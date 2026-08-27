@@ -1,0 +1,1 @@
+"""Layar ringkasan harian."""

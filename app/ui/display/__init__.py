@@ -1,0 +1,1 @@
+"""Layar antrian untuk pengunjung."""

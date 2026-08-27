@@ -1,0 +1,1 @@
+"""Layar penerbitan nomor antrian."""

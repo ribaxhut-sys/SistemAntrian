@@ -1,0 +1,18 @@
+# =====================================================================
+# Sistem Antrian Pengaduan Wajib Pajak — DEVELOPMENT DEPENDENCIES
+#
+# Install (sudah termasuk seluruh runtime dependencies):
+#   .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+# =====================================================================
+
+-r requirements.txt
+
+# Automated testing (setiap phase wajib punya test sendiri)
+pytest==9.1.1
+
+# Pengujian widget PySide6: mengelola daur hidup QApplication dan
+# menunggu sinyal Qt secara andal. Dev-only, tidak ikut ke dalam .exe.
+pytest-qt==4.5.0
+
+# Packaging ke ComplaintQueue.exe (dipakai pada Phase 9)
+pyinstaller==6.22.2

@@ -1,0 +1,32 @@
+# =====================================================================
+# Sistem Antrian Pengaduan Wajib Pajak — RUNTIME DEPENDENCIES
+# Python 3.13 (wajib — jangan gunakan 3.14 untuk project ini)
+#
+# Install:
+#   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+#
+# Versi di-pin exact (==) untuk menjamin build yang reproducible.
+# =====================================================================
+
+# UI framework desktop
+PySide6==6.11.2
+
+# ORM + akses SQLite
+SQLAlchemy==2.0.52
+
+# Schema migration.
+# Runtime (bukan dev-only): aplikasi yang sudah terpasang di komputer petugas
+# berisi data antrian & survey nyata, sehingga perubahan skema harus lewat
+# migration, bukan drop-recreate.
+alembic==1.19.1
+
+# Validasi data internal (DTO / input validation)
+pydantic==2.13.4
+
+# Generator PDF untuk tiket antrian & laporan cetak
+reportlab==5.0.1
+
+# Database timezone IANA.
+# WAJIB: Windows tidak menyediakan tz database sistem, sehingga
+# zoneinfo.ZoneInfo("Asia/Jakarta") akan gagal tanpa paket ini.
+tzdata==2026.3
