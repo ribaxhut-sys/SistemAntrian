@@ -73,6 +73,21 @@ def setup_logging(config: AppConfig | None = None, *, force: bool = False) -> lo
     # SQLAlchemy sangat berisik pada level INFO.
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
+    # Hidupkan kembali logger aplikasi yang mungkin telah dimatikan.
+    #
+    # `fileConfig` milik Alembic berjalan dengan disable_existing_loggers
+    # bawaannya, yang menyetel `disabled = True` pada setiap logger yang
+    # sudah terlanjur dibuat. Memasang ulang handler saja TIDAK memulihkan
+    # keadaan itu: pesannya berhenti di logger yang mati, jauh sebelum
+    # sampai ke handler mana pun, sehingga app.log hanya berisi baris
+    # milik Alembic sendiri. Pada kios yang berdiri tanpa penjaga, log
+    # adalah satu-satunya keterangan yang tertinggal ketika ada yang
+    # salah — kehilangannya diam-diam jauh lebih mahal daripada
+    # pemeriksaan singkat ini.
+    for nama, butir in logging.Logger.manager.loggerDict.items():
+        if isinstance(butir, logging.Logger) and nama.startswith(APP_LOGGER):
+            butir.disabled = False
+
     _configured = True
     return logging.getLogger(APP_LOGGER)
 
