@@ -14,6 +14,12 @@ class UserRole(str, Enum):
     CRO = "CRO"                  # memanggil dan melayani antrian
     DISPLAY = "DISPLAY"          # hanya layar antrian, tanpa fungsi administrasi
 
+    # Mesin kios yang menghadap pengunjung: menampilkan papan nomor sekaligus
+    # melayani pengambilan nomor sendiri. TIDAK ada akun dengan peran ini —
+    # sesinya dibuat tanpa login, karena menyimpan kata sandi di komputer
+    # publik yang tidak diawasi justru menciptakan kebocoran yang tidak perlu.
+    KIOSK = "KIOSK"
+
 
 class RecordStatus(str, Enum):
     """Status aktif/nonaktif untuk data master."""

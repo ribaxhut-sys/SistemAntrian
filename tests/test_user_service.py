@@ -161,6 +161,17 @@ def test_membuat_user_tanpa_login_ditolak(auth):
         )
 
 
+def test_peran_kios_tidak_dapat_diberikan_kepada_akun(user_service):
+    """Menyimpan kata sandi kios di app_user justru menciptakan kebocoran."""
+    with pytest.raises(ValidationError, match="kios"):
+        user_service.create_user(
+            username="mesin-kios",
+            full_name="Mesin Kios",
+            password="sandibaru123",
+            role=UserRole.KIOSK,
+        )
+
+
 # ---------------------------------------------------------------------
 # Perubahan
 # ---------------------------------------------------------------------
@@ -172,6 +183,13 @@ def test_nama_dan_peran_dapat_diubah(user_service, users):
 
     assert diubah.full_name == "Petugas CRO Senior"
     assert diubah.role is UserRole.SUPERVISOR
+
+
+def test_peran_akun_tidak_dapat_diubah_menjadi_kios(user_service, users):
+    with pytest.raises(ValidationError, match="kios"):
+        user_service.update_user(
+            users["CRO"], full_name="Petugas CRO", role=UserRole.KIOSK
+        )
 
 
 def test_admin_tidak_dapat_mengubah_perannya_sendiri(user_service, users):

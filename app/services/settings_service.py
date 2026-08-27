@@ -29,6 +29,7 @@ BAWAAN: dict[str, str] = {
     "backup.pg_dump_path": "",
     "backup.retention_days": "30",
     "dashboard.refresh_seconds": "30",
+    "kiosk.cooldown_seconds": "10",
     "display.title": "ANTRIAN PELAYANAN CRO",
     "display.next_count": "3",
     "display.sound_enabled": "true",
@@ -129,6 +130,17 @@ SKEMA: tuple[Pengaturan, ...] = (
         ANGKA,
         minimum=1,
         maksimum=10,
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.cooldown_seconds",
+        "Jeda ambil nomor di kios (detik)",
+        "Menahan satu orang menekan tombol berulang kali dan memenuhi antrian "
+        "dengan nomor kosong. Tidak berlaku bagi petugas pendaftaran, yang "
+        "melayani rombongan datang bersamaan.",
+        ANGKA,
+        minimum=0,
+        maksimum=300,
         kelompok="Antrian",
     ),
     Pengaturan(

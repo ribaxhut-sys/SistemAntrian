@@ -43,6 +43,15 @@ class UserInfo:
         return self.status is RecordStatus.ACTIVE
 
 
+def _tolak_peran_kios(role: UserRole) -> None:
+    """KIOSK bukan akun. Menyimpannya di app_user hanya menambah kredensial di mesin publik."""
+    if role is UserRole.KIOSK:
+        raise ValidationError(
+            "Peran kios tidak dapat diberikan kepada akun. "
+            "Mesin kios berjalan tanpa login."
+        )
+
+
 def _as_info(row: User) -> UserInfo:
     return UserInfo(
         id=row.id,
@@ -104,6 +113,7 @@ class UserService:
         kata sandi petugas selamanya.
         """
         sesi = self.auth.require_permission(Permission.USER_MANAGE)
+        _tolak_peran_kios(role)
 
         nama = normalize_username(username)
         if not nama:
@@ -156,6 +166,7 @@ class UserService:
         aplikasi tidak dapat dikelola sama sekali.
         """
         sesi = self.auth.require_permission(Permission.USER_MANAGE)
+        _tolak_peran_kios(role)
         lengkap = (full_name or "").strip()
         if not lengkap:
             raise ValidationError("Nama lengkap tidak boleh kosong.")

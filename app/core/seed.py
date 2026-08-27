@@ -64,6 +64,8 @@ _SETTINGS: list[tuple[str, str, str]] = [
     ("display.next_count", "3", "Jumlah nomor berikutnya yang ditampilkan"),
     ("display.sound_enabled", "true", "Suara saat nomor dipanggil"),
     ("queue.max_call_attempts", "3", "Batas pemanggilan sebelum dianggap tidak hadir"),
+    ("kiosk.cooldown_seconds", "10",
+     "Jeda antar-pengambilan nomor di mesin kios, dalam detik"),
     ("survey.enabled", "true", "Tampilkan survey setelah pelayanan selesai"),
     ("ticket.footer", "Silakan menunggu hingga nomor Anda dipanggil.",
      "Teks penutup pada tiket antrian"),

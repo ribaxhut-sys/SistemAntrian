@@ -5,9 +5,13 @@ Titik masuk aplikasi.
 
 Urutan yang dijalankan:
 
-    siapkan database -> masuk -> (wajib ganti kata sandi) -> jendela utama
+    siapkan database -> pilih layar -> masuk -> jendela utama
 
 Argumen:
+    --layar       langsung membuka layar pengunjung tanpa dialog pilihan dan
+                  tanpa login. Dipasang pada shortcut komputer kios supaya
+                  layar antrian pulih sendiri setelah komputer menyala ulang,
+                  tanpa perlu ada yang mengklik apa pun.
     --init-only   hanya siapkan database lalu keluar, tanpa membuka jendela.
                   Berguna untuk memeriksa pemasangan di komputer baru.
 """
@@ -91,13 +95,14 @@ def _laporkan_kegagalan_database(config, *, berjendela: bool) -> None:
         logger.exception("Pesan kegagalan database tidak dapat ditampilkan")
 
 
-def _jalankan_ui() -> int:
+def _jalankan_ui(*, langsung_kios: bool = False) -> int:
     """Buka aplikasi berjendela. Import Qt ditunda sampai benar-benar dipakai."""
     from PySide6.QtWidgets import QApplication, QDialog
 
     from app.services.auth_service import get_auth_service
     from app.ui.login.change_password_dialog import ChangePasswordDialog
     from app.ui.login.login_window import LoginWindow
+    from app.ui.login.mode_dialog import LAYAR_PENGUNJUNG, ModeDialog
     from app.ui.main_window import MainWindow
     from app.ui.style import STYLESHEET
 
@@ -106,6 +111,20 @@ def _jalankan_ui() -> int:
     app.setStyleSheet(STYLESHEET)
 
     auth = get_auth_service()
+
+    if not langsung_kios:
+        pilihan = ModeDialog()
+        if pilihan.exec() != QDialog.DialogCode.Accepted:
+            logger.info("Aplikasi ditutup dari layar pilihan")
+            return 0
+        langsung_kios = pilihan.pilihan == LAYAR_PENGUNJUNG
+
+    if langsung_kios:
+        # Tanpa login: komputernya menghadap publik dan tidak diawasi.
+        auth.mulai_sesi_kios()
+        jendela = MainWindow(auth)
+        jendela.tampilkan()
+        return app.exec()
 
     login = LoginWindow(auth)
     if login.exec() != QDialog.DialogCode.Accepted:
@@ -133,6 +152,7 @@ def _jalankan_ui() -> int:
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     hanya_init = "--init-only" in argv
+    langsung_kios = "--layar" in argv
 
     config = get_config()
     setup_logging(config)
@@ -164,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        return _jalankan_ui()
+        return _jalankan_ui(langsung_kios=langsung_kios)
     except Exception:
         logger.exception("Kesalahan tak terduga pada aplikasi")
         print(

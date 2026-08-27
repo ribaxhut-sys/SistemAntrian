@@ -197,6 +197,10 @@ class QueueService:
         # Tanpa sesi: pembacaan pengaturan memang tidak menuntut hak akses,
         # dan batas pemanggilan dibutuhkan setiap kali antrian dibaca.
         self.settings = settings or SettingsService()
+        #: Waktu nomor terakhir terbit dari mesin ini. Disimpan di memori,
+        #: bukan di database: yang perlu ditahan adalah satu orang menekan
+        #: tombol berulang kali di satu kios, bukan lalu lintas antar mesin.
+        self._nomor_kios_terakhir: datetime | None = None
 
     def batas_panggilan(self) -> int:
         """
@@ -220,6 +224,8 @@ class QueueService:
         pengunjung yang disimpan.
         """
         sesi = self.auth.require_permission(Permission.QUEUE_CREATE)
+        if sesi.kios:
+            self._pastikan_jeda_kios()
 
         with session_scope() as session:
             kategori = ServiceCategoryRepository(session).get_by_id(category_id)
@@ -232,8 +238,8 @@ class QueueService:
             prefix = kategori.prefix
             branch_id = kategori.branch_id
 
-        # Di luar session_scope: penomoran memakai transaksinya sendiri
-        # (BEGIN IMMEDIATE) agar kunci tulis dipegang sesingkat mungkin.
+        # Di luar session_scope: penomoran memakai transaksinya sendiri agar
+        # kunci tulis dipegang sesingkat mungkin.
         terbit = terbitkan_nomor(
             branch_id=branch_id, category_id=category_id, prefix=prefix
         )
@@ -249,8 +255,40 @@ class QueueService:
             )
             info = _as_info(QueueRepository(session).get_by_id(terbit.queue_id))
 
+        self._nomor_kios_terakhir = clock.now()
         logger.info("Nomor antrian terbit: %s", terbit.queue_number)
         return info
+
+    def jeda_kios_detik(self) -> int:
+        """Jeda wajib antar-pengambilan nomor di mesin kios."""
+        return self.settings.get_int("kiosk.cooldown_seconds", 10)
+
+    def sisa_jeda_kios(self) -> float:
+        """Detik yang masih harus ditunggu sebelum nomor berikutnya boleh diambil."""
+        if self._nomor_kios_terakhir is None:
+            return 0.0
+        berlalu = (clock.now() - self._nomor_kios_terakhir).total_seconds()
+        return max(0.0, self.jeda_kios_detik() - berlalu)
+
+    def _pastikan_jeda_kios(self) -> None:
+        """
+        Tahan pengambilan nomor beruntun pada mesin kios.
+
+        Kios swalayan berarti siapa pun dapat menekan tombol berkali-kali
+        dan memenuhi antrian dengan nomor yang tidak ada orangnya. Jeda ini
+        tidak menghapus masalahnya — orang yang sabar tetap bisa — tetapi
+        menghentikan yang paling merepotkan, yaitu satu orang menekan
+        berulang kali dalam hitungan detik.
+
+        Sengaja HANYA berlaku pada sesi kios. Petugas pendaftaran melayani
+        rombongan yang datang bersamaan dan tidak boleh ikut diperlambat.
+        """
+        sisa = self.sisa_jeda_kios()
+        if sisa <= 0:
+            return
+        raise BusinessRuleError(
+            f"Mohon tunggu {int(sisa) + 1} detik sebelum mengambil nomor berikutnya."
+        )
 
     # =================================================================
     # Pembacaan

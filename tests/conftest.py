@@ -185,6 +185,11 @@ def users(seeded) -> dict:
         branch = s.scalar(select(Branch).where(Branch.code == "PUSAT"))
         sandi = hash_password(TEST_PASSWORD)
         for role in UserRole:
+            if role is UserRole.KIOSK:
+                # Bukan akun. Sesi kios dibuat tanpa login, jadi tidak
+                # boleh ada baris app_user dengan peran ini — termasuk
+                # di data uji.
+                continue
             username = role.value.lower()
 
             # Seed sudah membuat akun "admin". Akun itu dipakai ulang, bukan

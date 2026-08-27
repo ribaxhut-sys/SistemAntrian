@@ -163,6 +163,20 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | K4 | Periksa `logs\app.log` | Kejadian tercatat; tidak ada kata sandi di dalamnya | |
 | K5 | Picu sebuah kegagalan (mis. hapus folder backup saat backup) | Pesan berbahasa Indonesia yang jelas, bukan traceback Python | |
 
+## L. Kios pengunjung (tanpa login)
+
+| # | Langkah | Hasil yang diharapkan | Hasil |
+|---|---|---|---|
+| L1 | Buka aplikasi tanpa argumen | Dialog pilihan **Layar Pengunjung** / **Layar Petugas** | |
+| L2 | Pilih Layar Pengunjung | Langsung layar penuh; papan nomor + tombol ambil nomor; tanpa login, tanpa bilah status | |
+| L3 | Buka dengan `AntrianCRO.exe --layar` | Dialog dilewati; kios terbuka sendiri | |
+| L4 | Sentuh satu jenis layanan | Nomor terbit (mis. `A-001`); tiket tercetak (bila printer aktif) | |
+| L5 | Sentuh lagi segera setelahnya | Tombol mati dan ada keterangan menunggu; nomor kedua belum terbit | |
+| L6 | Tunggu jeda selesai, ambil nomor lagi | Nomor berikutnya terbit | |
+| L7 | Panggil nomor dari loket | Papan di kios menyegar paling lambat 2 detik | |
+| L8 | Cabut printer / kehabisan kertas, ambil nomor | Nomor tetap terbit; hanya pencetakan yang gagal | |
+| L9 | **PostgreSQL:** dari mesin kios, coba baca tabel `app_user` | Ditolak hak akses; hash kata sandi petugas tidak terbaca | |
+
 ---
 
 ## Persetujuan

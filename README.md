@@ -83,6 +83,10 @@ dan tanpa bilah status. Pengunjung tidak melihat nama petugas, lokasi
 database, maupun tombol "Keluar" — tombol keluar yang terpampang di layar
 publik hanya mengundang orang menutup aplikasi antrian.
 
+**Layar pengunjung** (`--layar` atau pilihan saat start) menggabungkan papan
+nomor dengan pengambilan nomor sendiri pada satu mesin, tanpa login. Jeda
+`kiosk.cooldown_seconds` menahan satu orang menekan tombol berulang kali.
+
 Petugas tetap dapat keluar dengan `Ctrl+Q`, dan `F11` mengembalikan jendela
 ke ukuran biasa saat perlu dipindahkan ke monitor yang benar.
 
@@ -113,9 +117,10 @@ normal, hanya tanpa bunyi.
 |---|---|
 | `REGISTRATION` | Terbitkan Nomor |
 | `CRO` | Pelayanan · Survey Kepuasan |
-| `SUPERVISOR` | Ringkasan Harian |
+| `SUPERVISOR` | Ringkasan Harian · Hasil Survey |
 | `ADMIN` | Data Master · Pengaturan · Backup & Audit |
 | `DISPLAY` | Layar Antrian |
+| `KIOSK` | Layar Pengunjung (papan nomor + ambil nomor, tanpa login) |
 
 **Status antrian:**
 
@@ -227,6 +232,11 @@ Menghapusnya setelah membuat akun sendiri tidak akan memunculkannya lagi.
 | `REGISTRATION` | menerbitkan nomor antrian, mencetak tiket |
 | `CRO` | memanggil, melayani, menunda, menyelesaikan, no-show, batal |
 | `DISPLAY` | hanya layar antrian |
+| `KIOSK` | papan nomor dan pengambilan nomor sendiri, **tanpa akun** |
+
+`KIOSK` bukan akun yang dibuat administrator. Sesi itu dibuka tanpa login
+pada komputer yang menghadap pengunjung. Menyimpan kata sandi petugas di
+mesin publik justru menciptakan kebocoran yang tidak perlu.
 
 Pembagian ini disengaja: tidak ada satu peran pun yang dapat melakukan
 segalanya. `ADMIN` mengelola sistem tetapi tidak melayani antrian, dan
@@ -283,6 +293,24 @@ Gunakan `--init-only` untuk menyiapkan database saja tanpa membuka jendela —
 berguna saat memeriksa pemasangan di komputer baru. Hasilnya juga tercatat
 di `logs/app.log`, karena `AntrianCRO.exe` berjendela dan tidak punya
 terminal untuk menampilkannya.
+
+Saat dibuka tanpa argumen, aplikasi menanyakan layar mana yang akan dipakai:
+**Layar Pengunjung** (kios, tanpa login) atau **Layar Petugas** (wajib masuk).
+
+Komputer kios sebaiknya **melewati dialog itu**, supaya mati listrik siang
+hari tidak meninggalkan papan nomor kosong sampai ada yang mengklik:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.main --layar
+```
+
+Pasang perintah yang sama pada pintasan Startup Windows, atau pada
+`AntrianCRO.exe --layar` di komputer kios yang sudah di-build.
+
+Jeda antar-pengambilan nomor di kios diatur lewat `kiosk.cooldown_seconds`
+(bawaan 10 detik). Jeda ini **hanya** berlaku pada sesi kios — meja
+pendaftaran melayani rombongan yang datang bersamaan dan tidak ikut
+diperlambat.
 
 ---
 
@@ -361,6 +389,30 @@ Sisanya tinggal menyambung.
 `ANTRIAN_DB_URL` **mengalahkan** `ANTRIAN_DB_PATH`. Komputer yang sudah
 diarahkan ke server tidak akan diam-diam kembali memakai berkas SQLite lokal
 hanya karena variabel lama tertinggal.
+
+### User PostgreSQL terbatas untuk mesin kios
+
+Komputer kios menghadap publik. Connection string-nya tetap ada di mesin
+itu, jadi **jangan** memakai user `antrian` yang sama dengan petugas —
+user itu dapat membaca tabel `app_user` (hash kata sandi seluruh petugas).
+
+1. Buat user terpisah, lalu jalankan [docs/sql/kios-grant.sql](docs/sql/kios-grant.sql)
+   sebagai superuser pada database `antrian`.
+2. Di komputer kios, arahkan ke user itu:
+
+```powershell
+setx ANTRIAN_DB_URL "postgresql+psycopg://antrian_kios:ganti-kata-sandi-kios@192.168.1.10:5432/antrian"
+```
+
+3. Tambah baris `pg_hba.conf` khusus untuk user kios, tetap dibatasi
+   jaringan kantor:
+
+```
+host    antrian    antrian_kios    192.168.1.0/24    scram-sha-256
+```
+
+User kios tidak punya hak apa pun pada `app_user`. Ia hanya boleh
+menerbitkan nomor, membaca papan antrian, dan menulis jejak audit.
 
 ### Backup dijalankan di komputer server
 
@@ -516,6 +568,7 @@ app/
 | `display.next_count` | `3` | Jumlah nomor berikutnya yang ditampilkan |
 | `display.sound_enabled` | `true` | Suara saat nomor dipanggil |
 | `queue.max_call_attempts` | `3` | Batas pemanggilan sebelum dianggap tidak hadir |
+| `kiosk.cooldown_seconds` | `10` | Jeda antar-pengambilan nomor di mesin kios (detik) |
 | `survey.enabled` | `true` | Aktifkan survey kepuasan |
 | `dashboard.refresh_seconds` | `30` | Jeda penyegaran ringkasan harian |
 | `backup.auto_enabled` | `true` | Backup otomatis harian saat aplikasi dibuka |

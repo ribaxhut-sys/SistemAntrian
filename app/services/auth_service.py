@@ -37,7 +37,10 @@ logger = get_logger("auth")
 class AuthSession:
     """Sesi yang sedang aktif. Objek nilai, bukan model database."""
 
-    user_id: int
+    #: None hanya untuk sesi kios, yang memang tidak mewakili orang tertentu.
+    #: Audit log menyimpannya sebagai NULL — kolomnya memang dirancang boleh
+    #: kosong untuk aktivitas yang tidak berpemilik.
+    user_id: int | None
     username: str
     full_name: str
     role: UserRole
@@ -48,6 +51,11 @@ class AuthSession:
     @property
     def permissions(self) -> frozenset[Permission]:
         return permissions_for(self.role)
+
+    @property
+    def kios(self) -> bool:
+        """Sesi mesin kios yang berjalan tanpa login."""
+        return self.role is UserRole.KIOSK
 
     def __repr__(self) -> str:
         return f"<AuthSession {self.username} {self.role.value}>"
@@ -181,6 +189,59 @@ class AuthService:
             )
         self._session = None
         logger.info("Logout: %s", sesi.username)
+
+    # -----------------------------------------------------------------
+    # Sesi kios
+    # -----------------------------------------------------------------
+
+    def mulai_sesi_kios(self) -> AuthSession:
+        """
+        Buka sesi mesin kios tanpa login.
+
+        Komputer kios menghadap publik dan tidak diawasi. Menyimpan kata
+        sandi petugas di mesin seperti itu — atau menempelkannya di bawah
+        keyboard agar petugas pagi bisa masuk — justru menciptakan kebocoran
+        yang tidak perlu. Kios hanya menampilkan papan nomor dan menerbitkan
+        nomor, keduanya hal yang memang dikerjakan pengunjung sendiri.
+
+        Pembatasan sesungguhnya ada pada dua lapis: hak akses peran KIOSK di
+        sini, dan hak user PostgreSQL mesin itu di database. Lapis kedua
+        yang membuat mesin publik tidak dapat membaca tabel app_user sama
+        sekali.
+        """
+        cabang = self._cabang_pertama()
+        sesi = AuthSession(
+            user_id=None,
+            username="kios",
+            full_name="Layar Pengunjung",
+            role=UserRole.KIOSK,
+            branch_id=cabang,
+            login_at=clock.now(),
+        )
+        self._session = sesi
+        logger.info("Sesi kios dimulai untuk cabang %s", cabang)
+        return sesi
+
+    @staticmethod
+    def _cabang_pertama() -> int:
+        """
+        Cabang yang dilayani mesin ini.
+
+        Sistem ini melayani satu kantor, sehingga cabangnya tunggal dan
+        tidak perlu dipilih petugas saat kios dinyalakan.
+        """
+        import sqlalchemy as sa
+
+        from app.models import Branch
+
+        with session_scope() as session:
+            cabang = session.scalar(sa.select(Branch.id).order_by(Branch.id))
+        if cabang is None:
+            raise NotFoundError(
+                "Data cabang belum ada. Jalankan aplikasi sebagai petugas "
+                "terlebih dahulu agar data awal terbentuk."
+            )
+        return cabang
 
     # -----------------------------------------------------------------
     # Hak akses

@@ -16,13 +16,31 @@ from app.models import (
 
 
 def test_seed_membuat_data_master(database):
+    """
+    Seed pertama membuat seluruh data awal.
+
+    Jumlah pengaturan dihitung dari daftarnya sendiri, bukan angka tetap.
+    Angka tetap basi setiap kali satu pengaturan ditambahkan, dan test yang
+    gagal karena hal itu tidak menandakan apa pun selain dirinya sendiri
+    ketinggalan.
+    """
+    from app.core.seed import _SETTINGS
+
     hasil = seed_initial_data()
-    assert hasil == {"counters": 3, "categories": 3, "settings": 11, "users": 1}
+    assert hasil == {
+        "counters": 3,
+        "categories": 3,
+        "settings": len(_SETTINGS),
+        "users": 1,
+    }
 
     with session_scope() as s:
         assert s.scalar(sa.select(sa.func.count()).select_from(Branch)) == 1
         assert s.scalar(sa.select(sa.func.count()).select_from(Counter)) == 3
         assert s.scalar(sa.select(sa.func.count()).select_from(ServiceCategory)) == 3
+        assert s.scalar(
+            sa.select(sa.func.count()).select_from(ApplicationSetting)
+        ) == len(_SETTINGS)
 
 
 def test_seed_idempotent(database):
@@ -102,6 +120,7 @@ def test_pengaturan_penting_tersedia(seeded):
         "display.title",
         "survey.enabled",
         "queue.max_call_attempts",
+        "kiosk.cooldown_seconds",
         "dashboard.refresh_seconds",
         "backup.auto_enabled",
         "backup.retention_days",

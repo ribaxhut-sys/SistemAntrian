@@ -88,6 +88,20 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
     ),
     # Hanya layar antrian, tanpa fungsi administrasi apa pun.
     UserRole.DISPLAY: frozenset({Permission.DISPLAY_VIEW}),
+    # Mesin kios yang menghadap pengunjung. Berjalan tanpa login, sehingga
+    # kewenangannya sengaja dibatasi pada dua hal yang memang dikerjakan
+    # pengunjung sendiri: melihat papan nomor dan mengambil nomornya.
+    #
+    # Perhatikan yang TIDAK ada di sini: kios tidak dapat memanggil,
+    # melayani, membatalkan, maupun melihat daftar antrian secara penuh.
+    # Komputernya berdiri di ruang publik tanpa diawasi.
+    UserRole.KIOSK: frozenset(
+        {
+            Permission.DISPLAY_VIEW,
+            Permission.QUEUE_CREATE,
+            Permission.TICKET_PRINT,
+        }
+    ),
 }
 
 

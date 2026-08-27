@@ -539,12 +539,14 @@ def test_dialog_jenis_layanan_dapat_mengunci_prefix(qtbot, halaman_master):
     assert dialog.input_nama.isEnabled()
 
 
-def test_dialog_akun_menyediakan_seluruh_peran(qtbot):
+def test_dialog_akun_menyediakan_peran_petugas(qtbot):
+    """KIOSK bukan akun, jadi tidak ditawarkan saat membuat petugas."""
     dialog = UserDialog()
     qtbot.addWidget(dialog)
 
     tersedia = {dialog.pilih_peran.itemData(i) for i in range(dialog.pilih_peran.count())}
-    assert tersedia == set(UserRole)
+    assert UserRole.KIOSK not in tersedia
+    assert tersedia == {r for r in UserRole if r is not UserRole.KIOSK}
 
 
 def test_dialog_akun_menyembunyikan_kata_sandi_saat_mengubah(qtbot, halaman_master):

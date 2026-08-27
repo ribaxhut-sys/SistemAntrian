@@ -213,6 +213,11 @@ class UserDialog(_DialogIsian):
 
         self.pilih_peran = QComboBox()
         for role in UserRole:
+            # KIOSK bukan akun petugas. Sesi itu dibuat tanpa login, dan
+            # menawarkannya di sini hanya mengundang admin menyimpan kata
+            # sandi di komputer publik.
+            if role is UserRole.KIOSK:
+                continue
             self.pilih_peran.addItem(LABEL_PERAN[role], role)
         if ubah:
             self.pilih_peran.setCurrentIndex(

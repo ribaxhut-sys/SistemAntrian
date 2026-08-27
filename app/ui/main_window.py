@@ -36,6 +36,7 @@ from app.ui.dashboard.survey_result_page import SurveyResultPage
 from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.settings.dialogs import LABEL_PERAN
 from app.ui.display.display_page import DisplayPage
+from app.ui.kiosk.kiosk_page import KioskPage
 from app.ui.queue.service_page import ServicePage
 from app.ui.registration.registration_page import RegistrationPage
 from app.ui.settings.backup_page import BackupPage
@@ -56,6 +57,10 @@ class _Menu:
     #: Bila sesi memiliki salah satu hak ini, menu disembunyikan. Dipakai
     #: agar satu peran tidak mendapat dua menu untuk pekerjaan yang sama.
     kecuali: tuple[Permission, ...] = ()
+    #: Hanya untuk sesi kios. Hak akses saja tidak cukup membedakannya:
+    #: petugas pendaftaran juga berhak menerbitkan nomor, tetapi layar
+    #: pengunjung bukan untuk meja berpetugas.
+    hanya_kios: bool = False
 
 
 class PlaceholderPage(QWidget):
@@ -115,12 +120,18 @@ class MainWindow(QMainWindow):
 
         #: Layar yang menghadap pengunjung, bukan meja petugas.
         #:
-        #: Ditentukan dari hak akses, bukan dari nama peran: akun yang hanya
-        #: boleh melihat layar antrian dan tidak boleh apa-apa lagi memang
-        #: dipasang di komputer publik. Bila suatu saat peran DISPLAY diberi
-        #: kewenangan tambahan, akunnya berhenti dianggap kios — dan itu
-        #: memang yang seharusnya terjadi.
-        self.mode_kios = sesi.permissions == frozenset({Permission.DISPLAY_VIEW})
+        #: Dua bentuk yang keduanya dipasang di komputer publik: sesi kios
+        #: yang berjalan tanpa login, dan akun DISPLAY yang hanya boleh
+        #: melihat layar antrian dan tidak boleh apa-apa lagi.
+        #:
+        #: Untuk DISPLAY, penentunya hak akses dan bukan nama peran. Bila
+        #: suatu saat peran itu diberi kewenangan tambahan, akunnya berhenti
+        #: dianggap kios — dan itu memang yang seharusnya terjadi, karena
+        #: akun berkemampuan lebih tidak boleh terkunci di layar tanpa jalan
+        #: keluar yang terlihat.
+        self.mode_kios = sesi.kios or sesi.permissions == frozenset(
+            {Permission.DISPLAY_VIEW}
+        )
 
         if self.mode_kios:
             # Nama petugas tidak ikut ditampilkan. Judul jendela terbaca
@@ -250,12 +261,30 @@ class MainWindow(QMainWindow):
                 Permission.BACKUP_MANAGE,
                 lambda: BackupPage(self.backup_service),
             ),
+            # Kios menggabungkan papan nomor dengan pengambilan nomor pada
+            # satu layar, karena satu mesin melayani keduanya. Akun DISPLAY
+            # tetap mendapat papan nomor saja.
+            _Menu(
+                "Layar Pengunjung",
+                Permission.QUEUE_CREATE,
+                lambda: KioskPage(
+                    self.queue_service,
+                    self.master_service,
+                    self.settings_service,
+                    self.sound_player,
+                    self.ticket_service,
+                ),
+                hanya_kios=True,
+            ),
             _Menu(
                 "Layar Antrian",
                 Permission.DISPLAY_VIEW,
                 lambda: DisplayPage(
                     self.queue_service, self.settings_service, self.sound_player
                 ),
+                # Kios sudah memuat papan nomor di dalam layarnya sendiri;
+                # tanpa syarat ini ia mendapat dua menu untuk hal yang sama.
+                kecuali=(Permission.QUEUE_CREATE,),
             ),
             # Satu menu saja untuk pemantauan. Ringkasan harian sudah memuat
             # keadaan antrian sekaligus kepuasan, sehingga memisahkannya
@@ -277,8 +306,17 @@ class MainWindow(QMainWindow):
             ),
         ]
 
+        sesi = self.auth.require_session()
         self.menu_aktif: list[_Menu] = []
         for butir in daftar:
+            if butir.hanya_kios and not sesi.kios:
+                continue
+            # Kios hanya boleh layar pengunjung. Tanpa ini ia juga mendapat
+            # "Terbitkan Nomor" karena sama-sama berhak QUEUE_CREATE, dan
+            # halaman pertamanya justru meja pendaftaran — bukan papan
+            # yang menghadap pengunjung.
+            if sesi.kios and not butir.hanya_kios:
+                continue
             if any(self.auth.has_permission(p) for p in butir.kecuali):
                 continue
             if butir.permission is None or self.auth.has_permission(butir.permission):
