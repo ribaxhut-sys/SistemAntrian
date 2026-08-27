@@ -293,10 +293,15 @@ def test_gaya_layar_dibatasi_pada_widgetnya_sendiri(halaman_layar):
     Akibatnya panel putih ikut berlatar biru dan nomor antrian — satu-satunya
     hal yang benar-benar dibaca pengunjung — menjadi tidak terlihat.
     """
+    from PySide6.QtCore import Qt
+
     gaya = halaman_layar.styleSheet()
 
     assert "QWidget#" in gaya, "selector harus dibatasi dengan objectName"
     assert not gaya.strip().startswith("background")
+    # Tanpa atribut ini, latar stylesheet tidak dilukis saat halaman
+    # menempel sebagai anak (misalnya di kios), dan yang tampil hanya abu-abu Qt.
+    assert halaman_layar.testAttribute(Qt.WidgetAttribute.WA_StyledBackground)
 
 
 def test_isi_panel_putih_memakai_latar_transparan(halaman_layar):
@@ -305,6 +310,7 @@ def test_isi_panel_putih_memakai_latar_transparan(halaman_layar):
         halaman_layar.label_nomor,
         halaman_layar.label_loket,
         halaman_layar.label_layanan,
+        halaman_layar.label_status,
     ):
         assert "background: transparent" in label.styleSheet()
 
@@ -329,3 +335,39 @@ def test_tidak_ada_warna_heksadesimal_delapan_digit(halaman_layar, terbitkan, au
 
     for potongan in gaya:
         assert not re.search(r"#[0-9A-Fa-f]{8}\b", potongan), potongan
+
+
+def test_nomor_berikutnya_berkontras_tinggi(halaman_layar, terbitkan, auth):
+    """
+    Nomor berikutnya harus gelap di atas kartu terang. Teks putih di atas
+    kaca transparan hampir tidak terbaca dari seberang ruangan.
+    """
+    from app.ui.style import DISPLAY_BERIKUTNYA_KARTU, DISPLAY_BERIKUTNYA_TEKS
+
+    terbitkan("A", 3)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman_layar.muat_ulang()
+
+    widget = halaman_layar.baris_berikutnya.itemAt(0).widget()
+    gaya = widget.styleSheet()
+    assert DISPLAY_BERIKUTNYA_TEKS in gaya
+    assert DISPLAY_BERIKUTNYA_KARTU in gaya
+
+
+def test_loket_tampil_sebagai_lencana_saat_ada_panggilan(
+    halaman_layar, terbitkan, antrian_siap, auth
+):
+    assert halaman_layar.bingkai_loket.isHidden()
+
+    terbitkan("A", 1)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    QueueService(auth).call_next(antrian_siap["loket"][0])
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman_layar.muat_ulang()
+
+    assert not halaman_layar.bingkai_loket.isHidden()
+    assert halaman_layar.label_status.text() == "SEDANG DIPANGGIL"

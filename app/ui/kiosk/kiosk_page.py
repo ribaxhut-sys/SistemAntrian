@@ -33,7 +33,18 @@ from app.services.sound_service import SoundPlayer
 from app.services.ticket_service import TicketService
 from app.ui.common import pesan_untuk_user, tombol
 from app.ui.display.display_page import DisplayPage
-from app.ui.style import PRIMARY_DARK, SUCCESS, TEXT_MUTED
+from app.ui.style import (
+    DISPLAY_BG_ATAS,
+    DISPLAY_KIOS_PANEL,
+    DISPLAY_KIOS_TOMBOL,
+    DISPLAY_KIOS_TOMBOL_HOVER,
+    DISPLAY_KIOS_TOMBOL_MATI,
+    DISPLAY_KIOS_TOMBOL_MATI_TEKS,
+    DISPLAY_LOKET_BG,
+    DISPLAY_NOMOR,
+    SUCCESS,
+    TEXT_MUTED,
+)
 
 logger = get_logger("ui.kiosk")
 
@@ -88,6 +99,12 @@ class KioskPage(QWidget):
     # -----------------------------------------------------------------
 
     def _bangun_tampilan(self) -> None:
+        self.setObjectName("layarKios")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(
+            f"QWidget#layarKios {{ background: {DISPLAY_BG_ATAS}; }}"
+        )
+
         susunan = QVBoxLayout(self)
         susunan.setContentsMargins(0, 0, 0, 0)
         susunan.setSpacing(0)
@@ -96,7 +113,7 @@ class KioskPage(QWidget):
         # Pengunjung melihat tampilan yang persis sama dengan layar besar di
         # ruang tunggu, dan perbaikan pada salah satunya berlaku bagi keduanya.
         self.papan = DisplayPage(self.queue, self.settings, self.sound)
-        susunan.addWidget(self.papan, stretch=3)
+        susunan.addWidget(self.papan, stretch=5)
 
         susunan.addWidget(self._bangun_panel_ambil(), stretch=2)
 
@@ -104,8 +121,8 @@ class KioskPage(QWidget):
         panel = QFrame()
         panel.setObjectName("panelAmbil")
         panel.setStyleSheet(
-            f"QFrame#panelAmbil {{ background: white;"
-            f" border-top: 3px solid {PRIMARY_DARK}; }}"
+            f"QFrame#panelAmbil {{ background: {DISPLAY_KIOS_PANEL};"
+            f" border-top: 4px solid {DISPLAY_LOKET_BG}; }}"
         )
 
         susunan = QVBoxLayout(panel)
@@ -115,7 +132,7 @@ class KioskPage(QWidget):
         self.label_ajakan = QLabel("AMBIL NOMOR ANTRIAN ANDA")
         self.label_ajakan.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label_ajakan.setStyleSheet(
-            f"color: {PRIMARY_DARK}; font-size: 26px; font-weight: 700;"
+            f"color: {DISPLAY_NOMOR}; font-size: 26px; font-weight: 700;"
             " letter-spacing: 2px;"
         )
         susunan.addWidget(self.label_ajakan)
@@ -173,11 +190,15 @@ class KioskPage(QWidget):
 
     def _bangun_tombol_layanan(self, layanan):
         btn = tombol(f"{layanan.prefix}\n{layanan.name}", variant="primary")
-        btn.setMinimumHeight(110)
+        btn.setMinimumHeight(120)
         btn.setStyleSheet(
-            f"font-size: 22px; font-weight: 700; color: white;"
-            f" background: {PRIMARY_DARK}; border: 2px solid {PRIMARY_DARK};"
-            " border-radius: 10px;"
+            f"QPushButton {{ font-size: 22px; font-weight: 700; color: white;"
+            f" background: {DISPLAY_KIOS_TOMBOL}; border: none;"
+            f" border-radius: 16px; }}"
+            f"QPushButton:hover {{ background: {DISPLAY_KIOS_TOMBOL_HOVER}; }}"
+            f"QPushButton:pressed {{ background: {DISPLAY_LOKET_BG}; }}"
+            f"QPushButton:disabled {{ background: {DISPLAY_KIOS_TOMBOL_MATI};"
+            f" color: {DISPLAY_KIOS_TOMBOL_MATI_TEKS}; }}"
         )
         btn.clicked.connect(lambda _, k=layanan.id: self.ambil_nomor(k))
         return btn
@@ -253,7 +274,7 @@ class KioskPage(QWidget):
     def _bersihkan_hasil(self) -> None:
         self.label_ajakan.setText("AMBIL NOMOR ANTRIAN ANDA")
         self.label_ajakan.setStyleSheet(
-            f"color: {PRIMARY_DARK}; font-size: 26px; font-weight: 700;"
+            f"color: {DISPLAY_NOMOR}; font-size: 26px; font-weight: 700;"
             " letter-spacing: 2px;"
         )
         self._perbarui_jeda()
