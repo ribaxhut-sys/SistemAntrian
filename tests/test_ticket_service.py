@@ -7,10 +7,8 @@ membatalkan antrian dan tidak boleh melempar exception.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
-import sqlalchemy as sa
 
 from app.core.database import session_scope
 from app.models import Queue, QueueStatus
@@ -23,7 +21,6 @@ from app.services.ticket_service import (
     TicketService,
     buat_printer,
 )
-from tests.conftest import TEST_PASSWORD
 
 
 # ---------------------------------------------------------------------
@@ -323,10 +320,9 @@ def test_gambar_tidak_melempar_dan_menghasilkan_berkas_valid(qt_available, tmp_p
 
 def test_ukuran_halaman_sama_dengan_tiket_pdf(qt_available, tmp_path):
     """Kedua mode cetak harus menghasilkan ukuran tiket yang identik."""
-    from datetime import datetime
 
     from PySide6.QtCore import QSizeF
-    from PySide6.QtGui import QPageSize, QPainter
+    from PySide6.QtGui import QPageSize
     from PySide6.QtPrintSupport import QPrinter
 
     printer = QPrinter(QPrinter.PrinterMode.HighResolution)
@@ -343,3 +339,40 @@ def test_ukuran_halaman_sama_dengan_tiket_pdf(qt_available, tmp_path):
     ukuran_mm = printer.pageRect(QPrinter.Unit.Millimeter)
     assert abs(ukuran_mm.width() - PdfTicketPrinter.LEBAR_MM) < 1
     assert abs(ukuran_mm.height() - PdfTicketPrinter.TINGGI_MM) < 1
+
+
+# ---------------------------------------------------------------------
+# Catatan kaki dibatasi tinggi struk
+# ---------------------------------------------------------------------
+
+def test_footer_bawaan_muat_tanpa_dipotong():
+    from app.services.settings_service import BAWAAN
+    from app.services.ticket_service import MAKS_BARIS_FOOTER, _bungkus
+
+    baris = _bungkus(BAWAAN["ticket.footer"], 38)
+
+    assert len(baris) <= MAKS_BARIS_FOOTER
+    assert not baris[-1].endswith("…"), "footer bawaan tidak boleh terpotong"
+
+
+def test_footer_panjang_dipotong_bukan_jatuh_di_luar_halaman():
+    """
+    Tinggi struk tetap, jadi baris ketiga tidak akan tercetak sama sekali.
+
+    Dipotong dengan "…" supaya yang menulis catatan kaki tahu tulisannya
+    kepanjangan, bukan hilang diam-diam tanpa jejak.
+    """
+    from app.services.ticket_service import MAKS_BARIS_FOOTER, _bungkus
+
+    panjang = " ".join(["Terima kasih atas kesabaran Anda"] * 5)
+    baris = _bungkus(panjang, 38)
+
+    assert len(baris) == MAKS_BARIS_FOOTER
+    assert baris[-1].endswith("…")
+    assert all(len(b) <= 38 for b in baris)
+
+
+def test_footer_pendek_tidak_disentuh():
+    from app.services.ticket_service import _bungkus
+
+    assert _bungkus("Singkat.", 38) == ["Singkat."]

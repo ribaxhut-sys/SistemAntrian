@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
 from app.services.queue_service import QueueInfo, QueueService
 from app.services.settings_service import SettingsService
@@ -41,6 +42,7 @@ class ServicePage(QWidget):
         master: MasterDataService,
         survey: SurveyService,
         settings: SettingsService,
+        auth: AuthService | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -48,7 +50,15 @@ class ServicePage(QWidget):
         self.master = master
         self.survey = survey
         self.settings = settings
+        #: Dipakai untuk memilih loket petugas ini sendiri saat halaman
+        #: dibuka, dan mengingat kepindahannya bila ia berganti meja.
+        self.auth = auth
         self.antrian: QueueInfo | None = None
+        #: Status istirahat loket yang sedang dipilih, dibaca ulang setiap
+        #: `muat_ulang()` supaya tombolnya benar walau diubah dari sesi lain.
+        self.loket_istirahat = False
+        #: Jenis layanan yang dilayani loket terpilih. Kosong berarti semua.
+        self.loket_kategori: tuple[int, ...] = ()
         #: Antrian yang barusan diselesaikan. Disimpan karena setelah
         #: `complete()` loket tidak lagi memegang antrian apa pun, sedangkan
         #: nomor itulah yang perlu dinilai pengunjung yang masih di depan meja.
@@ -57,6 +67,11 @@ class ServicePage(QWidget):
         self._bangun_tampilan()
         self._pasang_pintasan()
         self.muat_loket()
+        # Wajib setelah muat_loket(): `muat_ulang()` hanya menyusun ulang
+        # pilihan jenis layanan ketika daftar loketnya BERUBAH, dan pada
+        # loket tanpa batasan daftarnya tetap kosong sejak awal sehingga
+        # tidak pernah dianggap berubah. Tanpa baris ini pilihannya kosong.
+        self.muat_kategori()
 
     # -----------------------------------------------------------------
     # Tampilan
@@ -73,8 +88,17 @@ class ServicePage(QWidget):
         baris_atas.addWidget(QLabel("Loket:"))
         self.pilih_loket = QComboBox()
         self.pilih_loket.setMinimumWidth(160)
-        self.pilih_loket.currentIndexChanged.connect(self.muat_ulang)
+        self.pilih_loket.currentIndexChanged.connect(self.loket_diganti)
         baris_atas.addWidget(self.pilih_loket)
+
+        baris_atas.addWidget(QLabel("Jenis Layanan:"))
+        self.pilih_kategori = QComboBox()
+        self.pilih_kategori.setMinimumWidth(160)
+        baris_atas.addWidget(self.pilih_kategori)
+
+        self.tombol_istirahat = tombol("Mulai Istirahat")
+        self.tombol_istirahat.clicked.connect(self.alihkan_istirahat)
+        baris_atas.addWidget(self.tombol_istirahat)
         susunan.addLayout(baris_atas)
 
         susunan.addWidget(self._bangun_panel_antrian())
@@ -199,6 +223,13 @@ class ServicePage(QWidget):
     # -----------------------------------------------------------------
 
     def muat_loket(self) -> None:
+        """
+        Isi pilihan loket, lalu pilih loket milik petugas ini sendiri.
+
+        Tanpa pemilihan itu, daftarnya selalu jatuh ke loket pertama dan
+        petugas di Loket 4 akan memanggil atas nama Loket 1 setiap kali ia
+        lupa menggantinya — pengunjungnya berjalan ke meja yang salah.
+        """
         berhasil, data = jalankan_aman(
             self, lambda: self.master.list_counters(only_active=True)
         )
@@ -209,8 +240,62 @@ class ServicePage(QWidget):
         self.pilih_loket.clear()
         for loket in data:
             self.pilih_loket.addItem(loket.name, loket.id)
+
+        bawaan = self.auth.current_session.default_counter_id if self.auth else None
+        if bawaan is not None:
+            baris = self.pilih_loket.findData(bawaan)
+            if baris >= 0:
+                self.pilih_loket.setCurrentIndex(baris)
         self.pilih_loket.blockSignals(False)
         self.muat_ulang()
+
+    def loket_diganti(self) -> None:
+        """
+        Petugas berpindah meja: ingat loket barunya, lalu muat ulang.
+
+        Kepindahan disimpan supaya besok tidak perlu diulang. Bila
+        penyimpanannya gagal, halaman tetap dimuat ulang — bekerja di loket
+        yang benar hari ini lebih penting daripada mengingatnya untuk besok.
+        """
+        if self.auth is not None and self.loket_id is not None:
+            jalankan_aman(self, lambda: self.auth.pindah_loket(self.loket_id))
+        self.muat_ulang()
+
+    def muat_kategori(self) -> None:
+        """
+        Isi pilihan jenis layanan yang boleh disaring saat memanggil.
+
+        "Semua Jenis Layanan" (data None) berarti PANGGIL BERIKUTNYA
+        memanggil antrian terdepan lintas jenis layanan seperti biasa;
+        memilih satu jenis layanan membatasi panggilan hanya pada
+        antrian jenis itu, tetap yang paling depan di antara sesamanya.
+
+        Loket khusus hanya menampilkan jenis layanan yang memang
+        dilayaninya. Menawarkan pilihan yang pasti ditolak service hanya
+        membuat petugas menabrak pesan kesalahan tanpa sebab yang terlihat.
+        """
+        berhasil, data = jalankan_aman(
+            self, lambda: self.master.list_categories(only_active=True)
+        )
+        if not berhasil:
+            return
+
+        if self.loket_kategori:
+            data = [k for k in data if k.id in self.loket_kategori]
+
+        sebelumnya = self.pilih_kategori.currentData()
+        self.pilih_kategori.blockSignals(True)
+        self.pilih_kategori.clear()
+        self.pilih_kategori.addItem("Semua Jenis Layanan", None)
+        for kategori in data:
+            self.pilih_kategori.addItem(kategori.name, kategori.id)
+
+        # Pilihan petugas dipertahankan bila loket barunya masih melayani
+        # jenis itu, supaya penyaringan tidak diam-diam hilang saat halaman
+        # disegarkan setiap beberapa detik.
+        baris = self.pilih_kategori.findData(sebelumnya)
+        self.pilih_kategori.setCurrentIndex(max(baris, 0))
+        self.pilih_kategori.blockSignals(False)
 
     @property
     def loket_id(self) -> int | None:
@@ -220,6 +305,18 @@ class ServicePage(QWidget):
         """Segarkan antrian yang sedang ditangani dan daftar yang menunggu."""
         if self.loket_id is None:
             return
+
+        berhasil, loket = jalankan_aman(self, lambda: self.master.get_counter(self.loket_id))
+        self.loket_istirahat = loket.on_break if berhasil and loket else False
+        self._perbarui_tombol_istirahat()
+
+        # Loket khusus boleh berubah daftarnya dari sesi admin sementara
+        # halaman ini terbuka, jadi pilihan jenis layanan disusun ulang
+        # begitu daftarnya tidak lagi sama.
+        kategori_loket = loket.category_ids if berhasil and loket else ()
+        if kategori_loket != self.loket_kategori:
+            self.loket_kategori = kategori_loket
+            self.muat_kategori()
 
         berhasil, antrian = jalankan_aman(
             self, lambda: self.queue.current_for_counter(self.loket_id)
@@ -271,12 +368,21 @@ class ServicePage(QWidget):
     def _perbarui_tombol(self) -> None:
         tersedia = set(self.antrian.aksi_tersedia()) if self.antrian else set()
 
-        # Loket yang masih menangani seseorang belum boleh memanggil berikutnya.
-        self.tombol_panggil.setEnabled(self.antrian is None and self.loket_id is not None)
+        # Loket yang masih menangani seseorang, atau sedang istirahat,
+        # belum boleh memanggil berikutnya.
+        self.tombol_panggil.setEnabled(
+            self.antrian is None and self.loket_id is not None and not self.loket_istirahat
+        )
         for kunci, btn in self.aksi.items():
             btn.setEnabled(kunci in tersedia)
 
         self._perbarui_tombol_survey()
+
+    def _perbarui_tombol_istirahat(self) -> None:
+        self.tombol_istirahat.setEnabled(self.loket_id is not None)
+        self.tombol_istirahat.setText(
+            "Akhiri Istirahat" if self.loket_istirahat else "Mulai Istirahat"
+        )
 
     def _perbarui_tombol_survey(self) -> None:
         aktif = self.settings.get_bool("survey.enabled", True)
@@ -320,11 +426,28 @@ class ServicePage(QWidget):
         if berhasil:
             self.muat_ulang()
 
+    def alihkan_istirahat(self) -> None:
+        """
+        Mulai atau akhiri istirahat loket yang sedang dipilih.
+
+        Boleh dilakukan kapan pun, termasuk saat loket masih menangani
+        seseorang — istirahat hanya menghentikan panggilan BERIKUTNYA,
+        pengunjung yang sudah di depan meja tetap harus diselesaikan.
+        """
+        if self.loket_id is None:
+            return
+        self._jalankan(
+            lambda: self.queue.set_istirahat(self.loket_id, not self.loket_istirahat),
+            "Gagal mengubah status istirahat",
+        )
+
     def panggil_berikutnya(self) -> None:
         if self.loket_id is None or not self.tombol_panggil.isEnabled():
             return
+        category_id = self.pilih_kategori.currentData()
         self._jalankan(
-            lambda: self.queue.call_next(self.loket_id), "Gagal memanggil antrian"
+            lambda: self.queue.call_next(self.loket_id, category_id=category_id),
+            "Gagal memanggil antrian",
         )
 
     def panggil_ulang(self) -> None:

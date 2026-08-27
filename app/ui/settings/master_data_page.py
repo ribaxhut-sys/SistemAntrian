@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.errors import BusinessRuleError
-from app.models import UserRole
 from app.services.master_data_service import MasterDataService
 from app.services.user_service import UserService
 from app.ui.common import (
@@ -31,6 +30,7 @@ from app.ui.common import (
 from app.ui.settings.dialogs import (
     LABEL_PERAN,
     CategoryDialog,
+    CounterCategoryDialog,
     CounterDialog,
     ResetPasswordDialog,
     UserDialog,
@@ -124,11 +124,13 @@ class _TabelTab(QWidget):
 class CounterTab(_TabelTab):
     """Pengelolaan loket."""
 
-    kolom = ("Kode", "Nama Loket", "Status")
+    kolom = ("Kode", "Nama Loket", "Jenis Layanan", "Status")
     penjelasan = (
         "Loket tidak dapat dihapus, hanya dinonaktifkan. Loket yang "
         "dinonaktifkan hilang dari pilihan petugas tetapi riwayat "
-        "pemanggilannya tetap utuh."
+        "pemanggilannya tetap utuh. Loket yang jenis layanannya dibiarkan "
+        "\"Semua\" memanggil antrian apa pun — itu keadaan yang disarankan "
+        "kecuali memang ada loket khusus."
     )
 
     def __init__(self, master: MasterDataService, parent: QWidget | None = None) -> None:
@@ -137,26 +139,56 @@ class CounterTab(_TabelTab):
 
         self.tambah_aksi("Tambah Loket", self.tambah, variant="primary")
         self.tambah_aksi("Ubah Nama", self.ubah, perlu_pilihan=True)
+        self.tambah_aksi("Atur Layanan", self.atur_layanan, perlu_pilihan=True)
         self.tombol_status = self.tambah_aksi(
             "Nonaktifkan", self.ganti_status, perlu_pilihan=True
         )
         self.selesai_menyusun_aksi()
 
         self.data: list = []
+        self.kategori: list = []
         self.muat_ulang()
 
     def muat_ulang(self) -> None:
         berhasil, data = jalankan_aman(self, self.master.list_counters)
         if not berhasil:
             return
+        berhasil_kategori, kategori = jalankan_aman(self, self.master.list_categories)
+        self.kategori = kategori if berhasil_kategori else []
+        nama_kategori = {k.id: k.name for k in self.kategori}
 
         self.data = data
         self.tabel.setRowCount(len(data))
         for baris, loket in enumerate(data):
+            layanan = (
+                "Semua"
+                if loket.melayani_semua
+                else ", ".join(
+                    nama_kategori.get(k, "?") for k in loket.category_ids
+                )
+            )
             self.isi_baris(
-                baris, [loket.code, loket.name, badge_status(loket.is_active)], loket.id
+                baris,
+                [loket.code, loket.name, layanan, badge_status(loket.is_active)],
+                loket.id,
             )
         self._perbarui_tombol()
+
+    def atur_layanan(self) -> None:
+        baris = self.baris_terpilih()
+        if baris is None:
+            return
+        loket = self.data[baris]
+
+        dialog = CounterCategoryDialog(self, counter=loket, categories=self.kategori)
+        if dialog.exec() != CounterCategoryDialog.DialogCode.Accepted:
+            return
+        berhasil, _ = jalankan_aman(
+            self,
+            lambda: self.master.set_counter_categories(loket.id, dialog.terpilih),
+        )
+        if berhasil:
+            self.muat_ulang()
 
     def _perbarui_tombol(self) -> None:
         super()._perbarui_tombol()
@@ -229,6 +261,7 @@ class CategoryTab(_TabelTab):
         self.tombol_status = self.tambah_aksi(
             "Nonaktifkan", self.ganti_status, perlu_pilihan=True
         )
+        self.tambah_aksi("Hapus", self.hapus, perlu_pilihan=True)
         self.selesai_menyusun_aksi()
 
         self.data: list = []
@@ -315,6 +348,33 @@ class CategoryTab(_TabelTab):
 
         self.muat_ulang()
 
+    def hapus(self) -> None:
+        """
+        Hapus jenis layanan yang belum pernah dipakai.
+
+        Service yang memutuskan boleh atau tidaknya — di sini cukup
+        meneruskan penolakannya apa adanya, karena pesannya sudah
+        menjelaskan bahwa yang benar adalah menonaktifkan.
+        """
+        baris = self.baris_terpilih()
+        if baris is None:
+            return
+        layanan = self.data[baris]
+
+        if not konfirmasi(
+            self,
+            f"Hapus {layanan.name} secara permanen?\n\nHanya bisa dihapus bila "
+            "belum pernah dipakai satu nomor antrian pun. Bila sudah pernah, "
+            "gunakan Nonaktifkan.",
+        ):
+            return
+
+        berhasil, _ = jalankan_aman(
+            self, lambda: self.master.delete_category(layanan.id)
+        )
+        if berhasil:
+            self.muat_ulang()
+
     def ganti_status(self) -> None:
         baris = self.baris_terpilih()
         if baris is None:
@@ -339,15 +399,31 @@ class CategoryTab(_TabelTab):
 class UserTab(_TabelTab):
     """Pengelolaan akun petugas."""
 
-    kolom = ("Nama Pengguna", "Nama Lengkap", "Peran", "Status", "Terakhir Masuk")
+    kolom = (
+        "Nama Pengguna",
+        "Nama Lengkap",
+        "Peran",
+        "Loket Bawaan",
+        "Status",
+        "Terakhir Masuk",
+    )
     penjelasan = (
         "Akun tidak dapat dihapus, hanya dinonaktifkan, agar riwayat "
-        "pemanggilan dan survey yang menunjuk petugas tetap dapat dibaca."
+        "pemanggilan dan survey yang menunjuk petugas tetap dapat dibaca. "
+        "Loket bawaan langsung terpilih saat petugas masuk; petugas tetap "
+        "boleh berpindah sendiri bila pindah meja."
     )
 
-    def __init__(self, users: UserService, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        users: UserService,
+        master: MasterDataService,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.users = users
+        self.master = master
+        self.loket: list = []
 
         self.tambah_aksi("Tambah Akun", self.tambah, variant="primary")
         self.tambah_aksi("Ubah", self.ubah, perlu_pilihan=True)
@@ -364,6 +440,9 @@ class UserTab(_TabelTab):
         berhasil, data = jalankan_aman(self, self.users.list_users)
         if not berhasil:
             return
+        berhasil_loket, loket = jalankan_aman(self, self.master.list_counters)
+        self.loket = loket if berhasil_loket else []
+        nama_loket = {l.id: l.name for l in self.loket}
 
         self.data = data
         self.tabel.setRowCount(len(data))
@@ -379,6 +458,7 @@ class UserTab(_TabelTab):
                     akun.username,
                     akun.full_name,
                     LABEL_PERAN.get(akun.role, akun.role.value),
+                    nama_loket.get(akun.default_counter_id, "—"),
                     badge_status(akun.is_active),
                     masuk,
                 ],
@@ -394,7 +474,7 @@ class UserTab(_TabelTab):
             self.tombol_status.setText("Nonaktifkan" if aktif else "Aktifkan")
 
     def tambah(self) -> None:
-        dialog = UserDialog(self)
+        dialog = UserDialog(self, counters=self.loket)
         if dialog.exec() != UserDialog.DialogCode.Accepted:
             return
         berhasil, _ = jalankan_aman(
@@ -404,6 +484,7 @@ class UserTab(_TabelTab):
                 full_name=dialog.nama_lengkap,
                 password=dialog.password,
                 role=dialog.peran,
+                default_counter_id=dialog.loket_bawaan,
             ),
         )
         if berhasil:
@@ -420,13 +501,16 @@ class UserTab(_TabelTab):
             return
         akun = self.data[baris]
 
-        dialog = UserDialog(self, user=akun)
+        dialog = UserDialog(self, user=akun, counters=self.loket)
         if dialog.exec() != UserDialog.DialogCode.Accepted:
             return
         berhasil, _ = jalankan_aman(
             self,
             lambda: self.users.update_user(
-                akun.id, full_name=dialog.nama_lengkap, role=dialog.peran
+                akun.id,
+                full_name=dialog.nama_lengkap,
+                role=dialog.peran,
+                default_counter_id=dialog.loket_bawaan,
             ),
         )
         if berhasil:
@@ -563,7 +647,7 @@ class MasterDataPage(QWidget):
         self.tab.tabBar().setUsesScrollButtons(False)
         self.tab_loket = CounterTab(master)
         self.tab_layanan = CategoryTab(master)
-        self.tab_akun = UserTab(users)
+        self.tab_akun = UserTab(users, master)
         self.tab_kantor = BranchTab(master)
 
         self.tab.addTab(self.tab_loket, "Loket")

@@ -47,6 +47,20 @@ class User(TimestampMixin, Base):
     must_change_password: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, default=False, server_default=sa.false()
     )
+    #: Loket yang langsung terpilih saat petugas ini masuk, supaya tidak
+    #: perlu memilihnya lagi setiap hari — dan supaya petugas tidak diam-diam
+    #: memanggil atas nama loket sebelah karena pilihannya tertinggal di
+    #: loket pertama daftar.
+    #:
+    #: Boleh kosong: peran selain CRO tidak duduk di loket mana pun. Petugas
+    #: tetap boleh berpindah loket sendiri saat itu juga (pindah meja terjadi
+    #: tanpa admin), yang disimpan di sini hanyalah titik awalnya.
+    #:
+    #: SET NULL, bukan RESTRICT: loket yang dihapus tidak boleh membuat akun
+    #: petugasnya ikut tidak bisa dipakai.
+    default_counter_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("counter.id", ondelete="SET NULL"), index=True
+    )
 
     branch: Mapped[Branch] = relationship(back_populates="users")
 

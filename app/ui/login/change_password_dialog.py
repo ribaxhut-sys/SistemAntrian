@@ -99,12 +99,17 @@ class ChangePasswordDialog(QDialog):
 
         susunan.addLayout(baris_tombol)
 
-        for isian in (self.input_lama, self.input_baru, self.input_ulangi):
-            isian.returnPressed.connect(self.simpan)
+        self.input_lama.textChanged.connect(self._bersihkan_kesalahan)
+        self.input_baru.textChanged.connect(self._bersihkan_kesalahan)
+        self.input_ulangi.textChanged.connect(self._bersihkan_kesalahan)
 
         self.input_lama.setFocus()
 
     # -----------------------------------------------------------------
+
+    def _bersihkan_kesalahan(self, _teks: str = "") -> None:
+        self.pesan_kesalahan.setVisible(False)
+        self.pesan_kesalahan.setText("")
 
     def _tampilkan_kesalahan(self, pesan: str, fokus: QLineEdit | None = None) -> None:
         self.pesan_kesalahan.setText(pesan)
@@ -114,7 +119,7 @@ class ChangePasswordDialog(QDialog):
             fokus.selectAll()
 
     def simpan(self) -> None:
-        self.pesan_kesalahan.setVisible(False)
+        self._bersihkan_kesalahan()
 
         lama = self.input_lama.text()
         baru = self.input_baru.text()

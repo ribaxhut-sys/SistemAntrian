@@ -12,7 +12,7 @@ menyembunyikan tombol, tetapi tidak boleh menjadi satu-satunya penjaga.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from app.core import clock
@@ -20,12 +20,14 @@ from app.core.database import session_scope
 from app.core.errors import (
     AuthenticationError,
     AuthorizationError,
+    BusinessRuleError,
     NotFoundError,
     ValidationError,
 )
 from app.core.logger import get_logger
 from app.core.security import hash_password, needs_rehash, validate_password_strength, verify_password
 from app.models import AuditAction, RecordStatus, UserRole
+from app.repositories.master_repository import CounterRepository
 from app.repositories.user_repository import UserRepository, normalize_username
 from app.services import audit_service
 from app.services.permissions import Permission, permissions_for
@@ -47,6 +49,10 @@ class AuthSession:
     branch_id: int
     login_at: datetime
     must_change_password: bool = False
+    #: Loket bawaan petugas ini, dipakai layar pelayanan untuk memilih
+    #: loketnya sendiri begitu masuk. Kosong berarti belum ditetapkan —
+    #: petugas memilih sendiri seperti sebelumnya.
+    default_counter_id: int | None = None
 
     @property
     def permissions(self) -> frozenset[Permission]:
@@ -162,6 +168,7 @@ class AuthService:
                     branch_id=user.branch_id,
                     login_at=clock.now(),
                     must_change_password=user.must_change_password,
+                    default_counter_id=user.default_counter_id,
                 )
 
         if gagal is not None:
@@ -326,8 +333,57 @@ class AuthService:
             branch_id=sesi.branch_id,
             login_at=sesi.login_at,
             must_change_password=False,
+            default_counter_id=sesi.default_counter_id,
         )
         logger.info("Kata sandi diganti: %s", sesi.username)
+
+    def pindah_loket(self, counter_id: int | None) -> AuthSession:
+        """
+        Pindahkan petugas yang sedang masuk ke loket lain, dan ingat itu.
+
+        Pindah meja terjadi tanpa rencana — petugas menggantikan rekannya,
+        atau loketnya rusak — dan tidak masuk akal menunggu admin untuk hal
+        sesederhana itu. Karena itu petugas boleh mengubah loketnya sendiri,
+        dan pilihannya disimpan sebagai loket bawaan supaya besok tidak
+        perlu diulang.
+
+        Menyimpannya juga yang membuat pengikatan ini ada gunanya: tanpa
+        disimpan, layar pelayanan akan kembali ke loket pertama daftar
+        setiap kali dibuka, dan petugas kembali berisiko memanggil atas
+        nama loket sebelah.
+        """
+        sesi = self.require_permission(Permission.QUEUE_CALL)
+        if sesi.user_id is None:
+            raise BusinessRuleError("Sesi kios tidak memiliki loket.")
+
+        with session_scope() as session:
+            user = UserRepository(session).get_by_id(sesi.user_id)
+            if user is None:
+                raise NotFoundError("Akun tidak ditemukan.")
+
+            if counter_id is not None:
+                loket = CounterRepository(session).get_by_id(counter_id)
+                if loket is None or loket.branch_id != sesi.branch_id:
+                    raise NotFoundError("Loket tidak ditemukan.")
+                if loket.status is not RecordStatus.ACTIVE:
+                    raise BusinessRuleError(
+                        f"Loket {loket.name!r} sedang tidak aktif."
+                    )
+
+            user.default_counter_id = counter_id
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="app_user",
+                entity_id=sesi.user_id,
+                tindakan="pindah loket",
+                default_counter_id=counter_id,
+            )
+
+        self._session = replace(sesi, default_counter_id=counter_id)
+        logger.info("Petugas %s pindah ke loket %s", sesi.username, counter_id)
+        return self._session
 
 
 _auth_service: AuthService | None = None

@@ -90,7 +90,6 @@ def _kosongkan_schema() -> None:
     ini, data satu test bocor ke test berikutnya dan kegagalannya bergantung
     pada urutan — jenis kegagalan yang paling sulit ditelusuri.
     """
-    import sqlalchemy as sa
 
     from app.core.database import get_engine
 

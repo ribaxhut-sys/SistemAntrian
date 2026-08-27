@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -111,6 +112,49 @@ class CounterDialog(_DialogIsian):
         self.accept()
 
 
+class CounterCategoryDialog(_DialogIsian):
+    """
+    Pilih jenis layanan yang boleh dipanggil sebuah loket.
+
+    Tidak ada yang dicentang berarti loket melayani SEMUA jenis layanan.
+    Itu ditulis terang-terangan di dialognya karena kotak yang semuanya
+    kosong biasanya dibaca sebagai "tidak melayani apa pun", padahal
+    artinya justru sebaliknya.
+    """
+
+    def __init__(
+        self, parent: QWidget | None = None, *, counter, categories: list
+    ) -> None:
+        super().__init__(
+            parent,
+            f"Jenis Layanan {counter.name}",
+            "Centang jenis layanan yang boleh dipanggil loket ini. Bila "
+            "tidak ada yang dicentang, loket melayani SEMUA jenis layanan — "
+            "itu pilihan yang disarankan kecuali loket ini memang khusus.",
+        )
+        self.counter = counter
+        self.kotak: list[tuple[int, QCheckBox]] = []
+
+        terpilih = set(counter.category_ids)
+        for kategori in categories:
+            kotak = QCheckBox(f"{kategori.name} ({kategori.prefix})")
+            kotak.setChecked(kategori.id in terpilih)
+            if not kategori.is_active:
+                # Jenis layanan nonaktif tetap ditampilkan supaya loket
+                # khusus tidak kehilangan pengaturannya saat layanannya
+                # sedang dihentikan sementara.
+                kotak.setText(f"{kotak.text()} — nonaktif")
+            self.form.addRow("", kotak)
+            self.kotak.append((kategori.id, kotak))
+
+    @property
+    def terpilih(self) -> list[int]:
+        return [id_ for id_, kotak in self.kotak if kotak.isChecked()]
+
+    def simpan(self) -> None:
+        self.accept()
+
+
 class CategoryDialog(_DialogIsian):
     """Tambah atau ubah jenis layanan."""
 
@@ -190,7 +234,9 @@ class CategoryDialog(_DialogIsian):
 class UserDialog(_DialogIsian):
     """Tambah atau ubah akun petugas."""
 
-    def __init__(self, parent: QWidget | None = None, *, user=None) -> None:
+    def __init__(
+        self, parent: QWidget | None = None, *, user=None, counters: list | None = None
+    ) -> None:
         self.user = user
         ubah = user is not None
         super().__init__(
@@ -218,12 +264,27 @@ class UserDialog(_DialogIsian):
             # sandi di komputer publik.
             if role is UserRole.KIOSK:
                 continue
-            self.pilih_peran.addItem(LABEL_PERAN[role], role)
+            # Simpan nilai string, bukan objek enum. QVariant PySide sering
+            # mengubah str Enum menjadi str biasa; service tetap menormalkannya.
+            self.pilih_peran.addItem(LABEL_PERAN[role], role.value)
         if ubah:
-            self.pilih_peran.setCurrentIndex(
-                self.pilih_peran.findData(user.role)
-            )
+            nilai = user.role.value if isinstance(user.role, UserRole) else user.role
+            self.pilih_peran.setCurrentIndex(self.pilih_peran.findData(nilai))
         self.form.addRow("Peran", self.pilih_peran)
+
+        # Loket bawaan: yang langsung terpilih saat petugas ini masuk,
+        # supaya tidak perlu memilihnya lagi setiap hari dan tidak keliru
+        # memanggil atas nama loket sebelah. Petugas tetap boleh berpindah
+        # sendiri saat pindah meja; yang disimpan di sini titik awalnya.
+        self.pilih_loket = QComboBox()
+        self.pilih_loket.addItem("— Tidak diikat ke loket —", None)
+        for loket in counters or []:
+            self.pilih_loket.addItem(loket.name, loket.id)
+        if ubah and getattr(user, "default_counter_id", None) is not None:
+            baris = self.pilih_loket.findData(user.default_counter_id)
+            if baris >= 0:
+                self.pilih_loket.setCurrentIndex(baris)
+        self.form.addRow("Loket Bawaan", self.pilih_loket)
 
         if not ubah:
             self.input_password = QLineEdit()
@@ -244,7 +305,14 @@ class UserDialog(_DialogIsian):
 
     @property
     def peran(self) -> UserRole:
-        return self.pilih_peran.currentData()
+        data = self.pilih_peran.currentData()
+        if isinstance(data, UserRole):
+            return data
+        return UserRole(data)
+
+    @property
+    def loket_bawaan(self) -> int | None:
+        return self.pilih_loket.currentData()
 
     @property
     def password(self) -> str:

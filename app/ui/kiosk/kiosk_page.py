@@ -15,7 +15,7 @@ service layer dan oleh hak user PostgreSQL mesin itu di database.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -82,6 +82,7 @@ class KioskPage(QWidget):
         self.ticket = ticket
         self.kategori: list = []
         self.tombol_layanan: list = []
+        self.pendaftaran_dibuka = True
         #: True selama label petunjuk menampilkan kesalahan, supaya
         #: penyegaran jeda tidak menimpanya dengan ajakan mengambil nomor.
         self._tahan_petunjuk = False
@@ -181,6 +182,7 @@ class KioskPage(QWidget):
         self.papan.muat_ulang()
 
         try:
+            self.pendaftaran_dibuka = self.queue.pendaftaran_dibuka()
             data = self.master.list_categories(only_active=True)
         except Exception as exc:  # noqa: BLE001 - batas UI kios, tanpa dialog
             self._tampilkan_kesalahan(exc)
@@ -188,6 +190,7 @@ class KioskPage(QWidget):
 
         self.kategori = data or []
         self._susun_tombol()
+        self._perbarui_jeda()
 
     def _susun_tombol(self) -> None:
         while self.kisi.count():
@@ -246,8 +249,14 @@ class KioskPage(QWidget):
         isi.addWidget(nama)
 
         self._warnai_tulisan_tombol(btn, aktif=True)
+        btn.installEventFilter(self)
         btn.clicked.connect(lambda _, k=layanan.id: self.ambil_nomor(k))
         return btn
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 - nama API Qt
+        if event.type() == QEvent.Type.Resize and obj in self.tombol_layanan:
+            self._warnai_tulisan_tombol(obj, aktif=obj.isEnabled())
+        return super().eventFilter(obj, event)
 
     def _warnai_tulisan_tombol(self, btn, *, aktif: bool) -> None:
         """
@@ -256,15 +265,21 @@ class KioskPage(QWidget):
         Stylesheet global `QWidget { color }` mengalahkan `color` pada
         QPushButton, sehingga huruf A/B/C sempat tampak gelap di atas
         latar teal dan hampir tidak terbaca.
+
+        Ukuran font mengikuti tinggi kartu (bukan angka tetap), supaya
+        kartu besar di layar lebar tidak menyisakan huruf kecil di
+        tengahnya.
         """
         warna = DISPLAY_KIOS_TOMBOL_TEKS if aktif else DISPLAY_KIOS_TOMBOL_MATI_TEKS
-        for nama, ukuran, berat in (
-            ("prefixLayanan", 36, 800),
-            ("namaLayanan", 18, 600),
+        tinggi = max(btn.height(), TINGGI_TOMBOL_MIN)
+        for nama, dasar, faktor, berat in (
+            ("prefixLayanan", 48, 0.42, 800),
+            ("namaLayanan", 22, 0.18, 600),
         ):
             label = btn.findChild(QLabel, nama)
             if label is None:
                 continue
+            ukuran = max(dasar, round(tinggi * faktor))
             label.setStyleSheet(
                 f"color: {warna}; background: transparent;"
                 f" font-size: {ukuran}px; font-weight: {berat};"
@@ -304,7 +319,23 @@ class KioskPage(QWidget):
         self.label_petunjuk.setText(pesan_untuk_user(exc))
 
     def _kunci_tombol(self) -> None:
-        aktif = self.queue.sisa_jeda_kios() <= 0
+        """
+        Sesuaikan tombol dengan jeda yang masih berjalan.
+
+        Dipanggil dari penanganan kegagalan `ambil_nomor()`, sehingga
+        pembacaan jedanya WAJIB ikut dijaga: bila kegagalan tadi memang
+        karena database tidak terjangkau, membacanya lagi di sini akan
+        gagal untuk alasan yang sama — tepat di dalam blok except — dan
+        exception-nya lolos dari slot Qt. Layar kios lalu berhenti bekerja
+        justru pada saat penanganan kegagalannya sedang dibutuhkan.
+        """
+        try:
+            sisa = self.queue.sisa_jeda_kios()
+        except Exception:  # noqa: BLE001 - layar publik tidak boleh mati di sini
+            logger.exception("Gagal membaca sisa jeda kios; tombol dimatikan sementara")
+            sisa = float("inf")
+
+        aktif = sisa <= 0 and self.pendaftaran_dibuka
         for btn in self.tombol_layanan:
             btn.setEnabled(aktif)
             self._warnai_tulisan_tombol(btn, aktif=aktif)
@@ -354,8 +385,19 @@ class KioskPage(QWidget):
         Tombol yang mati tanpa keterangan membuat pengunjung menekannya
         berulang kali dan mengira layarnya rusak.
         """
-        sisa = self.queue.sisa_jeda_kios()
-        aktif = sisa <= 0
+        # Keduanya membaca database, dan keduanya dipanggil dari pewaktu
+        # yang berdetak terus. Kegagalan di sini tidak boleh menghentikan
+        # pewaktunya — kios akan berhenti menghitung mundur dan tombolnya
+        # tinggal mati selamanya — tetapi tetap wajib tercatat, sebab kios
+        # berdiri tanpa penjaga dan tidak ada yang akan melaporkannya.
+        try:
+            self.pendaftaran_dibuka = self.queue.pendaftaran_dibuka()
+            sisa = self.queue.sisa_jeda_kios()
+        except Exception:  # noqa: BLE001 - pewaktu tidak boleh berhenti karenanya
+            logger.exception("Gagal membaca status kios; memakai nilai terakhir")
+            sisa = 0.0
+
+        aktif = sisa <= 0 and self.pendaftaran_dibuka
 
         for btn in self.tombol_layanan:
             btn.setEnabled(aktif)
@@ -363,7 +405,10 @@ class KioskPage(QWidget):
 
         if self._penghapus_hasil.isActive():
             return
-        if not aktif:
+        if not self.pendaftaran_dibuka:
+            self._tahan_petunjuk = False
+            self.label_petunjuk.setText("Pendaftaran nomor antrian sedang ditutup sementara.")
+        elif not aktif:
             self._tahan_petunjuk = False
             self.label_petunjuk.setText(
                 f"Mohon tunggu {int(sisa) + 1} detik sebelum mengambil nomor berikutnya."

@@ -12,7 +12,7 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QFrame, QPushButton, QStatusBar
 
-from app.core.errors import AppError, ValidationError
+from app.core.errors import ValidationError
 from app.models import UserRole
 from app.services.master_data_service import MasterDataService
 from app.services.user_service import UserService
@@ -522,10 +522,26 @@ def test_tab_data_master_lengkap(halaman_master):
 
 
 def test_tabel_loket_terisi_dari_database(halaman_master):
-    tabel = halaman_master.tab_loket.tabel
+    tab = halaman_master.tab_loket
+    tabel = tab.tabel
+    kolom = {nama: i for i, nama in enumerate(tab.kolom)}
+
     assert tabel.rowCount() == 3
-    assert tabel.item(0, 0).text() == "LOKET-1"
-    assert tabel.item(0, 2).text() == "Aktif"
+    assert tabel.item(0, kolom["Kode"]).text() == "LOKET-1"
+    assert tabel.item(0, kolom["Status"]).text() == "Aktif"
+
+
+def test_tabel_loket_menampilkan_semua_untuk_loket_tanpa_batasan(halaman_master):
+    """
+    Kosong berarti loket melayani SEMUA jenis layanan, bukan tidak ada.
+
+    Kolom yang dibiarkan kosong akan dibaca terbalik oleh admin, lalu ia
+    mengira loketnya belum siap dipakai.
+    """
+    tab = halaman_master.tab_loket
+    kolom = {nama: i for i, nama in enumerate(tab.kolom)}
+
+    assert tab.tabel.item(0, kolom["Jenis Layanan"]).text() == "Semua"
 
 
 def test_tabel_jenis_layanan_menampilkan_contoh_nomor(halaman_master):
@@ -1023,8 +1039,10 @@ def test_pengaturan_terisi_dari_nilai_tersimpan(halaman_pengaturan):
     from app.services.settings_service import SKEMA
 
     # Setiap pengaturan yang dikenali harus punya kontrolnya di layar,
-    # kalau tidak ia hanya bisa diubah lewat database.
-    assert set(halaman_pengaturan.baris) == {p.kunci for p in SKEMA}
+    # kalau tidak ia hanya bisa diubah lewat database. Kecuali yang
+    # sengaja disembunyikan: nilainya ditulis sistem sendiri secara
+    # berpasangan, dan formulir ini hanya menyetel satu kunci sekaligus.
+    assert set(halaman_pengaturan.baris) == {p.kunci for p in SKEMA if p.tampil}
     assert halaman_pengaturan.baris["ticket.printer"].nilai() == "pdf"
     assert halaman_pengaturan.baris["survey.enabled"].nilai() == "true"
     assert halaman_pengaturan.baris["display.next_count"].nilai() == "3"
@@ -1354,3 +1372,101 @@ def test_tombol_bergaya_khusus_punya_tampilan_nonaktif(variant):
     from app.ui.style import STYLESHEET
 
     assert f'QPushButton[variant="{variant}"]:disabled' in STYLESHEET
+
+
+# ---------------------------------------------------------------------
+# Loket bawaan petugas
+# ---------------------------------------------------------------------
+
+def _halaman_layanan(qtbot, auth):
+    """Panel pelayanan untuk sesi CRO yang sedang masuk."""
+    from app.services.master_data_service import MasterDataService
+    from app.services.queue_service import QueueService
+    from app.services.settings_service import SettingsService
+    from app.services.survey_service import SurveyService
+    from app.ui.queue.service_page import ServicePage
+
+    halaman = ServicePage(
+        QueueService(auth),
+        MasterDataService(auth),
+        SurveyService(auth),
+        SettingsService(auth),
+        auth,
+    )
+    qtbot.addWidget(halaman)
+    return halaman
+
+
+def test_loket_bawaan_langsung_terpilih_saat_masuk(qtbot, auth, antrian_siap, users):
+    """
+    Tanpa ini, daftarnya selalu jatuh ke loket pertama dan petugas Loket 3
+    memanggil atas nama Loket 1 setiap kali lupa menggantinya.
+    """
+    from app.services.user_service import UserService
+
+    loket = antrian_siap["loket"][2]
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    UserService(auth).update_user(
+        users["CRO"], full_name="Petugas Cro", role="CRO", default_counter_id=loket
+    )
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+    assert _halaman_layanan(qtbot, auth).loket_id == loket
+
+
+def test_tanpa_loket_bawaan_jatuh_ke_pilihan_pertama(qtbot, auth, antrian_siap):
+    """Perilaku lama dipertahankan bagi akun yang belum diatur."""
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman = _halaman_layanan(qtbot, auth)
+
+    assert halaman.loket_id == antrian_siap["loket"][0]
+
+
+def test_pindah_loket_dari_panel_diingat(qtbot, auth, antrian_siap):
+    """Petugas pindah meja tanpa memanggil admin, dan besok tidak mengulang."""
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman = _halaman_layanan(qtbot, auth)
+
+    halaman.pilih_loket.setCurrentIndex(
+        halaman.pilih_loket.findData(antrian_siap["loket"][1])
+    )
+
+    assert auth.current_session.default_counter_id == antrian_siap["loket"][1]
+
+
+def test_loket_khusus_hanya_menawarkan_layanannya(qtbot, auth, antrian_siap):
+    """
+    Menawarkan jenis layanan yang pasti ditolak service hanya membuat
+    petugas menabrak pesan kesalahan tanpa sebab yang terlihat.
+    """
+    from app.services.master_data_service import MasterDataService
+
+    loket = antrian_siap["loket"][0]
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    MasterDataService(auth).set_counter_categories(
+        loket, [antrian_siap["kategori"]["B"]]
+    )
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman = _halaman_layanan(qtbot, auth)
+
+    tersedia = {
+        halaman.pilih_kategori.itemData(i)
+        for i in range(halaman.pilih_kategori.count())
+    }
+    assert tersedia == {None, antrian_siap["kategori"]["B"]}
+
+
+def test_loket_tanpa_batasan_menawarkan_semua_layanan(qtbot, auth, antrian_siap):
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman = _halaman_layanan(qtbot, auth)
+
+    assert halaman.pilih_kategori.count() == len(antrian_siap["kategori"]) + 1

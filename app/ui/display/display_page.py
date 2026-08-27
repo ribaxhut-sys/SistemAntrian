@@ -49,23 +49,24 @@ LABEL_STATUS_LOKET: dict[QueueStatus, str] = {
 #:
 #: Batas atas nomor ditentukan oleh lebar kartu, bukan selera: tiga kartu
 #: pada layar 1100px memberi sekitar 325px per kartu, dan nomor lima huruf
-#: pada 112px masih muat di dalamnya setelah dikurangi padding.
+#: pada 132px masih muat di dalamnya setelah dikurangi padding (skala
+#: turun otomatis di layar yang lebih sempit lewat hitung_skala()).
 UKURAN_TV: dict[str, int] = {
     "judul": 36,
     "jam": 24,
     "nama": 32,
     "status": 22,
-    "nomor": 112,
+    "nomor": 132,
     "layanan": 26,
     "berikutnya_judul": 20,
     "berikutnya": 46,
     # Varian baris: kartu melebar, nomornya di kanan nama loket.
     "nama_baris": 26,
     "status_baris": 20,
-    "nomor_baris": 72,
+    "nomor_baris": 84,
     # Panel sorotan.
     "sorot_pil": 22,
-    "sorot_nomor": 200,
+    "sorot_nomor": 224,
     "sorot_nama": 62,
     "sorot_layanan": 28,
     # Panel pengumuman tema split.
@@ -81,15 +82,15 @@ UKURAN_KIOS: dict[str, int] = {
     "jam": 15,
     "nama": 16,
     "status": 13,
-    "nomor": 56,
+    "nomor": 64,
     "layanan": 15,
     "berikutnya_judul": 15,
     "berikutnya": 28,
     "nama_baris": 15,
     "status_baris": 12,
-    "nomor_baris": 34,
+    "nomor_baris": 40,
     "sorot_pil": 12,
-    "sorot_nomor": 90,
+    "sorot_nomor": 100,
     "sorot_nama": 28,
     "sorot_layanan": 15,
     "info_judul": 18,
@@ -159,6 +160,11 @@ class KartuLoket(QFrame):
       dalam satu kolom sempit.
     """
 
+    #: Kunci ukuran yang ikut dikalikan `skala_nomor` — nomor antrian saja,
+    #: bukan nama loket atau status, supaya pengaturannya benar-benar hanya
+    #: membesarkan angka yang dibaca dari jarak jauh.
+    _KUNCI_NOMOR = frozenset({"nomor", "nomor_baris"})
+
     def __init__(
         self,
         parent: QWidget | None = None,
@@ -166,6 +172,7 @@ class KartuLoket(QFrame):
         kompak: bool = False,
         palet: Palet | None = None,
         varian: str = "kisi",
+        skala_nomor: float = 1.0,
     ) -> None:
         super().__init__(parent)
         self.kompak = kompak
@@ -176,6 +183,9 @@ class KartuLoket(QFrame):
         self.pakai_pita = bool(self.palet.pita) and varian != "baris"
         self.ukuran = UKURAN_KIOS if kompak else UKURAN_TV
         self.skala = 1.0
+        #: Faktor tambahan dari pengaturan `display.number_font_scale`,
+        #: terpisah dari `skala` (yang mengikuti besar layar).
+        self.skala_nomor = skala_nomor
         self._unggulan = False
         self._kosong = True
 
@@ -266,7 +276,10 @@ class KartuLoket(QFrame):
 
     def px(self, kunci: str) -> int:
         """Ukuran huruf setelah diskalakan terhadap besar layar."""
-        return max(10, round(self.ukuran[kunci] * self.skala))
+        dasar = self.ukuran[kunci] * self.skala
+        if kunci in self._KUNCI_NOMOR:
+            dasar *= self.skala_nomor
+        return max(10, round(dasar))
 
     def set_skala(self, skala: float) -> None:
         """Ubah skala huruf. Diabaikan bila perubahannya tidak berarti."""
@@ -282,9 +295,11 @@ class KartuLoket(QFrame):
         self._unggulan = unggulan
 
         if antrian is None:
-            self.label_status.setText("KOSONG")
+            self.label_status.setText("ISTIRAHAT" if keadaan.istirahat else "KOSONG")
             self.label_nomor.setText("—")
-            self.label_layanan.setText("Siap melayani")
+            self.label_layanan.setText(
+                "Sedang istirahat" if keadaan.istirahat else "Siap melayani"
+            )
         else:
             self.label_status.setText(_teks_status(antrian, unggulan=unggulan))
             self.label_nomor.setText(antrian.queue_number)
@@ -396,13 +411,19 @@ class KartuSorot(QFrame):
     """
 
     def __init__(
-        self, parent: QWidget | None = None, *, kompak: bool = False, palet: Palet | None = None
+        self,
+        parent: QWidget | None = None,
+        *,
+        kompak: bool = False,
+        palet: Palet | None = None,
+        skala_nomor: float = 1.0,
     ) -> None:
         super().__init__(parent)
         self.kompak = kompak
         self.palet = palet or palet_untuk(TEMA_BAWAAN)
         self.ukuran = UKURAN_KIOS if kompak else UKURAN_TV
         self.skala = 1.0
+        self.skala_nomor = skala_nomor
 
         self.setObjectName("kartuSorot")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -427,7 +448,10 @@ class KartuSorot(QFrame):
         self._tulis_gaya()
 
     def px(self, kunci: str) -> int:
-        return max(10, round(self.ukuran[kunci] * self.skala))
+        dasar = self.ukuran[kunci] * self.skala
+        if kunci == "sorot_nomor":
+            dasar *= self.skala_nomor
+        return max(10, round(dasar))
 
     def set_skala(self, skala: float) -> None:
         if abs(skala - self.skala) < 0.02:
@@ -533,6 +557,8 @@ class DisplayPage(QWidget):
         self.tata_letak = KISI if kompak else self.palet.tata_letak
 
         self.jumlah_berikutnya = settings.get_int("display.next_count", 3)
+        #: Faktor tambahan khusus nomor antrian, dari pengaturan admin.
+        self.skala_nomor = settings.get_int("display.number_font_scale", 100) / 100.0
         self.suara_aktif = settings.get_bool("display.sound_enabled", True)
         #: Nomor yang terakhir dibunyikan, supaya nada tidak berulang setiap
         #: penyegaran untuk panggilan yang sama.
@@ -668,7 +694,9 @@ class DisplayPage(QWidget):
         isi = QHBoxLayout()
         isi.setSpacing(28)
 
-        self.kartu_sorot = KartuSorot(kompak=self.kompak, palet=self.palet)
+        self.kartu_sorot = KartuSorot(
+            kompak=self.kompak, palet=self.palet, skala_nomor=self.skala_nomor
+        )
         self._bayangan(self.kartu_sorot, 60, 16, 120)
         isi.addWidget(self.kartu_sorot, stretch=6)
 
@@ -909,7 +937,12 @@ class DisplayPage(QWidget):
         varian = "kisi" if self.tata_letak == KISI else "baris"
         kolom = min(3, len(loket))
         for indeks, _item in enumerate(loket):
-            kartu = KartuLoket(kompak=self.kompak, palet=self.palet, varian=varian)
+            kartu = KartuLoket(
+                kompak=self.kompak,
+                palet=self.palet,
+                varian=varian,
+                skala_nomor=self.skala_nomor,
+            )
             kartu.set_skala(self.skala)
             self._bayangan(kartu, 40, 12, 110)
             self.kartu_loket.append(kartu)

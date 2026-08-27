@@ -8,12 +8,13 @@ tabel transisi di bawah kehilangan artinya dan status tidak sah bisa lolos.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from app.core import clock
 from app.core.database import session_scope
-from app.core.errors import BusinessRuleError, NotFoundError, ValidationError
+from app.core.errors import BusinessRuleError, NotFoundError
 from app.core.logger import get_logger
 from app.models import AuditAction, Counter, Queue, QueueStatus, RecordStatus, User
 from app.repositories.master_repository import (
@@ -21,7 +22,7 @@ from app.repositories.master_repository import (
     ServiceCategoryRepository,
 )
 from app.repositories.queue_repository import (
-    STATUS_SIBUK,
+    STATUS_BELUM_SELESAI,
     QueueRepository,
     terbitkan_nomor,
 )
@@ -181,6 +182,7 @@ class DisplayCounterState:
     counter_id: int
     counter_name: str
     antrian: QueueInfo | None
+    istirahat: bool = False
 
 
 @dataclass(frozen=True)
@@ -206,7 +208,7 @@ class QueueService:
         self.auth = auth
         # Tanpa sesi: pembacaan pengaturan memang tidak menuntut hak akses,
         # dan batas pemanggilan dibutuhkan setiap kali antrian dibaca.
-        self.settings = settings or SettingsService()
+        self.settings = settings or SettingsService(auth)
         #: Waktu nomor terakhir terbit dari mesin ini. Disimpan di memori,
         #: bukan di database: yang perlu ditahan adalah satu orang menekan
         #: tombol berulang kali di satu kios, bukan lalu lintas antar mesin.
@@ -234,6 +236,11 @@ class QueueService:
         pengunjung yang disimpan.
         """
         sesi = self.auth.require_permission(Permission.QUEUE_CREATE)
+        if not self.pendaftaran_dibuka():
+            raise BusinessRuleError(
+                "Pendaftaran antrian baru sedang ditutup sementara. "
+                "Nomor yang sudah terbit tetap dapat dilayani."
+            )
         if sesi.kios:
             self._pastikan_jeda_kios()
 
@@ -268,6 +275,60 @@ class QueueService:
         self._nomor_kios_terakhir = clock.now()
         logger.info("Nomor antrian terbit: %s", terbit.queue_number)
         return info
+
+    def pendaftaran_dibuka(self) -> bool:
+        """
+        Apakah loket dan kios sedang menerima pengambilan nomor baru.
+
+        Penutupan otomatis kedaluwarsa begitu tanggal berganti: petugas
+        yang menutup pendaftaran sore hari dan lupa membukanya lagi tidak
+        boleh diam-diam membuat kantor tampak tutup keesokan paginya. Hari
+        baru dianggap dibuka lagi dari awal, sama seperti penomoran yang
+        juga otomatis mulai dari 1 setiap tanggal baru.
+
+        Pembacaan tidak menuntut hak akses — kios berjalan tanpa login dan
+        tetap harus tahu kapan tombolnya wajib nonaktif.
+        """
+        if self.settings.get_bool("queue.registration_open", True):
+            return True
+        tanggal_tutup = self.settings.get("queue.registration_closed_date", "")
+        return tanggal_tutup != str(clock.today())
+
+    def tutup_pendaftaran(self) -> None:
+        """
+        Hentikan sementara penerbitan nomor baru dari seluruh loket dan kios.
+
+        Berlaku HANYA untuk hari ini — lihat `pendaftaran_dibuka()`.
+        """
+        sesi = self.auth.require_permission(Permission.QUEUE_TOGGLE_INTAKE)
+        self.settings.set(
+            "queue.registration_open", "false", permission=Permission.QUEUE_TOGGLE_INTAKE
+        )
+        self.settings.set(
+            "queue.registration_closed_date",
+            str(clock.today()),
+            permission=Permission.QUEUE_TOGGLE_INTAKE,
+        )
+        logger.info("Pendaftaran antrian ditutup oleh %s", sesi.username)
+
+    def buka_pendaftaran(self) -> None:
+        """
+        Buka kembali penerbitan nomor baru, memulai antrian hari ini dari awal.
+
+        Tanggal penutupan ikut dikosongkan supaya kedua nilai itu tidak
+        pernah bercerita berbeda: menutup selalu menyetel keduanya, membuka
+        selalu membersihkan keduanya.
+        """
+        sesi = self.auth.require_permission(Permission.QUEUE_TOGGLE_INTAKE)
+        self.settings.set(
+            "queue.registration_open", "true", permission=Permission.QUEUE_TOGGLE_INTAKE
+        )
+        self.settings.set(
+            "queue.registration_closed_date",
+            "",
+            permission=Permission.QUEUE_TOGGLE_INTAKE,
+        )
+        logger.info("Pendaftaran antrian dibuka oleh %s", sesi.username)
 
     def jeda_kios_detik(self) -> int:
         """Jeda wajib antar-pengambilan nomor di mesin kios."""
@@ -391,6 +452,7 @@ class QueueService:
                             if row is not None
                             else None
                         ),
+                        istirahat=counter.on_break,
                     )
                 )
 
@@ -413,6 +475,38 @@ class QueueService:
     # Alur pelayanan
     # =================================================================
 
+    def set_istirahat(self, counter_id: int, istirahat: bool) -> None:
+        """
+        Tandai loket sedang istirahat, atau kembali bertugas.
+
+        Sengaja terpisah dari `status` ACTIVE/INACTIVE loket (kewenangan
+        admin di Data Master): istirahat berulang beberapa kali sehari dan
+        petugas yang duduk di loket itu sendiri harus bisa mengubahnya
+        tanpa memanggil admin setiap kali. Loket yang sedang istirahat
+        tetap tampil di layar antrian — hanya statusnya berubah menjadi
+        "ISTIRAHAT" — supaya pengunjung tidak mendatangi loket kosong yang
+        sebenarnya tidak ditinggal petugas selamanya.
+        """
+        sesi = self.auth.require_permission(Permission.QUEUE_CALL)
+
+        with session_scope() as session:
+            loket = self._pastikan_loket_aktif(session, counter_id, sesi.branch_id)
+            if loket.on_break is istirahat:
+                return
+            loket.on_break = istirahat
+
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="counter",
+                entity_id=counter_id,
+                istirahat=istirahat,
+            )
+            logger.info(
+                "Loket %s %s", loket.code, "mulai istirahat" if istirahat else "aktif kembali"
+            )
+
     def call_next(self, counter_id: int, *, category_id: int | None = None) -> QueueInfo:
         """
         Panggil antrian paling depan ke sebuah loket.
@@ -427,6 +521,11 @@ class QueueService:
 
         with session_scope() as session:
             loket = self._pastikan_loket_aktif(session, counter_id, sesi.branch_id)
+            if loket.on_break:
+                raise BusinessRuleError(
+                    f"Loket {loket.name!r} sedang istirahat. Akhiri istirahat "
+                    "terlebih dahulu sebelum memanggil antrian."
+                )
             repo = QueueRepository(session)
 
             sedang = repo.sedang_ditangani_loket(counter_id, hari)
@@ -436,10 +535,34 @@ class QueueService:
                     "Selesaikan, tunda, atau tandai tidak hadir terlebih dahulu."
                 )
 
+            # Daftar kosong berarti loket ini boleh memanggil semua jenis
+            # layanan; lihat `counter_category` pada model.
+            diizinkan = [kategori.id for kategori in loket.categories]
+            if diizinkan and category_id is not None and category_id not in diizinkan:
+                raise BusinessRuleError(
+                    f"Loket {loket.name!r} tidak melayani jenis layanan itu."
+                )
+
             antrian = repo.berikutnya_untuk_dipanggil(
-                sesi.branch_id, hari, category_id=category_id
+                sesi.branch_id,
+                hari,
+                category_id=category_id,
+                category_ids=diizinkan or None,
             )
             if antrian is None:
+                # Pesannya membedakan "memang sepi" dari "ada yang menunggu
+                # tetapi bukan bagian loket ini". Tanpa pembedaan itu petugas
+                # melihat "tidak ada antrian" sementara layar di depannya
+                # menampilkan sepuluh orang menunggu, lalu menyimpulkan
+                # aplikasinya rusak.
+                if diizinkan and repo.berikutnya_untuk_dipanggil(
+                    sesi.branch_id, hari
+                ) is not None:
+                    raise BusinessRuleError(
+                        "Tidak ada antrian untuk jenis layanan yang dilayani "
+                        f"loket {loket.name!r}. Antrian yang menunggu saat ini "
+                        "adalah bagian loket lain."
+                    )
                 raise BusinessRuleError("Tidak ada antrian yang menunggu.")
 
             self._pindah_status(antrian, QueueStatus.CALLED)
@@ -603,6 +726,149 @@ class QueueService:
             "dibatalkan",
             selesai=True,
         )
+
+    def ringkasan_tutup_hari(self) -> dict[QueueStatus, int]:
+        """
+        Jumlah antrian yang masih akan dibatalkan bila Tutup Hari dijalankan.
+
+        Dipakai untuk memperlihatkan kepada admin apa yang akan terjadi
+        sebelum tombolnya benar-benar ditekan.
+        """
+        sesi = self.auth.require_permission(Permission.QUEUE_CLOSE_DAY)
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            daftar = repo.list_belum_selesai(sesi.branch_id, clock.today())
+            hasil = {status: 0 for status in STATUS_BELUM_SELESAI}
+            for antrian in daftar:
+                hasil[antrian.status] += 1
+            return hasil
+
+    def tutup_hari(self) -> int:
+        """
+        Batalkan seluruh antrian yang belum selesai hari ini (dan sisa hari
+        sebelumnya yang belum sempat ditutup).
+
+        Ini BUKAN pembatalan satu per satu lewat `cancel()`: nomor yang
+        sedang dipanggil, dilayani, atau ditunda tidak boleh dibatalkan
+        pengunjungnya sendiri (lihat TRANSISI_SAH), tetapi wajib bisa
+        ditutup paksa oleh admin di akhir hari — mesin tidak pernah tahu
+        kapan loket sungguh-sungguh berhenti bekerja. Karena itu perubahan
+        statusnya menulis langsung, melewati `_pindah_status`, dan dicatat
+        sebagai SATU audit CLOSE_DAY berisi jumlahnya, bukan satu audit per
+        nomor yang bisa mencapai ratusan baris.
+
+        Antrian yang sudah COMPLETED/CANCELLED/NO_SHOW tidak tersentuh:
+        riwayat pelayanan yang sungguh terjadi tidak boleh ikut berubah.
+        """
+        sesi = self.auth.require_permission(Permission.QUEUE_CLOSE_DAY)
+        sekarang = clock.now()
+
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            daftar = repo.list_belum_selesai(sesi.branch_id, clock.today())
+            id_antrian = [antrian.id for antrian in daftar]
+            for antrian in daftar:
+                antrian.status = QueueStatus.CANCELLED
+                antrian.completed_at = sekarang
+
+            jumlah = len(daftar)
+            audit_service.record(
+                session,
+                AuditAction.CLOSE_DAY,
+                user_id=sesi.user_id,
+                entity_type="queue",
+                entity_id=None,
+                jumlah=jumlah,
+                branch_id=sesi.branch_id,
+                # Disimpan supaya bisa dipulihkan lewat `buka_kembali_hari()`
+                # bila tombolnya tertekan tidak sengaja.
+                queue_ids=id_antrian,
+            )
+            logger.info("Tutup hari: %d antrian dibatalkan", jumlah)
+            return jumlah
+
+    def ringkasan_buka_kembali_hari(self) -> int:
+        """
+        Banyaknya antrian yang masih dapat dipulihkan dari Tutup Hari
+        terakhir, bila tombolnya ternyata tertekan tidak sengaja.
+
+        Nol berarti tidak ada Tutup Hari yang baru saja terjadi, atau
+        seluruh antrian yang dibatalkannya sudah disentuh lagi sejak itu
+        (misalnya sudah ditutup ulang secara manual).
+        """
+        self.auth.require_permission(Permission.QUEUE_CLOSE_DAY)
+        ids = self._id_tutup_hari_terakhir()
+        if not ids:
+            return 0
+        with session_scope() as session:
+            daftar = QueueRepository(session).list_by_ids(ids)
+            return sum(1 for antrian in daftar if antrian.status is QueueStatus.CANCELLED)
+
+    def buka_kembali_hari(self) -> int:
+        """
+        Batalkan efek Tutup Hari yang PALING BARU, mengembalikan antrian
+        yang tersentuh menjadi WAITING seolah belum pernah dipanggil.
+
+        Sengaja hanya mengembalikan ke WAITING, bukan ke status persisnya
+        semula (CALLED/SERVING/PAUSED): pengunjung yang tadinya sedang
+        dilayani bisa saja sudah pergi begitu tombol Tutup Hari tertekan,
+        dan loket yang tercatat menanganinya belum tentu masih relevan.
+        Nomor cukup kembali antre dan dipanggil ulang dari awal.
+
+        Hanya menyentuh baris yang statusnya MASIH CANCELLED sejak Tutup
+        Hari tadi — bila petugas sudah membatalkannya lagi secara manual
+        untuk alasan lain, baris itu dilewati begitu saja.
+        """
+        sesi = self.auth.require_permission(Permission.QUEUE_CLOSE_DAY)
+        ids = self._id_tutup_hari_terakhir()
+        if not ids:
+            return 0
+
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            daftar = [q for q in repo.list_by_ids(ids) if q.status is QueueStatus.CANCELLED]
+            for antrian in daftar:
+                antrian.status = QueueStatus.WAITING
+                antrian.counter_id = None
+                antrian.served_by_user_id = None
+                antrian.called_at = None
+                antrian.serving_at = None
+                antrian.completed_at = None
+
+            jumlah = len(daftar)
+            audit_service.record(
+                session,
+                AuditAction.REOPEN_DAY,
+                user_id=sesi.user_id,
+                entity_type="queue",
+                entity_id=None,
+                jumlah=jumlah,
+            )
+            logger.info("Buka kembali hari: %d antrian dikembalikan menunggu", jumlah)
+            return jumlah
+
+    def _id_tutup_hari_terakhir(self) -> list[int]:
+        """
+        Id antrian dari Tutup Hari terakhir milik cabang sesi ini, bila ada.
+
+        Dibatasi hanya beberapa baris audit paling baru: Tutup Hari bukan
+        aktivitas yang sering terjadi, dan mengembalikan sesuatu dari
+        berhari-hari lalu tidak pernah dimaksudkan pengguna yang menekan
+        tombol "Buka Kembali".
+        """
+        sesi = self.auth.require_permission(Permission.QUEUE_CLOSE_DAY)
+        for entri in audit_service.list_terakhir(batas=5, aksi=AuditAction.CLOSE_DAY.value):
+            if not entri.meta:
+                continue
+            try:
+                meta = json.loads(entri.meta)
+            except ValueError:
+                continue
+            if meta.get("branch_id") != sesi.branch_id:
+                continue
+            ids = meta.get("queue_ids")
+            return list(ids) if isinstance(ids, list) else []
+        return []
 
     # =================================================================
     # Bagian dalam

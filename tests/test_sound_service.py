@@ -142,7 +142,17 @@ def test_susunan_kalimat_pengumuman():
 
     assert (
         _teks_pengumuman("A-023", "Loket 2")
-        == "Nomor antrian A, dua puluh tiga, silakan menuju Loket 2."
+        == "Nomor antrian A, nol dua tiga, silakan menuju Loket dua."
+    )
+
+
+def test_angka_nol_dalam_nomor_antrian_tetap_dieja():
+    """"A-006" harus dibaca "A, nol nol enam", nol di depan tidak boleh hilang."""
+    from app.services.sound_service import _teks_pengumuman
+
+    assert (
+        _teks_pengumuman("A-006", "Loket 02")
+        == "Nomor antrian A, nol nol enam, silakan menuju Loket nol dua."
     )
 
 
@@ -150,20 +160,20 @@ def test_kalimat_tanpa_loket_tetap_wajar():
     """Sebelum antrian dipanggil ke loket mana pun, kalimat tetap masuk akal."""
     from app.services.sound_service import _teks_pengumuman
 
-    assert _teks_pengumuman("B-005", None) == "Nomor antrian B, lima."
+    assert _teks_pengumuman("B-005", None) == "Nomor antrian B, nol nol lima."
 
 
 def test_prefix_dua_huruf_dieja_terpisah():
     from app.services.sound_service import _teks_pengumuman
 
     kalimat = _teks_pengumuman("AB-001", "Loket 1")
-    assert kalimat.startswith("Nomor antrian A B, satu,")
+    assert kalimat.startswith("Nomor antrian A B, nol nol satu,")
 
 
-def test_angka_ratusan_terdengar_wajar():
+def test_angka_ratusan_dieja_per_digit():
     from app.services.sound_service import _teks_pengumuman
 
-    assert "seratus dua puluh tiga" in _teks_pengumuman("C-123", None)
+    assert "satu dua tiga" in _teks_pengumuman("C-123", None)
 
 
 def test_tts_disiapkan_saat_pemutar_dibuat(qapp):

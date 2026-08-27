@@ -7,6 +7,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QVBoxLayout,
     QWidget,
@@ -43,6 +44,7 @@ class RegistrationPage(QWidget):
         self.ticket = ticket
         self.kategori: list = []
         self.terakhir: QueueInfo | None = None
+        self.pendaftaran_dibuka = True
 
         self._bangun_tampilan()
         self.muat_ulang()
@@ -54,13 +56,30 @@ class RegistrationPage(QWidget):
         susunan.setContentsMargins(32, 28, 32, 28)
         susunan.setSpacing(18)
 
-        susunan.addWidget(judul("Terbitkan Nomor Antrian"))
+        baris_judul = QHBoxLayout()
+        baris_judul.addWidget(judul("Terbitkan Nomor Antrian"))
+        baris_judul.addStretch()
+        self.tombol_pendaftaran = tombol("Tutup Pendaftaran")
+        self.tombol_pendaftaran.clicked.connect(self.alihkan_pendaftaran)
+        baris_judul.addWidget(self.tombol_pendaftaran)
+        susunan.addLayout(baris_judul)
+
         susunan.addWidget(
             keterangan(
                 "Pilih jenis layanan yang dibutuhkan pengunjung. "
                 "Tekan angka 1–9 sebagai pintasan."
             )
         )
+
+        self.label_pendaftaran_tertutup = keterangan(
+            "Pendaftaran antrian baru sedang ditutup. Nomor yang sudah "
+            "terbit tetap dapat dilayani seperti biasa."
+        )
+        self.label_pendaftaran_tertutup.setStyleSheet(
+            f"color: {DANGER}; font-weight: 600;"
+        )
+        self.label_pendaftaran_tertutup.setVisible(False)
+        susunan.addWidget(self.label_pendaftaran_tertutup)
 
         self.kisi = QGridLayout()
         self.kisi.setSpacing(12)
@@ -123,7 +142,14 @@ class RegistrationPage(QWidget):
     # -----------------------------------------------------------------
 
     def muat_ulang(self) -> None:
-        """Muat ulang daftar jenis layanan yang aktif."""
+        """Muat ulang daftar jenis layanan yang aktif dan status pendaftaran."""
+        berhasil, terbuka = jalankan_aman(self, self.queue.pendaftaran_dibuka)
+        self.pendaftaran_dibuka = terbuka if berhasil else True
+        self.tombol_pendaftaran.setText(
+            "Buka Pendaftaran" if not self.pendaftaran_dibuka else "Tutup Pendaftaran"
+        )
+        self.label_pendaftaran_tertutup.setVisible(not self.pendaftaran_dibuka)
+
         berhasil, data = jalankan_aman(
             self, lambda: self.master.list_categories(only_active=True)
         )
@@ -132,6 +158,12 @@ class RegistrationPage(QWidget):
 
         self.kategori = data
         self._susun_tombol()
+
+    def alihkan_pendaftaran(self) -> None:
+        aksi = self.queue.buka_pendaftaran if not self.pendaftaran_dibuka else self.queue.tutup_pendaftaran
+        berhasil, _ = jalankan_aman(self, aksi, "Gagal mengubah status pendaftaran")
+        if berhasil:
+            self.muat_ulang()
 
     def _susun_tombol(self) -> None:
         while self.kisi.count():
@@ -157,6 +189,7 @@ class RegistrationPage(QWidget):
             btn.clicked.connect(
                 lambda _=False, id_layanan=layanan.id: self.terbitkan(id_layanan)
             )
+            btn.setEnabled(self.pendaftaran_dibuka)
             self.kisi.addWidget(btn, indeks // 3, indeks % 3)
 
             if indeks < 9:

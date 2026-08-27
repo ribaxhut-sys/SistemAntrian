@@ -96,7 +96,17 @@ def _laporkan_kegagalan_database(config, *, berjendela: bool) -> None:
 
 
 def _jalankan_ui(*, langsung_kios: bool = False) -> int:
-    """Buka aplikasi berjendela. Import Qt ditunda sampai benar-benar dipakai."""
+    """
+    Buka aplikasi berjendela. Import Qt ditunda sampai benar-benar dipakai.
+
+    Keluar dari layar pengunjung (kios) atau layar petugas TIDAK menutup
+    proses aplikasi — hanya mengembalikan ke layar sebelumnya, seolah
+    komputer baru dinyalakan. Kios kembali ke layar pilihan mode (Login /
+    Layar Pengunjung); petugas yang logout kembali langsung ke layar masuk,
+    tanpa mampir ke layar pilihan lagi. Menutup aplikasi sepenuhnya hanya
+    terjadi lewat tombol silang (X) pada layar pilihan atau layar masuk —
+    sama seperti alur "batal" yang sudah ada sebelumnya.
+    """
     from PySide6.QtWidgets import QApplication, QDialog
 
     from app.services.auth_service import get_auth_service
@@ -111,42 +121,55 @@ def _jalankan_ui(*, langsung_kios: bool = False) -> int:
     app.setStyleSheet(STYLESHEET)
 
     auth = get_auth_service()
+    kios_pertama = langsung_kios
 
-    if not langsung_kios:
-        pilihan = ModeDialog()
-        if pilihan.exec() != QDialog.DialogCode.Accepted:
-            logger.info("Aplikasi ditutup dari layar pilihan")
-            return 0
-        langsung_kios = pilihan.pilihan == LAYAR_PENGUNJUNG
+    while True:
+        if kios_pertama:
+            # --layar: langsung ke kios tanpa dialog, hanya pada peluncuran
+            # pertama. Setelah kios itu ditutup, tetap lewat layar pilihan
+            # seperti biasa — seseorang sudah hadir untuk menekan Ctrl+Q.
+            kios_pertama = False
+            mode_kios = True
+        else:
+            pilihan = ModeDialog()
+            if pilihan.exec() != QDialog.DialogCode.Accepted:
+                logger.info("Aplikasi ditutup dari layar pilihan")
+                return 0
+            mode_kios = pilihan.pilihan == LAYAR_PENGUNJUNG
 
-    if langsung_kios:
-        # Tanpa login: komputernya menghadap publik dan tidak diawasi.
-        auth.mulai_sesi_kios()
-        jendela = MainWindow(auth)
-        jendela.tampilkan()
-        return app.exec()
+        if mode_kios:
+            # Tanpa login: komputernya menghadap publik dan tidak diawasi.
+            auth.mulai_sesi_kios()
+            jendela = MainWindow(auth)
+            jendela.tampilkan()
+            app.exec()
+            continue  # kios ditutup -> kembali ke layar pilihan mode
 
-    login = LoginWindow(auth)
-    if login.exec() != QDialog.DialogCode.Accepted:
-        logger.info("Aplikasi ditutup dari layar masuk")
-        return 0
+        # Mode petugas: logout kembali langsung ke layar masuk, tidak
+        # mampir dulu ke layar pilihan mode.
+        while True:
+            login = LoginWindow(auth)
+            if login.exec() != QDialog.DialogCode.Accepted:
+                logger.info("Aplikasi ditutup dari layar masuk")
+                return 0
 
-    sesi = auth.require_session()
+            sesi = auth.require_session()
 
-    # Akun dengan kata sandi bawaan tidak boleh dipakai bekerja sebelum
-    # kata sandinya diganti. Dialognya tidak dapat dibatalkan.
-    if sesi.must_change_password:
-        dialog = ChangePasswordDialog(auth, wajib=True)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            auth.logout()
-            logger.info("Aplikasi ditutup tanpa mengganti kata sandi wajib")
-            return 0
+            # Akun dengan kata sandi bawaan tidak boleh dipakai bekerja
+            # sebelum kata sandinya diganti. Dialognya tidak dapat dibatalkan.
+            if sesi.must_change_password:
+                dialog = ChangePasswordDialog(auth, wajib=True)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    auth.logout()
+                    logger.info("Aplikasi ditutup tanpa mengganti kata sandi wajib")
+                    return 0
 
-    jendela = MainWindow(auth)
-    # tampilkan(), bukan show(): akun layar antrian dibuka penuh tanpa
-    # bingkai jendela karena layarnya menghadap pengunjung.
-    jendela.tampilkan()
-    return app.exec()
+            jendela = MainWindow(auth)
+            # tampilkan(), bukan show(): akun layar antrian dibuka penuh
+            # tanpa bingkai jendela karena layarnya menghadap pengunjung.
+            jendela.tampilkan()
+            app.exec()
+            # petugas logout -> kembali langsung ke layar masuk
 
 
 def main(argv: list[str] | None = None) -> int:

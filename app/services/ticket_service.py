@@ -27,6 +27,15 @@ from app.utils.formatting import tanggal_panjang
 
 logger = get_logger("ticket")
 
+#: Banyaknya baris catatan kaki yang benar-benar muat di tinggi struk.
+#:
+#: Diturunkan dari tata letak kedua pencetak: setelah nomor, jenis layanan,
+#: loket, tanggal, dan jam, sisa ruangnya hanya cukup untuk dua baris.
+#: Baris ketiga jatuh di luar halaman — pada PDF melewati tepi bawah, pada
+#: pencetak Qt melewati tinggi kertas — jadi lebih baik dipotong sadar di
+#: satu tempat daripada hilang diam-diam di dua tempat.
+MAKS_BARIS_FOOTER = 2
+
 
 @dataclass(frozen=True)
 class TicketData:
@@ -171,37 +180,37 @@ class PdfTicketPrinter:
         c = canvas.Canvas(str(berkas), pagesize=(lebar, tinggi))
         y = tinggi - 12 * mm
 
-        c.setFont("Helvetica-Bold", 10)
+        c.setFont("Helvetica-Bold", 11)
         c.drawCentredString(tengah, y, data.office_name[:34])
         y -= 8 * mm
 
-        c.setFont("Helvetica", 8)
+        c.setFont("Helvetica", 9)
         c.drawCentredString(tengah, y, "NOMOR ANTRIAN")
-        y -= 16 * mm
+        y -= 18 * mm
 
         # Nomor dibuat sebesar mungkin: inilah satu-satunya bagian tiket
         # yang benar-benar dibaca pengunjung.
-        c.setFont("Helvetica-Bold", 42)
+        c.setFont("Helvetica-Bold", 54)
         c.drawCentredString(tengah, y, data.queue_number)
-        y -= 12 * mm
+        y -= 13 * mm
 
-        c.setFont("Helvetica-Bold", 12)
+        c.setFont("Helvetica-Bold", 14)
         c.drawCentredString(tengah, y, data.category_name[:28])
         y -= 7 * mm
 
         if data.counter_name:
-            c.setFont("Helvetica", 10)
+            c.setFont("Helvetica", 11)
             c.drawCentredString(tengah, y, data.counter_name)
             y -= 7 * mm
 
-        c.setFont("Helvetica", 9)
+        c.setFont("Helvetica", 10)
         c.drawCentredString(tengah, y, data.tanggal)
         y -= 5 * mm
         c.drawCentredString(tengah, y, data.jam)
         y -= 10 * mm
 
         if data.footer:
-            c.setFont("Helvetica", 8)
+            c.setFont("Helvetica", 9)
             for potongan in _bungkus(data.footer, 38):
                 c.drawCentredString(tengah, y, potongan)
                 y -= 4.5 * mm
@@ -230,7 +239,7 @@ class QtTicketPrinter:
     def cetak(self, data: TicketData) -> PrintResult:
         try:
             from PySide6.QtCore import QSizeF
-            from PySide6.QtGui import QFont, QPageSize, QPainter
+            from PySide6.QtGui import QPageSize, QPainter
             from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 
             if self.nama_printer:
@@ -314,28 +323,36 @@ class QtTicketPrinter:
             lebar_teks = painter.fontMetrics().horizontalAdvance(isi)
             painter.drawText(int((lebar - lebar_teks) / 2), int(mm * titik_per_mm), isi)
 
-        teks_tengah(12, data.office_name[:34], 10, True)
-        teks_tengah(20, "NOMOR ANTRIAN", 8, False)
-        teks_tengah(36, data.queue_number, 34, True)
-        teks_tengah(48, data.category_name[:28], 12, True)
+        teks_tengah(12, data.office_name[:34], 11, True)
+        teks_tengah(20, "NOMOR ANTRIAN", 9, False)
+        teks_tengah(38, data.queue_number, 44, True)
+        teks_tengah(51, data.category_name[:28], 14, True)
 
-        y = 55.0
+        y = 58.0
         if data.counter_name:
-            teks_tengah(y, data.counter_name, 10, False)
+            teks_tengah(y, data.counter_name, 11, False)
             y += 7
 
-        teks_tengah(y, data.tanggal, 9, False)
-        teks_tengah(y + 5, data.jam, 9, False)
+        teks_tengah(y, data.tanggal, 10, False)
+        teks_tengah(y + 5, data.jam, 10, False)
         y += 15
 
         if data.footer:
             for potongan in _bungkus(data.footer, 38):
-                teks_tengah(y, potongan, 8, False)
+                teks_tengah(y, potongan, 9, False)
                 y += 4.5
 
 
-def _bungkus(teks: str, lebar: int) -> list[str]:
-    """Pecah teks menjadi beberapa baris agar muat di lebar struk."""
+def _bungkus(teks: str, lebar: int, maks_baris: int = MAKS_BARIS_FOOTER) -> list[str]:
+    """
+    Pecah teks menjadi beberapa baris agar muat di lebar struk.
+
+    Dipotong pada `maks_baris` karena tinggi struk tetap: baris berikutnya
+    tidak akan tercetak di kertas, melainkan jatuh di luar halaman tanpa
+    jejak apa pun. Lebih baik terlihat terpotong dengan "…" daripada
+    hilang diam-diam — yang menulis catatan kaki itu perlu tahu bahwa
+    tulisannya kepanjangan.
+    """
     kata = teks.split()
     baris: list[str] = []
     sekarang = ""
@@ -349,6 +366,10 @@ def _bungkus(teks: str, lebar: int) -> list[str]:
             sekarang = k
     if sekarang:
         baris.append(sekarang)
+
+    if len(baris) > maks_baris:
+        baris = baris[:maks_baris]
+        baris[-1] = baris[-1][: lebar - 1].rstrip() + "…"
     return baris
 
 

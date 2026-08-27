@@ -307,3 +307,223 @@ def test_status_awal_data_master_aktif(master_service):
 
     assert master_service.get_counter(counter_id).status is RecordStatus.ACTIVE
     assert master_service.get_category(category_id).status is RecordStatus.ACTIVE
+
+
+# ---------------------------------------------------------------------
+# Jenis layanan yang dilayani sebuah loket
+# ---------------------------------------------------------------------
+
+def test_loket_baru_melayani_semua_jenis_layanan(master_service):
+    """
+    Kosong berarti SEMUA, bukan tidak ada.
+
+    Kalau terbalik, pemasangan baru dan loket yang belum sempat diatur akan
+    berdiri diam tanpa pernah bisa memanggil siapa pun.
+    """
+    loket = master_service.list_counters()[0]
+
+    assert loket.category_ids == ()
+    assert loket.melayani_semua
+
+
+def test_atur_jenis_layanan_loket(master_service):
+    loket = master_service.list_counters()[0]
+    kategori = master_service.list_categories()
+
+    hasil = master_service.set_counter_categories(loket.id, [kategori[0].id])
+
+    assert hasil.category_ids == (kategori[0].id,)
+    assert not hasil.melayani_semua
+    assert master_service.get_counter(loket.id).category_ids == (kategori[0].id,)
+
+
+def test_daftar_kosong_mengembalikan_loket_ke_semua_layanan(master_service):
+    loket = master_service.list_counters()[0]
+    kategori = master_service.list_categories()
+    master_service.set_counter_categories(loket.id, [kategori[0].id])
+
+    hasil = master_service.set_counter_categories(loket.id, [])
+
+    assert hasil.category_ids == ()
+    assert hasil.melayani_semua
+
+
+def test_jenis_layanan_ganda_pada_satu_loket(master_service):
+    loket = master_service.list_counters()[0]
+    kategori = master_service.list_categories()
+
+    hasil = master_service.set_counter_categories(
+        loket.id, [kategori[0].id, kategori[1].id]
+    )
+
+    assert set(hasil.category_ids) == {kategori[0].id, kategori[1].id}
+
+
+def test_jenis_layanan_kembar_tidak_menggandakan_baris(master_service):
+    loket = master_service.list_counters()[0]
+    kategori = master_service.list_categories()[0]
+
+    hasil = master_service.set_counter_categories(
+        loket.id, [kategori.id, kategori.id]
+    )
+
+    assert hasil.category_ids == (kategori.id,)
+
+
+def test_jenis_layanan_tidak_dikenal_ditolak(master_service):
+    loket = master_service.list_counters()[0]
+
+    with pytest.raises(NotFoundError):
+        master_service.set_counter_categories(loket.id, [999999])
+
+
+def test_selain_admin_tidak_dapat_mengatur_layanan_loket(auth, master_service):
+    loket = master_service.list_counters()[0]
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+    with pytest.raises(AuthorizationError):
+        MasterDataService(auth).set_counter_categories(loket.id, [])
+
+
+# ---------------------------------------------------------------------
+# Nonaktifkan loket yang sedang melayani
+# ---------------------------------------------------------------------
+
+def test_loket_yang_sedang_melayani_tidak_dapat_dinonaktifkan(
+    auth, master_service, antrian_siap, terbitkan
+):
+    """
+    Kartunya akan hilang dari papan televisi begitu dinonaktifkan, sedangkan
+    pengunjungnya masih duduk di depan meja.
+    """
+    from app.services.queue_service import QueueService
+
+    terbitkan("A", 1)
+    loket = antrian_siap["loket"][0]
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    antrian = QueueService(auth).call_next(loket)
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    with pytest.raises(BusinessRuleError) as gagal:
+        MasterDataService(auth).set_counter_status(loket, False)
+
+    assert antrian.queue_number in gagal.value.user_message
+
+
+def test_loket_bebas_dapat_dinonaktifkan(auth, master_service, antrian_siap, terbitkan):
+    """Setelah pelayanannya selesai, loket kembali boleh dinonaktifkan."""
+    from app.services.queue_service import QueueService
+
+    terbitkan("A", 1)
+    loket = antrian_siap["loket"][0]
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    cro = QueueService(auth)
+    antrian = cro.call_next(loket)
+    cro.start_service(antrian.id)
+    cro.complete(antrian.id)
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    hasil = MasterDataService(auth).set_counter_status(loket, False)
+
+    assert hasil.status is RecordStatus.INACTIVE
+
+
+# ---------------------------------------------------------------------
+# Hapus jenis layanan
+# ---------------------------------------------------------------------
+
+def test_jenis_layanan_yang_belum_dipakai_dapat_dihapus(master_service):
+    """Salah ketik saat pemasangan tidak boleh tertinggal selamanya."""
+    category_id = master_service.create_category(
+        code="SALAH", name="Salah Ketik", prefix="Z"
+    )
+
+    master_service.delete_category(category_id)
+
+    assert category_id not in [c.id for c in master_service.list_categories()]
+
+
+def test_jenis_layanan_yang_sudah_dipakai_tidak_dapat_dihapus(
+    auth, master_service, antrian_siap, terbitkan
+):
+    """Riwayat antrian dan laporan lama merujuk kepadanya."""
+    terbitkan("A", 1)
+    kategori = antrian_siap["kategori"]["A"]
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    with pytest.raises(BusinessRuleError) as gagal:
+        MasterDataService(auth).delete_category(kategori)
+
+    assert "Nonaktifkan" in gagal.value.user_message
+
+
+def test_hapus_jenis_layanan_tidak_dikenal_ditolak(master_service):
+    with pytest.raises(NotFoundError):
+        master_service.delete_category(999999)
+
+
+def test_jenis_layanan_aktif_terakhir_tidak_dapat_dihapus(master_service):
+    """Tanpa satu pun jenis layanan aktif, nomor tidak dapat diterbitkan."""
+    kategori = master_service.list_categories()
+    for baris in kategori[1:]:
+        master_service.set_category_status(baris.id, False)
+
+    with pytest.raises(BusinessRuleError):
+        master_service.delete_category(kategori[0].id)
+
+
+def test_penghapusan_jenis_layanan_tercatat_di_audit(master_service):
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import AuditLog
+
+    category_id = master_service.create_category(
+        code="SALAH", name="Salah Ketik", prefix="Z"
+    )
+    master_service.delete_category(category_id)
+
+    with session_scope() as s:
+        entri = [
+            r
+            for r in s.scalars(sa.select(AuditLog))
+            if r.entity_type == "service_category" and "hapus" in (r.meta or "")
+        ]
+
+    assert entri, "penghapusan data master harus tercatat"
+    assert "SALAH" in (entri[-1].meta or "")
+
+
+def test_selain_admin_tidak_dapat_menghapus_jenis_layanan(auth, master_service):
+    kategori = master_service.list_categories()[0]
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+    with pytest.raises(AuthorizationError):
+        MasterDataService(auth).delete_category(kategori.id)
+def test_hapus_layanan_membersihkan_ikatan_loket(master_service):
+    """
+    Ikatan loket-layanan ikut terhapus lewat CASCADE.
+
+    Bila baris ikatannya tertinggal, loket itu akan terlihat "khusus" pada
+    jenis layanan yang sudah tidak ada, dan tidak akan pernah bisa
+    memanggil siapa pun.
+    """
+    loket = master_service.list_counters()[0]
+    category_id = master_service.create_category(
+        code="SALAH", name="Salah Ketik", prefix="Z"
+    )
+    master_service.set_counter_categories(loket.id, [category_id])
+    assert master_service.get_counter(loket.id).category_ids == (category_id,)
+
+    master_service.delete_category(category_id)
+
+    assert master_service.get_counter(loket.id).category_ids == ()

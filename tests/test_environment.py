@@ -26,7 +26,6 @@ import sqlite3
 import sys
 from pathlib import Path
 
-import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 

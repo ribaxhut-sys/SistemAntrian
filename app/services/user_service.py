@@ -17,6 +17,7 @@ from app.core.errors import BusinessRuleError, NotFoundError, ValidationError
 from app.core.logger import get_logger
 from app.core.security import hash_password, validate_password_strength
 from app.models import AuditAction, RecordStatus, User, UserRole
+from app.repositories.master_repository import CounterRepository
 from app.repositories.user_repository import UserRepository, normalize_username
 from app.services import audit_service
 from app.services.auth_service import AuthService
@@ -37,15 +38,50 @@ class UserInfo:
     status: RecordStatus
     last_login_at: datetime | None
     must_change_password: bool
+    #: Loket yang langsung terpilih saat petugas ini masuk. Kosong berarti
+    #: belum ditetapkan — peran selain CRO memang tidak duduk di loket.
+    default_counter_id: int | None = None
 
     @property
     def is_active(self) -> bool:
         return self.status is RecordStatus.ACTIVE
 
 
+def _normalkan_peran(role: UserRole | str) -> UserRole:
+    """
+    QComboBox di PySide sering menyimpan str Enum sebagai string biasa.
+
+    Tanpa langkah ini, pemanggilan `role.value` melempar AttributeError
+    ('str' tidak punya .value) dan petugas hanya melihat pesan “tidak terduga”.
+    """
+    if isinstance(role, UserRole):
+        return role
+    try:
+        return UserRole(role)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Peran tidak dikenali.") from exc
+
+
+def _loket_sah(session, counter_id: int | None, branch_id: int) -> int | None:
+    """
+    Pastikan loket bawaan benar-benar ada dan sekantor dengan akunnya.
+
+    Loket dari cabang lain ditolak, bukan diam-diam dikosongkan: itu selalu
+    salah pilih, dan petugas yang loket bawaannya hilang tanpa kabar akan
+    mengira pengaturannya tidak tersimpan.
+    """
+    if counter_id is None:
+        return None
+
+    loket = CounterRepository(session).get_by_id(counter_id)
+    if loket is None or loket.branch_id != branch_id:
+        raise NotFoundError("Loket tidak ditemukan.")
+    return loket.id
+
+
 def _tolak_peran_kios(role: UserRole) -> None:
     """KIOSK bukan akun. Menyimpannya di app_user hanya menambah kredensial di mesin publik."""
-    if role is UserRole.KIOSK:
+    if role == UserRole.KIOSK:
         raise ValidationError(
             "Peran kios tidak dapat diberikan kepada akun. "
             "Mesin kios berjalan tanpa login."
@@ -62,6 +98,7 @@ def _as_info(row: User) -> UserInfo:
         status=row.status,
         last_login_at=row.last_login_at,
         must_change_password=row.must_change_password,
+        default_counter_id=row.default_counter_id,
     )
 
 
@@ -101,9 +138,10 @@ class UserService:
         username: str,
         full_name: str,
         password: str,
-        role: UserRole,
+        role: UserRole | str,
         branch_id: int | None = None,
         must_change_password: bool = True,
+        default_counter_id: int | None = None,
     ) -> int:
         """
         Buat akun petugas baru.
@@ -113,7 +151,8 @@ class UserService:
         kata sandi petugas selamanya.
         """
         sesi = self.auth.require_permission(Permission.USER_MANAGE)
-        _tolak_peran_kios(role)
+        peran = _normalkan_peran(role)
+        _tolak_peran_kios(peran)
 
         nama = normalize_username(username)
         if not nama:
@@ -132,15 +171,17 @@ class UserService:
                     f"Nama pengguna {nama!r} sudah dipakai. Gunakan nama lain."
                 )
 
+            cabang = branch_id or sesi.branch_id
             user = repo.add(
                 User(
-                    branch_id=branch_id or sesi.branch_id,
+                    branch_id=cabang,
                     username=nama,
                     full_name=lengkap,
                     password_hash=hash_password(password),
-                    role=role,
+                    role=peran,
                     status=RecordStatus.ACTIVE,
                     must_change_password=must_change_password,
+                    default_counter_id=_loket_sah(session, default_counter_id, cabang),
                 )
             )
             audit_service.record(
@@ -150,23 +191,32 @@ class UserService:
                 entity_type="app_user",
                 entity_id=user.id,
                 username=nama,
-                role=role.value,
+                role=peran.value,
             )
-            logger.info("User baru dibuat: %s (%s)", nama, role.value)
+            logger.info("User baru dibuat: %s (%s)", nama, peran.value)
             return user.id
 
     def update_user(
-        self, user_id: int, *, full_name: str, role: UserRole
+        self,
+        user_id: int,
+        *,
+        full_name: str,
+        role: UserRole | str,
+        default_counter_id: int | None = None,
     ) -> UserInfo:
         """
-        Ubah nama lengkap dan peran.
+        Ubah nama lengkap, peran, dan loket bawaan.
 
         Admin tidak dapat mengubah perannya sendiri. Tanpa larangan ini,
         satu klik keliru bisa membuat tidak ada lagi ADMIN di sistem dan
         aplikasi tidak dapat dikelola sama sekali.
+
+        `default_counter_id` None berarti akun ini tidak diikat ke loket
+        mana pun — keadaan yang benar untuk peran selain CRO.
         """
         sesi = self.auth.require_permission(Permission.USER_MANAGE)
-        _tolak_peran_kios(role)
+        peran = _normalkan_peran(role)
+        _tolak_peran_kios(peran)
         lengkap = (full_name or "").strip()
         if not lengkap:
             raise ValidationError("Nama lengkap tidak boleh kosong.")
@@ -177,14 +227,14 @@ class UserService:
             if user is None:
                 raise NotFoundError("Akun tidak ditemukan.")
 
-            if user.id == sesi.user_id and role is not user.role:
+            if user.id == sesi.user_id and peran != user.role:
                 raise BusinessRuleError(
                     "Anda tidak dapat mengubah peran akun Anda sendiri."
                 )
 
             if (
-                user.role is UserRole.ADMIN
-                and role is not UserRole.ADMIN
+                user.role == UserRole.ADMIN
+                and peran != UserRole.ADMIN
                 and self._jumlah_admin_aktif(repo, kecuali=user.id) == 0
             ):
                 raise BusinessRuleError(
@@ -193,7 +243,10 @@ class UserService:
                 )
 
             user.full_name = lengkap
-            user.role = role
+            user.role = peran
+            user.default_counter_id = _loket_sah(
+                session, default_counter_id, user.branch_id
+            )
 
             audit_service.record(
                 session,
@@ -202,7 +255,8 @@ class UserService:
                 entity_type="app_user",
                 entity_id=user.id,
                 username=user.username,
-                role=role.value,
+                role=peran.value,
+                default_counter_id=user.default_counter_id,
             )
             logger.info("User %s diperbarui", user.username)
             return _as_info(user)

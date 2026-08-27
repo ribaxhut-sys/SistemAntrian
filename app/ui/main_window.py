@@ -40,6 +40,7 @@ from app.ui.kiosk.kiosk_page import KioskPage
 from app.ui.queue.service_page import ServicePage
 from app.ui.registration.registration_page import RegistrationPage
 from app.ui.settings.backup_page import BackupPage
+from app.ui.settings.close_day_page import CloseDayPage
 from app.ui.settings.master_data_page import MasterDataPage
 from app.ui.settings.settings_page import SettingsPage
 from app.ui.survey.survey_page import SurveyPage
@@ -92,6 +93,15 @@ class MainWindow(QMainWindow):
 
     def __init__(self, auth: AuthService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # Sejak keluar dari layar kembali ke Login/Pilihan Mode alih-alih
+        # menutup aplikasi (lihat _jalankan_ui di app/main.py), close()
+        # tanpa ini hanya menyembunyikan jendela — QTimer auto-refresh di
+        # halaman-halaman anaknya (Layar Antrian, Dashboard, dst.) tetap
+        # berdetak di latar belakang, dan begitu sesi logout, detak
+        # berikutnya gagal dengan AuthenticationError yang muncul sebagai
+        # kotak "Gagal" di atas layar berikutnya. WA_DeleteOnClose memastikan
+        # jendela beserta seluruh anak dan timer-nya benar-benar dihapus.
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.auth = auth
         self.master_service = MasterDataService(auth)
         self.user_service = UserService(auth)
@@ -239,6 +249,7 @@ class MainWindow(QMainWindow):
                     self.master_service,
                     self.survey_service,
                     self.settings_service,
+                    self.auth,
                 ),
             ),
             _Menu(
@@ -260,6 +271,11 @@ class MainWindow(QMainWindow):
                 "Backup & Audit",
                 Permission.BACKUP_MANAGE,
                 lambda: BackupPage(self.backup_service),
+            ),
+            _Menu(
+                "Tutup Hari",
+                Permission.QUEUE_CLOSE_DAY,
+                lambda: CloseDayPage(self.queue_service, self.backup_service),
             ),
             # Kios menggabungkan papan nomor dengan pengambilan nomor pada
             # satu layar, karena satu mesin melayani keduanya. Akun DISPLAY
@@ -392,7 +408,7 @@ class MainWindow(QMainWindow):
         ChangePasswordDialog(self.auth, self).exec()
 
     def keluar(self) -> None:
-        if not konfirmasi(self, "Keluar dari aplikasi?"):
+        if not konfirmasi(self, "Keluar dan kembali ke layar masuk?"):
             return
         self.auth.logout()
         self.close()

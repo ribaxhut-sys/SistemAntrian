@@ -9,6 +9,7 @@ nomor yang sama.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 
@@ -146,9 +147,20 @@ class QueueRepository:
         )
 
     def list_menunggu(
-        self, branch_id: int, tanggal: date, *, category_id: int | None = None
+        self,
+        branch_id: int,
+        tanggal: date,
+        *,
+        category_id: int | None = None,
+        category_ids: Sequence[int] | None = None,
     ) -> list[Queue]:
-        """Antrian yang belum dipanggil, urut sesuai waktu pengambilan nomor."""
+        """
+        Antrian yang belum dipanggil, urut sesuai waktu pengambilan nomor.
+
+        `category_id` adalah penyaringan yang dipilih petugas saat itu;
+        `category_ids` adalah batas jenis layanan yang boleh dipanggil
+        loketnya. None pada `category_ids` berarti tidak dibatasi.
+        """
         stmt = (
             sa.select(Queue)
             .where(
@@ -160,10 +172,17 @@ class QueueRepository:
         )
         if category_id is not None:
             stmt = stmt.where(Queue.category_id == category_id)
+        if category_ids is not None:
+            stmt = stmt.where(Queue.category_id.in_(list(category_ids)))
         return list(self.session.scalars(self._dengan_relasi(stmt)))
 
     def berikutnya_untuk_dipanggil(
-        self, branch_id: int, tanggal: date, *, category_id: int | None = None
+        self,
+        branch_id: int,
+        tanggal: date,
+        *,
+        category_id: int | None = None,
+        category_ids: Sequence[int] | None = None,
     ) -> Queue | None:
         """
         Antrian paling depan yang menunggu.
@@ -171,7 +190,9 @@ class QueueRepository:
         Urutannya murni siapa datang lebih dahulu, lintas jenis layanan.
         Prefix hanya membedakan penomoran, bukan menentukan prioritas.
         """
-        daftar = self.list_menunggu(branch_id, tanggal, category_id=category_id)
+        daftar = self.list_menunggu(
+            branch_id, tanggal, category_id=category_id, category_ids=category_ids
+        )
         return daftar[0] if daftar else None
 
     def sedang_ditangani_loket(self, counter_id: int, tanggal: date) -> Queue | None:
@@ -238,6 +259,36 @@ class QueueRepository:
                 )
             )
         )
+
+    def list_by_ids(self, ids: list[int]) -> list[Queue]:
+        """Antrian dari sekumpulan id, tanpa urutan tertentu."""
+        if not ids:
+            return []
+        return list(
+            self.session.scalars(
+                self._dengan_relasi(sa.select(Queue).where(Queue.id.in_(ids)))
+            )
+        )
+
+    def list_belum_selesai(self, branch_id: int, sampai: date) -> list[Queue]:
+        """
+        Antrian yang belum mencapai status akhir, pada tanggal itu atau
+        sebelumnya.
+
+        Dipakai oleh "Tutup Hari": mengumpulkan nomor yang masih menunggu,
+        dipanggil, dilayani, atau ditunda, termasuk sisa hari-hari
+        sebelumnya yang tidak sempat ditutup.
+        """
+        stmt = (
+            sa.select(Queue)
+            .where(
+                Queue.branch_id == branch_id,
+                Queue.queue_date <= sampai,
+                Queue.status.in_(STATUS_BELUM_SELESAI),
+            )
+            .order_by(Queue.queue_date, Queue.created_at)
+        )
+        return list(self.session.scalars(self._dengan_relasi(stmt)))
 
     def hitung_per_status(self, branch_id: int, tanggal: date) -> dict[QueueStatus, int]:
         """Jumlah antrian per status untuk satu hari."""

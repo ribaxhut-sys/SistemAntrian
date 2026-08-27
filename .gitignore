@@ -29,6 +29,7 @@ data/*.db-wal
 data/*.db-shm
 backup/*.db
 tiket/
+Print hasil/
 assets/sounds/*.wav
 logs/
 *.log

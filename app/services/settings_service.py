@@ -34,8 +34,11 @@ BAWAAN: dict[str, str] = {
     "display.title": "ANTRIAN PELAYANAN CRO",
     "display.info": "",
     "display.next_count": "3",
+    "display.number_font_scale": "100",
     "display.sound_enabled": "true",
     "queue.max_call_attempts": "3",
+    "queue.registration_open": "true",
+    "queue.registration_closed_date": "",
     "survey.enabled": "true",
     "ticket.footer": "Silakan menunggu hingga nomor Anda dipanggil.",
     "ticket.printer": "pdf",
@@ -74,6 +77,12 @@ class Pengaturan:
     #: maupun teks tiket yang kosong hanya membingungkan pembacanya.
     boleh_kosong: bool = False
     kelompok: str = "Umum"
+    #: Tampil di layar Pengaturan. Dimatikan untuk nilai yang ditulis dan
+    #: dibaca sistem sendiri: mengubahnya lewat formulir umum melewati
+    #: aturan yang menyertainya, sehingga hasilnya tidak seperti yang
+    #: dikira pengubahnya. Nilainya tetap sah dan tetap divalidasi — yang
+    #: hilang hanya kotak isiannya.
+    tampil: bool = True
 
 
 #: Seluruh pengaturan yang dikenali aplikasi.
@@ -146,11 +155,52 @@ SKEMA: tuple[Pengaturan, ...] = (
         kelompok="Layar Antrian",
     ),
     Pengaturan(
+        "display.number_font_scale",
+        "Ukuran huruf nomor antrian (%)",
+        "Membesarkan atau mengecilkan khusus nomor antrian di layar, tanpa "
+        "mengubah ukuran tulisan lain. 100 adalah ukuran bawaan.",
+        ANGKA,
+        minimum=50,
+        maksimum=200,
+        kelompok="Layar Antrian",
+    ),
+    Pengaturan(
         "display.sound_enabled",
         "Bunyikan panggilan",
         "Komputer tanpa perangkat suara tetap berjalan normal, hanya tanpa bunyi.",
         BOOLEAN,
         kelompok="Layar Antrian",
+    ),
+    # Dua pengaturan berikut sengaja TIDAK tampil di layar Pengaturan.
+    #
+    # Keduanya wajib berubah bersama-sama: menutup pendaftaran berarti
+    # menyetel "open" ke false SEKALIGUS menanggali penutupannya, karena
+    # `pendaftaran_dibuka()` menganggap penutupan tanpa tanggal hari ini
+    # sudah kedaluwarsa. Formulir umum hanya menyetel satu kunci, sehingga
+    # mematikan "open" dari sana tidak menutup apa pun — admin mengira
+    # pendaftaran berhenti padahal nomor terus terbit.
+    #
+    # Jalan yang benar sudah ada dan memakai keduanya sekaligus: tombol
+    # pada layar Terbitkan Nomor, dan layar Tutup Hari.
+    Pengaturan(
+        "queue.registration_open",
+        "Terima pendaftaran antrian baru",
+        "Diubah lewat tombol pada layar Terbitkan Nomor atau layar Tutup "
+        "Hari, bukan dari sini.",
+        BOOLEAN,
+        kelompok="Antrian",
+        tampil=False,
+    ),
+    Pengaturan(
+        "queue.registration_closed_date",
+        "Tanggal pendaftaran terakhir ditutup",
+        "Diisi dan dibaca otomatis oleh sistem. Begitu tanggal berganti, "
+        "pendaftaran otomatis terbuka kembali walau lupa dibuka, supaya "
+        "penutupan kemarin tidak diam-diam terbawa ke hari ini.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Antrian",
+        tampil=False,
     ),
     Pengaturan(
         "queue.max_call_attempts",
@@ -223,9 +273,16 @@ SKEMA_PER_KUNCI: dict[str, Pengaturan] = {p.kunci: p for p in SKEMA}
 
 
 def kelompok_pengaturan() -> dict[str, list[Pengaturan]]:
-    """Pengaturan dikelompokkan menurut layar yang dipengaruhinya."""
+    """
+    Pengaturan dikelompokkan menurut layar yang dipengaruhinya.
+
+    Yang `tampil=False` tidak ikut: nilainya dikelola sistem sendiri dan
+    tidak boleh diubah lewat formulir umum.
+    """
     hasil: dict[str, list[Pengaturan]] = {}
     for butir in SKEMA:
+        if not butir.tampil:
+            continue
         hasil.setdefault(butir.kelompok, []).append(butir)
     return hasil
 
@@ -328,16 +385,21 @@ class SettingsService:
     # Perubahan
     # -----------------------------------------------------------------
 
-    def set(self, key: str, value: str) -> None:
+    def set(
+        self, key: str, value: str, *, permission: Permission = Permission.CONFIG_MANAGE
+    ) -> None:
         """
-        Ubah satu pengaturan. Hanya ADMIN yang berhak.
+        Ubah satu pengaturan. Hanya ADMIN yang berhak, kecuali dipanggil
+        lewat service lain yang sengaja memberi wewenang lebih sempit pada
+        satu kunci tertentu (mis. `queue.registration_open`, yang juga
+        boleh diubah petugas pendaftaran lewat `QueueService`).
 
         Nilainya divalidasi dan dibakukan lebih dahulu sesuai SKEMA, supaya
         pengaturan yang rusak tidak pernah sampai tersimpan.
         """
         if self.auth is None:
             raise NotFoundError("Perubahan pengaturan memerlukan sesi pengguna.")
-        sesi = self.auth.require_permission(Permission.CONFIG_MANAGE)
+        sesi = self.auth.require_permission(permission)
         value = _validasi(key, value)
 
         with session_scope() as session:

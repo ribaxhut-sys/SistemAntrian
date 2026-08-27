@@ -581,6 +581,197 @@ def test_batas_tidak_berlaku_setelah_mulai_dilayani(
     assert not dilayani.melewati_batas_panggilan
 
 
+# ---------------------------------------------------------------------
+# Istirahat loket
+# ---------------------------------------------------------------------
+
+def test_set_istirahat_menandai_loket_istirahat(cro_queue, antrian_siap, auth):
+    loket = antrian_siap["loket"][0]
+    cro_queue.set_istirahat(loket, True)
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    state = QueueService(auth).display_state()
+    entri = next(l for l in state.loket if l.counter_id == loket)
+    assert entri.istirahat is True
+
+
+def test_set_istirahat_loket_tidak_dapat_memanggil(cro_queue, terbitkan, antrian_siap):
+    terbitkan("A", 1)
+    loket = antrian_siap["loket"][0]
+    cro_queue.set_istirahat(loket, True)
+
+    with pytest.raises(BusinessRuleError) as gagal:
+        cro_queue.call_next(loket)
+
+    assert "istirahat" in gagal.value.user_message
+
+
+def test_set_istirahat_kembali_bertugas_dapat_memanggil_lagi(
+    cro_queue, terbitkan, antrian_siap
+):
+    terbitkan("A", 1)
+    loket = antrian_siap["loket"][0]
+
+    cro_queue.set_istirahat(loket, True)
+    cro_queue.set_istirahat(loket, False)
+
+    assert cro_queue.call_next(loket).queue_number == "A-001"
+
+
+def test_set_istirahat_tidak_mengganggu_antrian_yang_sedang_ditangani(
+    cro_queue, terbitkan, antrian_siap
+):
+    """Loket boleh ditandai istirahat setelah menerima antrian; yang sedang
+    ditangani tidak ikut terbatalkan atau berubah."""
+    terbitkan("A", 1)
+    loket = antrian_siap["loket"][0]
+    antrian = cro_queue.call_next(loket)
+
+    cro_queue.set_istirahat(loket, True)
+
+    assert cro_queue.current_for_counter(loket).id == antrian.id
+
+
+@pytest.mark.parametrize("peran", ["registration", "supervisor", "display"])
+def test_selain_cro_tidak_dapat_mengubah_istirahat(auth, antrian_siap, peran):
+    auth.logout()
+    auth.login(peran, TEST_PASSWORD)
+
+    with pytest.raises(AuthorizationError):
+        QueueService(auth).set_istirahat(antrian_siap["loket"][0], True)
+
+
+# ---------------------------------------------------------------------
+# Tutup hari dan buka kembali
+# ---------------------------------------------------------------------
+
+def test_ringkasan_tutup_hari_menghitung_yang_belum_selesai(
+    cro_queue, terbitkan, antrian_siap, auth
+):
+    terbitkan("A", 3)
+    loket = antrian_siap["loket"]
+
+    dipanggil = cro_queue.call_next(loket[0])
+    cro_queue.start_service(dipanggil.id)
+    cro_queue.call_next(loket[1])
+    # Nomor ketiga tetap WAITING.
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    ringkasan = QueueService(auth).ringkasan_tutup_hari()
+
+    assert ringkasan[QueueStatus.WAITING] == 1
+    assert ringkasan[QueueStatus.CALLED] == 1
+    assert ringkasan[QueueStatus.SERVING] == 1
+
+
+def test_tutup_hari_membatalkan_yang_belum_selesai(
+    cro_queue, terbitkan, antrian_siap, auth
+):
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import Queue
+
+    terbitkan("A", 2)
+    loket = antrian_siap["loket"]
+    cro_queue.call_next(loket[0])
+    # Nomor kedua tetap WAITING.
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    jumlah = QueueService(auth).tutup_hari()
+
+    assert jumlah == 2
+    with session_scope() as s:
+        statuses = {q.status for q in s.scalars(sa.select(Queue))}
+    assert statuses == {QueueStatus.CANCELLED}
+
+
+def test_tutup_hari_tidak_menyentuh_yang_sudah_selesai(
+    cro_queue, terbitkan, antrian_siap, auth
+):
+    terbitkan("A", 2)
+    loket = antrian_siap["loket"]
+    selesai = cro_queue.call_next(loket[0])
+    cro_queue.start_service(selesai.id)
+    cro_queue.complete(selesai.id)
+    # Nomor kedua tetap WAITING dan seharusnya dibatalkan.
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    admin_queue = QueueService(auth)
+    jumlah = admin_queue.tutup_hari()
+
+    assert jumlah == 1
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    rekap = QueueService(auth).counts_today()
+    assert rekap[QueueStatus.COMPLETED] == 1
+
+
+def test_tutup_hari_hanya_untuk_admin(cro_queue, terbitkan, antrian_siap, auth):
+    terbitkan("A", 1)
+
+    with pytest.raises(AuthorizationError):
+        cro_queue.tutup_hari()
+
+
+def test_buka_kembali_hari_mengembalikan_ke_menunggu(
+    cro_queue, terbitkan, antrian_siap, auth
+):
+    terbitkan("A", 1)
+    loket = antrian_siap["loket"]
+    dipanggil = cro_queue.call_next(loket[0])
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    admin_queue = QueueService(auth)
+    admin_queue.tutup_hari()
+
+    jumlah = admin_queue.buka_kembali_hari()
+    assert jumlah == 1
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    kembali = QueueService(auth).list_waiting()
+    assert [q.id for q in kembali] == [dipanggil.id]
+    assert kembali[0].status is QueueStatus.WAITING
+
+
+def test_ringkasan_buka_kembali_hari_nol_tanpa_tutup_hari(antrian_siap, auth):
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    admin_queue = QueueService(auth)
+
+    assert admin_queue.ringkasan_buka_kembali_hari() == 0
+    assert admin_queue.buka_kembali_hari() == 0
+
+
+def test_tutup_hari_dan_buka_kembali_tercatat_di_audit(
+    cro_queue, terbitkan, antrian_siap, auth
+):
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import AuditLog
+
+    terbitkan("A", 1)
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    admin_queue = QueueService(auth)
+    admin_queue.tutup_hari()
+    admin_queue.buka_kembali_hari()
+
+    with session_scope() as s:
+        aksi = {r.action for r in s.scalars(sa.select(AuditLog))}
+
+    assert {"CLOSE_DAY", "REOPEN_DAY"} <= aksi
+
+
 def test_batas_mengikuti_pengaturan_yang_diubah(
     antrian_siap, cro_queue, terbitkan, auth
 ):
@@ -599,3 +790,284 @@ def test_batas_mengikuti_pengaturan_yang_diubah(
     assert cro_queue.batas_panggilan() == 2
     assert antrian.melewati_batas_panggilan
 
+
+
+# ---------------------------------------------------------------------
+# Jenis layanan yang dilayani sebuah loket
+# ---------------------------------------------------------------------
+
+def _batasi_loket(auth, loket_id: int, kategori_ids: list[int]) -> None:
+    """Tetapkan jenis layanan sebuah loket sebagai admin, lalu kembali ke CRO."""
+    from app.services.master_data_service import MasterDataService
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    MasterDataService(auth).set_counter_categories(loket_id, kategori_ids)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+
+def test_loket_khusus_hanya_memanggil_layanannya(auth, antrian_siap, terbitkan):
+    terbitkan("A", 1)
+    terbitkan("B", 1)
+    loket = antrian_siap["loket"][0]
+    _batasi_loket(auth, loket, [antrian_siap["kategori"]["B"]])
+
+    assert QueueService(auth).call_next(loket).queue_number == "B-001"
+
+
+def test_loket_khusus_melewati_antrian_yang_bukan_bagiannya(
+    auth, antrian_siap, terbitkan
+):
+    """A-001 datang lebih dulu, tetapi bukan bagian loket ini."""
+    terbitkan("A", 2)
+    terbitkan("B", 1)
+    loket = antrian_siap["loket"][0]
+    _batasi_loket(auth, loket, [antrian_siap["kategori"]["B"]])
+
+    assert QueueService(auth).call_next(loket).queue_number == "B-001"
+
+
+def test_loket_tanpa_batasan_memanggil_semua_layanan(auth, antrian_siap, terbitkan):
+    """Daftar kosong berarti semua, sehingga perilakunya seperti sebelumnya."""
+    terbitkan("B", 1)
+    loket = antrian_siap["loket"][0]
+    _batasi_loket(auth, loket, [])
+
+    assert QueueService(auth).call_next(loket).queue_number == "B-001"
+
+
+def test_loket_khusus_boleh_melayani_beberapa_jenis(auth, antrian_siap, terbitkan):
+    terbitkan("C", 1)
+    terbitkan("A", 1)
+    loket = antrian_siap["loket"][0]
+    _batasi_loket(
+        auth, loket, [antrian_siap["kategori"]["A"], antrian_siap["kategori"]["C"]]
+    )
+
+    assert QueueService(auth).call_next(loket).queue_number == "C-001"
+
+
+def test_pesan_membedakan_sepi_dari_bukan_bagian_loket_ini(
+    auth, antrian_siap, terbitkan
+):
+    """
+    Petugas melihat sepuluh orang menunggu di layar. Bila pesannya hanya
+    "tidak ada antrian", dia akan menyimpulkan aplikasinya rusak.
+    """
+    terbitkan("A", 1)
+    loket = antrian_siap["loket"][0]
+    _batasi_loket(auth, loket, [antrian_siap["kategori"]["B"]])
+
+    with pytest.raises(BusinessRuleError) as gagal:
+        QueueService(auth).call_next(loket)
+
+    assert "loket lain" in gagal.value.user_message
+
+
+def test_pesan_sepi_tetap_apa_adanya_saat_memang_kosong(auth, antrian_siap):
+    loket = antrian_siap["loket"][0]
+    _batasi_loket(auth, loket, [antrian_siap["kategori"]["B"]])
+
+    with pytest.raises(BusinessRuleError) as gagal:
+        QueueService(auth).call_next(loket)
+
+    assert gagal.value.user_message == "Tidak ada antrian yang menunggu."
+
+
+def test_saringan_petugas_di_luar_layanan_loket_ditolak(auth, antrian_siap, terbitkan):
+    terbitkan("A", 1)
+    loket = antrian_siap["loket"][0]
+    _batasi_loket(auth, loket, [antrian_siap["kategori"]["B"]])
+
+    with pytest.raises(BusinessRuleError) as gagal:
+        QueueService(auth).call_next(loket, category_id=antrian_siap["kategori"]["A"])
+
+    assert "tidak melayani" in gagal.value.user_message
+
+
+def test_daftar_menunggu_tetap_utuh_walau_loket_dibatasi(auth, antrian_siap, terbitkan):
+    """
+    Batasan hanya berlaku saat memanggil.
+
+    Petugas tetap perlu melihat keseluruhan antrian untuk tahu keadaan
+    ruangan, dan supervisor membaca daftar yang sama.
+    """
+    terbitkan("A", 1)
+    terbitkan("B", 1)
+    loket = antrian_siap["loket"][0]
+    _batasi_loket(auth, loket, [antrian_siap["kategori"]["B"]])
+
+    assert len(QueueService(auth).list_waiting()) == 2
+
+
+# ---------------------------------------------------------------------
+# Loket bawaan petugas
+# ---------------------------------------------------------------------
+
+def test_sesi_membawa_loket_bawaan_petugas(auth, antrian_siap, users):
+    """Layar pelayanan memakainya untuk memilih loket sendiri saat masuk."""
+    from app.services.user_service import UserService
+
+    loket = antrian_siap["loket"][1]
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    UserService(auth).update_user(
+        users["CRO"], full_name="Petugas Cro", role="CRO", default_counter_id=loket
+    )
+
+    auth.logout()
+    sesi = auth.login("cro", TEST_PASSWORD)
+
+    assert sesi.default_counter_id == loket
+
+
+def test_loket_bawaan_kosong_bila_belum_ditetapkan(auth):
+    auth.logout()
+    sesi = auth.login("cro", TEST_PASSWORD)
+
+    assert sesi.default_counter_id is None
+
+
+def test_petugas_pindah_loket_sendiri(auth, antrian_siap):
+    """Pindah meja terjadi tanpa rencana dan tidak menunggu admin."""
+    loket = antrian_siap["loket"][2]
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+    sesi = auth.pindah_loket(loket)
+
+    assert sesi.default_counter_id == loket
+
+
+def test_pindah_loket_diingat_sampai_login_berikutnya(auth, antrian_siap):
+    loket = antrian_siap["loket"][2]
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    auth.pindah_loket(loket)
+
+    auth.logout()
+    sesi = auth.login("cro", TEST_PASSWORD)
+
+    assert sesi.default_counter_id == loket
+
+
+def test_pindah_ke_loket_nonaktif_ditolak(auth, antrian_siap, master_service):
+    loket = antrian_siap["loket"][0]
+    master_service.set_counter_status(loket, False)
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+    with pytest.raises(BusinessRuleError):
+        auth.pindah_loket(loket)
+
+
+def test_pindah_ke_loket_tidak_dikenal_ditolak(auth, antrian_siap):
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+    with pytest.raises(NotFoundError):
+        auth.pindah_loket(999999)
+
+
+def test_petugas_dapat_melepas_ikatan_loketnya(auth, antrian_siap):
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    auth.pindah_loket(antrian_siap["loket"][0])
+
+    sesi = auth.pindah_loket(None)
+
+    assert sesi.default_counter_id is None
+
+
+@pytest.mark.parametrize("peran", ["registration", "supervisor", "display"])
+def test_selain_cro_tidak_dapat_pindah_loket(auth, antrian_siap, peran):
+    """Hanya yang memanggil antrian yang duduk di loket."""
+    auth.logout()
+    auth.login(peran, TEST_PASSWORD)
+
+    with pytest.raises(AuthorizationError):
+        auth.pindah_loket(antrian_siap["loket"][0])
+
+
+# ---------------------------------------------------------------------
+# Buka / tutup pendaftaran
+# ---------------------------------------------------------------------
+
+def test_pendaftaran_terbuka_secara_bawaan(reg_queue):
+    assert reg_queue.pendaftaran_dibuka()
+
+
+def test_tutup_pendaftaran_menghentikan_nomor_baru(reg_queue, antrian_siap):
+    reg_queue.tutup_pendaftaran()
+
+    assert not reg_queue.pendaftaran_dibuka()
+    with pytest.raises(BusinessRuleError):
+        reg_queue.create_queue(antrian_siap["kategori"]["A"])
+
+
+def test_buka_pendaftaran_memulihkan_penerbitan(reg_queue, antrian_siap):
+    reg_queue.tutup_pendaftaran()
+    reg_queue.buka_pendaftaran()
+
+    assert reg_queue.pendaftaran_dibuka()
+    assert reg_queue.create_queue(antrian_siap["kategori"]["A"]).queue_number == "A-001"
+
+
+def test_buka_pendaftaran_membersihkan_tanggal_penutupan(reg_queue, settings_service):
+    """
+    Kedua nilai itu tidak boleh bercerita berbeda.
+
+    Tanggal yang tertinggal membuat penutupan berikutnya tampak sudah
+    kedaluwarsa padahal baru saja terjadi.
+    """
+    reg_queue.tutup_pendaftaran()
+    assert settings_service.get("queue.registration_closed_date") != ""
+
+    reg_queue.buka_pendaftaran()
+
+    assert settings_service.get("queue.registration_closed_date") == ""
+
+
+def test_penutupan_kedaluwarsa_saat_tanggal_berganti(auth, reg_queue, settings_service):
+    """
+    Petugas yang menutup sore hari dan lupa membukanya lagi tidak boleh
+    diam-diam membuat kantor tampak tutup keesokan paginya.
+    """
+    from app.services.settings_service import SettingsService
+
+    reg_queue.tutup_pendaftaran()
+    assert not reg_queue.pendaftaran_dibuka()
+
+    # Menua-kan tanggal penutupan setara dengan hari berganti. Ditulis
+    # sebagai admin karena mengubah pengaturan menuntut CONFIG_MANAGE.
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    SettingsService(auth).set("queue.registration_closed_date", "2000-01-01")
+    auth.logout()
+    auth.login("registration", TEST_PASSWORD)
+
+    assert QueueService(auth).pendaftaran_dibuka()
+
+
+def test_nomor_yang_sudah_terbit_tetap_dapat_dipanggil_saat_pendaftaran_ditutup(
+    auth, reg_queue, antrian_siap, terbitkan
+):
+    """Menutup pendaftaran menghentikan nomor BARU, bukan pelayanan."""
+    terbitkan("A", 1)
+    reg_queue.tutup_pendaftaran()
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+    assert QueueService(auth).call_next(antrian_siap["loket"][0]).queue_number == "A-001"
+
+
+@pytest.mark.parametrize("peran", ["cro", "supervisor", "display"])
+def test_peran_tanpa_hak_tidak_dapat_menutup_pendaftaran(auth, antrian_siap, peran):
+    auth.logout()
+    auth.login(peran, TEST_PASSWORD)
+
+    with pytest.raises(AuthorizationError):
+        QueueService(auth).tutup_pendaftaran()

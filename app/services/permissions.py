@@ -28,6 +28,8 @@ class Permission(str, Enum):
     QUEUE_COMPLETE = "QUEUE_COMPLETE"
     QUEUE_CANCEL = "QUEUE_CANCEL"
     QUEUE_NO_SHOW = "QUEUE_NO_SHOW"
+    QUEUE_CLOSE_DAY = "QUEUE_CLOSE_DAY"
+    QUEUE_TOGGLE_INTAKE = "QUEUE_TOGGLE_INTAKE"
 
     # Layar antrian
     DISPLAY_VIEW = "DISPLAY_VIEW"
@@ -54,6 +56,7 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
             Permission.QUEUE_CREATE,
             Permission.TICKET_PRINT,
             Permission.QUEUE_VIEW,
+            Permission.QUEUE_TOGGLE_INTAKE,
         }
     ),
     # Petugas yang memanggil dan melayani pengunjung.
@@ -84,6 +87,8 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
             Permission.USER_MANAGE,
             Permission.CONFIG_MANAGE,
             Permission.BACKUP_MANAGE,
+            Permission.QUEUE_CLOSE_DAY,
+            Permission.QUEUE_TOGGLE_INTAKE,
         }
     ),
     # Hanya layar antrian, tanpa fungsi administrasi apa pun.
