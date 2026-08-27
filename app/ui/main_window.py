@@ -345,6 +345,9 @@ class MainWindow(QMainWindow):
         # Satu-satunya jalan keluar dari layar penuh selain Ctrl+Q. Petugas
         # membutuhkannya saat memindahkan jendela ke monitor yang benar.
         QShortcut(QKeySequence("F11"), self, self.ganti_layar_penuh)
+        # Esc hanya menurunkan layar penuh, tidak menutup aplikasi. Menutup
+        # lewat Esc di komputer publik terlalu mudah tertekan tanpa sengaja.
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self.keluar_layar_penuh)
 
     # -----------------------------------------------------------------
 
@@ -365,6 +368,11 @@ class MainWindow(QMainWindow):
             self.showNormal()
         else:
             self.showFullScreen()
+
+    def keluar_layar_penuh(self) -> None:
+        """Turunkan layar penuh. Tidak melakukan apa-apa bila sudah jendela."""
+        if self.isFullScreen():
+            self.showNormal()
 
     def _ganti_halaman(self, baris: int) -> None:
         if baris >= 0:

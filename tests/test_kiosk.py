@@ -239,6 +239,90 @@ def test_halaman_kios_membuat_tombol_jenis_layanan(halaman_kios):
     assert [c.prefix for c in halaman_kios.kategori] == ["A", "B", "C"]
 
 
+def test_tulisan_tombol_layanan_berwarna_terang(halaman_kios):
+    """Huruf A/B/C harus putih di atas tombol teal, bukan gelap dari stylesheet global."""
+    from PySide6.QtWidgets import QLabel
+
+    from app.ui.style import DISPLAY_KIOS_TOMBOL_TEKS
+
+    for btn in halaman_kios.tombol_layanan:
+        prefix = btn.findChild(QLabel, "prefixLayanan")
+        nama = btn.findChild(QLabel, "namaLayanan")
+        assert prefix is not None
+        assert nama is not None
+        assert DISPLAY_KIOS_TOMBOL_TEKS in prefix.styleSheet()
+        assert DISPLAY_KIOS_TOMBOL_TEKS in nama.styleSheet()
+
+
+def test_nama_layanan_tetap_tampil_pada_jendela_biasa(qtbot, halaman_kios):
+    """
+    Papan nomor huruf besar merebut tinggi jendela. Nama di bawah A/B/C
+    tidak boleh ikut terpotong saat petugas menekan F11.
+    """
+    from PySide6.QtWidgets import QLabel
+
+    halaman_kios.resize(1100, 700)
+    halaman_kios.show()
+    qtbot.waitExposed(halaman_kios)
+
+    nama_tampil = []
+    for btn in halaman_kios.tombol_layanan:
+        label = btn.findChild(QLabel, "namaLayanan")
+        assert label is not None
+        assert label.text()
+        assert btn.height() >= 80
+        nama_tampil.append(label.text())
+
+    assert nama_tampil == ["Konsultasi", "Pengaduan", "Informasi"]
+
+
+def test_nama_layanan_tetap_tampil_pada_layar_penuh(qtbot, halaman_kios):
+    """
+    Kios dipasang layar penuh di monitor 1080p.
+
+    Papan nomor tidak boleh ikut membesar sampai menelan panel ambil nomor;
+    nama layanan di bawah A/B/C harus tetap muat seluruhnya.
+    """
+    from PySide6.QtWidgets import QLabel
+
+    from app.ui.kiosk.kiosk_page import TINGGI_PANEL_AMBIL_MIN, TINGGI_TOMBOL_MIN
+
+    halaman_kios.resize(1920, 1080)
+    halaman_kios.show()
+    qtbot.waitExposed(halaman_kios)
+
+    panel = halaman_kios.findChild(QFrame, "panelAmbil")
+    assert panel is not None
+    assert panel.height() >= TINGGI_PANEL_AMBIL_MIN
+
+    for btn in halaman_kios.tombol_layanan:
+        label = btn.findChild(QLabel, "namaLayanan")
+        assert label is not None
+        assert btn.height() >= TINGGI_TOMBOL_MIN
+        # QLabel memotong teksnya diam-diam bila tingginya kurang; yang
+        # dijaga di sini adalah tinggi yang dibutuhkan pada lebar sekarang.
+        assert label.height() >= label.heightForWidth(label.width())
+
+
+def test_papan_kios_tetap_kompak_di_layar_penuh(qtbot, halaman_kios):
+    """Pembedanya `kompak`, bukan aplikasi yang berbeda."""
+    sebelum = halaman_kios.papan.px("nomor")
+
+    halaman_kios.resize(1920, 1080)
+    halaman_kios.show()
+    qtbot.waitExposed(halaman_kios)
+
+    assert halaman_kios.papan.kompak is True
+    assert halaman_kios.papan.skala == 1.0
+    assert halaman_kios.papan.px("nomor") == sebelum
+
+
+def test_papan_kios_juga_memiliki_jam(halaman_kios):
+    """Satu DisplayPage: perbaikan pada papan televisi ikut ke kios."""
+    assert halaman_kios.papan.label_jam.text()
+    assert "·" in halaman_kios.papan.label_jam.text()
+
+
 def test_mengambil_nomor_menampilkan_hasil_besar(halaman_kios, antrian_siap):
     halaman_kios.ambil_nomor(antrian_siap["kategori"]["A"])
 

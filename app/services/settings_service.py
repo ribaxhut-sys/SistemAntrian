@@ -30,7 +30,9 @@ BAWAAN: dict[str, str] = {
     "backup.retention_days": "30",
     "dashboard.refresh_seconds": "30",
     "kiosk.cooldown_seconds": "10",
+    "display.theme": "gelap",
     "display.title": "ANTRIAN PELAYANAN CRO",
+    "display.info": "",
     "display.next_count": "3",
     "display.sound_enabled": "true",
     "queue.max_call_attempts": "3",
@@ -100,10 +102,38 @@ SKEMA: tuple[Pengaturan, ...] = (
         kelompok="Tiket",
     ),
     Pengaturan(
+        "display.theme",
+        "Tampilan layar antrian",
+        "Bentuk papan yang menghadap pengunjung. Isinya sama pada semua pilihan — "
+        "seluruh loket tetap tampil; yang berbeda hanya tata letak dan warnanya.",
+        PILIHAN,
+        # Daftar ini sengaja ditulis ulang di sini, tidak diimpor dari
+        # app.ui: service tidak boleh bergantung pada lapisan tampilan.
+        # Agar keduanya tidak diam-diam berbeda, ada test yang membandingkan
+        # daftar ini dengan tema yang benar-benar ada.
+        pilihan=(
+            ("gelap", "Kartu Gelap (bawaan)"),
+            ("terang", "Terang Minimal"),
+            ("sorotan", "Sorotan"),
+            ("split", "Split Informasi"),
+            ("led", "Papan LED"),
+        ),
+        kelompok="Layar Antrian",
+    ),
+    Pengaturan(
         "display.title",
         "Judul layar antrian",
         "Tulisan besar di bagian atas layar yang menghadap pengunjung.",
         TEKS,
+        kelompok="Layar Antrian",
+    ),
+    Pengaturan(
+        "display.info",
+        "Pengumuman layar antrian",
+        "Tulisan pada panel kiri tema Split Informasi, misalnya jam layanan atau "
+        "berkas yang perlu dibawa. Kosongkan bila tidak ada pengumuman.",
+        TEKS,
+        boleh_kosong=True,
         kelompok="Layar Antrian",
     ),
     Pengaturan(

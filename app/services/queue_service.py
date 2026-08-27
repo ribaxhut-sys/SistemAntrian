@@ -8,7 +8,7 @@ tabel transisi di bawah kehilangan artinya dan status tidak sah bisa lolos.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from app.core import clock
@@ -175,6 +175,15 @@ def _as_info(
 
 
 @dataclass(frozen=True)
+class DisplayCounterState:
+    """Keadaan satu loket pada layar antrian."""
+
+    counter_id: int
+    counter_name: str
+    antrian: QueueInfo | None
+
+
+@dataclass(frozen=True)
 class DisplayState:
     """
     Keadaan yang ditampilkan pada layar antrian.
@@ -186,6 +195,7 @@ class DisplayState:
 
     terkini: QueueInfo | None
     berikutnya: list[QueueInfo]
+    loket: list[DisplayCounterState] = field(default_factory=list)
     judul: str = ""
 
 
@@ -361,7 +371,30 @@ class QueueService:
             menunggu = repo.list_menunggu(sesi.branch_id, hari)
             berikutnya = [_as_info(q) for q in menunggu[:jumlah_berikutnya]]
 
-        return DisplayState(terkini=terkini, berikutnya=berikutnya)
+            counters = CounterRepository(session).list_for_branch(
+                sesi.branch_id, only_active=True
+            )
+            per_loket: dict[int, Queue] = {}
+            for antrian in repo.list_sedang_ditangani(sesi.branch_id, hari):
+                if antrian.counter_id is not None and antrian.counter_id not in per_loket:
+                    per_loket[antrian.counter_id] = antrian
+
+            loket = []
+            for counter in counters:
+                row = per_loket.get(counter.id)
+                loket.append(
+                    DisplayCounterState(
+                        counter_id=counter.id,
+                        counter_name=counter.name,
+                        antrian=(
+                            _as_info(row, repo.jumlah_pemanggilan(row.id))
+                            if row is not None
+                            else None
+                        ),
+                    )
+                )
+
+        return DisplayState(terkini=terkini, berikutnya=berikutnya, loket=loket)
 
     def counts_today(self) -> dict[QueueStatus, int]:
         sesi = self.auth.require_permission(Permission.QUEUE_VIEW)

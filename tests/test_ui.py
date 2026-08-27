@@ -150,6 +150,50 @@ def test_enter_pada_kata_sandi_langsung_mencoba_masuk(qtbot, auth):
     assert jendela.result() == QDialog.DialogCode.Accepted
 
 
+def test_enter_saat_sandi_salah_tidak_mengatakan_belum_diisi(qtbot, auth):
+    """
+    Enter pada isian kata sandi memicu returnPressed DAN tombol MASUK
+    bawaan dialog. Percobaan kedua melihat isian yang sudah dikosongkan
+    setelah gagal, lalu menimpa pesan yang sebenarnya.
+    """
+    jendela = LoginWindow(auth)
+    qtbot.addWidget(jendela)
+
+    jendela.input_username.setText("cro")
+    jendela.input_password.setText("salah-sekali")
+    qtbot.keyClick(jendela.input_password, Qt.Key.Key_Return)
+
+    assert jendela.pesan_kesalahan.isVisibleTo(jendela)
+    assert "belum diisi" not in jendela.pesan_kesalahan.text().lower()
+    assert not auth.is_authenticated
+
+
+def test_pesan_kesalahan_hilang_saat_kata_sandi_diketik(qtbot, auth):
+    """Label sisa percobaan sebelumnya tidak boleh tetap menempel."""
+    jendela = LoginWindow(auth)
+    qtbot.addWidget(jendela)
+
+    jendela.input_username.setText("cro")
+    jendela.coba_masuk()
+    assert "belum diisi" in jendela.pesan_kesalahan.text().lower()
+
+    jendela.input_password.setText("x")
+
+    assert not jendela.pesan_kesalahan.isVisibleTo(jendela)
+
+
+def test_login_enter_tidak_menjalankan_dua_kali(qtbot, auth):
+    """
+    Tombol MASUK tidak boleh menjadi default dialog. Enter pada isian
+    sudah terhubung ke coba_masuk; default button akan menjalankannya lagi.
+    """
+    jendela = LoginWindow(auth)
+    qtbot.addWidget(jendela)
+
+    assert not jendela.tombol_masuk.isDefault()
+    assert not jendela.tombol_masuk.autoDefault()
+
+
 def test_fokus_awal_pada_nama_pengguna(qtbot, auth):
     """Petugas dapat langsung mengetik tanpa mengklik isian terlebih dahulu."""
     jendela = LoginWindow(auth)
@@ -359,6 +403,25 @@ def test_pintasan_keluar_dan_layar_penuh_terpasang_di_kios(qtbot, auth):
     assert "Ctrl+Q" in kunci
     assert "F11" in kunci
     assert "F5" in kunci
+    assert "Esc" in kunci
+
+
+def test_esc_hanya_keluar_dari_layar_penuh(qtbot, auth):
+    """Esc menurunkan layar penuh, tidak menutup aplikasi, dan tidak menyalakannya kembali."""
+    auth.login("display", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    jendela.tampilkan()
+    assert jendela.isFullScreen()
+
+    jendela.keluar_layar_penuh()
+    assert not jendela.isFullScreen()
+    assert jendela.isVisible()
+
+    jendela.keluar_layar_penuh()
+    assert not jendela.isFullScreen()
+    assert jendela.isVisible()
 
 
 def test_kios_dibuka_layar_penuh(qtbot, auth):
@@ -582,7 +645,9 @@ def test_dialog_akun_menyediakan_peran_petugas(qtbot):
 
     tersedia = {dialog.pilih_peran.itemData(i) for i in range(dialog.pilih_peran.count())}
     assert UserRole.KIOSK not in tersedia
-    assert tersedia == {r for r in UserRole if r is not UserRole.KIOSK}
+    assert tersedia == {r.value for r in UserRole if r is not UserRole.KIOSK}
+    assert isinstance(dialog.peran, UserRole)
+    assert dialog.peran is UserRole.ADMIN
 
 
 def test_dialog_akun_menyembunyikan_kata_sandi_saat_mengubah(qtbot, halaman_master):

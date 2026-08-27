@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QLabel,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -34,12 +35,12 @@ from app.services.ticket_service import TicketService
 from app.ui.common import pesan_untuk_user, tombol
 from app.ui.display.display_page import DisplayPage
 from app.ui.style import (
-    DISPLAY_BG_ATAS,
     DISPLAY_KIOS_PANEL,
     DISPLAY_KIOS_TOMBOL,
     DISPLAY_KIOS_TOMBOL_HOVER,
     DISPLAY_KIOS_TOMBOL_MATI,
     DISPLAY_KIOS_TOMBOL_MATI_TEKS,
+    DISPLAY_KIOS_TOMBOL_TEKS,
     DISPLAY_LOKET_BG,
     DISPLAY_NOMOR,
     SUCCESS,
@@ -54,6 +55,11 @@ JEDA_HASIL = 8000
 
 #: Selang pembaruan hitung mundur jeda pengambilan nomor.
 SELANG_HITUNG_MS = 500
+
+#: Tinggi minimum panel ambil nomor. Tanpa ini, papan antrian merebut
+#: seluruh tinggi jendela biasa dan nama layanan di bawah A/B/C terpotong.
+TINGGI_PANEL_AMBIL_MIN = 248
+TINGGI_TOMBOL_MIN = 100
 
 
 class KioskPage(QWidget):
@@ -101,28 +107,46 @@ class KioskPage(QWidget):
     def _bangun_tampilan(self) -> None:
         self.setObjectName("layarKios")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet(
-            f"QWidget#layarKios {{ background: {DISPLAY_BG_ATAS}; }}"
-        )
 
         susunan = QVBoxLayout(self)
         susunan.setContentsMargins(0, 0, 0, 0)
         susunan.setSpacing(0)
 
         # Papan nomor memakai layar antrian yang sudah ada, bukan salinannya.
-        # Pengunjung melihat tampilan yang persis sama dengan layar besar di
-        # ruang tunggu, dan perbaikan pada salah satunya berlaku bagi keduanya.
-        self.papan = DisplayPage(self.queue, self.settings, self.sound)
-        susunan.addWidget(self.papan, stretch=5)
+        # Pengunjung melihat isi yang persis sama dengan layar besar di ruang
+        # tunggu, dan perbaikan pada salah satunya berlaku bagi keduanya.
+        #
+        # kompak=True bukan sekadar huruf lebih kecil: papan kios sengaja
+        # TIDAK ikut membesar mengikuti tinggi layar seperti papan televisi.
+        # Di layar penuh 1080p, papan yang menskala akan menelan panel ambil
+        # nomor dan memotong nama layanan di bawah A/B/C.
+        self.papan = DisplayPage(
+            self.queue, self.settings, self.sound, kompak=True
+        )
+        self.papan.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored
+        )
+        susunan.addWidget(self.papan, stretch=3)
+
+        # Latar kios mengikuti tema papan. Yang terlihat hanyalah sela
+        # tipis di sekeliling papan, tetapi sela berwarna biru di bawah
+        # papan hitam bertema LED langsung terbaca sebagai cacat.
+        self.setStyleSheet(
+            f"QWidget#layarKios {{ background: {self.papan.palet.latar}; }}"
+        )
 
         susunan.addWidget(self._bangun_panel_ambil(), stretch=2)
 
     def _bangun_panel_ambil(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("panelAmbil")
+        panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
+        panel.setMinimumHeight(TINGGI_PANEL_AMBIL_MIN)
         panel.setStyleSheet(
             f"QFrame#panelAmbil {{ background: {DISPLAY_KIOS_PANEL};"
-            f" border-top: 4px solid {DISPLAY_LOKET_BG}; }}"
+            f" border-top: 4px solid {self.papan.palet.tepi_unggulan}; }}"
         )
 
         susunan = QVBoxLayout(panel)
@@ -189,19 +213,62 @@ class KioskPage(QWidget):
             self.kisi.addWidget(btn, indeks // kolom_maks, indeks % kolom_maks)
 
     def _bangun_tombol_layanan(self, layanan):
-        btn = tombol(f"{layanan.prefix}\n{layanan.name}", variant="primary")
-        btn.setMinimumHeight(120)
+        btn = tombol("", variant="primary")
+        btn.setMinimumHeight(TINGGI_TOMBOL_MIN)
+        btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
         btn.setStyleSheet(
-            f"QPushButton {{ font-size: 22px; font-weight: 700; color: white;"
-            f" background: {DISPLAY_KIOS_TOMBOL}; border: none;"
-            f" border-radius: 16px; }}"
+            f"QPushButton {{ color: {DISPLAY_KIOS_TOMBOL_TEKS};"
+            f" background: {DISPLAY_KIOS_TOMBOL};"
+            " border: none; border-radius: 16px; }}"
             f"QPushButton:hover {{ background: {DISPLAY_KIOS_TOMBOL_HOVER}; }}"
             f"QPushButton:pressed {{ background: {DISPLAY_LOKET_BG}; }}"
             f"QPushButton:disabled {{ background: {DISPLAY_KIOS_TOMBOL_MATI};"
             f" color: {DISPLAY_KIOS_TOMBOL_MATI_TEKS}; }}"
         )
+
+        isi = QVBoxLayout(btn)
+        isi.setContentsMargins(12, 12, 12, 12)
+        isi.setSpacing(4)
+
+        prefix = QLabel(layanan.prefix)
+        prefix.setObjectName("prefixLayanan")
+        prefix.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        prefix.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        isi.addWidget(prefix)
+
+        nama = QLabel(layanan.name)
+        nama.setObjectName("namaLayanan")
+        nama.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        nama.setWordWrap(True)
+        nama.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        isi.addWidget(nama)
+
+        self._warnai_tulisan_tombol(btn, aktif=True)
         btn.clicked.connect(lambda _, k=layanan.id: self.ambil_nomor(k))
         return btn
+
+    def _warnai_tulisan_tombol(self, btn, *, aktif: bool) -> None:
+        """
+        Warna ditulis di label, bukan diwarisi dari tombol.
+
+        Stylesheet global `QWidget { color }` mengalahkan `color` pada
+        QPushButton, sehingga huruf A/B/C sempat tampak gelap di atas
+        latar teal dan hampir tidak terbaca.
+        """
+        warna = DISPLAY_KIOS_TOMBOL_TEKS if aktif else DISPLAY_KIOS_TOMBOL_MATI_TEKS
+        for nama, ukuran, berat in (
+            ("prefixLayanan", 36, 800),
+            ("namaLayanan", 18, 600),
+        ):
+            label = btn.findChild(QLabel, nama)
+            if label is None:
+                continue
+            label.setStyleSheet(
+                f"color: {warna}; background: transparent;"
+                f" font-size: {ukuran}px; font-weight: {berat};"
+            )
 
     # -----------------------------------------------------------------
     # Tindakan
@@ -240,6 +307,7 @@ class KioskPage(QWidget):
         aktif = self.queue.sisa_jeda_kios() <= 0
         for btn in self.tombol_layanan:
             btn.setEnabled(aktif)
+            self._warnai_tulisan_tombol(btn, aktif=aktif)
 
     def _cetak(self, nomor: QueueInfo) -> None:
         """
@@ -291,6 +359,7 @@ class KioskPage(QWidget):
 
         for btn in self.tombol_layanan:
             btn.setEnabled(aktif)
+            self._warnai_tulisan_tombol(btn, aktif=aktif)
 
         if self._penghapus_hasil.isActive():
             return
