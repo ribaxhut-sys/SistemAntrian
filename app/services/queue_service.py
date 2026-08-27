@@ -28,6 +28,7 @@ from app.repositories.queue_repository import (
 from app.services import audit_service
 from app.services.auth_service import AuthService
 from app.services.permissions import Permission
+from app.services.settings_service import SettingsService
 
 logger = get_logger("queue")
 
@@ -91,10 +92,30 @@ class QueueInfo:
     serving_at: datetime | None
     completed_at: datetime | None
     jumlah_panggilan: int = 0
+    #: Batas pemanggilan yang berlaku, dari pengaturan queue.max_call_attempts.
+    #: Nol berarti batasnya tidak diketahui pada data ini.
+    batas_panggilan: int = 0
 
     @property
     def label_status(self) -> str:
         return LABEL_STATUS.get(self.status, self.status.value)
+
+    @property
+    def melewati_batas_panggilan(self) -> bool:
+        """
+        Sudah dipanggil sebanyak batas yang ditetapkan tanpa hadir.
+
+        Sengaja hanya menjadi PENGINGAT, bukan penghalang. Memblokir
+        panggilan ulang akan menelantarkan pengunjung yang sebenarnya hadir
+        tetapi lambat sampai ke loket, sedangkan nomor yang sudah terbit
+        tidak dapat diterbitkan ulang. Keputusan menyatakan seseorang tidak
+        hadir tetap milik petugas yang melihat ruangannya.
+        """
+        return (
+            self.status is QueueStatus.CALLED
+            and self.batas_panggilan > 0
+            and self.jumlah_panggilan >= self.batas_panggilan
+        )
 
     @property
     def menunggu_detik(self) -> float | None:
@@ -128,7 +149,9 @@ class QueueInfo:
         return []
 
 
-def _as_info(row: Queue, jumlah_panggilan: int = 0) -> QueueInfo:
+def _as_info(
+    row: Queue, jumlah_panggilan: int = 0, batas_panggilan: int = 0
+) -> QueueInfo:
     return QueueInfo(
         id=row.id,
         queue_number=row.queue_number,
@@ -147,6 +170,7 @@ def _as_info(row: Queue, jumlah_panggilan: int = 0) -> QueueInfo:
         serving_at=row.serving_at,
         completed_at=row.completed_at,
         jumlah_panggilan=jumlah_panggilan,
+        batas_panggilan=batas_panggilan,
     )
 
 
@@ -168,8 +192,21 @@ class DisplayState:
 class QueueService:
     """Penerbitan nomor antrian dan seluruh alur pelayanannya."""
 
-    def __init__(self, auth: AuthService) -> None:
+    def __init__(self, auth: AuthService, settings: SettingsService | None = None) -> None:
         self.auth = auth
+        # Tanpa sesi: pembacaan pengaturan memang tidak menuntut hak akses,
+        # dan batas pemanggilan dibutuhkan setiap kali antrian dibaca.
+        self.settings = settings or SettingsService()
+
+    def batas_panggilan(self) -> int:
+        """
+        Batas pemanggilan yang berlaku saat ini.
+
+        Dibaca setiap kali dipakai, bukan disimpan saat service dibuat.
+        Administrator dapat mengubahnya sementara aplikasi berjalan, dan
+        petugas tidak perlu membuka ulang aplikasinya.
+        """
+        return self.settings.get_int("queue.max_call_attempts", 3)
 
     # =================================================================
     # Penerbitan nomor
@@ -242,7 +279,9 @@ class QueueService:
             row = repo.get_by_id(queue_id)
             if row is None:
                 raise NotFoundError("Antrian tidak ditemukan.")
-            return _as_info(row, repo.jumlah_pemanggilan(queue_id))
+            return _as_info(
+                row, repo.jumlah_pemanggilan(queue_id), self.batas_panggilan()
+            )
 
     def current_for_counter(self, counter_id: int) -> QueueInfo | None:
         """Antrian yang sedang dipegang sebuah loket, bila ada."""
@@ -250,7 +289,11 @@ class QueueService:
         with session_scope() as session:
             repo = QueueRepository(session)
             row = repo.sedang_ditangani_loket(counter_id, clock.today())
-            return None if row is None else _as_info(row, repo.jumlah_pemanggilan(row.id))
+            if row is None:
+                return None
+            return _as_info(
+                row, repo.jumlah_pemanggilan(row.id), self.batas_panggilan()
+            )
 
     def display_state(self, jumlah_berikutnya: int = 3) -> DisplayState:
         """
@@ -349,7 +392,9 @@ class QueueService:
                 loket=counter_id,
             )
             logger.info("Antrian %s dipanggil ke loket %s", antrian.queue_number, counter_id)
-            return _as_info(antrian, repo.jumlah_pemanggilan(antrian.id))
+            return _as_info(
+                antrian, repo.jumlah_pemanggilan(antrian.id), self.batas_panggilan()
+            )
 
     def recall(self, queue_id: int) -> QueueInfo:
         """
@@ -391,7 +436,7 @@ class QueueService:
             )
             jumlah = repo.jumlah_pemanggilan(antrian.id)
             logger.info("Antrian %s dipanggil ulang (ke-%d)", antrian.queue_number, jumlah)
-            return _as_info(antrian, jumlah)
+            return _as_info(antrian, jumlah, self.batas_panggilan())
 
     def start_service(self, queue_id: int) -> QueueInfo:
         """Mulai melayani pengunjung yang sudah dipanggil."""

@@ -1040,8 +1040,116 @@ def test_ringkasan_harian_menampilkan_angka(qtbot, auth, antrian_siap, terbitkan
     assert halaman.kartu_menunggu.nilai.text() == "—"
 
 
-def test_ringkasan_harian_hanya_untuk_supervisor(qtbot, auth, antrian_siap):
-    """Menu pemantauan tidak boleh muncul untuk peran yang bukan pemantau."""
+def test_pengingat_batas_panggilan_muncul_setelah_batasnya(
+    halaman_layanan, terbitkan
+):
+    """Petugas diingatkan, bukan dihalangi."""
+    terbitkan("A")
+    halaman_layanan.muat_ulang()
+    halaman_layanan.panggil_berikutnya()
+
+    assert not halaman_layanan.label_batas.isVisibleTo(halaman_layanan)
+
+    halaman_layanan.panggil_ulang()
+    halaman_layanan.panggil_ulang()
+
+    assert halaman_layanan.label_batas.isVisibleTo(halaman_layanan)
+    assert "Tidak Hadir" in halaman_layanan.label_batas.text()
+    # Tombol Panggil Ulang tetap menyala: nomor yang sudah terbit tidak
+    # dapat diterbitkan ulang, jadi pengunjung yang lambat tidak boleh
+    # kehilangan gilirannya karena hitungan.
+    assert halaman_layanan.aksi["panggil_ulang"].isEnabled()
+
+
+def test_pengingat_hilang_setelah_mulai_dilayani(halaman_layanan, terbitkan):
+    terbitkan("A")
+    halaman_layanan.muat_ulang()
+    halaman_layanan.panggil_berikutnya()
+    halaman_layanan.panggil_ulang()
+    halaman_layanan.panggil_ulang()
+
+    halaman_layanan.mulai_melayani()
+
+    assert not halaman_layanan.label_batas.isVisibleTo(halaman_layanan)
+
+
+# ---------------------------------------------------------------------
+# Hasil survey untuk supervisor
+# ---------------------------------------------------------------------
+
+def test_hasil_survey_menampilkan_masukan_pengunjung(
+    qtbot, auth, cro_survey, layani_sampai_selesai
+):
+    """Yang tidak terbaca di mana pun sebelumnya adalah tulisan pengunjung."""
+    from app.services.survey_service import SurveyService
+    from app.ui.dashboard.survey_result_page import SurveyResultPage
+
+    antrian = layani_sampai_selesai()
+    cro_survey.submit(antrian.id, 2, "Menunggu terlalu lama.")
+
+    auth.logout()
+    auth.login("supervisor", TEST_PASSWORD)
+    halaman = SurveyResultPage(SurveyService(auth))
+    qtbot.addWidget(halaman)
+
+    assert halaman.tabel.rowCount() == 1
+    assert halaman.tabel.item(0, 1).text() == antrian.queue_number
+    assert "2" in halaman.tabel.item(0, 4).text()
+    assert halaman.tabel.item(0, 5).text() == "Menunggu terlalu lama."
+
+
+def test_hasil_survey_kosong_dinyatakan_terus_terang(qtbot, auth, antrian_siap):
+    from app.services.survey_service import SurveyService
+    from app.ui.dashboard.survey_result_page import SurveyResultPage
+
+    auth.logout()
+    auth.login("supervisor", TEST_PASSWORD)
+    halaman = SurveyResultPage(SurveyService(auth))
+    qtbot.addWidget(halaman)
+
+    assert halaman.tabel.rowCount() == 0
+    assert "Belum ada penilaian" in halaman.label_kosong.text()
+
+
+def test_hasil_survey_tanpa_masukan_tetap_tampil(
+    qtbot, auth, cro_survey, layani_sampai_selesai
+):
+    """Masukan boleh dikosongkan; barisnya tetap harus ada."""
+    from app.services.survey_service import SurveyService
+    from app.ui.dashboard.survey_result_page import SurveyResultPage
+
+    cro_survey.submit(layani_sampai_selesai().id, 5)
+
+    auth.logout()
+    auth.login("supervisor", TEST_PASSWORD)
+    halaman = SurveyResultPage(SurveyService(auth))
+    qtbot.addWidget(halaman)
+
+    assert halaman.tabel.rowCount() == 1
+    assert halaman.tabel.item(0, 5).text() == ""
+
+
+def test_menu_hasil_survey_hanya_untuk_supervisor(qtbot, auth, antrian_siap):
+    from app.ui.main_window import MainWindow
+
+    auth.logout()
+    auth.login("supervisor", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+    menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
+    assert menu == ["Ringkasan Harian", "Hasil Survey"]
+
+    for peran in ("cro", "admin", "registration"):
+        auth.logout()
+        auth.login(peran, TEST_PASSWORD)
+        lain = MainWindow(auth)
+        qtbot.addWidget(lain)
+        menu_lain = [lain.navigasi.item(i).text() for i in range(lain.navigasi.count())]
+        assert "Hasil Survey" not in menu_lain
+
+
+def test_supervisor_hanya_memantau(qtbot, auth, antrian_siap):
+    """Supervisor memantau; tidak ada satu pun menu yang mengubah antrian."""
     from app.ui.main_window import MainWindow
 
     auth.logout()
@@ -1050,7 +1158,7 @@ def test_ringkasan_harian_hanya_untuk_supervisor(qtbot, auth, antrian_siap):
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
 
-    assert menu == ["Ringkasan Harian"]
+    assert menu == ["Ringkasan Harian", "Hasil Survey"]
 
 
 def test_tombol_minta_survey_aktif_setelah_pelayanan_selesai(

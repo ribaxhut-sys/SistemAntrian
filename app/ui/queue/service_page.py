@@ -22,7 +22,7 @@ from app.services.queue_service import QueueInfo, QueueService
 from app.services.settings_service import SettingsService
 from app.services.survey_service import SurveyService
 from app.ui.common import jalankan_aman, judul, keterangan, konfirmasi, tombol
-from app.ui.style import BORDER, FONT_SIZE_HUGE, PRIMARY, TEXT_MUTED
+from app.ui.style import BORDER, FONT_SIZE_HUGE, PRIMARY, TEXT_MUTED, WARNING
 from app.ui.survey.survey_dialog import SurveyDialog
 
 
@@ -124,6 +124,13 @@ class ServicePage(QWidget):
         self.label_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label_status.setStyleSheet(f"color: {TEXT_MUTED};")
         susunan.addWidget(self.label_status)
+
+        self.label_batas = QLabel("")
+        self.label_batas.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_batas.setWordWrap(True)
+        self.label_batas.setStyleSheet(f"color: {WARNING}; font-weight: 600;")
+        self.label_batas.setVisible(False)
+        susunan.addWidget(self.label_batas)
 
         return panel
 
@@ -241,7 +248,25 @@ class ServicePage(QWidget):
                 f"{self.antrian.label_status}{keterangan_panggilan}"
             )
 
+        self._tampilkan_pengingat_panggilan()
         self._perbarui_tombol()
+
+    def _tampilkan_pengingat_panggilan(self) -> None:
+        """
+        Ingatkan petugas bila nomor sudah dipanggil sampai batasnya.
+
+        Hanya pengingat. Tombol Panggil Ulang tetap menyala, karena
+        pengunjung yang lambat sampai ke loket tidak boleh kehilangan
+        nomornya hanya karena hitungan.
+        """
+        if self.antrian is not None and self.antrian.melewati_batas_panggilan:
+            self.label_batas.setText(
+                f"Sudah dipanggil {self.antrian.jumlah_panggilan}x tanpa hadir. "
+                "Pertimbangkan menandainya Tidak Hadir."
+            )
+            self.label_batas.setVisible(True)
+        else:
+            self.label_batas.setVisible(False)
 
     def _perbarui_tombol(self) -> None:
         tersedia = set(self.antrian.aksi_tersedia()) if self.antrian else set()

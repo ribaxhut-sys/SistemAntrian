@@ -32,6 +32,7 @@ from app.services.ticket_service import TicketService, buat_printer
 from app.services.user_service import UserService
 from app.ui.common import judul, keterangan, konfirmasi, tombol
 from app.ui.dashboard.dashboard_page import DashboardPage
+from app.ui.dashboard.survey_result_page import SurveyResultPage
 from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.settings.dialogs import LABEL_PERAN
 from app.ui.display.display_page import DisplayPage
@@ -264,6 +265,15 @@ class MainWindow(QMainWindow):
                 "Ringkasan Harian",
                 Permission.DASHBOARD_VIEW,
                 lambda: DashboardPage(self.dashboard_service, self.settings_service),
+            ),
+            # Terpisah dari ringkasan harian karena isinya berbeda jenis:
+            # ringkasan menjawab "bagaimana hari ini", daftar ini menjawab
+            # "apa kata pengunjung" — dan yang kedua dibaca kalimat per
+            # kalimat, bukan sekilas.
+            _Menu(
+                "Hasil Survey",
+                Permission.SURVEY_VIEW,
+                lambda: SurveyResultPage(self.survey_service),
             ),
         ]
 

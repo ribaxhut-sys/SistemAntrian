@@ -515,3 +515,87 @@ def test_seluruh_tindakan_tercatat_di_audit(cro_queue, terbitkan, antrian_siap):
         "COMPLETE_QUEUE",
         "NO_SHOW",
     } <= aksi
+
+
+# ---------------------------------------------------------------------
+# Batas pemanggilan
+# ---------------------------------------------------------------------
+
+def _panggil_berulang(cro_queue, antrian_siap, terbitkan, kali: int):
+    """Panggil satu nomor lalu ulangi pemanggilannya beberapa kali."""
+    terbitkan("A")
+    antrian = cro_queue.call_next(antrian_siap["loket"][0])
+    for _ in range(kali - 1):
+        antrian = cro_queue.recall(antrian.id)
+    return antrian
+
+
+def test_batas_panggilan_diambil_dari_pengaturan(cro_queue):
+    assert cro_queue.batas_panggilan() == 3
+
+
+def test_belum_melewati_batas_saat_baru_dipanggil(
+    antrian_siap, cro_queue, terbitkan
+):
+    antrian = _panggil_berulang(cro_queue, antrian_siap, terbitkan, 1)
+
+    assert antrian.jumlah_panggilan == 1
+    assert not antrian.melewati_batas_panggilan
+
+
+def test_melewati_batas_setelah_dipanggil_sebanyak_batasnya(
+    antrian_siap, cro_queue, terbitkan
+):
+    antrian = _panggil_berulang(cro_queue, antrian_siap, terbitkan, 3)
+
+    assert antrian.jumlah_panggilan == 3
+    assert antrian.melewati_batas_panggilan
+
+
+def test_panggil_ulang_tetap_diizinkan_setelah_melewati_batas(
+    antrian_siap, cro_queue, terbitkan
+):
+    """
+    Batas hanya mengingatkan, tidak menghalangi.
+
+    Pengunjung yang lambat sampai ke loket tidak boleh kehilangan nomornya
+    hanya karena hitungan, sebab nomor yang sudah terbit tidak dapat
+    diterbitkan ulang.
+    """
+    antrian = _panggil_berulang(cro_queue, antrian_siap, terbitkan, 3)
+
+    lagi = cro_queue.recall(antrian.id)
+
+    assert lagi.jumlah_panggilan == 4
+    assert lagi.status is QueueStatus.CALLED
+
+
+def test_batas_tidak_berlaku_setelah_mulai_dilayani(
+    antrian_siap, cro_queue, terbitkan
+):
+    """Pengunjung sudah di depan meja; hitungan panggilan tidak relevan lagi."""
+    antrian = _panggil_berulang(cro_queue, antrian_siap, terbitkan, 3)
+
+    dilayani = cro_queue.start_service(antrian.id)
+
+    assert not dilayani.melewati_batas_panggilan
+
+
+def test_batas_mengikuti_pengaturan_yang_diubah(
+    antrian_siap, cro_queue, terbitkan, auth
+):
+    """Administrator mengubahnya saat aplikasi berjalan, tanpa buka ulang."""
+    from app.services.settings_service import SettingsService
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    SettingsService(auth).set("queue.max_call_attempts", "2")
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+    antrian = _panggil_berulang(cro_queue, antrian_siap, terbitkan, 2)
+
+    assert cro_queue.batas_panggilan() == 2
+    assert antrian.melewati_batas_panggilan
+
