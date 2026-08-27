@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session, selectinload
 
 from app.core import clock
-from app.core.database import begin_immediate
+from app.core.database import transaksi_tulis
 from app.models import Queue, QueueCall, QueueStatus, ServiceCategory
 
 #: Status yang berarti loket sedang menangani seseorang.
@@ -42,10 +42,17 @@ def terbitkan_nomor(
     """
     Terbitkan satu nomor antrian baru.
 
-    Seluruhnya berjalan dalam satu transaksi BEGIN IMMEDIATE. Artinya kunci
-    tulis diambil sejak awal, sehingga dua permintaan yang datang bersamaan
-    dilayani berurutan — bukan sama-sama membaca nilai lama lalu sama-sama
-    menuliskan nomor yang sama.
+    Penomoran dilakukan oleh SATU pernyataan upsert atomik. Baris sequence
+    dibuat bila belum ada, dinaikkan bila sudah ada, dan nilai barunya
+    dikembalikan — semuanya dalam satu langkah yang tidak dapat disela.
+    Dua permintaan bersamaan karena itu pasti menerima dua nilai berbeda.
+
+    Bentuk sebelumnya — UPDATE dahulu, INSERT bila tidak ada barisnya —
+    menyimpan celah: dua penulis dapat sama-sama menemukan barisnya belum
+    ada lalu sama-sama menyisipkan. Pada SQLite celah itu tidak pernah
+    terlihat karena BEGIN IMMEDIATE mengunci seluruh database sejak awal
+    transaksi, tetapi pada PostgreSQL celah itu nyata dan berujung nomor
+    kembar. Upsert menutupnya tanpa bergantung pada perilaku satu dialect.
 
     Penambahan nomor dan penyimpanan antrian berada di transaksi yang sama.
     Bila salah satunya gagal, keduanya dibatalkan, sehingga tidak pernah ada
@@ -58,38 +65,23 @@ def terbitkan_nomor(
     hari = tanggal or clock.today()
     sekarang = clock.now()
 
-    with begin_immediate() as conn:
-        # UPDATE ... RETURNING bersifat atomik: membaca dan menaikkan nilai
-        # terjadi dalam satu langkah, tidak ada celah di antaranya.
-        hasil = conn.execute(
+    with transaksi_tulis() as conn:
+        # ON CONFLICT menyebut kolom primary key gabungan tabel sequence.
+        # EXCLUDED tidak dipakai: nilai barunya dihitung dari baris yang
+        # sudah tersimpan, bukan dari baris yang gagal disisipkan.
+        urutan = conn.execute(
             sa.text(
                 """
-                UPDATE queue_sequence
-                   SET last_number = last_number + 1
-                 WHERE branch_id = :branch_id
-                   AND queue_date = :queue_date
-                   AND category_id = :category_id
+                INSERT INTO queue_sequence
+                    (branch_id, queue_date, category_id, last_number)
+                VALUES (:branch_id, :queue_date, :category_id, 1)
+                ON CONFLICT (branch_id, queue_date, category_id)
+                DO UPDATE SET last_number = queue_sequence.last_number + 1
              RETURNING last_number
                 """
             ).bindparams(sa.bindparam("queue_date", type_=sa.Date)),
             {"branch_id": branch_id, "queue_date": hari, "category_id": category_id},
-        ).first()
-
-        if hasil is None:
-            # Nomor pertama untuk kombinasi cabang/tanggal/layanan ini.
-            conn.execute(
-                sa.text(
-                    """
-                    INSERT INTO queue_sequence
-                        (branch_id, queue_date, category_id, last_number)
-                    VALUES (:branch_id, :queue_date, :category_id, 1)
-                    """
-                ).bindparams(sa.bindparam("queue_date", type_=sa.Date)),
-                {"branch_id": branch_id, "queue_date": hari, "category_id": category_id},
-            )
-            urutan = 1
-        else:
-            urutan = hasil[0]
+        ).scalar_one()
 
         nomor = f"{prefix}-{urutan:03d}"
 
@@ -265,24 +257,17 @@ class QueueRepository:
         """
         Rata-rata lama menunggu dan lama pelayanan, dalam detik.
 
-        Dihitung di SQL memakai julianday(), bukan dengan menarik seluruh
-        baris ke Python. Nilai None berarti belum ada satu pun antrian yang
-        mencapai tahap tersebut hari ini.
+        Dihitung di SQL, bukan dengan menarik seluruh baris ke Python.
+        Nilai None berarti belum ada satu pun antrian yang mencapai tahap
+        tersebut hari ini.
 
         Yang dihitung hanya antrian yang benar-benar sampai ke tahapnya:
         nomor yang dibatalkan sebelum dipanggil tidak pernah "menunggu
         sampai dipanggil", dan memasukkannya akan menurunkan angka secara
         keliru.
         """
-        detik_per_hari = 86400.0
-        menunggu = sa.func.avg(
-            (sa.func.julianday(Queue.called_at) - sa.func.julianday(Queue.created_at))
-            * detik_per_hari
-        )
-        layanan = sa.func.avg(
-            (sa.func.julianday(Queue.completed_at) - sa.func.julianday(Queue.serving_at))
-            * detik_per_hari
-        )
+        menunggu = sa.func.avg(self._selisih_detik(Queue.created_at, Queue.called_at))
+        layanan = sa.func.avg(self._selisih_detik(Queue.serving_at, Queue.completed_at))
 
         dasar = (Queue.branch_id == branch_id, Queue.queue_date == tanggal)
         rata_menunggu = self.session.scalar(
@@ -299,6 +284,20 @@ class QueueRepository:
             None if rata_menunggu is None else float(rata_menunggu),
             None if rata_layanan is None else float(rata_layanan),
         )
+
+    def _selisih_detik(self, awal, akhir):
+        """
+        Selisih dua kolom waktu dalam detik, sesuai dialect yang dipakai.
+
+        Tidak ada cara yang berlaku di kedua dialect. SQLite tidak mengenal
+        tipe interval dan menghitungnya lewat julianday() yang bersatuan
+        hari; PostgreSQL mengurangkan timestamp menjadi interval yang lalu
+        diambil detiknya dengan EXTRACT.
+        """
+        if self.session.get_bind().dialect.name == "sqlite":
+            detik_per_hari = 86400.0
+            return (sa.func.julianday(akhir) - sa.func.julianday(awal)) * detik_per_hari
+        return sa.extract("epoch", akhir - awal)
 
     def get_category(self, category_id: int) -> ServiceCategory | None:
         return self.session.get(ServiceCategory, category_id)

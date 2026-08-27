@@ -29,6 +29,11 @@ datas += collect_data_files("tzdata")
 
 hiddenimports = [
     "tzdata",
+    # Driver database dipilih saat runtime menurut isi ANTRIAN_DB_URL,
+    # sehingga tidak satu pun terlihat oleh analisis import statis.
+    "psycopg",
+    "psycopg_binary",
+    "sqlalchemy.dialects.postgresql",
     # Dimuat Alembic lewat nama saat runtime, sehingga tidak terlihat oleh
     # analisis import statis PyInstaller.
     "alembic.ddl.sqlite",

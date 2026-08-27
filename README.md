@@ -3,16 +3,32 @@
 Aplikasi desktop lokal untuk mengelola antrian pelayanan CRO
 (Customer Relations Officer) dan mengukur kepuasan pengunjung.
 
-Aplikasi berjalan **100% offline**. Tidak ada server, API, cloud, maupun
-sinkronisasi. Seluruh data tersimpan pada satu file SQLite lokal.
+Aplikasi berjalan **di jaringan lokal saja**. Tidak ada API, cloud, maupun
+sinkronisasi ke luar kantor.
 
 | | |
 |---|---|
 | Platform | Windows 10 / 11 |
 | Python | **3.13** (dikunci — jangan pakai 3.11 atau 3.14) |
 | UI | PySide6 |
-| Database | SQLite (satu file lokal, tanpa server) via SQLAlchemy |
+| Database | PostgreSQL (beberapa loket) atau SQLite (satu komputer) via SQLAlchemy |
 | Timezone | Asia/Jakarta (WIB, UTC+7) |
+
+## Memilih database
+
+| Keadaan | Database |
+|---|---|
+| **Satu komputer** melayani sendirian | SQLite, satu berkas lokal. Tanpa pemasangan apa pun. |
+| **Beberapa loket** melayani bersamaan | **PostgreSQL wajib**, dipasang di satu komputer server. |
+
+**SQLite di folder bersama TIDAK bisa dipakai beberapa komputer.** Mode WAL
+memakai shared memory yang tidak berfungsi di filesystem jaringan, dan
+mematikan WAL pun SQLite mendokumentasikan bug locking di sana. Akibatnya
+bukan sekadar lambat, melainkan nomor antrian kembar atau database rusak.
+
+Pindah dari satu komputer ke beberapa loket berarti memasang PostgreSQL —
+lihat bagian **Pemasangan Beberapa Loket** di bawah. Konsekuensinya: ada satu
+komputer yang bila mati membuat seluruh loket berhenti.
 
 ---
 
@@ -279,6 +295,80 @@ terminal untuk menampilkannya.
 Selalu panggil interpreter `.venv` secara eksplisit. Menjalankan `pytest`
 langsung berisiko memakai Python global yang versinya berbeda.
 
+Perintah di atas menguji di atas **SQLite** karena jauh lebih cepat. Tetapi
+SQLite bukan yang dipakai kantor dengan beberapa loket, sehingga sebelum
+rilis seluruh test wajib dijalankan juga di PostgreSQL:
+
+```powershell
+.\test-postgres.ps1
+```
+
+Skrip itu menyalakan PostgreSQL di Docker, menjalankan seluruh suite
+terhadapnya, lalu membiarkan container hidup agar pengulangan tidak perlu
+menunggu. Hentikan dengan `docker compose down -v`.
+
+Test yang tidak bermakna pada dialect yang sedang diuji akan **dilewati**,
+bukan gagal — PRAGMA SQLite tidak ada padanannya di PostgreSQL, dan backup
+PostgreSQL membutuhkan `pg_dump`. Perhatikan jumlah yang dilewati: test
+backup yang terlewat berarti backup belum terbukti sama sekali.
+
+---
+
+## Pemasangan Beberapa Loket (PostgreSQL)
+
+### Di komputer server
+
+1. Pasang PostgreSQL 17:
+
+```powershell
+winget install --id PostgreSQL.PostgreSQL.17
+```
+
+2. Buat database dan penggunanya:
+
+```sql
+CREATE USER antrian WITH PASSWORD 'ganti-kata-sandi-ini';
+CREATE DATABASE antrian OWNER antrian;
+```
+
+3. Izinkan komputer loket menyambung. Pada `postgresql.conf`:
+
+```
+listen_addresses = '*'
+```
+
+Pada `pg_hba.conf`, sesuaikan dengan rentang alamat jaringan kantor:
+
+```
+host    antrian    antrian    192.168.1.0/24    scram-sha-256
+```
+
+Jangan memakai `0.0.0.0/0`. Batasi persis pada jaringan kantor.
+
+4. Buka port 5432 pada Windows Firewall, hanya untuk jaringan lokal.
+
+### Di tiap komputer loket
+
+Setel environment variable, lalu jalankan aplikasi seperti biasa:
+
+```powershell
+setx ANTRIAN_DB_URL "postgresql+psycopg://antrian:ganti-kata-sandi-ini@192.168.1.10:5432/antrian"
+```
+
+Migration dijalankan otomatis oleh aplikasi yang pertama kali dibuka.
+Sisanya tinggal menyambung.
+
+`ANTRIAN_DB_URL` **mengalahkan** `ANTRIAN_DB_PATH`. Komputer yang sudah
+diarahkan ke server tidak akan diam-diam kembali memakai berkas SQLite lokal
+hanya karena variabel lama tertinggal.
+
+### Backup dijalankan di komputer server
+
+Backup PostgreSQL memakai `pg_dump`, yang ikut terpasang bersama PostgreSQL.
+Komputer loket biasanya tidak memilikinya. Bila foldernya tidak ada di PATH,
+isi pengaturan **Folder perkakas PostgreSQL** dengan
+`C:\Program Files\PostgreSQL\17\bin`.
+
 ---
 
 ## Membangun `AntrianCRO.exe`
@@ -322,9 +412,14 @@ Seluruh antrian dan survey yang tercatat setelah tanggal backup akan
 hilang. Database yang sedang berjalan otomatis disalin lebih dahulu sebagai
 cadangan pengaman, sehingga salah pilih berkas masih dapat diperbaiki.
 
-Berkas backup adalah database SQLite biasa dan dapat disalin ke media lain
-untuk arsip. Menaruhnya di komputer yang sama dengan aslinya tidak
-melindungi apa pun bila komputer itu rusak.
+Berkas backup dapat disalin ke media lain untuk arsip: `.db` pada SQLite
+adalah database yang dapat dibuka langsung, `.dump` pada PostgreSQL adalah
+arsip `pg_dump` format custom. **Menaruhnya di komputer yang sama dengan
+aslinya tidak melindungi apa pun bila komputer itu rusak.**
+
+Pada PostgreSQL, pemulihan memakai `pg_restore --clean --single-transaction`
+sehingga kegagalan di tengah jalan membatalkan seluruhnya — database tidak
+pernah tertinggal separuh terpulihkan.
 
 ---
 
@@ -335,7 +430,8 @@ melindungi apa pun bila komputer itu rusak.
 | Paket | Kegunaan |
 |---|---|
 | PySide6 | UI desktop, cetak tiket (QtPrintSupport), suara panggilan (QtMultimedia) |
-| SQLAlchemy | ORM dan akses SQLite |
+| SQLAlchemy | ORM dan akses database |
+| psycopg | Driver PostgreSQL — wajib bila lebih dari satu loket |
 | alembic | Migration skema — agar update aplikasi tidak menghapus data lama |
 | pydantic | Validasi data internal |
 | reportlab | PDF tiket dan laporan |
@@ -356,8 +452,27 @@ Jangan menambah dependency tanpa kebutuhan nyata.
 ## Arsitektur
 
 ```
-PySide6 UI  →  Service Layer  →  Repository Layer  →  SQLAlchemy  →  SQLite
+PySide6 UI  →  Service Layer  →  Repository Layer  →  SQLAlchemy  →  PostgreSQL / SQLite
 ```
+
+Dialect dipilih saat aplikasi berjalan lewat `ANTRIAN_DB_URL`. Yang berbeda
+di antara keduanya hanya tiga tempat, dan semuanya sudah dipagari:
+
+| Berbeda | Di mana |
+|---|---|
+| PRAGMA, pool, penguncian | [app/core/database.py](app/core/database.py) |
+| Selisih waktu di SQL | `QueueRepository._selisih_detik` — SQLite tidak punya tipe interval |
+| Cara backup | [app/services/backup_engines.py](app/services/backup_engines.py) |
+
+**Penomoran antrian tidak termasuk yang berbeda,** dan itu disengaja.
+Keamanannya bersandar pada satu pernyataan `INSERT … ON CONFLICT DO UPDATE …
+RETURNING` yang berlaku sama di kedua dialect — bukan pada perilaku kunci
+milik salah satunya. Bentuk sebelumnya (UPDATE dahulu, INSERT bila tidak
+ada barisnya) menyimpan celah yang tidak pernah terlihat di SQLite karena
+`BEGIN IMMEDIATE` mengunci seluruh database, tetapi nyata di PostgreSQL.
+
+Ada test yang mengunci **bentuk pernyataannya**, bukan sekadar hasilnya,
+agar pemecahan kembali menjadi dua pernyataan tidak lolos diam-diam.
 
 Relasi data:
 
@@ -405,6 +520,7 @@ app/
 | `dashboard.refresh_seconds` | `30` | Jeda penyegaran ringkasan harian |
 | `backup.auto_enabled` | `true` | Backup otomatis harian saat aplikasi dibuka |
 | `backup.retention_days` | `30` | Lama backup disimpan sebelum dihapus |
+| `backup.pg_dump_path` | — | Folder perkakas PostgreSQL bila tidak ada di PATH |
 
 Jenis dan batas tiap pengaturan dijelaskan sekali saja pada `SKEMA` di
 [app/services/settings_service.py](app/services/settings_service.py). Layar

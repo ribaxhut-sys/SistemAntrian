@@ -40,10 +40,13 @@ def _configure(**kwargs) -> None:
     ALTER TABLE, sehingga Alembic perlu membuat tabel baru, menyalin data,
     lalu menukarnya. Tanpa opsi ini, perubahan kolom di kemudian hari akan
     gagal total.
+
+    PostgreSQL tidak membutuhkannya — ALTER TABLE-nya lengkap — dan mode
+    batch di sana hanya membangun ulang tabel tanpa alasan.
     """
     context.configure(
         target_metadata=target_metadata,
-        render_as_batch=True,
+        render_as_batch=get_config().memakai_sqlite,
         compare_type=True,
         compare_server_default=True,
         **kwargs,

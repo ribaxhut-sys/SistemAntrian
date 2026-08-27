@@ -1,17 +1,21 @@
 """
-Koneksi database SQLite.
+Koneksi database.
 
-Yang ditegakkan di sini:
+Mendukung dua dialect. SQLite untuk pemasangan satu komputer dan untuk
+seluruh test; PostgreSQL untuk kantor dengan beberapa loket yang melayani
+bersamaan — SQLite tidak sanggup melayani beberapa komputer sekaligus.
+
+PRAGMA khusus SQLite yang ditegakkan di sini:
 
 * foreign_keys = ON     SQLite mematikan penegakan foreign key secara default.
                         Tanpa ini, relasi antar tabel tidak dijaga sama sekali.
 * journal_mode = WAL    Pembaca tidak memblokir penulis. Penting karena layar
                         display membaca terus-menerus sementara petugas menulis.
 * busy_timeout          Menunggu kunci alih-alih langsung gagal.
-* BEGIN eksplisit       pysqlite secara default memulai transaksi secara
-                        implisit dan tidak memungkinkan BEGIN IMMEDIATE.
-                        Perilaku itu dimatikan agar penomoran antrian
-                        (Phase 4) dapat mengunci baris sequence dengan benar.
+
+PostgreSQL tidak membutuhkan satu pun dari itu: foreign key selalu
+ditegakkan, pembaca memang tidak pernah memblokir penulis, dan antrian
+kunci ditangani server.
 """
 
 from __future__ import annotations
@@ -34,11 +38,7 @@ _session_factory: sessionmaker[Session] | None = None
 
 
 def _configure_connection(dbapi_connection, connection_record) -> None:  # noqa: ANN001
-    """Pasang PRAGMA pada setiap koneksi baru."""
-    # Matikan manajemen transaksi implisit milik pysqlite supaya PRAGMA
-    # di bawah ini berjalan di luar transaksi dan BEGIN dapat dikendalikan.
-    dbapi_connection.isolation_level = None
-
+    """Pasang PRAGMA pada setiap koneksi SQLite baru."""
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute("PRAGMA foreign_keys=ON")
@@ -49,39 +49,33 @@ def _configure_connection(dbapi_connection, connection_record) -> None:  # noqa:
         cursor.close()
 
 
-#: Nama execution option untuk memilih mode BEGIN pada SQLite.
-BEGIN_MODE_OPTION = "sqlite_begin_mode"
-
-
-def _emit_begin(conn) -> None:  # noqa: ANN001
-    """
-    Mulai transaksi secara eksplisit (menggantikan perilaku pysqlite).
-
-    Mode BEGIN harus ditentukan di sini, bukan lewat statement terpisah.
-    Statement apa pun yang dijalankan pada Connection akan otomatis membuka
-    transaksi terlebih dahulu, sehingga "BEGIN IMMEDIATE" yang dikirim
-    belakangan pasti ditolak dengan "cannot start a transaction within a
-    transaction".
-    """
-    mode = conn.get_execution_options().get(BEGIN_MODE_OPTION, "")
-    conn.exec_driver_sql(f"BEGIN {mode}".strip())
-
-
 def create_engine(config: AppConfig | None = None) -> Engine:
-    """Buat engine baru lengkap dengan seluruh PRAGMA dan hook transaksi."""
+    """Buat engine baru sesuai dialect database yang dipakai."""
     config = config or get_config()
     config.ensure_directories()
 
-    engine = sa.create_engine(
+    if config.memakai_sqlite:
+        engine = sa.create_engine(
+            config.database_url,
+            future=True,
+            # check_same_thread=False dibutuhkan karena UI Qt dapat mengakses
+            # database dari thread selain thread utama.
+            connect_args={"check_same_thread": False},
+        )
+        event.listen(engine, "connect", _configure_connection)
+        return engine
+
+    return sa.create_engine(
         config.database_url,
         future=True,
-        # check_same_thread=False dibutuhkan karena UI Qt dapat mengakses
-        # database dari thread selain thread utama.
-        connect_args={"check_same_thread": False},
+        # pool_pre_ping wajib untuk koneksi lewat jaringan. Koneksi yang
+        # sudah putus — server sempat restart, kabel tercabut, switch
+        # memutus sesi menganggur — tidak memberi tahu klien. Tanpa ini,
+        # kegagalannya baru terasa saat petugas menekan tombol.
+        pool_pre_ping=True,
+        # Loket yang menganggur tidak perlu menggenggam koneksi semalaman.
+        pool_recycle=1800,
     )
-    event.listen(engine, "connect", _configure_connection)
-    event.listen(engine, "begin", _emit_begin)
-    return engine
 
 
 def get_engine() -> Engine:
@@ -123,16 +117,16 @@ def session_scope() -> Iterator[Session]:
 
 
 @contextmanager
-def begin_immediate() -> Iterator[sa.Connection]:
+def transaksi_tulis() -> Iterator[sa.Connection]:
     """
-    Transaksi tulis dengan kunci yang diambil SEJAK AWAL.
+    Satu transaksi tulis pada Connection mentah, di luar ORM.
 
-    BEGIN IMMEDIATE mencegah dua proses membaca nilai sequence yang sama lalu
-    sama-sama menuliskan nomor antrian kembar. Dipakai oleh Phase 4.
+    Dipakai penomoran antrian, yang memerlukan SQL apa adanya dan tidak
+    boleh ikut menunggu unit kerja lain. Keamanan terhadap penulis
+    bersamaan TIDAK bergantung pada mode transaksi di sini, melainkan pada
+    satu pernyataan upsert atomik di dalamnya — lihat `terbitkan_nomor`.
     """
-    conn = get_engine().connect().execution_options(
-        **{BEGIN_MODE_OPTION: "IMMEDIATE"}
-    )
+    conn = get_engine().connect()
     try:
         with conn.begin():
             yield conn

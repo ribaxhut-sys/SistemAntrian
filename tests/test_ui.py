@@ -856,6 +856,53 @@ def test_layar_survey_mati_saat_pengaturan_dinonaktifkan(
 
 
 # ---------------------------------------------------------------------
+# Kegagalan menghubungi database
+# ---------------------------------------------------------------------
+
+def test_kegagalan_database_menyebut_tujuan_tanpa_kata_sandi(app_config, monkeypatch):
+    """
+    Petugas harus tahu database mana yang tidak terjangkau.
+
+    Kata sandi TIDAK boleh ikut tampil: pesan ini muncul di layar yang bisa
+    dilihat siapa saja yang kebetulan lewat.
+    """
+    from app.core import config as config_module
+    from app.main import _laporkan_kegagalan_database
+
+    monkeypatch.setenv(
+        "ANTRIAN_DB_URL", "postgresql+psycopg://antrian:rahasia@server:5432/antrian"
+    )
+    config_module.reset_config()
+    cfg = config_module.get_config()
+
+    dicetak: list[str] = []
+    monkeypatch.setattr(
+        "builtins.print", lambda *a, **k: dicetak.append(" ".join(str(x) for x in a))
+    )
+
+    _laporkan_kegagalan_database(cfg, berjendela=False)
+
+    pesan = "\n".join(dicetak)
+    assert "server" in pesan
+    assert "antrian" in pesan
+    assert "rahasia" not in pesan
+
+
+def test_kegagalan_database_menunjuk_file_log(app_config, monkeypatch):
+    """Traceback tidak ditampilkan, jadi petugas harus diberi tahu letaknya."""
+    from app.main import _laporkan_kegagalan_database
+
+    dicetak: list[str] = []
+    monkeypatch.setattr(
+        "builtins.print", lambda *a, **k: dicetak.append(" ".join(str(x) for x in a))
+    )
+
+    _laporkan_kegagalan_database(app_config, berjendela=False)
+
+    assert "app.log" in "\n".join(dicetak)
+
+
+# ---------------------------------------------------------------------
 # Pengaturan aplikasi
 # ---------------------------------------------------------------------
 
@@ -989,7 +1036,9 @@ def test_dialog_survey_menolak_masukan_terlalu_panjang(
     assert layanan.get_by_queue(antrian.id) is None
 
 
-def test_layar_backup_menampilkan_berkas_dan_audit(qtbot, admin_auth, antrian_siap):
+def test_layar_backup_menampilkan_berkas_dan_audit(
+    qtbot, admin_auth, antrian_siap, mesin_backup_tersedia
+):
     from app.services.backup_service import BackupService
     from app.ui.settings.backup_page import BackupPage
 

@@ -97,9 +97,27 @@ def test_pyside6_modules_needed_later_are_available():
 # ---------------------------------------------------------------------
 
 def test_sqlite_version_supports_required_features():
-    """RETURNING butuh SQLite >= 3.35 (dipakai untuk sequence nomor antrian)."""
+    """
+    Penomoran antrian membutuhkan RETURNING dan ON CONFLICT.
+
+    RETURNING ada sejak SQLite 3.35, ON CONFLICT sejak 3.24. Keduanya
+    dipakai dalam satu pernyataan upsert yang menjadi satu-satunya penjamin
+    tidak adanya nomor kembar.
+    """
     parts = tuple(int(x) for x in sqlite3.sqlite_version.split("."))
     assert parts >= (3, 35, 0), f"SQLite terlalu lama: {sqlite3.sqlite_version}"
+
+
+def test_driver_postgresql_tersedia():
+    """
+    Kantor dengan beberapa loket memakai PostgreSQL.
+
+    Tanpa driver ini, ANTRIAN_DB_URL yang menunjuk PostgreSQL akan gagal
+    saat aplikasi dibuka, bukan saat dibangun.
+    """
+    import psycopg
+
+    assert psycopg.__version__
 
 
 def test_sqlite_wal_and_foreign_keys(tmp_path: Path):

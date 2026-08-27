@@ -54,6 +54,8 @@ _CATEGORIES: list[tuple[str, str, str, int]] = [
 _SETTINGS: list[tuple[str, str, str]] = [
     ("backup.auto_enabled", "true",
      "Buat backup otomatis satu kali setiap hari saat aplikasi dibuka"),
+    ("backup.pg_dump_path", "",
+     "Folder perkakas PostgreSQL bila tidak ada di PATH; kosongkan untuk SQLite"),
     ("backup.retention_days", "30",
      "Lama backup disimpan sebelum dihapus, dalam hari"),
     ("dashboard.refresh_seconds", "30",

@@ -17,7 +17,25 @@ Isi kolom hasil dengan ✅ atau ❌ beserta catatan bila gagal.
 | A3 | Periksa `data\queue.db` | Berkas database ada dan berukuran > 0 | |
 | A3b | Jalankan `AntrianCRO.exe --init-only`, lalu baca `logs\app.log` | Tercatat "Fondasi siap" beserta nomor revisi skema | |
 | A4 | Tutup lalu buka kembali aplikasi | Terbuka normal, data tidak hilang | |
-| A5 | Cabut kabel jaringan, buka aplikasi | Tetap berjalan normal — sistem ini 100% offline | |
+| A5 | Cabut kabel jaringan, buka aplikasi | Pemasangan SQLite satu komputer tetap berjalan normal | |
+
+## A2. Pemasangan beberapa loket (PostgreSQL)
+
+Lewati bagian ini bila hanya satu komputer yang dipakai.
+
+| # | Langkah | Hasil yang diharapkan | Hasil |
+|---|---|---|---|
+| A6 | Pasang PostgreSQL di komputer server, buat database `antrian` | Selesai tanpa error | |
+| A7 | Setel `ANTRIAN_DB_URL` di satu loket, jalankan aplikasi | Skema terbentuk sendiri lewat migration | |
+| A8 | Setel `ANTRIAN_DB_URL` di loket lainnya, jalankan aplikasi | Melihat data yang sama; migration tidak dijalankan ulang | |
+| A9 | Periksa bilah status | Menunjuk server PostgreSQL, bukan berkas lokal | |
+| A10 | **Dua loket menerbitkan nomor pada saat yang sama** | Nomor berurutan, **tidak ada yang kembar** | |
+| A11 | Ulangi A10 beberapa kali dengan dua orang menekan bersamaan | Tetap tidak ada nomor kembar | |
+| A12 | Loket A memanggil nomor; amati loket B dan layar antrian | Perubahan terlihat di semua komputer | |
+| A13 | Dua loket mencoba memanggil nomor terdepan bersamaan | Hanya satu yang mendapatkannya | |
+| A14 | Matikan server PostgreSQL saat loket sedang melayani | Pesan berbahasa Indonesia yang jelas, bukan traceback | |
+| A15 | Nyalakan kembali server, lanjutkan melayani | Loket pulih sendiri tanpa perlu dibuka ulang | |
+| A16 | Setel `ANTRIAN_DB_PATH` sekaligus `ANTRIAN_DB_URL` di satu loket | Tetap memakai PostgreSQL, tidak diam-diam kembali ke berkas lokal | |
 
 ## B. Masuk pertama kali
 
@@ -120,6 +138,10 @@ Isi kolom hasil dengan ✅ atau ❌ beserta catatan bila gagal.
 | I5 | Terbitkan beberapa nomor, lalu pulihkan dari backup sebelumnya | Nomor-nomor itu hilang; backup pengaman ikut terbentuk | |
 | I6 | Buka tab "Jejak Aktivitas" | Terlihat baris BACKUP dan RESTORE beserta pelakunya | |
 | I7 | Telusuri seluruh jejak aktivitas | TIDAK ada satu pun kata sandi yang tercatat | |
+| I8 | **PostgreSQL:** backup dari komputer server | Berkas `.dump` terbentuk | |
+| I9 | **PostgreSQL:** backup dari komputer loket tanpa pg_dump | Pesan jelas yang menyebut pengaturan folder perkakas, bukan traceback | |
+| I10 | **PostgreSQL:** pulihkan dari `.dump`, lalu periksa dari loket lain | Seluruh loket melihat data yang sudah dipulihkan | |
+| I11 | Periksa daftar proses saat backup berjalan | Kata sandi database TIDAK terlihat pada argumen perintah | |
 
 ## J. Hak akses
 

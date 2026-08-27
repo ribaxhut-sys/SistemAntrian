@@ -17,7 +17,7 @@ from app.models import (
 
 def test_seed_membuat_data_master(database):
     hasil = seed_initial_data()
-    assert hasil == {"counters": 3, "categories": 3, "settings": 10, "users": 1}
+    assert hasil == {"counters": 3, "categories": 3, "settings": 11, "users": 1}
 
     with session_scope() as s:
         assert s.scalar(sa.select(sa.func.count()).select_from(Branch)) == 1

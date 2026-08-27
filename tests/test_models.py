@@ -219,7 +219,16 @@ def test_username_unik(master):
 
 
 def test_panjang_prefix_dibatasi(master):
-    with pytest.raises(sa.exc.IntegrityError):
+    """
+    Prefix lebih dari dua huruf harus ditolak database.
+
+    Yang menolaknya berbeda per dialect, dan keduanya sah. SQLite
+    mengabaikan panjang VARCHAR sepenuhnya sehingga yang bekerja adalah
+    CheckConstraint `prefix_length` (IntegrityError); PostgreSQL menolak
+    lebih dahulu lewat tipe kolomnya (DataError). Karena itu yang dikunci
+    di sini adalah penolakannya, bukan nama exception-nya.
+    """
+    with pytest.raises(sa.exc.DatabaseError):
         with session_scope() as s:
             s.add(
                 ServiceCategory(

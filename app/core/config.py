@@ -6,10 +6,17 @@ yaitu lewat environment variable. Ini penting karena aplikasi didistribusikan
 sebagai .exe dan lokasi penyimpanan bisa berbeda di tiap komputer.
 
 Environment variable yang dikenali:
-    ANTRIAN_DB_PATH      lokasi file database SQLite
+    ANTRIAN_DB_URL       URL SQLAlchemy lengkap. Dipakai bila diisi.
+                         Contoh: postgresql+psycopg://user:sandi@server/antrian
+    ANTRIAN_DB_PATH      lokasi file database SQLite, dipakai bila DB_URL kosong
     ANTRIAN_BACKUP_DIR   folder hasil backup
     ANTRIAN_LOG_DIR      folder file log
     ANTRIAN_LOG_LEVEL    DEBUG | INFO | WARNING | ERROR
+
+Beberapa loket yang melayani bersamaan WAJIB memakai PostgreSQL lewat
+ANTRIAN_DB_URL. SQLite hanya sanggup melayani satu komputer: mode WAL
+memakai shared memory yang tidak berfungsi di filesystem jaringan, dan
+akibatnya bukan sekadar lambat melainkan nomor antrian kembar.
 """
 
 from __future__ import annotations
@@ -18,6 +25,8 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from sqlalchemy.engine import make_url
 
 APP_NAME = "Sistem Antrian CRO"
 APP_SLUG = "antrian-cro"
@@ -69,12 +78,44 @@ class AppConfig:
     backup_dir: Path
     log_dir: Path
     log_level: str
+    #: URL SQLAlchemy lengkap. Kosong berarti memakai SQLite pada db_path.
+    db_url: str = ""
     timezone: str = TIMEZONE
 
     @property
     def database_url(self) -> str:
-        """URL SQLAlchemy untuk SQLite."""
-        return f"sqlite:///{self.db_path}"
+        """
+        URL SQLAlchemy untuk database aktif.
+
+        Bila ANTRIAN_DB_URL tidak diisi, jatuh ke SQLite pada db_path —
+        bentuk yang dipakai pemasangan satu komputer dan seluruh test.
+        """
+        return self.db_url or f"sqlite:///{self.db_path}"
+
+    @property
+    def url_database(self):
+        """
+        URL yang sudah terurai menjadi host, port, user, dan nama database.
+
+        Dibutuhkan perkakas luar seperti pg_dump yang menerima potongan itu
+        sebagai argumen terpisah, bukan sebagai satu URL.
+        """
+        return make_url(self.database_url)
+
+    @property
+    def dialect(self) -> str:
+        """
+        Nama dialect database: "sqlite", "postgresql", dan seterusnya.
+
+        Beberapa hal memang harus berbeda per dialect — PRAGMA, cara
+        menghitung selisih waktu di SQL, dan cara membuat backup. Diambil
+        dari sini supaya tidak ada yang mengurai URL sendiri-sendiri.
+        """
+        return self.url_database.get_backend_name()
+
+    @property
+    def memakai_sqlite(self) -> bool:
+        return self.dialect == "sqlite"
 
     def ensure_directories(self) -> None:
         """Buat folder yang dibutuhkan bila belum ada."""
@@ -89,6 +130,7 @@ def load_config() -> AppConfig:
     return AppConfig(
         base_dir=root,
         db_path=_path_from_env("ANTRIAN_DB_PATH", root / "data" / "queue.db"),
+        db_url=os.environ.get("ANTRIAN_DB_URL", "").strip(),
         backup_dir=_path_from_env("ANTRIAN_BACKUP_DIR", root / "backup"),
         log_dir=_path_from_env("ANTRIAN_LOG_DIR", root / "logs"),
         log_level=os.environ.get("ANTRIAN_LOG_LEVEL", "INFO").upper(),

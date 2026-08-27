@@ -26,6 +26,7 @@ logger = get_logger("settings")
 #: karena database dibuat sebelum pengaturan tersebut diperkenalkan.
 BAWAAN: dict[str, str] = {
     "backup.auto_enabled": "true",
+    "backup.pg_dump_path": "",
     "backup.retention_days": "30",
     "dashboard.refresh_seconds": "30",
     "display.title": "ANTRIAN PELAYANAN CRO",
@@ -66,6 +67,9 @@ class Pengaturan:
     pilihan: tuple[tuple[str, str], ...] = ()
     minimum: int | None = None
     maksimum: int | None = None
+    #: Teks yang boleh dikosongkan. Bawaannya tidak boleh, karena judul layar
+    #: maupun teks tiket yang kosong hanya membingungkan pembacanya.
+    boleh_kosong: bool = False
     kelompok: str = "Umum"
 
 
@@ -152,6 +156,16 @@ SKEMA: tuple[Pengaturan, ...] = (
         kelompok="Backup",
     ),
     Pengaturan(
+        "backup.pg_dump_path",
+        "Folder perkakas PostgreSQL",
+        "Hanya dibutuhkan bila memakai PostgreSQL dan foldernya tidak ada di "
+        r"PATH, misalnya C:\Program Files\PostgreSQL\17\bin. Kosongkan untuk "
+        "SQLite.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Backup",
+    ),
+    Pengaturan(
         "backup.retention_days",
         "Lama backup disimpan (hari)",
         "Backup yang lebih tua akan dihapus otomatis. Nilai 0 mematikan "
@@ -214,7 +228,7 @@ def _validasi(kunci: str, nilai: str) -> str:
             )
         return str(angka)
 
-    if not nilai:
+    if not nilai and not butir.boleh_kosong:
         raise ValidationError(f"{butir.label} tidak boleh dikosongkan.")
     return nilai
 

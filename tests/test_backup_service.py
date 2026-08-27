@@ -19,13 +19,19 @@ from tests.conftest import TEST_PASSWORD
 
 
 @pytest.fixture
-def backup(admin_auth, antrian_siap):
+def backup(admin_auth, antrian_siap, mesin_backup_tersedia):
     """BackupService dengan sesi ADMIN."""
     return BackupService(admin_auth)
 
 
+@pytest.fixture
+def akhiran(backup) -> str:
+    """Akhiran berkas backup pada dialect yang sedang diuji."""
+    return backup.mesin.akhiran
+
+
 def _jumlah_antrian(berkas) -> int:
-    """Baca langsung dari berkas backup, tanpa lewat aplikasi."""
+    """Baca langsung dari berkas backup SQLite, tanpa lewat aplikasi."""
     koneksi = sqlite3.connect(f"file:{berkas}?mode=ro", uri=True)
     try:
         return koneksi.execute("SELECT COUNT(*) FROM queue").fetchone()[0]
@@ -33,20 +39,31 @@ def _jumlah_antrian(berkas) -> int:
         koneksi.close()
 
 
+def _jumlah_antrian_aktif() -> int:
+    """Jumlah antrian pada database yang sedang dipakai, apa pun dialectnya."""
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import Queue
+
+    with session_scope() as session:
+        return session.scalar(sa.select(sa.func.count()).select_from(Queue))
+
+
 # ---------------------------------------------------------------------
 # Pembuatan
 # ---------------------------------------------------------------------
 
-def test_backup_menghasilkan_berkas(backup):
+def test_backup_menghasilkan_berkas(backup, akhiran):
     info = backup.backup()
 
     assert info.berkas.exists()
     assert info.nama.startswith("queue-")
-    assert info.nama.endswith(".db")
+    assert info.nama.endswith(akhiran)
     assert info.ukuran_byte > 0
 
 
-def test_backup_memuat_data_terbaru(backup, terbitkan):
+def test_backup_memuat_data_terbaru(sqlite_saja, backup, terbitkan):
     """Mode WAL tidak boleh membuat transaksi terbaru tertinggal."""
     terbitkan("A", 3)
 
@@ -134,7 +151,7 @@ def test_backup_otomatis_tidak_melempar_saat_gagal(backup, monkeypatch):
     assert "gagal" in hasil.pesan.lower()
 
 
-def test_backup_otomatis_tidak_menuntut_sesi(auth, antrian_siap):
+def test_backup_otomatis_tidak_menuntut_sesi(auth, antrian_siap, mesin_backup_tersedia):
     """Dijalankan sebelum siapa pun masuk, sehingga tidak boleh menolak."""
     auth.logout()
 
@@ -154,11 +171,11 @@ def test_backup_baru_tidak_ikut_terhapus(backup):
     assert len(backup.list_backup()) == 1
 
 
-def test_backup_lama_dihapus(backup, admin_auth):
+def test_backup_lama_dihapus(backup, admin_auth, akhiran):
     from app.services.settings_service import SettingsService
 
     SettingsService(admin_auth).set("backup.retention_days", "1")
-    lama = backup.folder / "queue-20200101-080000.db"
+    lama = backup.folder / f"queue-20200101-080000{akhiran}"
     lama.write_bytes(b"berkas lama")
 
     dihapus = backup.hapus_kedaluwarsa()
@@ -184,16 +201,14 @@ def test_retensi_nol_diabaikan_agar_backup_baru_selamat(backup, admin_auth):
 
 def test_restore_mengembalikan_keadaan_lama(backup, terbitkan):
     """Antrian yang terbit setelah titik simpan hilang setelah dipulihkan."""
-    from app.core.config import get_config
-
     terbitkan("A", 2)
     titik_simpan = backup.backup()
     terbitkan("A", 3)
-    assert _jumlah_antrian(get_config().db_path) == 5
+    assert _jumlah_antrian_aktif() == 5
 
     backup.restore(titik_simpan.berkas)
 
-    assert _jumlah_antrian(get_config().db_path) == 2
+    assert _jumlah_antrian_aktif() == 2
 
 
 def test_restore_membuat_pengaman_lebih_dahulu(backup, terbitkan):
@@ -237,15 +252,15 @@ def test_restore_menolak_berkas_yang_tidak_ada(backup):
         backup.restore("queue-19700101-000000.db")
 
 
-def test_restore_menolak_berkas_bukan_database(backup):
-    palsu = backup.folder / "queue-20990101-000000.db"
+def test_restore_menolak_berkas_bukan_database(backup, akhiran):
+    palsu = backup.folder / f"queue-20990101-000000{akhiran}"
     palsu.write_text("ini bukan database")
 
     with pytest.raises(ValidationError):
         backup.restore(palsu)
 
 
-def test_restore_menolak_database_yang_sedang_dipakai(backup):
+def test_restore_menolak_database_yang_sedang_dipakai(sqlite_saja, backup):
     from app.core.config import get_config
 
     with pytest.raises(Exception) as info:

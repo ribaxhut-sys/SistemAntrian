@@ -1,0 +1,38 @@
+# PostgreSQL untuk menjalankan test.
+#
+# BUKAN untuk produksi. Di kantor, PostgreSQL dipasang langsung pada satu
+# komputer server; berkas ini hanya menyediakan database sementara agar
+# seluruh test dapat dibuktikan berjalan di dialect yang sama dengan yang
+# nanti dipakai.
+#
+#   docker compose up -d
+#   .\test-postgres.ps1
+#   docker compose down -v
+#
+# Data sengaja TIDAK disimpan pada volume: setiap kali container dibuang,
+# databasenya ikut hilang. Test harus membangun sendiri seluruh skemanya
+# lewat migration, dan itu justru yang ingin dibuktikan.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: antrian-postgres-test
+    environment:
+      POSTGRES_USER: antrian
+      POSTGRES_PASSWORD: antrian_test
+      POSTGRES_DB: antrian_test
+      # Percepat test: database uji boleh kehilangan data bila listrik mati.
+      # JANGAN dipakai pada server sungguhan.
+      POSTGRES_INITDB_ARGS: "--no-sync"
+    command: >
+      postgres
+      -c fsync=off
+      -c synchronous_commit=off
+      -c full_page_writes=off
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U antrian -d antrian_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

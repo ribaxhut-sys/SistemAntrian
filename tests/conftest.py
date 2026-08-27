@@ -23,6 +23,46 @@ from app.core import config as config_module
 from app.core import database as database_module
 
 
+def _pakai_sqlite() -> bool:
+    """Benar bila test dijalankan di atas SQLite (bawaan)."""
+    from app.core.config import get_config
+
+    return get_config().memakai_sqlite
+
+
+@pytest.fixture
+def sqlite_saja(app_config):
+    """
+    Lewati test yang memang hanya bermakna pada SQLite.
+
+    PRAGMA, integrity_check, dan penguncian berkas tidak punya padanan di
+    PostgreSQL. Yang diuji test semacam itu adalah cara SQLite dipasang,
+    bukan perilaku aplikasi.
+    """
+    if not _pakai_sqlite():
+        pytest.skip("khusus SQLite")
+
+
+@pytest.fixture
+def mesin_backup_tersedia(app_config):
+    """
+    Lewati test backup bila perkakas dialect ini tidak terpasang.
+
+    Backup PostgreSQL membutuhkan pg_dump dan pg_restore, yang ikut dalam
+    pemasangan PostgreSQL. Komputer pengembang boleh saja tidak memilikinya
+    — tetapi komputer server WAJIB, dan bila test ini terlewat berarti
+    backup PostgreSQL belum terbukti sama sekali.
+    """
+    import shutil
+
+    if app_config.memakai_sqlite:
+        return
+    if not (shutil.which("pg_dump") and shutil.which("pg_restore")):
+        pytest.skip(
+            "pg_dump/pg_restore tidak terpasang; backup PostgreSQL TIDAK teruji"
+        )
+
+
 @pytest.fixture
 def app_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Arahkan seluruh path aplikasi ke folder temporary milik test ini."""
@@ -41,10 +81,32 @@ def app_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config_module.reset_config()
 
 
+def _kosongkan_schema() -> None:
+    """
+    Kembalikan database PostgreSQL ke keadaan benar-benar kosong.
+
+    SQLite mendapat berkas baru di folder temporary untuk setiap test,
+    sedangkan PostgreSQL dipakai bersama seluruh test. Tanpa pengosongan
+    ini, data satu test bocor ke test berikutnya dan kegagalannya bergantung
+    pada urutan — jenis kegagalan yang paling sulit ditelusuri.
+    """
+    import sqlalchemy as sa
+
+    from app.core.database import get_engine
+
+    with get_engine().begin() as conn:
+        conn.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE")
+        conn.exec_driver_sql("CREATE SCHEMA public")
+    database_module.dispose_engine()
+
+
 @pytest.fixture
 def database(app_config):
     """Database kosong yang skemanya sudah dinaikkan ke revisi terbaru."""
     from app.core.database import init_database
+
+    if not app_config.memakai_sqlite:
+        _kosongkan_schema()
 
     init_database()
     return app_config

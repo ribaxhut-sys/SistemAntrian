@@ -27,11 +27,36 @@ def test_path_database_dapat_diubah_tanpa_mengubah_source(
     """Syarat operasional: lokasi database diatur lewat environment variable."""
     target = tmp_path / "lokasi-lain" / "antrian.db"
     monkeypatch.setenv("ANTRIAN_DB_PATH", str(target))
+    # Yang diuji di sini adalah jalur cadangan ke SQLite, sehingga URL penuh
+    # harus dikosongkan — bila diisi, ia memang seharusnya menang.
+    monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
     config_module.reset_config()
 
     cfg = load_config()
     assert cfg.db_path == target.resolve()
     assert cfg.database_url == f"sqlite:///{target.resolve()}"
+    assert cfg.memakai_sqlite
+
+
+def test_url_database_menang_atas_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """
+    Beberapa loket yang melayani bersamaan wajib memakai PostgreSQL.
+
+    ANTRIAN_DB_URL sengaja mengalahkan ANTRIAN_DB_PATH: komputer yang sudah
+    diarahkan ke server tidak boleh diam-diam kembali memakai berkas SQLite
+    lokal hanya karena variabel lama tertinggal.
+    """
+    monkeypatch.setenv("ANTRIAN_DB_PATH", str(tmp_path / "antrian.db"))
+    monkeypatch.setenv(
+        "ANTRIAN_DB_URL", "postgresql+psycopg://petugas:sandi@server:5432/antrian"
+    )
+    config_module.reset_config()
+
+    cfg = load_config()
+    assert cfg.dialect == "postgresql"
+    assert not cfg.memakai_sqlite
+    assert cfg.url_database.host == "server"
+    assert cfg.url_database.database == "antrian"
 
 
 def test_ensure_directories_membuat_folder_yang_belum_ada(

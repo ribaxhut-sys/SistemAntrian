@@ -11,8 +11,14 @@
 # UI framework desktop
 PySide6==6.11.2
 
-# ORM + akses SQLite
+# ORM + akses database
 SQLAlchemy==2.0.52
+
+# Driver PostgreSQL.
+# WAJIB bila lebih dari satu loket melayani bersamaan: SQLite hanya sanggup
+# melayani satu komputer. Varian [binary] membawa libpq sendiri sehingga
+# tidak ada yang perlu dipasang terpisah di komputer petugas.
+psycopg[binary]==3.3.4
 
 # Schema migration.
 # Runtime (bukan dev-only): aplikasi yang sudah terpasang di komputer petugas

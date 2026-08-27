@@ -47,6 +47,50 @@ def backup_harian() -> None:
     logger.info("Backup otomatis: %s", hasil.pesan)
 
 
+def _laporkan_kegagalan_database(config, *, berjendela: bool) -> None:
+    """
+    Beri tahu petugas bahwa database tidak dapat dihubungi.
+
+    Wajib berupa jendela, bukan sekadar print. Aplikasi didistribusikan
+    sebagai .exe berjendela yang tidak punya terminal, sehingga tanpa ini
+    petugas hanya melihat aplikasi gagal terbuka tanpa keterangan apa pun.
+
+    Kegagalan seperti ini menjadi hal biasa begitu database berada di
+    komputer lain: server belum menyala, kabel jaringan terlepas, atau
+    alamatnya salah ketik.
+
+    Kata sandi database TIDAK pernah ikut ditampilkan.
+    """
+    tujuan = config.url_database.render_as_string(hide_password=True)
+    pesan = (
+        "Aplikasi tidak dapat menghubungi database.\n\n"
+        f"Database  : {tujuan}\n"
+        f"Detail    : {config.log_dir / 'app.log'}\n\n"
+        "Pastikan komputer server menyala dan jaringan tersambung, "
+        "lalu buka kembali aplikasi ini."
+    )
+
+    print(pesan, file=sys.stderr)
+    if not berjendela:
+        return
+
+    try:
+        from PySide6.QtWidgets import QApplication, QMessageBox
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        kotak = QMessageBox()
+        kotak.setIcon(QMessageBox.Icon.Critical)
+        kotak.setWindowTitle(APP_NAME)
+        kotak.setText("Aplikasi tidak dapat menghubungi database.")
+        kotak.setInformativeText(pesan)
+        kotak.exec()
+        del app
+    except Exception:
+        # Qt sendiri gagal dimuat. Tidak ada lagi yang bisa ditampilkan;
+        # yang penting aplikasi berhenti dengan rapi, bukan menumpuk error.
+        logger.exception("Pesan kegagalan database tidak dapat ditampilkan")
+
+
 def _jalankan_ui() -> int:
     """Buka aplikasi berjendela. Import Qt ditunda sampai benar-benar dipakai."""
     from PySide6.QtWidgets import QApplication, QDialog
@@ -99,11 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         # Traceback hanya masuk log, tidak pernah ditampilkan ke petugas.
         logger.exception("Inisialisasi database gagal")
-        print(
-            "Aplikasi tidak dapat menyiapkan database.\n"
-            f"Detail tersimpan pada: {config.log_dir / 'app.log'}",
-            file=sys.stderr,
-        )
+        _laporkan_kegagalan_database(config, berjendela=not hanya_init)
         return 1
 
     if hanya_init:
@@ -111,8 +151,9 @@ def main(argv: list[str] | None = None) -> int:
         # .exe berjendela sehingga tidak punya terminal — tanpa baris log ini,
         # hasil pemeriksaan pemasangan di komputer baru tidak terlihat sama
         # sekali.
+        # Kata sandi database tidak boleh ikut tercetak maupun tercatat.
         ringkasan = (
-            f"Database  : {config.db_path}\n"
+            f"Database  : {config.url_database.render_as_string(hide_password=True)}\n"
             f"Revisi    : {current_revision()}\n"
             f"Seed baru : {dibuat}\n"
             "Fondasi siap."
