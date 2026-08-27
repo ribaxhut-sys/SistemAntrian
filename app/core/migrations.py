@@ -15,7 +15,7 @@ from alembic.script import ScriptDirectory
 
 from app.core.config import get_config, resource_dir
 from app.core.database import get_engine
-from app.core.logger import get_logger
+from app.core.logger import get_logger, setup_logging
 
 logger = get_logger("migrations")
 
@@ -56,4 +56,8 @@ def upgrade_to_head() -> None:
 
     logger.info("Migrasi skema: %s -> %s", current_revision(), head_revision())
     command.upgrade(alembic_config(), "head")
+    # command.upgrade memuat env.py, yang pada CLI Alembic memanggil
+    # fileConfig. Pulihkan handler aplikasi supaya jejak setelah migrasi
+    # (termasuk --init-only) tetap masuk app.log.
+    setup_logging(force=True)
     logger.info("Migrasi selesai")

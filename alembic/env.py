@@ -8,6 +8,7 @@ aplikasi, termasuk ketika lokasinya diubah lewat environment variable.
 
 from __future__ import annotations
 
+import logging
 import sys
 from logging.config import fileConfig
 from pathlib import Path
@@ -24,7 +25,10 @@ from app.models import Base  # noqa: E402
 
 config = context.config
 
-if config.config_file_name is not None:
+# Jangan menimpa logging aplikasi. fileConfig Alembic menaikkan root ke
+# WARNING dan membuang handler app.log — akibatnya --init-only pada
+# komputer baru tidak pernah mencatat "Fondasi siap".
+if config.config_file_name is not None and not logging.getLogger().handlers:
     fileConfig(config.config_file_name)
 
 config.set_main_option("sqlalchemy.url", get_config().database_url)

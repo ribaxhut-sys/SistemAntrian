@@ -341,6 +341,42 @@ def test_judul_jendela_kios_tanpa_nama_petugas(qtbot, auth, users):
     assert sesi.full_name not in jendela.windowTitle()
 
 
+def test_pintasan_keluar_dan_layar_penuh_terpasang_di_kios(qtbot, auth):
+    """
+    Layar kios tidak punya tombol Keluar. Petugas tetap harus bisa
+    menutupnya dan keluar dari layar penuh tanpa mouse.
+    """
+    from PySide6.QtGui import QKeySequence, QShortcut
+
+    auth.login("display", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    kunci = {
+        pintasan.key().toString(QKeySequence.SequenceFormat.PortableText)
+        for pintasan in jendela.findChildren(QShortcut)
+    }
+    assert "Ctrl+Q" in kunci
+    assert "F11" in kunci
+    assert "F5" in kunci
+
+
+def test_kios_dibuka_layar_penuh(qtbot, auth):
+    auth.login("display", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    jendela.tampilkan()
+
+    assert jendela.isFullScreen()
+
+    jendela.ganti_layar_penuh()
+    assert not jendela.isFullScreen()
+
+    jendela.ganti_layar_penuh()
+    assert jendela.isFullScreen()
+
+
 def test_petugas_tetap_melihat_bilah_atas(qtbot, admin_auth):
     """Mode kios tidak boleh ikut mengosongkan layar kerja petugas."""
     jendela = MainWindow(admin_auth)
