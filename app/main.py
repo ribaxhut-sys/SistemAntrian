@@ -80,7 +80,9 @@ def _jalankan_ui() -> int:
             return 0
 
     jendela = MainWindow(auth)
-    jendela.show()
+    # tampilkan(), bukan show(): akun layar antrian dibuka penuh tanpa
+    # bingkai jendela karena layarnya menghadap pengunjung.
+    jendela.tampilkan()
     return app.exec()
 
 

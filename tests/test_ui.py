@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QDialog, QFrame, QPushButton, QStatusBar
 
 from app.core.errors import AppError, ValidationError
 from app.models import UserRole
@@ -273,6 +273,81 @@ def test_layar_antrian_hanya_melihat_menunya_sendiri(qtbot, auth):
 
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
     assert menu == ["Layar Antrian"]
+
+
+# ---------------------------------------------------------------------
+# Mode kios layar antrian
+# ---------------------------------------------------------------------
+
+def test_akun_layar_antrian_masuk_mode_kios(qtbot, auth):
+    auth.login("display", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    assert jendela.mode_kios
+
+
+@pytest.mark.parametrize("peran", ["cro", "supervisor", "registration", "admin"])
+def test_peran_lain_tidak_masuk_mode_kios(qtbot, auth, users, peran):
+    auth.login(peran, TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    assert not jendela.mode_kios
+
+
+def test_kios_menyembunyikan_identitas_petugas_dan_tombol(qtbot, auth):
+    """
+    Pengunjung tidak boleh melihat nama petugas maupun tombol Keluar.
+
+    Tombol Keluar yang terpampang di layar publik mengundang orang menutup
+    aplikasi antrian.
+    """
+    auth.login("display", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    assert jendela.navigasi.parent() is None
+    assert jendela.findChild(QPushButton) is None
+    assert jendela.findChild(QFrame, "panelHeader") is None
+
+
+def test_kios_tidak_menampilkan_lokasi_database(qtbot, auth):
+    auth.login("display", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    assert jendela.findChild(QStatusBar) is None
+
+
+def test_kios_tetap_bersih_setelah_muat_ulang(qtbot, auth):
+    """statusBar() membuat bilahnya sendiri bila belum ada."""
+    auth.login("display", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    jendela.muat_ulang_halaman()
+
+    assert jendela.findChild(QStatusBar) is None
+
+
+def test_judul_jendela_kios_tanpa_nama_petugas(qtbot, auth, users):
+    """Judul terbaca di bilah tugas, yang juga di depan mata pengunjung."""
+    auth.login("display", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    sesi = auth.require_session()
+    assert sesi.full_name not in jendela.windowTitle()
+
+
+def test_petugas_tetap_melihat_bilah_atas(qtbot, admin_auth):
+    """Mode kios tidak boleh ikut mengosongkan layar kerja petugas."""
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+
+    assert jendela.findChild(QFrame, "panelHeader") is not None
+    assert jendela.navigasi.parent() is not None
 
 
 def test_supervisor_melihat_ringkasan(qtbot, auth):

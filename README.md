@@ -61,6 +61,19 @@ pengaturan `ticket.printer`:
 **Kegagalan mencetak tidak pernah membatalkan antrian.** Nomor sudah terbit
 dan tersimpan sebelum tiket dicetak; petugas cukup menyebutkan nomornya.
 
+**Layar antrian berjalan sebagai kios.** Akun berperan `DISPLAY` membuka
+aplikasi langsung dalam layar penuh, tanpa bilah atas, tanpa menu navigasi,
+dan tanpa bilah status. Pengunjung tidak melihat nama petugas, lokasi
+database, maupun tombol "Keluar" — tombol keluar yang terpampang di layar
+publik hanya mengundang orang menutup aplikasi antrian.
+
+Petugas tetap dapat keluar dengan `Ctrl+Q`, dan `F11` mengembalikan jendela
+ke ukuran biasa saat perlu dipindahkan ke monitor yang benar.
+
+Mode ini ditentukan dari hak akses, bukan dari nama peran: akun yang hanya
+boleh melihat layar antrian dan tidak boleh apa-apa lagi memang dipasang di
+komputer publik.
+
 **Layar antrian** menyegar setiap 2 detik dan membunyikan panggilan saat
 ada panggilan baru maupun panggilan ulang: nada dua-nada, lalu pengumuman
 lisan penuh ("Nomor antrian A, dua puluh tiga, silakan menuju Loket 2")
@@ -76,7 +89,7 @@ normal, hanya tanpa bunyi.
 |---|---|
 | Terbitkan Nomor | `1`–`9` memilih jenis layanan |
 | Pelayanan | `F2` panggil berikutnya · `F3` panggil ulang · `F4` mulai melayani · `F8` selesai |
-| Semua layar | `F5` muat ulang · `Ctrl+Q` keluar |
+| Semua layar | `F5` muat ulang · `F11` layar penuh · `Ctrl+Q` keluar |
 
 **Menu per peran:**
 

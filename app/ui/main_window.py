@@ -111,7 +111,23 @@ class MainWindow(QMainWindow):
         )
 
         sesi = auth.require_session()
-        self.setWindowTitle(f"{APP_NAME} — {sesi.full_name}")
+
+        #: Layar yang menghadap pengunjung, bukan meja petugas.
+        #:
+        #: Ditentukan dari hak akses, bukan dari nama peran: akun yang hanya
+        #: boleh melihat layar antrian dan tidak boleh apa-apa lagi memang
+        #: dipasang di komputer publik. Bila suatu saat peran DISPLAY diberi
+        #: kewenangan tambahan, akunnya berhenti dianggap kios — dan itu
+        #: memang yang seharusnya terjadi.
+        self.mode_kios = sesi.permissions == frozenset({Permission.DISPLAY_VIEW})
+
+        if self.mode_kios:
+            # Nama petugas tidak ikut ditampilkan. Judul jendela terbaca
+            # pada bilah tugas dan pengalih jendela, yang keduanya berada di
+            # depan mata pengunjung.
+            self.setWindowTitle(APP_NAME)
+        else:
+            self.setWindowTitle(f"{APP_NAME} — {sesi.full_name}")
         self.resize(1100, 700)
 
         self._bangun_tampilan()
@@ -125,18 +141,27 @@ class MainWindow(QMainWindow):
         susunan_utama.setContentsMargins(0, 0, 0, 0)
         susunan_utama.setSpacing(0)
 
-        susunan_utama.addWidget(self._bangun_kepala())
+        # Pada mode kios, bilah atas tidak dibangun sama sekali. Isinya —
+        # nama petugas, tombol Ganti Kata Sandi, dan tombol Keluar — bukan
+        # konsumsi pengunjung, dan tombol Keluar yang terlihat di layar
+        # publik mengundang orang menutupnya.
+        if not self.mode_kios:
+            susunan_utama.addWidget(self._bangun_kepala())
 
         isi = QWidget()
         susunan_isi = QHBoxLayout(isi)
         susunan_isi.setContentsMargins(0, 0, 0, 0)
         susunan_isi.setSpacing(0)
 
+        # Widget navigasi tetap dibuat walau tidak ditampilkan, supaya
+        # penyusunan menu berjalan seperti biasa dan pemeriksaan hak akses
+        # tetap melewati jalur yang sama.
         self.navigasi = QListWidget()
         self.navigasi.setObjectName("navigasi")
         self.navigasi.setFixedWidth(220)
         self.navigasi.currentRowChanged.connect(self._ganti_halaman)
-        susunan_isi.addWidget(self.navigasi)
+        if not self.mode_kios:
+            susunan_isi.addWidget(self.navigasi)
 
         self.halaman = QStackedWidget()
         susunan_isi.addWidget(self.halaman, stretch=1)
@@ -146,8 +171,11 @@ class MainWindow(QMainWindow):
 
         self._susun_menu()
 
-        config = get_config()
-        self.statusBar().showMessage(f"Database: {config.db_path}")
+        # Bilah status memuat lokasi lengkap file database. Tidak ada
+        # alasan pengunjung perlu mengetahuinya.
+        if not self.mode_kios:
+            config = get_config()
+            self.statusBar().showMessage(f"Database: {config.db_path}")
 
     def _bangun_kepala(self) -> QWidget:
         kepala = QFrame()
@@ -266,8 +294,29 @@ class MainWindow(QMainWindow):
         """Pintasan papan ketik: petugas loket jarang menyentuh mouse."""
         QShortcut(QKeySequence("F5"), self, self.muat_ulang_halaman)
         QShortcut(QKeySequence("Ctrl+Q"), self, self.keluar)
+        # Satu-satunya jalan keluar dari layar penuh selain Ctrl+Q. Petugas
+        # membutuhkannya saat memindahkan jendela ke monitor yang benar.
+        QShortcut(QKeySequence("F11"), self, self.ganti_layar_penuh)
 
     # -----------------------------------------------------------------
+
+    def tampilkan(self) -> None:
+        """
+        Buka jendela sesuai perannya.
+
+        Layar yang menghadap pengunjung dibuka penuh sejak awal, tanpa
+        bingkai jendela dan tanpa tombol tutup yang menggoda untuk ditekan.
+        """
+        if self.mode_kios:
+            self.showFullScreen()
+        else:
+            self.show()
+
+    def ganti_layar_penuh(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
 
     def _ganti_halaman(self, baris: int) -> None:
         if baris >= 0:
@@ -277,7 +326,11 @@ class MainWindow(QMainWindow):
         halaman = self.halaman.currentWidget()
         if hasattr(halaman, "muat_ulang"):
             halaman.muat_ulang()
-            self.statusBar().showMessage("Data dimuat ulang.", 2000)
+            # statusBar() membuat bilah status baru bila belum ada, sehingga
+            # tanpa penjagaan ini menekan F5 justru memunculkan bilah yang
+            # sengaja tidak dibangun pada mode kios.
+            if not self.mode_kios:
+                self.statusBar().showMessage("Data dimuat ulang.", 2000)
 
     def ganti_kata_sandi(self) -> None:
         ChangePasswordDialog(self.auth, self).exec()

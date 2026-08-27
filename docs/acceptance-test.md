@@ -76,7 +76,11 @@ Isi kolom hasil dengan ✅ atau ❌ beserta catatan bila gagal.
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| F1 | Masuk sebagai DISPLAY di komputer/monitor kedua | Hanya menu Layar Antrian yang tersedia | |
+| F1 | Masuk sebagai DISPLAY di komputer/monitor kedua | Langsung layar penuh; tidak ada bilah atas, menu, bilah status, maupun bingkai jendela | |
+| F1b | Amati layar dari posisi pengunjung | Tidak terlihat nama petugas, lokasi database, maupun tombol Keluar | |
+| F1c | Tekan `F11` lalu `F11` lagi | Keluar dari layar penuh dan kembali lagi | |
+| F1d | Tekan `F5` di layar kios | Data disegarkan; TIDAK muncul bilah status di bawah | |
+| F1e | Tekan `Ctrl+Q` | Petugas tetap dapat menutup aplikasi | |
 | F2 | Panggil satu nomor dari loket | Layar berubah paling lambat 2 detik | |
 | F3 | Dengarkan suara | Nada dua-nada lalu pengumuman lisan lengkap dengan nomor loket | |
 | F4 | Panggil ulang nomor yang sama | Berbunyi lagi, bukan diam | |
