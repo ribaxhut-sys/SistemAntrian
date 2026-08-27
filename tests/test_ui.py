@@ -780,6 +780,91 @@ def test_layar_survey_mati_saat_pengaturan_dinonaktifkan(
     assert "dinonaktifkan" in halaman.catatan.text()
 
 
+# ---------------------------------------------------------------------
+# Pengaturan aplikasi
+# ---------------------------------------------------------------------
+
+@pytest.fixture
+def halaman_pengaturan(qtbot, admin_auth, seeded):
+    from app.services.settings_service import SettingsService
+    from app.ui.settings.settings_page import SettingsPage
+
+    halaman = SettingsPage(SettingsService(admin_auth))
+    qtbot.addWidget(halaman)
+    return halaman
+
+
+def test_pengaturan_terisi_dari_nilai_tersimpan(halaman_pengaturan):
+    from app.services.settings_service import SKEMA
+
+    # Setiap pengaturan yang dikenali harus punya kontrolnya di layar,
+    # kalau tidak ia hanya bisa diubah lewat database.
+    assert set(halaman_pengaturan.baris) == {p.kunci for p in SKEMA}
+    assert halaman_pengaturan.baris["ticket.printer"].nilai() == "pdf"
+    assert halaman_pengaturan.baris["survey.enabled"].nilai() == "true"
+    assert halaman_pengaturan.baris["display.next_count"].nilai() == "3"
+
+
+def test_menyimpan_perubahan_pengaturan(halaman_pengaturan, admin_auth):
+    from app.services.settings_service import SettingsService
+
+    halaman_pengaturan.baris["survey.enabled"].kontrol.setChecked(False)
+    halaman_pengaturan.baris["display.next_count"].kontrol.setValue(5)
+    halaman_pengaturan.simpan()
+
+    layanan = SettingsService(admin_auth)
+    assert layanan.get("survey.enabled") == "false"
+    assert layanan.get("display.next_count") == "5"
+
+
+def test_membatalkan_mengembalikan_nilai_tersimpan(halaman_pengaturan, admin_auth):
+    from app.services.settings_service import SettingsService
+
+    halaman_pengaturan.baris["display.next_count"].kontrol.setValue(9)
+    halaman_pengaturan.muat_ulang()
+
+    assert halaman_pengaturan.baris["display.next_count"].nilai() == "3"
+    assert SettingsService(admin_auth).get("display.next_count") == "3"
+
+
+def test_pilihan_cara_cetak_tidak_dapat_diisi_bebas(halaman_pengaturan):
+    """Kontrolnya daftar pilihan, sehingga nilai asal tidak mungkin diketik."""
+    kotak = halaman_pengaturan.baris["ticket.printer"].kontrol
+    nilai = [kotak.itemData(i) for i in range(kotak.count())]
+
+    assert nilai == ["pdf", "system", "none"]
+
+
+def test_kotak_angka_menahan_nilai_di_luar_batas(halaman_pengaturan):
+    """Batasnya diambil dari skema yang sama dengan yang dipakai service."""
+    kotak = halaman_pengaturan.baris["dashboard.refresh_seconds"].kontrol
+    kotak.setValue(1)
+
+    assert kotak.value() == 5
+
+
+def test_menu_pengaturan_hanya_untuk_admin(qtbot, auth, antrian_siap):
+    from app.ui.main_window import MainWindow
+
+    for peran in ("cro", "supervisor", "registration", "display"):
+        auth.logout()
+        auth.login(peran, TEST_PASSWORD)
+        jendela = MainWindow(auth)
+        qtbot.addWidget(jendela)
+        menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
+        assert "Pengaturan" not in menu
+
+
+def test_admin_melihat_menu_pengaturan(qtbot, admin_auth):
+    from app.ui.main_window import MainWindow
+
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
+
+    assert "Pengaturan" in menu
+
+
 def test_dialog_survey_menyimpan_penilaian(qtbot, auth, layani_sampai_selesai):
     """Jalur pengisian yang dibuka petugas CRO untuk pengunjung."""
     from app.services.survey_service import SurveyService

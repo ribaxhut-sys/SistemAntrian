@@ -85,7 +85,7 @@ normal, hanya tanpa bunyi.
 | `REGISTRATION` | Terbitkan Nomor |
 | `CRO` | Pelayanan · Survey Kepuasan |
 | `SUPERVISOR` | Ringkasan Harian |
-| `ADMIN` | Data Master · Backup & Audit |
+| `ADMIN` | Data Master · Pengaturan · Backup & Audit |
 | `DISPLAY` | Layar Antrian |
 
 **Status antrian:**
@@ -378,7 +378,7 @@ app/
   utils/         format tampilan berbahasa Indonesia
 ```
 
-**Pengaturan** yang dapat diubah `ADMIN` dari dalam aplikasi:
+**Pengaturan** diubah `ADMIN` lewat menu **Pengaturan**:
 
 | Kunci | Bawaan | Kegunaan |
 |---|---|---|
@@ -392,6 +392,13 @@ app/
 | `dashboard.refresh_seconds` | `30` | Jeda penyegaran ringkasan harian |
 | `backup.auto_enabled` | `true` | Backup otomatis harian saat aplikasi dibuka |
 | `backup.retention_days` | `30` | Lama backup disimpan sebelum dihapus |
+
+Jenis dan batas tiap pengaturan dijelaskan sekali saja pada `SKEMA` di
+[app/services/settings_service.py](app/services/settings_service.py). Layar
+memakainya untuk memilih kontrol yang tepat — kotak centang, daftar pilihan,
+atau kotak angka berbatas — dan `set()` memakainya untuk menolak nilai yang
+tidak masuk akal. UI dapat dilewati, service tidak, sehingga keduanya wajib
+bersandar pada keterangan yang sama.
 
 **Audit log** mencatat setiap tindakan yang mengubah data, beserta pelaku
 dan waktunya, dan dapat dibaca `ADMIN` lewat menu **Backup & Audit**.

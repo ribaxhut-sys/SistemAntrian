@@ -37,6 +37,17 @@ Isi kolom hasil dengan ✅ atau ❌ beserta catatan bila gagal.
 | C3 | Nonaktifkan satu jenis layanan | Tidak lagi dapat menerbitkan nomor untuk layanan itu | |
 | C4 | Tambah satu loket | Muncul di pilihan loket panel pelayanan | |
 
+## C2. Pengaturan
+
+| # | Langkah | Hasil yang diharapkan | Hasil |
+|---|---|---|---|
+| C5 | Buka menu **Pengaturan** sebagai ADMIN | Seluruh pengaturan tampil terkelompok | |
+| C6 | Ubah judul layar antrian, tekan Simpan | Tersimpan; layar antrian memakai judul baru | |
+| C7 | Ubah beberapa pengaturan lalu tekan "Batalkan Perubahan" | Kembali ke nilai tersimpan, tidak ada yang berubah | |
+| C8 | Tekan Simpan tanpa mengubah apa pun | Dinyatakan tidak ada yang berubah; audit log tidak bertambah | |
+| C9 | Coba isi jeda penyegaran dengan 1 | Kotak angka menahannya di batas minimum | |
+| C10 | Periksa tab Jejak Aktivitas | Perubahan tercatat sebagai `CHANGE_CONFIGURATION` | |
+
 ## D. Penerbitan nomor
 
 | # | Langkah | Hasil yang diharapkan | Hasil |

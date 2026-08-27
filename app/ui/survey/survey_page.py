@@ -52,6 +52,14 @@ class SurveyPage(QWidget):
         self.terpilih: QueueInfo | None = None
         self.pending: list[QueueInfo] = []
 
+        # Timer dimiliki widget ini, bukan QTimer.singleShot yang statis.
+        # singleShot tidak terikat pada apa pun sehingga tetap menyala
+        # setelah halamannya dihapus, lalu menyentuh label yang sudah tidak
+        # ada — aplikasi berhenti bila ditutup tepat setelah survey terkirim.
+        self._penghapus_ucapan = QTimer(self)
+        self._penghapus_ucapan.setSingleShot(True)
+        self._penghapus_ucapan.timeout.connect(self._kembalikan_rincian)
+
         self._bangun_tampilan()
         self.muat_ulang()
 
@@ -253,7 +261,7 @@ class SurveyPage(QWidget):
         """
         self.label_rincian.setText(PESAN_TERIMA_KASIH)
         self.label_rincian.setStyleSheet(f"color: {SUCCESS}; font-weight: 600;")
-        QTimer.singleShot(JEDA_TERIMA_KASIH, self._kembalikan_rincian)
+        self._penghapus_ucapan.start(JEDA_TERIMA_KASIH)
 
     def _kembalikan_rincian(self) -> None:
         self.label_rincian.setStyleSheet(f"color: {TEXT_MUTED};")

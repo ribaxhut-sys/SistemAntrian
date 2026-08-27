@@ -39,6 +39,7 @@ from app.ui.queue.service_page import ServicePage
 from app.ui.registration.registration_page import RegistrationPage
 from app.ui.settings.backup_page import BackupPage
 from app.ui.settings.master_data_page import MasterDataPage
+from app.ui.settings.settings_page import SettingsPage
 from app.ui.survey.survey_page import SurveyPage
 
 logger = get_logger("ui.main")
@@ -209,6 +210,11 @@ class MainWindow(QMainWindow):
                 "Data Master",
                 Permission.MASTER_MANAGE,
                 lambda: MasterDataPage(self.master_service, self.user_service),
+            ),
+            _Menu(
+                "Pengaturan",
+                Permission.CONFIG_MANAGE,
+                lambda: SettingsPage(self.settings_service),
             ),
             _Menu(
                 "Backup & Audit",
