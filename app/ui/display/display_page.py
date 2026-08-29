@@ -773,6 +773,17 @@ class DisplayPage(QWidget):
     def _bangun_kisi(self) -> None:
         self.susunan.addLayout(self._bangun_kepala())
 
+        if self.kompak:
+            # Papan kios TIDAK menampilkan kartu per loket. Pengunjung yang
+            # berdiri di anjungan belum memegang nomor sama sekali, sehingga
+            # "loket mana yang kosong" bukan pertanyaannya — itu urusan
+            # orang yang sudah punya tiket, dan televisi ruang tunggu yang
+            # menjawabnya. Yang berguna baginya sekadar seberapa ramai
+            # kantor ini sekarang, lewat `_bangun_ringkasan_kios`.
+            self.susunan.addWidget(self._bangun_ringkasan_kios(), stretch=1)
+            self.susunan.addWidget(self._bangun_panel_berikutnya(), stretch=4)
+            return
+
         panel = QWidget()
         panel.setStyleSheet("background: transparent;")
         self.kisi_loket = QGridLayout(panel)
@@ -780,12 +791,35 @@ class DisplayPage(QWidget):
         # Televisi membagi layarnya rata: kartu loket menjawab "siapa yang
         # sedang dipanggil", daftar menunggu menjawab "kapan giliran saya" —
         # dan pertanyaan kedua ditanyakan jauh lebih sering oleh orang yang
-        # sudah duduk menunggu. Di kios daftar itu tetap kecil, karena
-        # tempatnya dibutuhkan tombol ambil nomor di bawahnya.
+        # sudah duduk menunggu.
         self.susunan.addWidget(panel, stretch=5)
-        self.susunan.addWidget(
-            self._bangun_panel_berikutnya(), stretch=2 if self.kompak else 5
+        self.susunan.addWidget(self._bangun_panel_berikutnya(), stretch=5)
+
+    def _bangun_ringkasan_kios(self) -> QWidget:
+        """Angka tunggal: berapa banyak antrian yang sedang berlangsung."""
+        panel = QFrame()
+        panel.setObjectName("panelRingkasKios")
+        panel.setStyleSheet(
+            f"QFrame#panelRingkasKios {{ background: {self.palet.panel};"
+            " border-radius: 20px; }"
         )
+
+        susunan = QVBoxLayout(panel)
+        susunan.setContentsMargins(16, 8, 16, 8)
+        susunan.setSpacing(0)
+        susunan.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.label_ringkas_angka = QLabel("0")
+        self.label_ringkas_angka.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_ringkas_angka.setMinimumSize(1, 1)
+        susunan.addWidget(self.label_ringkas_angka)
+
+        self.label_ringkas_caption = QLabel("ANTRIAN SEDANG BERLANGSUNG")
+        self.label_ringkas_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_ringkas_caption.setMinimumSize(1, 1)
+        susunan.addWidget(self.label_ringkas_caption)
+
+        return panel
 
     def _bangun_sorotan(self) -> None:
         self.susunan.addLayout(self._bangun_kepala())
@@ -962,6 +996,17 @@ class DisplayPage(QWidget):
         )
         self.baris_berikutnya.setSpacing(round(12 * skala))
 
+        if self.kompak:
+            self.label_ringkas_angka.setStyleSheet(
+                f"color: {p.nomor}; background: transparent;"
+                f" font-size: {self.px('nomor_baris')}px; font-weight: 800;"
+            )
+            self.label_ringkas_caption.setStyleSheet(
+                f"color: {p.panel_judul}; background: transparent;"
+                f" font-size: {self.px('status_baris')}px; font-weight: 700;"
+                " letter-spacing: 3px;"
+            )
+
         if self.tata_letak == SOROTAN:
             self.label_judul_loket.setStyleSheet(
                 f"color: {p.panel_judul}; background: transparent;"
@@ -1018,12 +1063,19 @@ class DisplayPage(QWidget):
     def tampilkan(self, keadaan: DisplayState) -> None:
         """Perbarui layar dari sebuah keadaan. Dipisah agar mudah diuji."""
         terkini = keadaan.terkini
-        self._susun_kartu(keadaan.loket)
 
-        id_unggulan = terkini.id if terkini is not None else None
-        for kartu, loket in zip(self.kartu_loket, keadaan.loket, strict=False):
-            unggulan = loket.antrian is not None and loket.antrian.id == id_unggulan
-            kartu.tampilkan(loket, unggulan=unggulan)
+        if self.kompak:
+            # Papan kios tidak punya kartu loket sama sekali — lihat
+            # `_bangun_ringkasan_kios`. Ganti dengan angka tunggal.
+            self._perbarui_ringkasan_kios(keadaan)
+        else:
+            self._susun_kartu(keadaan.loket)
+            id_unggulan = terkini.id if terkini is not None else None
+            for kartu, loket in zip(self.kartu_loket, keadaan.loket, strict=False):
+                unggulan = (
+                    loket.antrian is not None and loket.antrian.id == id_unggulan
+                )
+                kartu.tampilkan(loket, unggulan=unggulan)
 
         if self.kartu_sorot is not None:
             self.kartu_sorot.tampilkan(terkini)
@@ -1044,6 +1096,18 @@ class DisplayPage(QWidget):
         if self._halaman >= self.jumlah_halaman:
             self._halaman = 0
         self._gambar_halaman()
+
+    def _perbarui_ringkasan_kios(self, keadaan: DisplayState) -> None:
+        """
+        Hitung berapa antrian yang sedang berlangsung SEKARANG.
+
+        Bukan sekadar `total_menunggu`: nomor yang sudah dipanggil dan
+        sedang dilayani juga masih "berlangsung", belum selesai — hanya
+        yang sudah COMPLETED/CANCELLED/NO_SHOW yang tidak lagi dihitung.
+        """
+        sedang_dilayani = sum(1 for l in keadaan.loket if l.antrian is not None)
+        berlangsung = keadaan.total_menunggu + sedang_dilayani
+        self.label_ringkas_angka.setText(str(berlangsung))
 
     def _susun_kartu(self, loket: list[DisplayCounterState]) -> None:
         """Bangun ulang kartu hanya bila jumlah atau urutan loket berubah."""

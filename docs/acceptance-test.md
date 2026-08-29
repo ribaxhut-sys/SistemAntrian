@@ -178,6 +178,10 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | L5 | Sentuh lagi segera setelahnya | Tombol mati dan ada keterangan menunggu; nomor kedua belum terbit | |
 | L6 | Tunggu jeda selesai, ambil nomor lagi | Nomor berikutnya terbit | |
 | L7 | Panggil nomor dari loket | Papan di anjungan menyegar paling lambat 2 detik | |
+| L7b | Amati papan di anjungan | **Tidak ada kartu per loket** — hanya satu angka ringkasan dan daftar Menunggu Giliran | |
+| L7c | Bandingkan angka ringkasan dengan jumlah nyata yang menunggu + sedang dilayani | Cocok | |
+| L7d | Panggil sebuah nomor dari loket, amati angka ringkasan | Tidak berubah — nomor itu berpindah dari menunggu ke dilayani, bukan hilang dari hitungan | |
+| L7e | Selesaikan pelayanan nomor itu, amati lagi | Angka berkurang satu | |
 | L8 | Cabut printer / kehabisan kertas, ambil nomor | Nomor tetap terbit; hanya pencetakan yang gagal | |
 | L9 | **PostgreSQL:** dari mesin anjungan, coba baca tabel `app_user` | Ditolak hak akses; hash kata sandi petugas tidak terbaca | |
 | L10 | Panggil nomor dari loket, dengarkan anjungan | Anjungan **diam**; hanya televisi yang mengumumkan | |

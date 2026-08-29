@@ -128,6 +128,7 @@ proyek ini memakai `"Continue"` dan memeriksa `$LASTEXITCODE`.
 | `9642b4d` | Ruang kerja pengaduan dan catatan petugas per antrian |
 | `d1e820b` | Panel kanan berpindah otomatis: Menunggu Dilayani <-> Pengaduan |
 | `210f1b6` | Layar Pengaduan & Catatan menyegar sendiri tiap 30 detik |
+| _belum di-commit_ | Anjungan tidak lagi menampilkan kartu loket; diganti angka ringkasan |
 
 ### Yang paling penting dari `535a60e`
 
@@ -157,7 +158,7 @@ RETURNING last_number
 
 | Dialect | Hasil |
 |---|---|
-| SQLite | **888 lolos** (29 Agustus 2026, termasuk papan per-layanan, sisa antrian di tiket, lembar pengaduan, dan penyegaran otomatis layar Pengaduan) |
+| SQLite | **890 lolos** (29 Agustus 2026, termasuk papan per-layanan, sisa antrian di tiket, lembar pengaduan, penyegaran otomatis layar Pengaduan, dan anjungan tanpa kartu loket) |
 | PostgreSQL | **598 lolos, 25 dilewati** — putaran lama, SEBELUM perubahan papan per-layanan |
 
 **Angka PostgreSQL itu sudah basi.** Suite belum pernah dijalankan ulang
@@ -202,6 +203,18 @@ sudah dijalankan (bukan hanya test service).
 6. **Pencetak dan pengeras suara adalah sifat MESIN**, ditimpa lewat
    `ANTRIAN_PRINTER` dan `ANTRIAN_SUARA`. Anjungan diam secara bawaan
    supaya tidak berbunyi bersahutan dengan televisi.
+7. **Anjungan tidak menampilkan kartu loket** (29 Agustus 2026). Diminta
+   pemilik setelah melihat papan kios yang masih menyalin bentuk televisi
+   — kartu per loket dengan status KOSONG/SEDANG DIPANGGIL — padahal
+   pengunjung yang berdiri di anjungan belum memegang nomor sama sekali
+   dan tidak butuh tahu loket mana yang kosong. Diganti dengan satu angka
+   ringkasan (`DisplayPage._bangun_ringkasan_kios`, dipakai hanya saat
+   `kompak=True`): jumlah antrian yang masih menunggu DITAMBAH yang
+   sedang dilayani — keduanya sama-sama "berlangsung", belum selesai.
+   Daftar Menunggu Giliran di bawahnya mendapat porsi jauh lebih besar
+   (stretch 4:1, dari sebelumnya 5:2 untuk kartu loket) karena ruang yang
+   dulu dipakai kartu loket sekarang kosong. TV (`kompak=False`) sama
+   sekali tidak tersentuh — kartu loketnya tetap seperti semula.
 
 ### Keputusan pemilik atas lembar pengaduan (29 Agustus 2026)
 

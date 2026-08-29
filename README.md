@@ -99,7 +99,7 @@ sifat komputernya, bukan siapa yang sedang memakainya:
 | Mesin | Pintasan | Isi layar | Suara | Login |
 |---|---|---|---|---|
 | Televisi ruang tunggu | `AntrianCRO.exe --tv` | Papan nomor besar, dibaca dari seberang ruangan | ya | tidak |
-| Anjungan ambil nomor | `AntrianCRO.exe --kios` | Pilih layanan, cetak tiket, papan nomor kecil | tidak | tidak |
+| Anjungan ambil nomor | `AntrianCRO.exe --kios` | Pilih layanan, cetak tiket, ringkasan antrian berlangsung | tidak | tidak |
 | Komputer loket (3–5 unit) | `AntrianCRO.exe` | Memanggil dan melayani antrian | tidak | ya |
 
 Kedua mesin publik berjalan **tanpa login**. Komputer yang menghadap publik
@@ -115,6 +115,16 @@ televisi juga bersuara, pengunjung mendengar dua pengumuman yang saling
 menyusul — keduanya menyegarkan sendiri tiap dua detik dan tidak akan
 pernah sinkron. Pemasangan satu-mesin yang anjungannya merangkap papan
 nomor menyalakannya kembali dengan `ANTRIAN_SUARA=1`.
+
+**Anjungan tidak menampilkan kartu loket.** Pengunjung yang berdiri di
+sana belum memegang nomor sama sekali, sehingga "loket mana yang kosong"
+bukan pertanyaannya — itu urusan orang yang sudah punya tiket, dan
+televisi ruang tunggu yang menjawabnya. Yang ditampilkan sebagai
+gantinya cuma satu angka, **jumlah antrian yang sedang berlangsung**
+(masih menunggu ditambah yang sedang dilayani, keduanya sama-sama belum
+selesai), dan daftar **Menunggu Giliran** yang sama seperti di televisi —
+mendapat porsi jauh lebih besar karena ruang yang dulu dipakai kartu
+loket kini kosong.
 
 Jeda `kiosk.cooldown_seconds` menahan satu orang menekan tombol ambil nomor
 berulang kali. Akun berperan `DISPLAY` tetap ada dan tetap membuka papan
