@@ -155,7 +155,7 @@ RETURNING last_number
 
 | Dialect | Hasil |
 |---|---|
-| SQLite | **880 lolos** (29 Agustus 2026, termasuk papan per-layanan, sisa antrian di tiket, dan lembar pengaduan) |
+| SQLite | **884 lolos** (29 Agustus 2026, termasuk papan per-layanan, sisa antrian di tiket, dan lembar pengaduan) |
 | PostgreSQL | **598 lolos, 25 dilewati** — putaran lama, SEBELUM perubahan papan per-layanan |
 
 **Angka PostgreSQL itu sudah basi.** Suite belum pernah dijalankan ulang
@@ -216,14 +216,25 @@ ditegaskan ulang oleh pemilik:
    tanggalnya.
 5. **Tanpa status tindak lanjut.** Cukup dicatat.
 6. **Pengisiannya dipecah dua**, mengikuti cara petugas bekerja: Data
-   Pelapor sebagai kartu tetap di layar pelayanan (ditulis sambil
-   bertanya), keluhan dan catatan di dialog `F9` (ditulis sambil
-   mendengarkan). Bentuk pertama menempelkan ketujuhnya ke kolom kiri dan
-   tidak muat — barisnya tergencet sampai label dan isian saling menimpa.
-   Dikunci test `test_isian_pelapor_tidak_saling_menimpa` dan
-   `test_kotak_dialog_tidak_saling_menimpa` di
+   Pelapor sebagai kartu tetap di kolom kiri layar pelayanan (ditulis
+   sambil bertanya), keluhan dan catatan di tab **Pengaduan & Catatan**
+   pada panel kanan (ditulis sambil mendengarkan). Bentuk pertama
+   menempelkan ketujuhnya ke kolom kiri dan tidak muat — barisnya
+   tergencet sampai label dan isian saling menimpa. Bentuk kedua memakai
+   dialog terpisah; bentuk sekarang inline, sebagai tab yang berbagi
+   tempat dengan Menunggu Dilayani. Dikunci test
+   `test_isian_pelapor_tidak_saling_menimpa` dan
+   `test_kotak_pengaduan_tidak_saling_menimpa` di
    `tests/test_notes_ui.py`.
-7. **Disimpan selamanya, dihapus manual** oleh ADMIN. Tidak ada pembersihan
+7. **Panel kanan berpindah tab SENDIRI** mengikuti status loket —
+   Menunggu Dilayani selagi kosong, Pengaduan & Catatan begitu nomor
+   dipanggil — bukan dikunci di balik modal. Percobaan awal memindahkan
+   Menunggu Dilayani ke dialog terpisah ditolak: kolom lama-menunggunya
+   sengaja berubah warna setelah 10/20 menit supaya terlihat SEKILAS
+   tanpa mengklik apa pun, dan modal akan menguburnya. Judul tab
+   Menunggu Dilayani tetap menyebut jumlah yang sudah lama menunggu
+   sebagai penggantinya begitu tab itu tidak sedang aktif.
+8. **Disimpan selamanya, dihapus manual** oleh ADMIN. Tidak ada pembersihan
    otomatis — yang berarti tabel ini hanya bertambah, dan pencariannya
    sengaja selalu dibatasi jumlah.
 

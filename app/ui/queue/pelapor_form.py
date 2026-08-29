@@ -5,10 +5,11 @@ Identitas ditulis SAMBIL bertanya kepada orang yang duduk di depan meja —
 nama, nomor pelanggan, nomor telepon — sedangkan keluhannya ditulis sambil
 mendengarkan. Dua kegiatan yang berbeda, dan karena itu dua tempat: isian
 pendek ini tetap di layar sehingga dapat diisi seketika, sementara kotak
-keluhan yang panjang mendapat dialognya sendiri.
+keluhan yang panjang mendapat tempatnya sendiri di panel kanan
+(`note_panel.py`), yang berbagi tab dengan Menunggu Dilayani.
 
 Lembar tetap SATU baris di database. Formulir ini tidak menyimpan apa pun
-sendiri: nilainya dibaca dialog pengaduan pada saat Simpan ditekan, karena
+sendiri: nilainya dibaca NotePanel pada saat Simpan ditekan, karena
 identitas tanpa keluhan maupun catatan bukan lembar yang layak disimpan —
 ia hanya akan menjadi nama pengunjung yang tersimpan tanpa satu pun alasan.
 """
@@ -53,7 +54,16 @@ class PelaporForm(QFrame):
             f" border: 1px solid {BORDER}; border-radius: {RADIUS}px; }}"
         )
 
+        #: Kewajiban terakhir yang diminta lewat `tandai_wajib`. Disimpan
+        #: supaya isian Nama/No. Pelanggan dapat melepas tandanya SENDIRI
+        #: begitu diisi, tanpa menunggu NotePanel memanggil `tandai_wajib`
+        #: lagi — panel itu hanya bereaksi pada ketikan di kotak keluhan,
+        #: bukan pada ketikan di sini.
+        self._wajib_aktif = False
+
         self._bangun_tampilan()
+        self.isian_nama.textChanged.connect(self._perbarui_diri)
+        self.isian_nomor_pelanggan.textChanged.connect(self._perbarui_diri)
         self.set_aktif(False)
 
     # -----------------------------------------------------------------
@@ -208,6 +218,23 @@ class PelaporForm(QFrame):
         Kewajibannya bersyarat, dan peringatan yang menyala pada lembar yang
         cuma berisi catatan petugas cepat berhenti dibaca.
         """
+        self._wajib_aktif = wajib
+        self._terapkan_wajib()
+
+    def _perbarui_diri(self) -> None:
+        """
+        Lepas tanda wajib begitu isiannya sendiri terisi.
+
+        Mengetik di sini tidak memicu `tandai_wajib` dari luar — panel
+        keluhan hanya mendengarkan ketikan di kotaknya sendiri. Tanpa
+        pengait ini, bingkai kuning pada Nama tetap menyala walau
+        petugas sudah selesai mengisinya, sampai keluhannya diketik ulang.
+        """
+        if self._wajib_aktif:
+            self._terapkan_wajib()
+
+    def _terapkan_wajib(self) -> None:
+        wajib = self._wajib_aktif
         pasangan = (
             (self.label_nama, self.isian_nama, "Nama"),
             (self.label_nomor_pelanggan, self.isian_nomor_pelanggan, "No. Pelanggan"),

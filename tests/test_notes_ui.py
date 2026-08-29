@@ -1,10 +1,13 @@
 """
 Ruang kerja petugas dan layar Pengaduan.
 
-Yang diuji di sini adalah perilaku yang tidak dapat dilihat dari service:
-bahwa isian ikut berpindah ketika antriannya berganti, bahwa menutup
-pelayanan tidak menelan pengaduan yang gagal tersimpan, dan bahwa tombol
-Hapus tidak pernah muncul di layar petugas.
+Ruang kerja pengaduan/catatan sekarang menyatu di panel kanan, bukan
+dialog: satu QTabWidget berbagi tempat dengan Menunggu Dilayani, dan
+berpindah tab sendiri mengikuti status loket. Yang diuji di sini adalah
+perilaku yang tidak terlihat dari service — bahwa panel berpindah pada
+saat yang tepat, bahwa isian ikut berpindah ketika antriannya berganti,
+bahwa menutup pelayanan tidak menelan pengaduan yang gagal tersimpan, dan
+bahwa tombol Hapus tidak pernah muncul di layar petugas.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from tests.conftest import TEST_PASSWORD
 
 @pytest.fixture
 def halaman_kerja(qtbot, auth, antrian_siap):
-    """Panel pelayanan lengkap dengan ruang kerjanya, sebagai petugas CRO."""
+    """Panel pelayanan lengkap dengan panel kanannya, sebagai petugas CRO."""
     from app.services.master_data_service import MasterDataService
     from app.services.note_service import NoteService
     from app.services.queue_service import QueueService
@@ -54,26 +57,6 @@ def bisu(monkeypatch):
     return dicatat
 
 
-# ---------------------------------------------------------------------
-# Ruang kerja (dialog) dan baris ringkasnya
-# ---------------------------------------------------------------------
-
-def _buka(halaman, qtbot):
-    """
-    Dialog ruang kerja untuk antrian yang sedang ditangani.
-
-    Identitas dibaca dari formulir Data Pelapor di layar pelayanan, persis
-    seperti yang dilakukan `ServicePage.buka_ruang_kerja`.
-    """
-    from app.ui.queue.note_dialog import NoteDialog
-
-    dialog = NoteDialog(
-        halaman.note, halaman.antrian, lambda: halaman.pelapor.nilai, halaman
-    )
-    qtbot.addWidget(dialog)
-    return dialog
-
-
 def _panggil(halaman, terbitkan, prefix: str = "A"):
     """Terbitkan satu nomor lalu panggil ke loket halaman ini."""
     terbitkan(prefix)
@@ -81,25 +64,92 @@ def _panggil(halaman, terbitkan, prefix: str = "A"):
     halaman.panggil_berikutnya()
 
 
-def test_tombol_ruang_kerja_mati_tanpa_antrian(halaman_kerja):
-    assert not halaman_kerja.tombol_kerja.isEnabled()
-    assert "setelah nomor dipanggil" in halaman_kerja.label_kerja.text()
+# ---------------------------------------------------------------------
+# Panel kanan: Menunggu Dilayani <-> Pengaduan & Catatan
+# ---------------------------------------------------------------------
+
+def test_tab_menunggu_terlihat_selagi_loket_kosong(halaman_kerja):
+    """Loket kosong berarti petugas sedang memilih siapa berikutnya."""
+    assert halaman_kerja.tab_kanan.currentWidget() is halaman_kerja.panel_menunggu
 
 
-def test_tombol_ruang_kerja_hidup_setelah_memanggil(halaman_kerja, terbitkan):
-    terbitkan("A")
-    halaman_kerja.muat_ulang()
-    halaman_kerja.panggil_berikutnya()
+def test_berpindah_ke_pengaduan_otomatis_saat_dipanggil(halaman_kerja, terbitkan):
+    """Nomor dipanggil berarti petugas mulai berbicara dengan orangnya."""
+    _panggil(halaman_kerja, terbitkan)
+    assert halaman_kerja.tab_kanan.currentWidget() is halaman_kerja.panel_pengaduan
 
-    assert halaman_kerja.tombol_kerja.isEnabled()
-    assert "Belum ada" in halaman_kerja.label_kerja.text()
+
+def test_kembali_ke_menunggu_otomatis_saat_selesai(halaman_kerja, terbitkan):
+    _panggil(halaman_kerja, terbitkan)
+    halaman_kerja.mulai_melayani()
+    halaman_kerja.selesaikan()
+
+    assert halaman_kerja.tab_kanan.currentWidget() is halaman_kerja.panel_menunggu
+
+
+def test_tab_manual_tidak_dipaksa_kembali_oleh_penyegaran(halaman_kerja, terbitkan):
+    """
+    Memanggil ulang (F3) tidak mengganti antrian yang dipegang loket, jadi
+    tidak boleh menyeret petugas keluar dari tab yang sengaja ia buka
+    sendiri untuk melirik daftar tunggu sambil tetap melayani.
+    """
+    _panggil(halaman_kerja, terbitkan)
+    halaman_kerja.tab_kanan.setCurrentWidget(halaman_kerja.panel_menunggu)
+
+    halaman_kerja.panggil_ulang()
+
+    assert halaman_kerja.tab_kanan.currentWidget() is halaman_kerja.panel_menunggu
+
+
+def test_f9_berpindah_tab_dan_fokus_ke_kotak(halaman_kerja, terbitkan):
+    _panggil(halaman_kerja, terbitkan)
+    halaman_kerja.tab_kanan.setCurrentWidget(halaman_kerja.panel_menunggu)
+
+    halaman_kerja.buka_ruang_kerja()
+
+    assert halaman_kerja.tab_kanan.currentWidget() is halaman_kerja.panel_pengaduan
+
+
+def test_judul_tab_menunggu_menyebut_jumlah_dan_yang_lama(halaman_kerja):
+    from app.ui.queue.service_page import TUNGGU_LAMA_MENIT
+
+    halaman_kerja._perbarui_judul_tab_menunggu(5, [3, TUNGGU_LAMA_MENIT, 25])
+
+    assert halaman_kerja.tab_kanan.tabText(0) == "Menunggu Dilayani (5) · 2 lama"
+
+
+def test_judul_tab_tanpa_keterangan_lama_bila_tidak_ada(halaman_kerja):
+    halaman_kerja._perbarui_judul_tab_menunggu(3, [1, 2, 5])
+    assert halaman_kerja.tab_kanan.tabText(0) == "Menunggu Dilayani (3)"
+
+
+# ---------------------------------------------------------------------
+# Panel Pengaduan & Catatan
+# ---------------------------------------------------------------------
+
+def test_panel_pengaduan_mati_tanpa_antrian(halaman_kerja):
+    """Dinonaktifkan, bukan disembunyikan — sama seperti tombol tindakan."""
+    panel = halaman_kerja.panel_pengaduan
+
+    assert panel is not None
+    assert not panel.isEnabled()
+    assert not halaman_kerja.pelapor.isian_nama.isEnabled()
+
+
+def test_panel_pengaduan_hidup_setelah_memanggil(halaman_kerja, terbitkan):
+    _panggil(halaman_kerja, terbitkan)
+
+    panel = halaman_kerja.panel_pengaduan
+    assert panel.isEnabled()
+    assert halaman_kerja.pelapor.isian_nama.isEnabled()
 
 
 def test_isian_pelapor_tidak_saling_menimpa(halaman_kerja, terbitkan, qtbot):
     """
     Formulir tujuh isian pernah diperas di kolom kiri sampai label dan
     isian saling menimpa. Setelah dipecah — identitas di layar, kotak
-    keluhan di dialog — test ini yang menjaga sisa di layarnya tetap muat.
+    keluhan di panel kanan — test ini yang menjaga sisa di layarnya
+    tetap muat.
     """
     _panggil(halaman_kerja, terbitkan)
     halaman_kerja.show()
@@ -116,100 +166,95 @@ def test_isian_pelapor_tidak_saling_menimpa(halaman_kerja, terbitkan, qtbot):
         assert isian.height() >= isian.fontMetrics().height()
 
 
-def test_kotak_dialog_tidak_saling_menimpa(halaman_kerja, terbitkan, qtbot):
+def test_kotak_pengaduan_tidak_saling_menimpa(halaman_kerja, terbitkan, qtbot):
     _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    halaman_kerja.tab_kanan.setCurrentWidget(panel)
+    halaman_kerja.show()
+    qtbot.waitExposed(halaman_kerja)
 
-    dialog = _buka(halaman_kerja, qtbot)
-    dialog.show()
-    qtbot.waitExposed(dialog)
-
-    atas, bawah = dialog.isian_deskripsi, dialog.isian_catatan
+    atas, bawah = panel.isian_deskripsi, panel.isian_catatan
     assert (
-        atas.mapTo(dialog, atas.rect().bottomLeft()).y()
-        <= bawah.mapTo(dialog, bawah.rect().topLeft()).y()
+        atas.mapTo(panel, atas.rect().bottomLeft()).y()
+        <= bawah.mapTo(panel, bawah.rect().topLeft()).y()
     )
     for kotak in (atas, bawah):
         assert kotak.height() >= kotak.fontMetrics().height()
 
 
-def test_identitas_ada_di_layar_bukan_di_dialog(halaman_kerja, terbitkan, qtbot):
+def test_identitas_ada_di_layar_bukan_di_panel_kanan(halaman_kerja, terbitkan):
     """
     Identitas ditulis sambil bertanya kepada orang di depan meja; keluhan
     ditulis sambil mendengarkan. Dua kegiatan, dua tempat.
     """
     _panggil(halaman_kerja, terbitkan)
 
-    dialog = _buka(halaman_kerja, qtbot)
-    assert not hasattr(dialog, "isian_nama")
+    assert not hasattr(halaman_kerja.panel_pengaduan, "isian_nama")
     assert halaman_kerja.pelapor.isian_nama.isEnabled()
 
 
-def test_catatan_tersimpan_lewat_dialog(halaman_kerja, terbitkan, auth, qtbot):
+def test_catatan_tersimpan_lewat_panel(halaman_kerja, terbitkan, auth):
     from app.services.note_service import NoteService
 
-    terbitkan("A")
-    halaman_kerja.muat_ulang()
-    halaman_kerja.panggil_berikutnya()
+    _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    panel.isian_catatan.setPlainText("Berkas belum lengkap.")
 
-    dialog = _buka(halaman_kerja, qtbot)
-    dialog.isian_catatan.setPlainText("Berkas belum lengkap.")
-    assert dialog.simpan()
+    assert panel.simpan()
 
     lembar = NoteService(auth).ambil(halaman_kerja.antrian.id)
     assert lembar.catatan == "Berkas belum lengkap."
 
 
-def test_dialog_tetap_terbuka_setelah_menyimpan(halaman_kerja, terbitkan, qtbot):
-    """Petugas sering menyimpan di tengah pembicaraan lalu meneruskan."""
-    terbitkan("A")
-    halaman_kerja.muat_ulang()
-    halaman_kerja.panggil_berikutnya()
+def test_menyimpan_tidak_mengosongkan_isian(halaman_kerja, terbitkan):
+    """
+    Petugas sering menyimpan di tengah pembicaraan lalu meneruskan
+    mengetik — isian yang lenyap begitu Simpan ditekan memaksanya
+    mengetik ulang.
+    """
+    _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    panel.isian_catatan.setPlainText("Catatan sementara.")
+    panel.simpan()
 
-    dialog = _buka(halaman_kerja, qtbot)
-    dialog.show()
-    dialog.isian_catatan.setPlainText("Catatan sementara.")
-    dialog.simpan()
-
-    assert dialog.isVisible()
-    assert not dialog.berubah
+    assert panel.isian_catatan.toPlainText() == "Catatan sementara."
+    assert not panel.berubah
 
 
-def test_lembar_yang_sudah_ada_dimuat_kembali(halaman_kerja, terbitkan, qtbot):
-    terbitkan("A")
-    halaman_kerja.muat_ulang()
-    halaman_kerja.panggil_berikutnya()
+def test_lembar_yang_sudah_ada_dimuat_kembali(halaman_kerja, terbitkan):
+    _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    panel.isian_catatan.setPlainText("Sudah dijelaskan jadwalnya.")
+    panel.simpan()
 
-    pertama = _buka(halaman_kerja, qtbot)
-    pertama.isian_catatan.setPlainText("Sudah dijelaskan jadwalnya.")
-    pertama.simpan()
+    # Paksa panel membaca ulang seolah nomornya baru saja dipanggil lagi.
+    antrian = halaman_kerja.antrian
+    panel.set_antrian(None)
+    panel.set_antrian(antrian)
 
-    kedua = _buka(halaman_kerja, qtbot)
-    assert kedua.isian_catatan.toPlainText() == "Sudah dijelaskan jadwalnya."
-    assert not kedua.berubah
+    assert panel.isian_catatan.toPlainText() == "Sudah dijelaskan jadwalnya."
+    assert not panel.berubah
 
 
 def test_pengaduan_tanpa_identitas_ditahan_sebelum_menyentuh_database(
-    halaman_kerja, terbitkan, qtbot, bisu
+    halaman_kerja, terbitkan, bisu
 ):
     """
-    Ditahan di dialog, bukan dibiarkan ditolak service: petugas perlu tahu
-    bahwa yang kurang ada di LAYAR PELAYANAN, bukan di dialog ini. Keluhan
-    yang sudah tertulis tidak boleh ikut hilang bersama pesan gagalnya.
+    Ditahan di panel, bukan dibiarkan ditolak service: keluhan yang sudah
+    tertulis tidak boleh ikut hilang bersama pesan gagalnya.
     """
     _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    panel.isian_deskripsi.setPlainText("Air mati tiga hari.")
 
-    dialog = _buka(halaman_kerja, qtbot)
-    dialog.isian_deskripsi.setPlainText("Air mati tiga hari.")
-
-    assert not dialog.simpan()
-    assert not bisu, "tidak perlu kotak dialog; cukup keterangan di kakinya"
-    assert "Lengkapi" in dialog.label_keadaan.text()
-    assert "layar" in dialog.label_keadaan.text()
-    assert dialog.isian_deskripsi.toPlainText() == "Air mati tiga hari."
+    assert not panel.simpan()
+    assert not bisu, "tidak perlu kotak dialog; cukup keterangan di panelnya"
+    assert "Lengkapi" in panel.label_keadaan.text()
+    assert panel.isian_deskripsi.toPlainText() == "Air mati tiga hari."
 
 
 def test_pengaduan_tersimpan_bersama_identitas_dari_layar(
-    halaman_kerja, terbitkan, qtbot, auth
+    halaman_kerja, terbitkan, auth
 ):
     from app.services.note_service import NoteService
 
@@ -218,9 +263,9 @@ def test_pengaduan_tersimpan_bersama_identitas_dari_layar(
     halaman_kerja.pelapor.isian_nomor_pelanggan.setText("1234567")
     halaman_kerja.pelapor.isian_telepon.setText("081234567890")
 
-    dialog = _buka(halaman_kerja, qtbot)
-    dialog.isian_deskripsi.setPlainText("Air mati tiga hari.")
-    assert dialog.simpan()
+    panel = halaman_kerja.panel_pengaduan
+    panel.isian_deskripsi.setPlainText("Air mati tiga hari.")
+    assert panel.simpan()
 
     lembar = NoteService(auth).ambil(halaman_kerja.antrian.id)
     assert lembar.nama == "Budi Santoso"
@@ -229,115 +274,38 @@ def test_pengaduan_tersimpan_bersama_identitas_dari_layar(
     assert lembar.deskripsi == "Air mati tiga hari."
 
 
-def test_berpindah_nomor_mengosongkan_data_pelapor(halaman_kerja, terbitkan):
+def test_berpindah_nomor_mengosongkan_data_pelapor_dan_isian(
+    halaman_kerja, terbitkan
+):
     """
-    Identitas yang tertinggal dari nomor sebelumnya berarti keluhan orang
-    ini tersimpan atas nama orang lain.
+    Identitas maupun keluhan yang tertinggal dari nomor sebelumnya berarti
+    keluhan orang ini tersimpan atas nama orang lain.
     """
     terbitkan("A", 2)
     halaman_kerja.muat_ulang()
     halaman_kerja.panggil_berikutnya()
     halaman_kerja.pelapor.isian_nama.setText("Budi Santoso")
+    halaman_kerja.panel_pengaduan.isian_catatan.setPlainText("Catatan pertama.")
 
     halaman_kerja.mulai_melayani()
     halaman_kerja.selesaikan()
     halaman_kerja.panggil_berikutnya()
 
     assert halaman_kerja.pelapor.isian_nama.text() == ""
+    assert halaman_kerja.panel_pengaduan.isian_catatan.toPlainText() == ""
 
 
-def test_data_pelapor_dimuat_kembali_dari_lembar_tersimpan(
-    halaman_kerja, terbitkan, qtbot
-):
+def test_kapsul_mengikuti_isi_lembar(halaman_kerja, terbitkan):
+    """Petugas tahu lembar ini menjadi apa tanpa membuka apa pun."""
     _panggil(halaman_kerja, terbitkan)
-    halaman_kerja.pelapor.isian_nama.setText("Budi Santoso")
-    halaman_kerja.pelapor.isian_nomor_pelanggan.setText("1234567")
+    panel = halaman_kerja.panel_pengaduan
+    assert panel.kapsul.text() == "KOSONG"
 
-    dialog = _buka(halaman_kerja, qtbot)
-    dialog.isian_deskripsi.setPlainText("Air mati tiga hari.")
-    dialog.simpan()
+    panel.isian_catatan.setPlainText("Berkas belum lengkap.")
+    assert panel.kapsul.text() == "CATATAN"
 
-    # Paksa panel membaca ulang seolah nomornya baru saja dipanggil lagi.
-    halaman_kerja.pelapor.kosongkan()
-    halaman_kerja._lembar_nomor = None
-    halaman_kerja._perbarui_baris_kerja()
-
-    assert halaman_kerja.pelapor.isian_nama.text() == "Budi Santoso"
-    assert halaman_kerja.pelapor.isian_nama.property("wajib") is None
-
-
-def test_menutup_dengan_isian_belum_tersimpan_dikonfirmasi(
-    halaman_kerja, terbitkan, qtbot, monkeypatch
-):
-    terbitkan("A")
-    halaman_kerja.muat_ulang()
-    halaman_kerja.panggil_berikutnya()
-
-    dialog = _buka(halaman_kerja, qtbot)
-    dialog.isian_catatan.setPlainText("Belum sempat disimpan.")
-
-    ditanya: list[str] = []
-    monkeypatch.setattr(
-        "app.ui.queue.note_dialog.konfirmasi",
-        lambda parent, pertanyaan, judul="Konfirmasi": ditanya.append(pertanyaan)
-        and False,
-    )
-    dialog.reject()
-
-    assert ditanya, "menutup tanpa menyimpan wajib ditanyakan"
-    assert dialog.result() != dialog.DialogCode.Accepted
-
-
-def test_menutup_tanpa_perubahan_tidak_bertanya(
-    halaman_kerja, terbitkan, qtbot, monkeypatch
-):
-    """Pertanyaan yang muncul tanpa alasan membuat petugas berhenti membacanya."""
-    terbitkan("A")
-    halaman_kerja.muat_ulang()
-    halaman_kerja.panggil_berikutnya()
-
-    dialog = _buka(halaman_kerja, qtbot)
-    ditanya: list[str] = []
-    monkeypatch.setattr(
-        "app.ui.queue.note_dialog.konfirmasi",
-        lambda *a, **k: ditanya.append("x") or True,
-    )
-    dialog.reject()
-
-    assert not ditanya
-
-
-def test_kedua_kotak_terlihat_tanpa_berpindah_tab(halaman_kerja, terbitkan, qtbot):
-    """
-    Tab menyembunyikan separuh formulir di balik klik, dan yang tersembunyi
-    justru catatan petugas — bagian yang paling sering lupa diisi.
-    """
-    terbitkan("A")
-    halaman_kerja.muat_ulang()
-    halaman_kerja.panggil_berikutnya()
-
-    dialog = _buka(halaman_kerja, qtbot)
-    dialog.show()
-    qtbot.waitExposed(dialog)
-
-    assert dialog.isian_deskripsi.isVisible()
-    assert dialog.isian_catatan.isVisible()
-
-
-def test_kapsul_mengikuti_isi_lembar(halaman_kerja, terbitkan, qtbot):
-    """Petugas tahu lembar ini menjadi apa sebelum menekan Simpan."""
-    terbitkan("A")
-    halaman_kerja.muat_ulang()
-    halaman_kerja.panggil_berikutnya()
-
-    dialog = _buka(halaman_kerja, qtbot)
-    assert dialog.kapsul.text() == "KOSONG"
-
-    dialog.isian_catatan.setPlainText("Berkas belum lengkap.")
-    assert dialog.kapsul.text() == "CATATAN"
-
-    dialog.isian_deskripsi.setPlainText("Air mati tiga hari.")
-    assert dialog.kapsul.text() == "PENGADUAN"
+    panel.isian_deskripsi.setPlainText("Air mati tiga hari.")
+    assert panel.kapsul.text() == "PENGADUAN"
 
 
 def test_identitas_ditandai_wajib_hanya_setelah_ada_pengaduan(
@@ -349,11 +317,12 @@ def test_identitas_ditandai_wajib_hanya_setelah_ada_pengaduan(
     """
     _panggil(halaman_kerja, terbitkan)
     pelapor = halaman_kerja.pelapor
+    panel = halaman_kerja.panel_pengaduan
 
     assert pelapor.isian_nama.property("wajib") is None
     assert "*" not in pelapor.label_nama.text()
 
-    pelapor.tandai_wajib(True)
+    panel.isian_deskripsi.setPlainText("Air mati tiga hari.")
 
     assert pelapor.isian_nama.property("wajib") == "true"
     assert pelapor.label_nama.text().endswith("*")
@@ -361,52 +330,44 @@ def test_identitas_ditandai_wajib_hanya_setelah_ada_pengaduan(
 
     pelapor.isian_nama.setText("Budi")
     pelapor.isian_nomor_pelanggan.setText("1234567")
-    pelapor.tandai_wajib(True)
 
     assert pelapor.isian_nama.property("wajib") is None
     assert "Wajib diisi" not in pelapor.label_petunjuk.text()
 
 
-def test_dialog_menyebut_identitas_yang_belum_diisi(halaman_kerja, terbitkan, qtbot):
-    """
-    Isiannya berada di layar yang sedang tertutup dialog ini; petugas tidak
-    dapat melihat sendiri apa yang belum terisi.
-    """
+def test_data_pelapor_dimuat_kembali_dari_lembar_tersimpan(halaman_kerja, terbitkan):
     _panggil(halaman_kerja, terbitkan)
-
-    dialog = _buka(halaman_kerja, qtbot)
-    dialog.isian_deskripsi.setPlainText("Air mati tiga hari.")
-
-    assert "Nama" in dialog.label_pelapor.text()
-    assert "No. Pelanggan" in dialog.label_pelapor.text()
-
-    halaman_kerja.pelapor.isian_nama.setText("Budi")
+    halaman_kerja.pelapor.isian_nama.setText("Budi Santoso")
     halaman_kerja.pelapor.isian_nomor_pelanggan.setText("1234567")
-    dialog._perbarui_dinamis()
 
-    assert dialog.label_pelapor.text() == "Budi · 1234567"
+    panel = halaman_kerja.panel_pengaduan
+    panel.isian_deskripsi.setPlainText("Air mati tiga hari.")
+    panel.simpan()
+
+    # Paksa panel membaca ulang seolah nomornya baru saja dipanggil lagi.
+    halaman_kerja.pelapor.kosongkan()
+    antrian = halaman_kerja.antrian
+    panel.set_antrian(None)
+    panel.set_antrian(antrian)
+
+    assert halaman_kerja.pelapor.isian_nama.text() == "Budi Santoso"
+    assert halaman_kerja.pelapor.isian_nama.property("wajib") is None
 
 
-def test_tombol_simpan_mati_selama_belum_ada_isi(halaman_kerja, terbitkan, qtbot):
-    terbitkan("A")
-    halaman_kerja.muat_ulang()
-    halaman_kerja.panggil_berikutnya()
-
-    dialog = _buka(halaman_kerja, qtbot)
-    assert not dialog.tombol_simpan.isEnabled()
+def test_tombol_simpan_mati_selama_belum_ada_isi(halaman_kerja, terbitkan):
+    _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    assert not panel.tombol_simpan.isEnabled()
 
     # Identitas saja bukan isi: tidak ada keluhan maupun catatan di sana.
     halaman_kerja.pelapor.isian_nama.setText("Budi")
-    dialog._perbarui_dinamis()
-    assert not dialog.tombol_simpan.isEnabled()
+    assert not panel.tombol_simpan.isEnabled()
 
-    dialog.isian_catatan.setPlainText("Berkas belum lengkap.")
-    assert dialog.tombol_simpan.isEnabled()
+    panel.isian_catatan.setPlainText("Berkas belum lengkap.")
+    assert panel.tombol_simpan.isEnabled()
 
 
-def test_penghitung_huruf_memperingatkan_sebelum_batas(
-    halaman_kerja, terbitkan, qtbot
-):
+def test_penghitung_huruf_memperingatkan_sebelum_batas(halaman_kerja, terbitkan):
     """
     Petugas yang baru tahu batasnya ketika penolakan muncul harus memotong
     kalimat orang lain sambil orangnya menunggu.
@@ -414,55 +375,66 @@ def test_penghitung_huruf_memperingatkan_sebelum_batas(
     from app.services.note_service import PANJANG_CATATAN
     from app.ui.style import TEXT_MUTED
 
-    terbitkan("A")
-    halaman_kerja.muat_ulang()
-    halaman_kerja.panggil_berikutnya()
+    _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    panel.isian_catatan.setPlainText("abc")
+    assert panel.hitung_catatan.text() == f"3 / {PANJANG_CATATAN}"
+    assert TEXT_MUTED in panel.hitung_catatan.styleSheet()
 
-    dialog = _buka(halaman_kerja, qtbot)
-    dialog.isian_catatan.setPlainText("abc")
-    assert dialog.hitung_catatan.text() == f"3 / {PANJANG_CATATAN}"
-    assert TEXT_MUTED in dialog.hitung_catatan.styleSheet()
-
-    dialog.isian_catatan.setPlainText("a" * (PANJANG_CATATAN - 1))
-    assert TEXT_MUTED not in dialog.hitung_catatan.styleSheet()
+    panel.isian_catatan.setPlainText("a" * (PANJANG_CATATAN - 1))
+    assert TEXT_MUTED not in panel.hitung_catatan.styleSheet()
 
 
-def test_keadaan_menyebut_perubahan_yang_belum_disimpan(
-    halaman_kerja, terbitkan, qtbot
-):
-    terbitkan("A")
-    halaman_kerja.muat_ulang()
-    halaman_kerja.panggil_berikutnya()
+def test_keadaan_menyebut_perubahan_yang_belum_disimpan(halaman_kerja, terbitkan):
+    _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    assert "Belum pernah disimpan" in panel.label_keadaan.text()
 
-    dialog = _buka(halaman_kerja, qtbot)
-    assert "Belum pernah disimpan" in dialog.label_keadaan.text()
+    panel.isian_catatan.setPlainText("Belum sempat disimpan.")
+    assert "belum disimpan" in panel.label_keadaan.text()
 
-    dialog.isian_catatan.setPlainText("Belum sempat disimpan.")
-    assert "belum disimpan" in dialog.label_keadaan.text()
-
-    dialog.simpan()
-    assert "Tersimpan" in dialog.label_keadaan.text()
+    panel.simpan()
+    assert "Tersimpan" in panel.label_keadaan.text()
 
 
-def test_baris_ringkas_menyebut_keadaan_lembar(halaman_kerja, terbitkan, qtbot):
+def test_selesai_menyimpan_otomatis_sebelum_menutup(halaman_kerja, terbitkan, auth):
+    """F8 menutup pelayanan; catatannya tidak boleh ikut hilang bersamanya."""
+    from app.models import QueueStatus
+    from app.services.note_service import NoteService
+
+    _panggil(halaman_kerja, terbitkan)
+    antrian_id = halaman_kerja.antrian.id
+    halaman_kerja.panel_pengaduan.isian_catatan.setPlainText("Selesai dilayani.")
+
+    halaman_kerja.mulai_melayani()
+    halaman_kerja.selesaikan()
+
+    lembar = NoteService(auth).ambil(antrian_id)
+    assert lembar is not None
+    assert lembar.catatan == "Selesai dilayani."
+    assert halaman_kerja.queue.get_queue(antrian_id).status is QueueStatus.COMPLETED
+
+
+def test_pengaduan_tanpa_nama_membatalkan_penyelesaian(halaman_kerja, terbitkan, bisu):
     """
-    Lembar yang tersembunyi di balik dialog mudah terlupakan sama sekali
-    bila layarnya tidak menyebut keadaannya.
+    Antrian TIDAK boleh tertutup ketika pengaduannya gagal disimpan.
+    Kartu berganti kosong begitu selesai, dan yang menceritakan keluhannya
+    sudah berdiri meninggalkan meja.
     """
-    terbitkan("A")
-    halaman_kerja.muat_ulang()
-    halaman_kerja.panggil_berikutnya()
+    from app.models import QueueStatus
 
-    halaman_kerja.pelapor.isian_nama.setText("Budi")
-    halaman_kerja.pelapor.isian_nomor_pelanggan.setText("1234567")
-    dialog = _buka(halaman_kerja, qtbot)
-    dialog.isian_deskripsi.setPlainText("Air mati tiga hari.")
-    dialog.simpan()
+    _panggil(halaman_kerja, terbitkan)
+    antrian_id = halaman_kerja.antrian.id
+    halaman_kerja.panel_pengaduan.isian_deskripsi.setPlainText("Air mati tiga hari.")
 
-    halaman_kerja._lembar_nomor = None
-    halaman_kerja._perbarui_baris_kerja()
+    halaman_kerja.mulai_melayani()
+    halaman_kerja.selesaikan()
 
-    assert "Pengaduan tersimpan" in halaman_kerja.label_kerja.text()
+    assert not bisu, "tidak perlu kotak dialog; cukup keterangan di panelnya"
+    assert halaman_kerja.queue.get_queue(antrian_id).status is not QueueStatus.COMPLETED
+    assert halaman_kerja.panel_pengaduan.isian_deskripsi.toPlainText() == (
+        "Air mati tiga hari."
+    )
 
 
 # ---------------------------------------------------------------------

@@ -219,28 +219,30 @@ Jalankan seluruhnya, termasuk yang tampak sepele.
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| N1 | Buka panel Pelayanan tanpa memanggil nomor | Kartu **Data Pelapor** terlihat tetapi isiannya mati; tombol ruang kerja juga mati | |
+| N1 | Buka panel Pelayanan tanpa memanggil nomor | Kartu **Data Pelapor** terlihat tetapi isiannya mati; panel kanan menampilkan tab **Menunggu Dilayani** | |
 | N1b | Amati kartu Data Pelapor | Lima isian terbaca utuh; tidak ada label atau kotak yang saling menimpa | |
-| N2 | Panggil satu nomor | Isian Data Pelapor hidup | |
-| N2a | Tekan `F9` | Dialog terbuka berisi **Pengaduan** dan **Catatan Petugas** saja — tanpa isian identitas | |
-| N2d | Perhatikan kapsul di kanan atas dialog | Bertuliskan KOSONG; berubah menjadi CATATAN lalu PENGADUAN mengikuti isian | |
-| N2e | Ketik keluhan tanpa mengisi Data Pelapor | Kepala dialog menyebut "Belum diisi di layar pelayanan: Nama, No. Pelanggan" | |
-| N2f | Tekan Simpan dalam keadaan itu | Ditahan; kakinya meminta melengkapi Data Pelapor di layar pelayanan; keluhan yang tertulis tetap ada | |
-| N2g | Tutup dialog | Nama dan No. Pelanggan di kartu Data Pelapor bertanda wajib dan berbingkai kuning | |
-| N2h | Lengkapi Data Pelapor, buka `F9` lagi, Simpan | Tersimpan; identitas ikut tersimpan bersama keluhannya | |
+| N2 | Panggil satu nomor | Isian Data Pelapor hidup; panel kanan **berpindah sendiri** ke tab Pengaduan & Catatan | |
+| N2a | Amati tab Pengaduan & Catatan | Berisi kotak **Pengaduan** dan **Catatan Petugas** saja — tanpa isian identitas | |
+| N2b | Amati kedua kotak | Label dan isian terbaca utuh; tidak ada yang saling menimpa atau terpotong | |
+| N2c | Perkecil jendela sekecil mungkin | Berhenti pada ukuran minimum aplikasi; isian tetap tidak tergencet | |
+| N2d | Perhatikan kapsul di kanan atas panel | Bertuliskan KOSONG; berubah menjadi CATATAN lalu PENGADUAN mengikuti isian | |
+| N2e | Ketik keluhan tanpa mengisi Data Pelapor | Nama dan No. Pelanggan di kartu Data Pelapor **langsung** bertanda wajib dan berbingkai kuning — tanpa menekan apa pun | |
+| N2f | Tekan Simpan dalam keadaan itu | Ditahan; keterangan di kaki panel meminta melengkapi Data Pelapor; keluhan yang tertulis tetap ada | |
+| N2g | Lengkapi Nama dan No. Pelanggan | Bingkai kuning hilang sendiri begitu diisi, tanpa menekan Simpan | |
+| N2h | Tekan Simpan | Tersimpan; identitas ikut tersimpan bersama keluhannya | |
 | N2i | Perhatikan penghitung huruf di bawah kotak | Angkanya berjalan; berubah warna mendekati batas | |
-| N2b | Amati formulirnya | Seluruh label dan isian terbaca utuh; tidak ada yang saling menimpa atau terpotong | |
-| N2c | Perkecil jendela dialog sekecil mungkin | Berhenti pada ukuran minimum; isian tetap tidak tergencet | |
-| N3 | Isi Catatan Petugas saja, tekan Ctrl+S | Tersimpan; waktu simpan muncul; **dialog tetap terbuka** | |
-| N4 | Isi Deskripsi Pengaduan tanpa nama, tekan Simpan | Ditolak dengan kalimat Indonesia yang jelas; isian tetap ada | |
-| N5 | Lengkapi nama dan nomor pelanggan, simpan | Tersimpan | |
-| N6 | Isi email `budi.contoh.id` (tanpa @) | Ditolak; bentuk emailnya disebut | |
-| N7 | Isi telepon `0812` | Ditolak; terlalu pendek | |
-| N8 | Ketik sesuatu lalu tutup dialog tanpa menyimpan | Ditanya lebih dahulu; menjawab tidak membuat dialog tetap terbuka | |
-| N8b | Tutup dialog tanpa mengubah apa pun | Langsung tertutup, tanpa pertanyaan | |
-| N9 | Tutup dialog, perhatikan baris di panel pelayanan | Menyebut "Pengaduan tersimpan" beserta jamnya | |
-| N10 | Selesaikan pelayanan, panggil nomor berikutnya | **Data Pelapor kosong** dan `F9` kosong — bukan isian nomor sebelumnya | |
+| N3 | Klik tab **Menunggu Dilayani** secara manual, lalu tekan `F3` (panggil ulang) | Tab **tetap** di Menunggu Dilayani — memanggil ulang tidak mengganti antrian yang dipegang loket | |
+| N3b | Dari keadaan itu, tekan `F9` | Berpindah ke tab Pengaduan & Catatan, kursor langsung di kotak yang relevan | |
+| N4 | Isi Catatan Petugas saja, tekan Ctrl+S | Tersimpan; waktu simpan muncul; isian **tidak** ikut terhapus | |
+| N5 | Isi Deskripsi Pengaduan tanpa nama, tekan Simpan | Ditolak dengan kalimat Indonesia yang jelas; isian tetap ada | |
+| N6 | Lengkapi nama dan nomor pelanggan, simpan | Tersimpan | |
+| N7 | Isi email `budi.contoh.id` (tanpa @) | Ditolak; bentuk emailnya disebut | |
+| N8 | Isi telepon `0812` | Ditolak; terlalu pendek | |
+| N9 | Ketik keluhan valid (nama & nomor pelanggan terisi), tekan `F8` | Pelayanan selesai; lembar tersimpan otomatis tanpa menekan Simpan lebih dulu; panel kanan kembali ke tab Menunggu Dilayani | |
+| N9b | Ketik deskripsi TANPA nama, tekan `F8` | Pelayanan **TIDAK** selesai; keterangan di kaki panel muncul; isian tetap ada | |
+| N10 | Selesaikan pelayanan, panggil nomor berikutnya | **Data Pelapor kosong** dan kedua kotak kosong — bukan isian nomor sebelumnya | |
 | N11 | Panggil ulang nomor yang lembarnya sudah terisi | Data Pelapor dan kedua kotak terisi kembali seperti terakhir disimpan | |
+| N11b | Terbitkan beberapa nomor lagi hingga ada yang menunggu lebih dari 10 menit, lihat judul tab | Judul menyebut jumlah menunggu dan "N lama" | |
 | N12 | Buka menu **Pengaduan & Catatan** | Daftar lembar muncul, terbaru di atas | |
 | N13 | Cari dengan nama pelapor | Hanya lembar milik nama itu yang tampil | |
 | N14 | Cari dengan nomor pelanggan, lalu dengan sepenggal isi pengaduan | Keduanya menemukan lembar yang benar | |

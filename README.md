@@ -300,20 +300,31 @@ kembali agar seluruh layar membaca data yang baru.
 ### Pengaduan dan catatan petugas
 
 Setiap nomor antrian punya satu **lembar kerja**, dan pengisiannya dipecah
-mengikuti cara petugas bekerja:
+mengikuti cara petugas bekerja — bukan dialog, keduanya menyatu di panel
+kerja:
 
 | Bagian | Di mana | Alasan |
 |---|---|---|
-| **Data Pelapor** — nama, no. pelanggan, telepon, email, alamat | Kartu tetap di layar pelayanan | Ditulis sambil **bertanya** kepada orang di depan meja; isian pendek yang harus dapat diisi seketika |
-| **Pengaduan** dan **Catatan Petugas** | Dialog, dibuka `F9` atau tombolnya | Ditulis sambil **mendengarkan**; kotak panjang yang butuh ruang, dan ruang itu tidak ada di kolom yang sudah memuat kartu antrian beserta seluruh tombol tindakan |
+| **Data Pelapor** — nama, no. pelanggan, telepon, email, alamat | Kartu tetap di kolom kiri, layar pelayanan | Ditulis sambil **bertanya** kepada orang di depan meja; isian pendek yang harus dapat diisi seketika |
+| **Pengaduan** dan **Catatan Petugas** | Tab **Pengaduan & Catatan** di panel kanan | Ditulis sambil **mendengarkan**; kotak panjang yang butuh ruang, dan panel kanan jauh lebih lebar daripada sisa kolom kiri |
 
-Dialognya memuat kedua kotak sekaligus dalam satu halaman — bukan tab. Tab
+**Panel kanan berpindah tab SENDIRI** mengikuti status loket: **Menunggu
+Dilayani** selagi loket kosong — saat petugas memilih siapa berikutnya —
+lalu otomatis berganti ke **Pengaduan & Catatan** begitu sebuah nomor
+dipanggil, saat petugas mulai berbicara dengan orangnya. Tab tetap dapat
+dibuka manual kapan pun (atau lewat `F9`), dan berpindah manual tidak
+dipaksa kembali oleh penyegaran data selama antrian yang dipegang loket
+belum berganti — memanggil ulang (`F3`) tidak menyeret petugas keluar dari
+tab yang sengaja ia buka sendiri untuk melirik daftar tunggu.
+
+Kedua kotak keluhan berada dalam **satu halaman**, bukan tab terpisah. Tab
 menyembunyikan separuh formulir di balik klik, dan yang tersembunyi justru
 catatan petugas, bagian yang paling sering lupa diisi.
 
-**Yang menyimpan adalah dialognya**, beserta identitas yang dibacanya dari
-layar pelayanan. Identitas tidak pernah tersimpan sendirian: nama pengunjung
-tanpa keluhan maupun catatan hanyalah data pribadi tanpa satu pun alasan.
+**Yang menyimpan adalah panel kanan itu sendiri**, beserta identitas yang
+dibacanya dari kartu Data Pelapor. Identitas tidak pernah tersimpan
+sendirian: nama pengunjung tanpa keluhan maupun catatan hanyalah data
+pribadi tanpa satu pun alasan.
 
 Isi lembarnya:
 
@@ -336,21 +347,27 @@ Aturan yang menjaganya:
 - **Isinya tidak pernah masuk audit log.** Audit mencatat *bahwa* sebuah
   lembar disimpan, oleh siapa, untuk nomor mana — tidak pernah apa yang
   tertulis di dalamnya.
-- **Menutup dialog dengan isian yang belum disimpan selalu ditanyakan.**
-  Yang menceritakan keluhannya sudah selesai berbicara; teks yang hilang
-  karena satu klik tidak dapat diketik ulang.
-- **Dialog tidak menutup sendiri setelah disimpan** (`Ctrl+S`). Petugas
-  sering menyimpan di tengah pembicaraan lalu meneruskan mengetik.
+- **Menyelesaikan pelayanan (`F8`) menyimpan lembarnya lebih dahulu.**
+  Kegagalan menyimpan — biasanya karena Nama atau No. Pelanggan belum
+  diisi padahal ada deskripsi — membatalkan penyelesaian: kartu antrian
+  berganti kosong begitu selesai, sedangkan yang menceritakan keluhannya
+  sudah berdiri meninggalkan meja.
+- **Simpan (`Ctrl+S`) tidak mengosongkan isian.** Petugas sering menyimpan
+  di tengah pembicaraan lalu meneruskan mengetik.
 - **Formulirnya mengikuti apa yang sedang diketik.** Begitu deskripsi
-  terisi, kapsul di kepala dialog berubah menjadi PENGADUAN dan dialog
-  menyebutkan identitas mana yang masih kosong — isiannya berada di layar
-  yang sedang tertutup dialog, sehingga petugas tidak dapat melihatnya
-  sendiri. Setelah dialog ditutup, Nama dan No. Pelanggan yang kosong
-  ditandai wajib di kartu Data Pelapor. Penghitung huruf memperingatkan
-  sebelum batasnya tercapai, bukan sesudah.
-- **Berganti nomor mengosongkan Data Pelapor.** Identitas yang tertinggal
-  dari nomor sebelumnya berarti keluhan orang ini tersimpan atas nama orang
-  lain.
+  terisi, kapsul di panel berubah menjadi PENGADUAN dan Nama serta No.
+  Pelanggan yang masih kosong langsung ditandai wajib di kartu Data
+  Pelapor — kedua kartu saling terlihat, sehingga tandanya tidak perlu
+  menunggu apa pun ditutup. Penghitung huruf memperingatkan sebelum
+  batasnya tercapai, bukan sesudah.
+- **Berganti nomor mengosongkan Data Pelapor dan kedua kotak.** Identitas
+  maupun keluhan yang tertinggal dari nomor sebelumnya berarti keluhan
+  orang ini tersimpan atas nama orang lain.
+- **Judul tab Menunggu Dilayani menyebut jumlah yang sudah lama menunggu.**
+  Begitu sebuah nomor dipanggil, panel berpindah ke Pengaduan & Catatan dan
+  daftar tunggu tidak lagi terlihat tanpa mengklik tabnya — judul tab
+  inilah satu-satunya yang tersisa untuk memberi tahu ada yang sudah
+  menunggu lebih dari 10 menit.
 - **Menulis milik CRO, menghapus milik ADMIN.** Penulis yang sekaligus
   dapat menghilangkan tulisannya membuat catatan itu tidak berguna sebagai
   bukti. Penghapusan tercatat di audit log.
