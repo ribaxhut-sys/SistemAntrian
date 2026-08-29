@@ -219,6 +219,121 @@ def test_menutup_tanpa_perubahan_tidak_bertanya(
     assert not ditanya
 
 
+def test_kedua_kotak_terlihat_tanpa_berpindah_tab(halaman_kerja, terbitkan, qtbot):
+    """
+    Tab menyembunyikan separuh formulir di balik klik, dan yang tersembunyi
+    justru catatan petugas — bagian yang paling sering lupa diisi.
+    """
+    terbitkan("A")
+    halaman_kerja.muat_ulang()
+    halaman_kerja.panggil_berikutnya()
+
+    dialog = _buka(halaman_kerja, qtbot)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    assert dialog.isian_deskripsi.isVisible()
+    assert dialog.isian_catatan.isVisible()
+
+
+def test_kapsul_mengikuti_isi_lembar(halaman_kerja, terbitkan, qtbot):
+    """Petugas tahu lembar ini menjadi apa sebelum menekan Simpan."""
+    terbitkan("A")
+    halaman_kerja.muat_ulang()
+    halaman_kerja.panggil_berikutnya()
+
+    dialog = _buka(halaman_kerja, qtbot)
+    assert dialog.kapsul.text() == "KOSONG"
+
+    dialog.isian_catatan.setPlainText("Berkas belum lengkap.")
+    assert dialog.kapsul.text() == "CATATAN"
+
+    dialog.isian_deskripsi.setPlainText("Air mati tiga hari.")
+    assert dialog.kapsul.text() == "PENGADUAN"
+
+
+def test_identitas_ditandai_wajib_hanya_setelah_ada_deskripsi(
+    halaman_kerja, terbitkan, qtbot
+):
+    """
+    Kewajibannya bersyarat. Peringatan yang menyala pada lembar yang hanya
+    berisi catatan petugas akan cepat berhenti dibaca.
+    """
+    terbitkan("A")
+    halaman_kerja.muat_ulang()
+    halaman_kerja.panggil_berikutnya()
+
+    dialog = _buka(halaman_kerja, qtbot)
+    assert dialog.isian_nama.property("wajib") is None
+    assert "*" not in dialog.label_nama.text()
+
+    dialog.isian_deskripsi.setPlainText("Air mati tiga hari.")
+
+    assert dialog.isian_nama.property("wajib") == "true"
+    assert dialog.label_nama.text().endswith("*")
+    assert "Nama" in dialog.label_pelapor.text()
+
+    dialog.isian_nama.setText("Budi")
+    assert dialog.isian_nama.property("wajib") is None
+    assert "Nama" not in dialog.label_pelapor.text()
+
+
+def test_tombol_simpan_mati_selama_belum_ada_isi(halaman_kerja, terbitkan, qtbot):
+    terbitkan("A")
+    halaman_kerja.muat_ulang()
+    halaman_kerja.panggil_berikutnya()
+
+    dialog = _buka(halaman_kerja, qtbot)
+    assert not dialog.tombol_simpan.isEnabled()
+
+    # Identitas saja bukan isi: tidak ada keluhan maupun catatan di sana.
+    dialog.isian_nama.setText("Budi")
+    assert not dialog.tombol_simpan.isEnabled()
+
+    dialog.isian_catatan.setPlainText("Berkas belum lengkap.")
+    assert dialog.tombol_simpan.isEnabled()
+
+
+def test_penghitung_huruf_memperingatkan_sebelum_batas(
+    halaman_kerja, terbitkan, qtbot
+):
+    """
+    Petugas yang baru tahu batasnya ketika penolakan muncul harus memotong
+    kalimat orang lain sambil orangnya menunggu.
+    """
+    from app.services.note_service import PANJANG_CATATAN
+    from app.ui.style import TEXT_MUTED
+
+    terbitkan("A")
+    halaman_kerja.muat_ulang()
+    halaman_kerja.panggil_berikutnya()
+
+    dialog = _buka(halaman_kerja, qtbot)
+    dialog.isian_catatan.setPlainText("abc")
+    assert dialog.hitung_catatan.text() == f"3 / {PANJANG_CATATAN}"
+    assert TEXT_MUTED in dialog.hitung_catatan.styleSheet()
+
+    dialog.isian_catatan.setPlainText("a" * (PANJANG_CATATAN - 1))
+    assert TEXT_MUTED not in dialog.hitung_catatan.styleSheet()
+
+
+def test_keadaan_menyebut_perubahan_yang_belum_disimpan(
+    halaman_kerja, terbitkan, qtbot
+):
+    terbitkan("A")
+    halaman_kerja.muat_ulang()
+    halaman_kerja.panggil_berikutnya()
+
+    dialog = _buka(halaman_kerja, qtbot)
+    assert "Belum pernah disimpan" in dialog.label_keadaan.text()
+
+    dialog.isian_catatan.setPlainText("Belum sempat disimpan.")
+    assert "belum disimpan" in dialog.label_keadaan.text()
+
+    dialog.simpan()
+    assert "Tersimpan" in dialog.label_keadaan.text()
+
+
 def test_baris_ringkas_menyebut_keadaan_lembar(halaman_kerja, terbitkan, qtbot):
     """
     Lembar yang tersembunyi di balik dialog mudah terlupakan sama sekali

@@ -220,7 +220,10 @@ Jalankan seluruhnya, termasuk yang tampak sepele.
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
 | N1 | Buka panel Pelayanan tanpa memanggil nomor | Tombol **Pengaduan & Catatan** mati; barisnya menyebut nomor harus dipanggil dulu | |
-| N2 | Panggil satu nomor, tekan `F9` | Dialog terbuka; tab **Pengaduan** dan **Catatan Petugas** ada | |
+| N2 | Panggil satu nomor, tekan `F9` | Dialog terbuka; **Pengaduan** dan **Catatan Petugas** terlihat sekaligus dalam satu halaman | |
+| N2d | Perhatikan kapsul di kanan atas | Bertuliskan KOSONG; berubah menjadi CATATAN lalu PENGADUAN mengikuti isian | |
+| N2e | Ketik deskripsi pengaduan, jangan isi nama | Nama dan No. Pelanggan langsung ditandai wajib, tanpa menekan Simpan | |
+| N2f | Perhatikan penghitung huruf di bawah kotak | Angkanya berjalan; berubah warna mendekati batas | |
 | N2b | Amati formulirnya | Seluruh label dan isian terbaca utuh; tidak ada yang saling menimpa atau terpotong | |
 | N2c | Perkecil jendela dialog sekecil mungkin | Berhenti pada ukuran minimum; isian tetap tidak tergencet | |
 | N3 | Isi Catatan Petugas saja, tekan Ctrl+S | Tersimpan; waktu simpan muncul; **dialog tetap terbuka** | |

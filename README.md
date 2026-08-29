@@ -307,7 +307,9 @@ seluruh tombol tindakan. Yang tertinggal di layar adalah keadaannya —
 sudah terisi atau belum, dan kapan terakhir disimpan — supaya lembar yang
 tersembunyi di balik dialog tidak terlupakan.
 
-Isinya dua bagian:
+Formulirnya **satu halaman** — bukan tab. Tab menyembunyikan separuh
+formulir di balik klik, dan yang tersembunyi justru catatan petugas, bagian
+yang paling sering lupa diisi. Isinya dua bagian yang terlihat sekaligus:
 
 | Bagian | Isi | Wajib |
 |---|---|---|
@@ -333,6 +335,11 @@ Aturan yang menjaganya:
   karena satu klik tidak dapat diketik ulang.
 - **Dialog tidak menutup sendiri setelah disimpan** (`Ctrl+S`). Petugas
   sering menyimpan di tengah pembicaraan lalu meneruskan mengetik.
+- **Formulirnya mengikuti apa yang sedang diketik.** Begitu deskripsi
+  terisi, kapsul di kepala berubah menjadi PENGADUAN dan isian Nama serta
+  No. Pelanggan berubah menjadi wajib — ditandai pada saat itu juga, bukan
+  sesudah Simpan ditekan dan penolakan muncul. Penghitung huruf ikut
+  memperingatkan sebelum batasnya tercapai, bukan sesudah.
 - **Menulis milik CRO, menghapus milik ADMIN.** Penulis yang sekaligus
   dapat menghilangkan tulisannya membuat catatan itu tidak berguna sebagai
   bukti. Penghapusan tercatat di audit log.

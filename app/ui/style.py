@@ -186,6 +186,20 @@ QLineEdit[invalid="true"] {{
     padding: 7px 9px;
 }}
 
+/* Isian wajib yang masih kosong, ditandai hanya ketika kewajibannya sudah
+   berlaku — bukan sejak formulir dibuka. Peringatan yang menyala sebelum
+   ada yang salah cepat berhenti dibaca. */
+QLineEdit[wajib="true"] {{
+    border: 2px solid {WARNING};
+    background: {WARNING_SOFT};
+    padding: 7px 9px;
+}}
+
+QPlainTextEdit[wajib="true"] {{
+    border: 2px solid {WARNING};
+    padding: 5px 7px;
+}}
+
 QComboBox QAbstractItemView {{
     background: {SURFACE};
     border: 1px solid {BORDER_STRONG};
