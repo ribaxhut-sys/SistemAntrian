@@ -542,3 +542,80 @@ def test_admin_dapat_menghapus_lembar(qtbot, auth, lembar_terisi, monkeypatch):
     halaman.hapus()
 
     assert halaman.tabel.rowCount() == sebelum - 1
+
+
+# ---------------------------------------------------------------------
+# Penyegaran otomatis
+# ---------------------------------------------------------------------
+
+def test_penyegaran_otomatis_menemukan_lembar_baru(qtbot, auth, antrian_siap, terbitkan):
+    """Petugas lain terus menulis lembar baru sepanjang hari."""
+    from app.services.note_service import NoteService
+
+    satu = terbitkan("A")[0]
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman = _halaman_pengaduan(qtbot, auth)
+    assert halaman.tabel.rowCount() == 0
+
+    NoteService(auth).simpan(satu.id, catatan="Ditulis setelah layar dibuka.")
+    halaman._segarkan_otomatis()
+
+    assert halaman.tabel.rowCount() == 1
+
+
+def test_penyegaran_otomatis_tidak_memakai_ketikan_belum_disubmit(
+    qtbot, auth, lembar_terisi
+):
+    """
+    Pencarian sengaja hanya berjalan saat Enter/Cari ditekan. Penyegaran
+    diam-diam yang membaca kotak pencarian secara langsung akan mendahului
+    petugas yang belum selesai mengetik kata kuncinya.
+    """
+    halaman = _halaman_pengaduan(qtbot, auth)
+    sebelum = halaman.tabel.rowCount()
+
+    # Diketik, TIDAK ditekan Enter maupun tombol Cari.
+    halaman.isian_cari.setText("kata yang tidak akan pernah cocok")
+    halaman._segarkan_otomatis()
+
+    assert halaman.tabel.rowCount() == sebelum
+
+
+def test_penyegaran_otomatis_mempertahankan_baris_terpilih(
+    qtbot, auth, antrian_siap, terbitkan
+):
+    """
+    Baris yang sedang dibaca petugas tidak boleh melompat ke baris lain
+    hanya karena penyegaran berkala kebetulan berbunyi.
+    """
+    from app.services.note_service import NoteService
+
+    satu, dua = terbitkan("A", 2)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    note = NoteService(auth)
+    note.simpan(satu.id, catatan="Lembar pertama.")
+    note.simpan(dua.id, catatan="Lembar kedua.")
+
+    halaman = _halaman_pengaduan(qtbot, auth)
+    halaman.tabel.selectRow(1)
+    dipilih = halaman.terpilih.id
+
+    halaman._segarkan_otomatis()
+
+    assert halaman.terpilih.id == dipilih
+
+
+def test_f5_tetap_memakai_ketikan_saat_ini(qtbot, auth, lembar_terisi):
+    """
+    `muat_ulang()` — dipanggil F5 maupun tombol Cari — tetap membaca kotak
+    pencarian secara langsung. Hanya penyegaran BERKALA yang menahan diri.
+    """
+    halaman = _halaman_pengaduan(qtbot, auth)
+
+    halaman.isian_cari.setText("budi")
+    halaman.muat_ulang()
+
+    assert halaman.tabel.rowCount() == 1
+    assert halaman.terpilih.nama == "Budi Santoso"

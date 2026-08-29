@@ -126,6 +126,8 @@ proyek ini memakai `"Continue"` dan memeriksa `$LASTEXITCODE`.
 | `3ab265a` | Loket dan jenis layanan per petugas; istirahat dan tutup hari |
 | `0a0a727` | Televisi dipisah dari anjungan; papan menunggu per jenis layanan |
 | `9642b4d` | Ruang kerja pengaduan dan catatan petugas per antrian |
+| `d1e820b` | Panel kanan berpindah otomatis: Menunggu Dilayani <-> Pengaduan |
+| _belum di-commit_ | Layar Pengaduan & Catatan menyegar sendiri tiap 30 detik |
 
 ### Yang paling penting dari `535a60e`
 
@@ -155,7 +157,7 @@ RETURNING last_number
 
 | Dialect | Hasil |
 |---|---|
-| SQLite | **884 lolos** (29 Agustus 2026, termasuk papan per-layanan, sisa antrian di tiket, dan lembar pengaduan) |
+| SQLite | **888 lolos** (29 Agustus 2026, termasuk papan per-layanan, sisa antrian di tiket, lembar pengaduan, dan penyegaran otomatis layar Pengaduan) |
 | PostgreSQL | **598 lolos, 25 dilewati** — putaran lama, SEBELUM perubahan papan per-layanan |
 
 **Angka PostgreSQL itu sudah basi.** Suite belum pernah dijalankan ulang
@@ -237,6 +239,14 @@ ditegaskan ulang oleh pemilik:
 8. **Disimpan selamanya, dihapus manual** oleh ADMIN. Tidak ada pembersihan
    otomatis — yang berarti tabel ini hanya bertambah, dan pencariannya
    sengaja selalu dibatasi jumlah.
+9. **Layar Pengaduan & Catatan menyegar sendiri tiap 30 detik**, seperti
+   Ringkasan Harian. Penyegaran berkala memakai kriteria pencarian
+   TERAKHIR DISUBMIT, bukan membaca `isian_cari` secara langsung — kotak
+   itu boleh jadi sedang diketik separuh jalan saat timer kebetulan
+   berbunyi, dan pencarian di layar ini sengaja hanya berjalan saat
+   Enter/Cari ditekan. Baris yang sedang dibaca dipertahankan lintas
+   penyegaran selama lembarnya masih ada di hasil yang baru — dicocokkan
+   lewat id, bukan indeks baris.
 
 ### Langkah berikutnya
 

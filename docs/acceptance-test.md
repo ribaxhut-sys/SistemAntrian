@@ -248,6 +248,10 @@ Jalankan seluruhnya, termasuk yang tampak sepele.
 | N14 | Cari dengan nomor pelanggan, lalu dengan sepenggal isi pengaduan | Keduanya menemukan lembar yang benar | |
 | N15 | Centang **Hanya pengaduan** | Lembar yang hanya berisi catatan petugas hilang dari daftar | |
 | N16 | Pilih satu baris | Rincian muncul di kanan; isian yang kosong tidak ditampilkan sebagai "-" | |
+| N16b | Biarkan layar ini terbuka, tulis lembar baru dari komputer/loket lain, tunggu 30 detik | Lembar baru muncul di daftar tanpa menekan apa pun | |
+| N16c | Pilih baris di tengah daftar, biarkan 30 detik berlalu | Baris yang sama tetap terpilih; rincian di kanan tidak berpindah | |
+| N16d | Ketik sebagian kata kunci di kotak pencarian, JANGAN tekan Enter, tunggu 30 detik | Daftar tidak berubah mengikuti ketikan yang belum disubmit | |
+| N16e | Lanjutkan mengetik lalu tekan Enter | Daftar baru menyaring sesuai kata kunci lengkap | |
 | N17 | Periksa layar ini sebagai CRO | Tombol **Hapus Lembar** tidak ada sama sekali | |
 | N18 | Masuk sebagai SUPERVISOR, buka menu yang sama | Dapat membaca; tidak ada tombol Hapus | |
 | N19 | Masuk sebagai ADMIN, hapus satu lembar | Dikonfirmasi lebih dahulu, lalu hilang dari daftar | |

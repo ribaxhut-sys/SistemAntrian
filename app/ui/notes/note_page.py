@@ -11,13 +11,22 @@ adalah Hapus, dan tombolnya hanya hidup bagi ADMIN. Menyunting pengaduan
 lama dilakukan di panel pelayanan pada hari yang sama, bukan dari sini:
 pengaduan yang masih bisa diubah berhari-hari kemudian tidak berguna
 sebagai bukti apa pun.
+
+Menyegar sendiri secara berkala, seperti Ringkasan Harian — petugas lain
+terus menulis lembar baru sepanjang hari, dan layar yang dibuka lalu
+dibiarkan terbuka tidak boleh menyiratkan bahwa lembar seseorang tidak
+pernah masuk. Penyegaran berkala memakai kriteria pencarian TERAKHIR
+YANG DISUBMIT, bukan apa pun yang sedang diketik di kotak pencarian:
+pencarian sengaja hanya berjalan saat Enter/Cari ditekan (lihat komentar
+pada `isian_cari`), dan penyegaran diam-diam tidak boleh mendahului
+petugas yang belum selesai mengetik kata kuncinya.
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QTimer, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -57,6 +66,13 @@ from app.utils.formatting import hari_dan_tanggal, jam
 #: tidak perlu dicari, orangnya sedang berdiri di depan meja.
 HARI_BAWAAN = 30
 
+#: Jeda penyegaran otomatis, dalam milidetik.
+#:
+#: Sama dengan bawaan Ringkasan Harian. Layar ini dibaca berkali-kali
+#: sehari oleh lebih dari satu orang; 30 detik cukup segar tanpa membebani
+#: database dengan query beruntun.
+SELANG_PENYEGARAN_MS = 30_000
+
 
 class NotePage(QWidget):
     """Pencarian pengaduan dan catatan pada cabang yang sedang aktif."""
@@ -71,9 +87,28 @@ class NotePage(QWidget):
         self.note = note
         self.auth = auth
         self.hasil: list[NoteInfo] = []
+        #: Kriteria pencarian yang TERAKHIR DISUBMIT (Cari/Enter/centang),
+        #: dipakai ulang oleh penyegaran otomatis — lihat `_segarkan_otomatis`.
+        self._kata_terakhir = ""
+        self._dari_terakhir: date | None = None
+        self._sampai_terakhir: date | None = None
+        self._hanya_pengaduan_terakhir = False
 
         self._bangun_tampilan()
         self.muat_ulang()
+        self._pasang_penyegar()
+
+    def _pasang_penyegar(self) -> None:
+        """
+        Segarkan berkala supaya lembar baru dari petugas lain ikut terlihat.
+
+        Bukan `muat_ulang()` yang disambungkan, melainkan `_segarkan_otomatis`:
+        yang belakangan memakai kriteria TERAKHIR DISUBMIT, bukan apa pun
+        yang sedang diketik di kotak pencarian saat timer kebetulan berbunyi.
+        """
+        self.penyegar = QTimer(self)
+        self.penyegar.timeout.connect(self._segarkan_otomatis)
+        self.penyegar.start(SELANG_PENYEGARAN_MS)
 
     # -----------------------------------------------------------------
     # Tampilan
@@ -234,28 +269,60 @@ class NotePage(QWidget):
             self.muat_ulang()
 
     def muat_ulang(self) -> None:
-        dari = sampai = None
-        if self.centang_tanggal.isChecked():
-            dari = self.tanggal_dari.date().toPython()
-            sampai = self.tanggal_sampai.date().toPython()
+        """
+        Cari ulang memakai kriteria yang SEDANG TERTULIS di layar.
 
+        Dipanggil oleh interaksi eksplisit — tombol Cari, Enter di kotak
+        pencarian, kedua kotak tanggal, kedua kotak centang — maupun oleh
+        `F5`. Kriterianya disimpan sebagai "terakhir disubmit" supaya
+        penyegaran OTOMATIS berikutnya memakainya kembali tanpa membaca
+        ulang kotak pencarian, yang boleh jadi sedang diketik separuh
+        jalan.
+        """
+        self._kata_terakhir = self.isian_cari.text()
+        if self.centang_tanggal.isChecked():
+            self._dari_terakhir = self.tanggal_dari.date().toPython()
+            self._sampai_terakhir = self.tanggal_sampai.date().toPython()
+        else:
+            self._dari_terakhir = None
+            self._sampai_terakhir = None
+        self._hanya_pengaduan_terakhir = self.centang_pengaduan.isChecked()
+        self._cari_dan_tampilkan()
+
+    def _segarkan_otomatis(self) -> None:
+        """
+        Segarkan diam-diam setiap `SELANG_PENYEGARAN_MS`.
+
+        Memakai kriteria TERAKHIR DISUBMIT, bukan `muat_ulang()` — timer
+        ini dapat berbunyi kapan saja, termasuk saat petugas baru mengetik
+        separuh kata kunci dan belum menekan Enter. Mencari memakai kata
+        yang belum selesai diketik sama saja mendahului petugas yang
+        belum meminta apa pun.
+        """
+        self._cari_dan_tampilkan()
+
+    def _cari_dan_tampilkan(self) -> None:
         berhasil, data = jalankan_aman(
             self,
             lambda: self.note.cari(
-                self.isian_cari.text(),
-                dari=dari,
-                sampai=sampai,
-                hanya_pengaduan=self.centang_pengaduan.isChecked(),
+                self._kata_terakhir,
+                dari=self._dari_terakhir,
+                sampai=self._sampai_terakhir,
+                hanya_pengaduan=self._hanya_pengaduan_terakhir,
             ),
             "Gagal membaca pengaduan",
         )
         if not berhasil:
             return
 
+        # Baris yang sedang dibaca petugas TIDAK BOLEH melompat ke baris
+        # lain hanya karena penyegaran berkala kebetulan berbunyi —
+        # dicatat di sini, sebelum `self.hasil` ditimpa hasil yang baru.
+        dipilih_sebelumnya = self.terpilih.id if self.terpilih else None
         self.hasil = data or []
-        self._isi_tabel()
+        self._isi_tabel(pilih_id=dipilih_sebelumnya)
 
-    def _isi_tabel(self) -> None:
+    def _isi_tabel(self, pilih_id: int | None = None) -> None:
         self.tabel.setRowCount(len(self.hasil))
         for baris, lembar in enumerate(self.hasil):
             nilai = (
@@ -275,10 +342,23 @@ class NotePage(QWidget):
             if not self.hasil
             else f"{len(self.hasil)} lembar ditemukan."
         )
-        if self.hasil:
-            self.tabel.selectRow(0)
-        else:
+        if not self.hasil:
             self._tampilkan_rincian(None)
+            return
+
+        # Lembar yang sama dipilih lagi bila masih ada di hasil baru;
+        # baris pertama hanya dipakai untuk pencarian yang benar-benar
+        # baru, ketika belum ada satu pun yang dipilih sebelumnya.
+        baris_dipilih = next(
+            (i for i, lembar in enumerate(self.hasil) if lembar.id == pilih_id), 0
+        )
+        self.tabel.selectRow(baris_dipilih)
+        # Dipanggil eksplisit, bukan mengandalkan sinyal `currentCellChanged`
+        # semata: sinyal itu tidak berbunyi bila baris yang dipilih ulang
+        # kebetulan berindeks sama seperti sebelumnya, dan rincian akan
+        # menampilkan data yang sudah basi walau tabelnya sendiri sudah
+        # segar.
+        self._tampilkan_rincian(self.hasil[baris_dipilih])
 
     @property
     def terpilih(self) -> NoteInfo | None:

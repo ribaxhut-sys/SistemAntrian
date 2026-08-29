@@ -379,6 +379,16 @@ nomor pelanggan, isi pengaduan, catatan, atau nomor antrian — pengunjung
 yang kembali esok hari ke loket lain tidak perlu menceritakan keluhannya
 dari awal.
 
+Layar **Pengaduan & Catatan** menyegar sendiri setiap 30 detik, seperti
+Ringkasan Harian — petugas lain terus menulis lembar baru sepanjang hari,
+dan layar yang dibiarkan terbuka tidak boleh menyiratkan lembar seseorang
+tidak pernah masuk. Penyegaran diam-diam ini memakai kriteria pencarian
+yang TERAKHIR DISUBMIT, bukan apa pun yang sedang diketik: pencarian
+sengaja hanya berjalan saat Enter/Cari ditekan, dan penyegaran otomatis
+tidak boleh mendahului petugas yang belum selesai mengetik kata kuncinya.
+Baris yang sedang dibaca juga tidak melompat sendiri — dipertahankan
+selama lembarnya masih ada di hasil yang baru.
+
 ---
 
 ## Status Pengembangan
