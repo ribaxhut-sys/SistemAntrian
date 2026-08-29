@@ -1,53 +1,42 @@
 """
-Ruang kerja petugas: pengaduan pengunjung dan catatan petugas.
+Ruang kerja petugas: keluhan pengunjung dan catatan petugas.
 
-DIALOG, bukan panel yang menempel di layar pelayanan. Tujuh isian tidak
-muat pada kolom kiri panel pelayanan — kolom itu sudah memuat kartu antrian
-dan seluruh tombol tindakan. Dipaksa muat, baris formulirnya tergencet
-sampai label dan isian saling menimpa.
-
-SATU HALAMAN, bukan dua tab. Tab menyembunyikan separuh formulir di balik
-klik, dan yang tersembunyi itu justru catatan petugas — bagian yang paling
-sering lupa diisi. Keduanya kini terlihat sekaligus, dipisahkan judul
-bagian, dan seluruh formulir dapat digulir sehingga tidak pernah ada baris
-yang diperas ketika jendelanya diperkecil.
+DUA KOTAK SAJA. Identitas pelapor tinggal di layar pelayanan (lihat
+`pelapor_form.py`) karena ditulis sambil BERTANYA kepada orang di depan
+meja — nama, nomor pelanggan, telepon — sedangkan keluhannya ditulis
+sambil MENDENGARKAN. Isian pendek yang selalu terlihat dapat diisi
+seketika; kotak panjang yang butuh ruang mendapat dialognya sendiri.
 
 DESKRIPSI DAN CATATAN TETAP DUA KOTAK TERPISAH. Deskripsi adalah kata
 pengunjung; catatan adalah penilaian petugas. Disatukan menjadi satu kotak,
 penilaian internal ikut terbaca sebagai keluhan pelanggan oleh siapa pun
 yang membuka lembar itu kemudian.
 
-Formulirnya menanggapi apa yang sedang diketik: begitu deskripsi terisi,
-lembar ini berubah menjadi pengaduan, dan isian identitas yang tadinya
-opsional berubah menjadi wajib — ditandai pada saat itu juga, bukan
-sesudah petugas menekan Simpan dan menerima penolakan.
+Dialog inilah yang menyimpan seluruh lembar — kedua kotak ini beserta
+identitas yang dibacanya dari layar pelayanan. Lembar tetap satu baris di
+database, dan identitas tanpa keluhan maupun catatan tidak pernah tersimpan
+sendirian: itu hanya akan menjadi nama pengunjung tanpa satu pun alasan.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPlainTextEdit,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from app.services.note_service import (
-    PANJANG_ALAMAT,
     PANJANG_CATATAN,
     PANJANG_DESKRIPSI,
-    PANJANG_EMAIL,
-    PANJANG_NAMA,
-    PANJANG_NOMOR_PELANGGAN,
-    PANJANG_TELEPON,
     NoteInfo,
     NoteService,
 )
@@ -72,24 +61,24 @@ from app.ui.style import (
     WARNING_SOFT,
 )
 
-#: Peringatan tetap di atas formulir.
+#: Peringatan tetap di atas kotak keluhan.
 #:
-#: Satu-satunya tempat data pribadi disimpan di aplikasi ini adalah lembar
-#: ini, dan petugas yang sedang terburu-buru tidak akan mengingat itu.
-#: Kalimatnya sengaja menyebut apa yang TIDAK perlu ditulis, bukan sekadar
-#: mengimbau berhati-hati — imbauan tanpa isi tidak mengubah apa pun.
+#: Lembar ini satu-satunya tempat data pribadi di aplikasi ini, dan petugas
+#: yang sedang terburu-buru tidak akan mengingat itu. Kalimatnya menyebut
+#: apa yang TIDAK perlu ditulis, bukan sekadar mengimbau berhati-hati —
+#: imbauan tanpa isi tidak mengubah apa pun.
 PERINGATAN = (
     "Isi seperlunya. Jangan menyalin NIK, nomor rekening, atau data lain "
     "yang tidak dibutuhkan untuk menindaklanjuti pengaduan ini."
 )
 
-#: Tinggi terkecil kotak keluhan dan catatan.
+#: Tinggi terkecil kedua kotak.
 #:
 #: Kotak setinggi satu baris membuat petugas mengetik keluhan panjang lewat
 #: lubang intip: yang sudah diketik menggulung ke atas dan tidak terbaca
 #: lagi saat hendak diperiksa ulang sebelum disimpan.
-TINGGI_DESKRIPSI = 130
-TINGGI_CATATAN = 90
+TINGGI_DESKRIPSI = 150
+TINGGI_CATATAN = 110
 
 #: Penghitung huruf mulai memperingatkan pada porsi ini dari batasnya.
 #:
@@ -108,17 +97,21 @@ def _gaya_kapsul(warna: str, latar: str) -> str:
 
 
 class NoteDialog(QDialog):
-    """Formulir pengaduan dan catatan untuk satu nomor antrian."""
+    """Kotak keluhan dan catatan untuk satu nomor antrian."""
 
     def __init__(
         self,
         note: NoteService,
         antrian: QueueInfo,
+        identitas: Callable[[], dict[str, str]] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.note = note
         self.antrian = antrian
+        # Dibaca pada saat Simpan ditekan, bukan disalin saat dialog dibuka:
+        # yang berlaku adalah isian terakhir di layar pelayanan.
+        self.identitas = identitas or (lambda: {})
         #: Lembar yang tersimpan di database, atau None bila belum ada.
         self.lembar: NoteInfo | None = None
         #: Benar bila ada yang tersimpan selama dialog ini terbuka. Dipakai
@@ -126,7 +119,7 @@ class NoteDialog(QDialog):
         self.tersimpan = False
 
         self.setWindowTitle(f"Pengaduan & Catatan — {antrian.queue_number}")
-        self.setMinimumSize(720, 640)
+        self.setMinimumSize(680, 560)
 
         self._bangun_tampilan()
         self._sambungkan()
@@ -147,37 +140,28 @@ class NoteDialog(QDialog):
 
         susunan.addWidget(self._bangun_kepala())
 
-        # Seluruh formulir dapat digulir. Jendela yang diperkecil lalu
-        # memeras baris formulirnya sampai label dan isian saling menimpa
-        # sudah pernah terjadi sekali; area gulir membuatnya mustahil.
-        gulir = QScrollArea()
-        gulir.setWidgetResizable(True)
-        gulir.setFrameShape(QFrame.Shape.NoFrame)
-        gulir.setStyleSheet(f"QScrollArea {{ background: {SURFACE_ALT}; }}")
-
         isi = QWidget()
         isi.setStyleSheet(f"background: {SURFACE_ALT};")
         badan = QVBoxLayout(isi)
-        badan.setContentsMargins(22, 18, 22, 18)
-        badan.setSpacing(14)
+        badan.setContentsMargins(22, 16, 22, 16)
+        badan.setSpacing(12)
 
         badan.addWidget(self._bangun_peringatan())
-        badan.addWidget(self._bangun_bagian_pelapor())
-        badan.addWidget(self._bangun_bagian_pengaduan())
-        badan.addWidget(self._bangun_bagian_catatan())
-        badan.addStretch()
+        badan.addWidget(self._bangun_bagian_pengaduan(), stretch=3)
+        badan.addWidget(self._bangun_bagian_catatan(), stretch=2)
 
-        gulir.setWidget(isi)
-        susunan.addWidget(gulir, stretch=1)
+        susunan.addWidget(isi, stretch=1)
         susunan.addWidget(self._bangun_kaki())
 
     def _bangun_kepala(self) -> QWidget:
         """
-        Kepala dialog: nomor antrian besar, keterangan, dan kapsul keadaan.
+        Kepala dialog: nomor antrian, pelapornya, dan kapsul keadaan.
 
         Nomor dibuat besar karena satu-satunya kekeliruan yang benar-benar
         merugikan di formulir ini adalah menuliskan keluhan seseorang pada
-        nomor milik orang lain.
+        nomor milik orang lain. Nama pelapor ikut disebut di sini — ia
+        diketik di layar yang sekarang tertutup dialog ini, dan tanpa
+        disebutkan tidak ada cara memastikannya tanpa menutup dialog.
         """
         kepala = QFrame()
         kepala.setObjectName("kepalaLembar")
@@ -187,24 +171,28 @@ class NoteDialog(QDialog):
         )
 
         baris = QHBoxLayout(kepala)
-        baris.setContentsMargins(22, 16, 22, 16)
+        baris.setContentsMargins(22, 14, 22, 14)
         baris.setSpacing(14)
 
         teks = QVBoxLayout()
         teks.setSpacing(2)
 
-        nomor = QLabel(self.antrian.queue_number)
+        rincian = [self.antrian.category_name, self.antrian.counter_name]
+        nomor = QLabel(
+            f"{self.antrian.queue_number}"
+            f"<span style='font-size:{FONT_SIZE_SMALL}px; color:{TEXT_MUTED};'>"
+            f"   {' · '.join(r for r in rincian if r)}</span>"
+        )
         nomor.setStyleSheet(
             f"color: {TEXT}; font-size: {FONT_SIZE_XL}px; font-weight: 800;"
         )
         teks.addWidget(nomor)
 
-        rincian = [self.antrian.category_name, self.antrian.counter_name]
-        keterangan_atas = QLabel(" · ".join(r for r in rincian if r))
-        keterangan_atas.setStyleSheet(
+        self.label_pelapor = QLabel("")
+        self.label_pelapor.setStyleSheet(
             f"color: {TEXT_MUTED}; font-size: {FONT_SIZE_SMALL}px;"
         )
-        teks.addWidget(keterangan_atas)
+        teks.addWidget(self.label_pelapor)
         baris.addLayout(teks)
         baris.addStretch()
 
@@ -218,51 +206,10 @@ class NoteDialog(QDialog):
         peringatan.setWordWrap(True)
         peringatan.setStyleSheet(
             f"background: {WARNING_SOFT}; color: {WARNING};"
-            f" border-radius: {RADIUS_SM}px; padding: 9px 12px;"
+            f" border-radius: {RADIUS_SM}px; padding: 8px 12px;"
             f" font-size: {FONT_SIZE_SMALL}px;"
         )
         return peringatan
-
-    def _bangun_bagian_pelapor(self) -> QWidget:
-        kartu, badan = self._kartu("DATA PELAPOR")
-
-        self.isian_nama = self._isian(PANJANG_NAMA, "Nama pelapor")
-        self.isian_nomor_pelanggan = self._isian(
-            PANJANG_NOMOR_PELANGGAN, "Nomor pelanggan"
-        )
-        self.isian_telepon = self._isian(PANJANG_TELEPON, "Boleh dikosongkan")
-        self.isian_email = self._isian(PANJANG_EMAIL, "Boleh dikosongkan")
-        self.isian_alamat = self._isian(PANJANG_ALAMAT, "Boleh dikosongkan")
-
-        # Dua isian per baris, bukan lima baris menurun. Dialog ini lebih
-        # lebar daripada tinggi, dan tinggi itulah yang dibutuhkan kotak
-        # keluhan di bawahnya.
-        kisi = QGridLayout()
-        kisi.setHorizontalSpacing(18)
-        kisi.setVerticalSpacing(10)
-        kisi.setColumnStretch(0, 1)
-        kisi.setColumnStretch(1, 1)
-
-        self.label_nama = self._label_isian("Nama")
-        self.label_nomor_pelanggan = self._label_isian("No. Pelanggan")
-
-        kisi.addLayout(self._kolom(self.label_nama, self.isian_nama), 0, 0)
-        kisi.addLayout(
-            self._kolom(self.label_nomor_pelanggan, self.isian_nomor_pelanggan), 0, 1
-        )
-        kisi.addLayout(
-            self._kolom(self._label_isian("Telepon"), self.isian_telepon), 1, 0
-        )
-        kisi.addLayout(self._kolom(self._label_isian("Email"), self.isian_email), 1, 1)
-        kisi.addLayout(
-            self._kolom(self._label_isian("Alamat"), self.isian_alamat), 2, 0, 1, 2
-        )
-        badan.addLayout(kisi)
-
-        self.label_pelapor = QLabel("")
-        self.label_pelapor.setWordWrap(True)
-        badan.addWidget(self.label_pelapor)
-        return kartu
 
     def _bangun_bagian_pengaduan(self) -> QWidget:
         kartu, badan = self._kartu("PENGADUAN", "Kata pengunjung")
@@ -272,12 +219,10 @@ class NoteDialog(QDialog):
             "Keluhan menurut pengunjung, dengan kata-katanya sendiri"
         )
         self.isian_deskripsi.setMinimumHeight(TINGGI_DESKRIPSI)
-        badan.addWidget(self.isian_deskripsi)
+        badan.addWidget(self.isian_deskripsi, stretch=1)
 
         self.hitung_deskripsi = self._penghitung()
-        badan.addWidget(
-            self.hitung_deskripsi, alignment=Qt.AlignmentFlag.AlignRight
-        )
+        badan.addWidget(self.hitung_deskripsi, alignment=Qt.AlignmentFlag.AlignRight)
         return kartu
 
     def _bangun_bagian_catatan(self) -> QWidget:
@@ -288,19 +233,13 @@ class NoteDialog(QDialog):
             "Misalnya: berkas belum lengkap, diminta kembali membawa fotokopi."
         )
         self.isian_catatan.setMinimumHeight(TINGGI_CATATAN)
-        badan.addWidget(self.isian_catatan)
+        badan.addWidget(self.isian_catatan, stretch=1)
 
         self.hitung_catatan = self._penghitung()
         badan.addWidget(self.hitung_catatan, alignment=Qt.AlignmentFlag.AlignRight)
         return kartu
 
     def _bangun_kaki(self) -> QWidget:
-        """
-        Kaki yang selalu terlihat, di luar area gulir.
-
-        Tombol Simpan yang ikut tergulir keluar layar adalah tombol yang
-        tidak ditemukan petugas ketika formulirnya panjang.
-        """
         kaki = QFrame()
         kaki.setObjectName("kakiLembar")
         kaki.setStyleSheet(
@@ -326,10 +265,6 @@ class NoteDialog(QDialog):
         baris.addWidget(self.tombol_simpan)
         return kaki
 
-    # -----------------------------------------------------------------
-    # Potongan tampilan yang dipakai berulang
-    # -----------------------------------------------------------------
-
     @staticmethod
     def _kartu(judul_bagian: str, petunjuk: str = "") -> tuple[QFrame, QVBoxLayout]:
         """Kartu berjudul; mengembalikan kartunya beserta susunan isinya."""
@@ -341,8 +276,8 @@ class NoteDialog(QDialog):
         )
 
         susunan = QVBoxLayout(kartu)
-        susunan.setContentsMargins(18, 14, 18, 14)
-        susunan.setSpacing(10)
+        susunan.setContentsMargins(16, 12, 16, 12)
+        susunan.setSpacing(8)
 
         kepala = QHBoxLayout()
         kepala.setSpacing(8)
@@ -363,35 +298,6 @@ class NoteDialog(QDialog):
         return kartu, susunan
 
     @staticmethod
-    def _kolom(label: QLabel, isian: QWidget) -> QVBoxLayout:
-        """Label di ATAS isiannya, bukan di sampingnya.
-
-        Label bersebelahan memaksa satu kolom selebar label terpanjang, dan
-        pada dua isian per baris kolom itu memakan lebar yang dibutuhkan
-        isiannya sendiri.
-        """
-        susunan = QVBoxLayout()
-        susunan.setSpacing(4)
-        susunan.addWidget(label)
-        susunan.addWidget(isian)
-        return susunan
-
-    @staticmethod
-    def _isian(batas: int, petunjuk: str) -> QLineEdit:
-        isian = QLineEdit()
-        isian.setMaxLength(batas)
-        isian.setPlaceholderText(petunjuk)
-        return isian
-
-    @staticmethod
-    def _label_isian(teks: str) -> QLabel:
-        label = QLabel(teks)
-        label.setStyleSheet(
-            f"color: {TEXT_MUTED}; font-size: {FONT_SIZE_SMALL}px; font-weight: 600;"
-        )
-        return label
-
-    @staticmethod
     def _penghitung() -> QLabel:
         label = QLabel("")
         label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: {FONT_SIZE_SMALL}px;")
@@ -404,14 +310,6 @@ class NoteDialog(QDialog):
     def _sambungkan(self) -> None:
         for kotak in (self.isian_deskripsi, self.isian_catatan):
             kotak.textChanged.connect(self._perbarui_dinamis)
-        for isian in (
-            self.isian_nama,
-            self.isian_nomor_pelanggan,
-            self.isian_telepon,
-            self.isian_email,
-            self.isian_alamat,
-        ):
-            isian.textChanged.connect(self._perbarui_dinamis)
 
     @property
     def ada_pengaduan(self) -> bool:
@@ -422,16 +320,34 @@ class NoteDialog(QDialog):
         """Benar bila ada sesuatu yang layak disimpan."""
         return self.ada_pengaduan or bool(self.isian_catatan.toPlainText().strip())
 
+    @property
+    def kurang(self) -> list[str]:
+        """
+        Isian identitas yang wajib tetapi masih kosong di layar pelayanan.
+
+        Kosong bila tidak ada deskripsi: catatan petugas boleh berdiri
+        sendiri tanpa identitas siapa pun.
+        """
+        if not self.ada_pengaduan:
+            return []
+        nilai = self.identitas()
+        hasil = []
+        if not (nilai.get("nama") or "").strip():
+            hasil.append("Nama")
+        if not (nilai.get("nomor_pelanggan") or "").strip():
+            hasil.append("No. Pelanggan")
+        return hasil
+
     def _perbarui_dinamis(self) -> None:
         """
-        Selaraskan kapsul, penanda wajib, dan penghitung dengan isian.
+        Selaraskan kapsul, penghitung, dan tombol dengan isian.
 
         Dijalankan pada setiap ketikan, dan karena itu tidak menyentuh
         database sama sekali — seluruhnya dihitung dari isi layar.
         """
         self._perbarui_kapsul()
-        self._perbarui_wajib()
         self._perbarui_penghitung()
+        self._perbarui_pelapor()
         self.tombol_simpan.setEnabled(self.ada_isian)
         self._perbarui_keadaan()
 
@@ -446,63 +362,34 @@ class NoteDialog(QDialog):
             self.kapsul.setText("KOSONG")
             self.kapsul.setStyleSheet(_gaya_kapsul(TEXT_MUTED, SURFACE_ALT))
 
-    def _perbarui_wajib(self) -> None:
+    def _perbarui_pelapor(self) -> None:
         """
-        Tandai identitas sebagai wajib hanya setelah ada deskripsi.
+        Sebutkan pelapor yang terbaca dari layar pelayanan.
 
-        Kewajibannya memang bersyarat. Menandainya sejak formulir dibuka
-        berarti menyalakan peringatan pada lembar yang mungkin hanya berisi
-        catatan petugas — dan peringatan yang menyala tanpa sebab cepat
-        berhenti dibaca.
+        Kekurangannya disebut di sini, bukan hanya saat Simpan ditolak:
+        isiannya berada di layar yang sedang tertutup dialog ini, sehingga
+        petugas tidak dapat melihat sendiri apa yang belum diisi.
         """
-        wajib = self.ada_pengaduan
-        pasangan = (
-            (self.label_nama, self.isian_nama, "Nama"),
-            (
-                self.label_nomor_pelanggan,
-                self.isian_nomor_pelanggan,
-                "No. Pelanggan",
-            ),
-        )
-        kurang: list[str] = []
-        for label, isian, nama in pasangan:
-            kosong = not isian.text().strip()
-            label.setText(f"{nama} *" if wajib else nama)
-            self._setel_wajib(isian, wajib and kosong)
-            if wajib and kosong:
-                kurang.append(nama)
-
+        kurang = self.kurang
         if kurang:
             self.label_pelapor.setText(
-                "Wajib diisi untuk pengaduan: " + ", ".join(kurang) + "."
+                "Belum diisi di layar pelayanan: " + ", ".join(kurang)
             )
             self.label_pelapor.setStyleSheet(
                 f"color: {WARNING}; font-size: {FONT_SIZE_SMALL}px; font-weight: 600;"
             )
-        else:
-            self.label_pelapor.setText(
-                "Telepon, email, dan alamat boleh dikosongkan."
-                if wajib
-                else "Seluruhnya boleh dikosongkan bila hanya menulis catatan petugas."
-            )
-            self.label_pelapor.setStyleSheet(
-                f"color: {TEXT_MUTED}; font-size: {FONT_SIZE_SMALL}px;"
-            )
-
-    @staticmethod
-    def _setel_wajib(widget: QWidget, wajib: bool) -> None:
-        """
-        Nyalakan gaya "wajib" pada sebuah isian.
-
-        unpolish/polish wajib: Qt sudah menghitung gaya widget ketika
-        pertama digambar dan tidak menghitungnya ulang dengan sendirinya —
-        property yang berubah tanpa ini tidak mengubah apa pun di layar.
-        """
-        if widget.property("wajib") == ("true" if wajib else None):
             return
-        widget.setProperty("wajib", "true" if wajib else None)
-        widget.style().unpolish(widget)
-        widget.style().polish(widget)
+
+        nilai = self.identitas()
+        bagian = [
+            (nilai.get("nama") or "").strip(),
+            (nilai.get("nomor_pelanggan") or "").strip(),
+        ]
+        terisi = " · ".join(b for b in bagian if b)
+        self.label_pelapor.setText(terisi or "Tanpa data pelapor")
+        self.label_pelapor.setStyleSheet(
+            f"color: {TEXT_MUTED}; font-size: {FONT_SIZE_SMALL}px;"
+        )
 
     def _perbarui_penghitung(self) -> None:
         for kotak, label, batas in (
@@ -531,52 +418,36 @@ class NoteDialog(QDialog):
             self, lambda: self.note.ambil(self.antrian.id), "Gagal membaca catatan"
         )
         if berhasil and lembar is not None:
-            self._tampilkan(lembar)
+            self.lembar = lembar
+            self.isian_deskripsi.setPlainText(lembar.deskripsi or "")
+            self.isian_catatan.setPlainText(lembar.catatan or "")
         self._perbarui_dinamis()
 
-    def _tampilkan(self, lembar: NoteInfo) -> None:
-        self.lembar = lembar
-        self.isian_nama.setText(lembar.nama or "")
-        self.isian_nomor_pelanggan.setText(lembar.nomor_pelanggan or "")
-        self.isian_telepon.setText(lembar.telepon or "")
-        self.isian_email.setText(lembar.email or "")
-        self.isian_alamat.setText(lembar.alamat or "")
-        self.isian_deskripsi.setPlainText(lembar.deskripsi or "")
-        self.isian_catatan.setPlainText(lembar.catatan or "")
-
     def _perbarui_keadaan(self, pesan: str = "", warna: str = "") -> None:
+        gaya_kapsul = ""
         if pesan:
-            self.label_keadaan.setText(pesan)
-            self.label_keadaan.setStyleSheet(
-                f"color: {warna or TEXT_MUTED}; font-size: {FONT_SIZE_SMALL}px;"
-                " font-weight: 700;"
-            )
-            return
-
-        if self.berubah:
-            teks, warna = "Ada perubahan yang belum disimpan.", WARNING
+            teks = pesan
+            warna = warna or TEXT_MUTED
+            tebal = " font-weight: 700;"
+        elif self.berubah:
+            teks, warna, tebal = "Ada perubahan yang belum disimpan.", WARNING, ""
         elif self.lembar is not None:
             teks = (
                 f"Tersimpan {self.lembar.updated_at.strftime('%H:%M')} · "
                 f"{self.lembar.officer_name or '-'}"
             )
-            warna = TEXT_MUTED
+            warna, tebal = TEXT_MUTED, ""
         else:
-            teks, warna = "Belum pernah disimpan.", TEXT_MUTED
+            teks, warna, tebal = "Belum pernah disimpan.", TEXT_MUTED, ""
 
         self.label_keadaan.setText(teks)
         self.label_keadaan.setStyleSheet(
-            f"color: {warna}; font-size: {FONT_SIZE_SMALL}px;"
+            f"color: {warna}; font-size: {FONT_SIZE_SMALL}px;{tebal}{gaya_kapsul}"
         )
 
     @property
-    def _isi_layar(self) -> tuple[str, ...]:
+    def _isi_layar(self) -> tuple[str, str]:
         return (
-            self.isian_nama.text().strip(),
-            self.isian_nomor_pelanggan.text().strip(),
-            self.isian_telepon.text().strip(),
-            self.isian_email.text().strip(),
-            self.isian_alamat.text().strip(),
             self.isian_deskripsi.toPlainText().strip(),
             self.isian_catatan.toPlainText().strip(),
         )
@@ -584,23 +455,18 @@ class NoteDialog(QDialog):
     @property
     def berubah(self) -> bool:
         """
-        Benar bila isian di layar berbeda dari yang tersimpan.
+        Benar bila kedua kotak berbeda dari yang tersimpan.
 
-        Dipakai saat dialog ditutup. Menutup dengan perubahan yang belum
-        disimpan berarti keluhan yang barusan diceritakan hilang tanpa
-        jejak, dan orangnya sudah meninggalkan meja.
+        Identitas TIDAK ikut dihitung: isiannya tetap ada di layar pelayanan
+        setelah dialog ini ditutup, sehingga menutup dialog tidak
+        menghilangkannya. Menanyakannya di sini hanya akan menjadi
+        pertanyaan yang muncul tanpa ada yang benar-benar dibuang.
         """
-        tersimpan = self.lembar
-        if tersimpan is None:
+        if self.lembar is None:
             return any(self._isi_layar)
         return self._isi_layar != (
-            (tersimpan.nama or "").strip(),
-            (tersimpan.nomor_pelanggan or "").strip(),
-            (tersimpan.telepon or "").strip(),
-            (tersimpan.email or "").strip(),
-            (tersimpan.alamat or "").strip(),
-            (tersimpan.deskripsi or "").strip(),
-            (tersimpan.catatan or "").strip(),
+            (self.lembar.deskripsi or "").strip(),
+            (self.lembar.catatan or "").strip(),
         )
 
     # =================================================================
@@ -609,7 +475,7 @@ class NoteDialog(QDialog):
 
     def simpan(self) -> bool:
         """
-        Simpan lembar. Mengembalikan True bila tersimpan.
+        Simpan lembar beserta identitas yang dibaca dari layar pelayanan.
 
         Dialog TIDAK ditutup sendiri setelah menyimpan. Petugas sering
         menyimpan di tengah pembicaraan lalu meneruskan mengetik; dialog
@@ -617,19 +483,33 @@ class NoteDialog(QDialog):
         """
         if not self.ada_isian:
             self._perbarui_keadaan(
-                "Isi deskripsi pengaduan atau catatan petugas lebih dahulu.", WARNING
+                "Isi keluhan pengunjung atau catatan petugas lebih dahulu.", WARNING
             )
             return False
 
+        # Diperiksa di sini, bukan dibiarkan ditolak service: isian yang
+        # kurang berada di layar yang sedang tertutup dialog ini, dan
+        # petugas perlu diberi tahu HARUS MENUTUP dialog untuk mengisinya.
+        kurang = self.kurang
+        if kurang:
+            self._perbarui_keadaan(
+                "Lengkapi " + ", ".join(kurang) + " pada Data Pelapor di layar "
+                "pelayanan, lalu simpan lagi.",
+                WARNING,
+            )
+            self._perbarui_pelapor()
+            return False
+
+        nilai = self.identitas()
         berhasil, lembar = jalankan_aman(
             self,
             lambda: self.note.simpan(
                 self.antrian.id,
-                nama=self.isian_nama.text(),
-                nomor_pelanggan=self.isian_nomor_pelanggan.text(),
-                telepon=self.isian_telepon.text(),
-                email=self.isian_email.text(),
-                alamat=self.isian_alamat.text(),
+                nama=nilai.get("nama", ""),
+                nomor_pelanggan=nilai.get("nomor_pelanggan", ""),
+                telepon=nilai.get("telepon", ""),
+                email=nilai.get("email", ""),
+                alamat=nilai.get("alamat", ""),
                 deskripsi=self.isian_deskripsi.toPlainText(),
                 catatan=self.isian_catatan.toPlainText(),
             ),

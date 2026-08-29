@@ -35,6 +35,7 @@ from app.ui.common import (
     tombol,
 )
 from app.ui.queue.note_dialog import NoteDialog
+from app.ui.queue.pelapor_form import PelaporForm
 from app.ui.style import (
     BORDER,
     BORDER_STRONG,
@@ -237,6 +238,15 @@ class ServicePage(QWidget):
         kolom.addWidget(self._bangun_panel_antrian())
         kolom.addLayout(self._bangun_tombol_aksi())
 
+        self.pelapor: PelaporForm | None = None
+        if self.note is not None:
+            # Identitas ditulis sambil BERTANYA kepada orang di depan meja,
+            # sedangkan keluhannya ditulis sambil MENDENGARKAN. Isian pendek
+            # ini karena itu tetap di layar; kotak keluhan yang panjang
+            # mendapat dialognya sendiri.
+            self.pelapor = PelaporForm()
+            kolom.addWidget(self.pelapor)
+
         kolom.addStretch()
 
         if self.note is not None:
@@ -273,7 +283,7 @@ class ServicePage(QWidget):
         self.label_kerja.setWordWrap(True)
         baris.addWidget(self.label_kerja, stretch=1)
 
-        self.tombol_kerja = tombol("Pengaduan & Catatan (F9)")
+        self.tombol_kerja = tombol("Tulis Pengaduan / Catatan (F9)", variant="primary")
         self.tombol_kerja.setMinimumHeight(36)
         self.tombol_kerja.setEnabled(False)
         self.tombol_kerja.clicked.connect(self.buka_ruang_kerja)
@@ -780,25 +790,41 @@ class ServicePage(QWidget):
 
         aktif = self.antrian is not None
         self.tombol_kerja.setEnabled(aktif)
+        if self.pelapor is not None:
+            self.pelapor.set_aktif(aktif)
 
         if not aktif:
             self._lembar_nomor = None
             self._lembar = None
+            if self.pelapor is not None:
+                self.pelapor.kosongkan()
             self.label_kerja.setText(
                 "Pengaduan dan catatan dapat ditulis setelah nomor dipanggil."
             )
             return
 
+        # Berganti nomor WAJIB mengosongkan isian lebih dahulu. Identitas
+        # yang tertinggal dari nomor sebelumnya berarti keluhan orang ini
+        # tersimpan atas nama orang lain.
         if self._lembar_nomor != self.antrian.id:
             self._lembar_nomor = self.antrian.id
+            if self.pelapor is not None:
+                self.pelapor.kosongkan()
             _, self._lembar = jalankan_aman(
                 self,
                 lambda: self.note.ambil(self.antrian.id),
                 "Gagal membaca catatan",
             )
+            if self._lembar is not None and self.pelapor is not None:
+                self.pelapor.isi(self._lembar)
+                self.pelapor.tandai_wajib(self._lembar.ada_pengaduan)
 
         if self._lembar is None:
-            self.label_kerja.setText("Belum ada pengaduan maupun catatan.")
+            self.label_kerja.setText(
+                "Data pelapor tersimpan bersama pengaduan atau catatan."
+                if self.pelapor is not None and self.pelapor.terisi
+                else "Belum ada pengaduan maupun catatan."
+            )
         else:
             bagian = "Pengaduan" if self._lembar.ada_pengaduan else "Catatan"
             self.label_kerja.setText(
@@ -927,8 +953,20 @@ class ServicePage(QWidget):
         if self.note is None or self.antrian is None:
             return
 
-        dialog = NoteDialog(self.note, self.antrian, self)
+        # lambda, BUKAN `self.pelapor.nilai.copy`: yang kedua mengikat
+        # salinan dict pada saat dialog dibuka, sehingga identitas yang
+        # diperbaiki sesudahnya tidak pernah ikut tersimpan.
+        pelapor = self.pelapor
+        pembaca = (lambda: pelapor.nilai) if pelapor is not None else None
+        dialog = NoteDialog(self.note, self.antrian, pembaca, self)
         dialog.exec()
+
+        # Ditandai setelah dialog ditutup, bukan hanya ketika Simpan
+        # ditolak: petugas yang menutup dialog dengan keluhan yang sudah
+        # tertulis tetap harus melihat isian mana yang menahannya.
+        if self.pelapor is not None:
+            self.pelapor.tandai_wajib(dialog.ada_pengaduan)
+
         if dialog.tersimpan:
             # Paksa pembacaan ulang: nomornya tidak berganti, sehingga
             # tanpa ini baris ringkas tetap menyebut keadaan yang lama.

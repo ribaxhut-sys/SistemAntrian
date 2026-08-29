@@ -219,11 +219,16 @@ Jalankan seluruhnya, termasuk yang tampak sepele.
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| N1 | Buka panel Pelayanan tanpa memanggil nomor | Tombol **Pengaduan & Catatan** mati; barisnya menyebut nomor harus dipanggil dulu | |
-| N2 | Panggil satu nomor, tekan `F9` | Dialog terbuka; **Pengaduan** dan **Catatan Petugas** terlihat sekaligus dalam satu halaman | |
-| N2d | Perhatikan kapsul di kanan atas | Bertuliskan KOSONG; berubah menjadi CATATAN lalu PENGADUAN mengikuti isian | |
-| N2e | Ketik deskripsi pengaduan, jangan isi nama | Nama dan No. Pelanggan langsung ditandai wajib, tanpa menekan Simpan | |
-| N2f | Perhatikan penghitung huruf di bawah kotak | Angkanya berjalan; berubah warna mendekati batas | |
+| N1 | Buka panel Pelayanan tanpa memanggil nomor | Kartu **Data Pelapor** terlihat tetapi isiannya mati; tombol ruang kerja juga mati | |
+| N1b | Amati kartu Data Pelapor | Lima isian terbaca utuh; tidak ada label atau kotak yang saling menimpa | |
+| N2 | Panggil satu nomor | Isian Data Pelapor hidup | |
+| N2a | Tekan `F9` | Dialog terbuka berisi **Pengaduan** dan **Catatan Petugas** saja — tanpa isian identitas | |
+| N2d | Perhatikan kapsul di kanan atas dialog | Bertuliskan KOSONG; berubah menjadi CATATAN lalu PENGADUAN mengikuti isian | |
+| N2e | Ketik keluhan tanpa mengisi Data Pelapor | Kepala dialog menyebut "Belum diisi di layar pelayanan: Nama, No. Pelanggan" | |
+| N2f | Tekan Simpan dalam keadaan itu | Ditahan; kakinya meminta melengkapi Data Pelapor di layar pelayanan; keluhan yang tertulis tetap ada | |
+| N2g | Tutup dialog | Nama dan No. Pelanggan di kartu Data Pelapor bertanda wajib dan berbingkai kuning | |
+| N2h | Lengkapi Data Pelapor, buka `F9` lagi, Simpan | Tersimpan; identitas ikut tersimpan bersama keluhannya | |
+| N2i | Perhatikan penghitung huruf di bawah kotak | Angkanya berjalan; berubah warna mendekati batas | |
 | N2b | Amati formulirnya | Seluruh label dan isian terbaca utuh; tidak ada yang saling menimpa atau terpotong | |
 | N2c | Perkecil jendela dialog sekecil mungkin | Berhenti pada ukuran minimum; isian tetap tidak tergencet | |
 | N3 | Isi Catatan Petugas saja, tekan Ctrl+S | Tersimpan; waktu simpan muncul; **dialog tetap terbuka** | |
@@ -234,8 +239,8 @@ Jalankan seluruhnya, termasuk yang tampak sepele.
 | N8 | Ketik sesuatu lalu tutup dialog tanpa menyimpan | Ditanya lebih dahulu; menjawab tidak membuat dialog tetap terbuka | |
 | N8b | Tutup dialog tanpa mengubah apa pun | Langsung tertutup, tanpa pertanyaan | |
 | N9 | Tutup dialog, perhatikan baris di panel pelayanan | Menyebut "Pengaduan tersimpan" beserta jamnya | |
-| N10 | Selesaikan pelayanan, panggil nomor berikutnya, tekan `F9` | Formulir kosong — bukan isian nomor sebelumnya | |
-| N11 | Buka `F9` pada nomor yang lembarnya sudah terisi | Isian terisi kembali seperti terakhir disimpan | |
+| N10 | Selesaikan pelayanan, panggil nomor berikutnya | **Data Pelapor kosong** dan `F9` kosong — bukan isian nomor sebelumnya | |
+| N11 | Panggil ulang nomor yang lembarnya sudah terisi | Data Pelapor dan kedua kotak terisi kembali seperti terakhir disimpan | |
 | N12 | Buka menu **Pengaduan & Catatan** | Daftar lembar muncul, terbaru di atas | |
 | N13 | Cari dengan nama pelapor | Hanya lembar milik nama itu yang tampil | |
 | N14 | Cari dengan nomor pelanggan, lalu dengan sepenggal isi pengaduan | Keduanya menemukan lembar yang benar | |

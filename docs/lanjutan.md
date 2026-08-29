@@ -155,7 +155,7 @@ RETURNING last_number
 
 | Dialect | Hasil |
 |---|---|
-| SQLite | **874 lolos** (29 Agustus 2026, termasuk papan per-layanan, sisa antrian di tiket, dan lembar pengaduan) |
+| SQLite | **880 lolos** (29 Agustus 2026, termasuk papan per-layanan, sisa antrian di tiket, dan lembar pengaduan) |
 | PostgreSQL | **598 lolos, 25 dilewati** — putaran lama, SEBELUM perubahan papan per-layanan |
 
 **Angka PostgreSQL itu sudah basi.** Suite belum pernah dijalankan ulang
@@ -215,11 +215,14 @@ ditegaskan ulang oleh pemilik:
 4. **Tanpa nomor pengaduan tersendiri** — dirujuk lewat nomor antrian dan
    tanggalnya.
 5. **Tanpa status tindak lanjut.** Cukup dicatat.
-6. **Formulirnya dialog**, bukan panel yang menempel di layar pelayanan.
-   Bentuk pertama menempelkannya ke kolom kiri dan tujuh isian tidak muat
-   di sana — barisnya tergencet sampai label dan isian saling menimpa.
-   Dikunci test:
-   `tests/test_notes_ui.py::test_isian_formulir_tidak_saling_menimpa`.
+6. **Pengisiannya dipecah dua**, mengikuti cara petugas bekerja: Data
+   Pelapor sebagai kartu tetap di layar pelayanan (ditulis sambil
+   bertanya), keluhan dan catatan di dialog `F9` (ditulis sambil
+   mendengarkan). Bentuk pertama menempelkan ketujuhnya ke kolom kiri dan
+   tidak muat — barisnya tergencet sampai label dan isian saling menimpa.
+   Dikunci test `test_isian_pelapor_tidak_saling_menimpa` dan
+   `test_kotak_dialog_tidak_saling_menimpa` di
+   `tests/test_notes_ui.py`.
 7. **Disimpan selamanya, dihapus manual** oleh ADMIN. Tidak ada pembersihan
    otomatis — yang berarti tabel ini hanya bertambah, dan pencariannya
    sengaja selalu dibatasi jumlah.
