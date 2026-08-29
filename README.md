@@ -299,8 +299,15 @@ kembali agar seluruh layar membaca data yang baru.
 
 ### Pengaduan dan catatan petugas
 
-Setiap nomor antrian punya satu **lembar kerja** yang dibuka petugas dari
-panel pelayanan, berisi dua bagian:
+Setiap nomor antrian punya satu **lembar kerja**, dibuka petugas dari panel
+pelayanan lewat tombol **Pengaduan & Catatan** atau `F9`. Formulirnya
+berupa dialog tersendiri, bukan panel yang menempel di layar pelayanan:
+tujuh isian tidak muat pada kolom yang sudah memuat kartu antrian beserta
+seluruh tombol tindakan. Yang tertinggal di layar adalah keadaannya —
+sudah terisi atau belum, dan kapan terakhir disimpan — supaya lembar yang
+tersembunyi di balik dialog tidak terlupakan.
+
+Isinya dua bagian:
 
 | Bagian | Isi | Wajib |
 |---|---|---|
@@ -321,9 +328,11 @@ Aturan yang menjaganya:
 - **Isinya tidak pernah masuk audit log.** Audit mencatat *bahwa* sebuah
   lembar disimpan, oleh siapa, untuk nomor mana — tidak pernah apa yang
   tertulis di dalamnya.
-- **Menutup pelayanan menyimpan lembarnya lebih dahulu**, dan kegagalan
-  menyimpan membatalkan penyelesaian: kartu antrian berganti kosong begitu
-  selesai, sedangkan yang menceritakan keluhannya sudah meninggalkan meja.
+- **Menutup dialog dengan isian yang belum disimpan selalu ditanyakan.**
+  Yang menceritakan keluhannya sudah selesai berbicara; teks yang hilang
+  karena satu klik tidak dapat diketik ulang.
+- **Dialog tidak menutup sendiri setelah disimpan** (`Ctrl+S`). Petugas
+  sering menyimpan di tengah pembicaraan lalu meneruskan mengetik.
 - **Menulis milik CRO, menghapus milik ADMIN.** Penulis yang sekaligus
   dapat menghilangkan tulisannya membuat catatan itu tidak berguna sebagai
   bukti. Penghapusan tercatat di audit log.

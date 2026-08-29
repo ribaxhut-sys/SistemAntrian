@@ -219,17 +219,20 @@ Jalankan seluruhnya, termasuk yang tampak sepele.
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| N1 | Buka panel Pelayanan tanpa memanggil nomor | Panel Ruang Kerja terlihat tetapi seluruh isiannya mati | |
-| N2 | Panggil satu nomor | Isian hidup; tab **Pengaduan** dan **Catatan Petugas** dapat dibuka | |
-| N3 | Isi Catatan Petugas saja, tekan Ctrl+S | Tersimpan; keterangan waktu simpan muncul di bawah | |
-| N4 | Isi Deskripsi Pengaduan tanpa nama, tekan Simpan | Ditolak dengan kalimat Indonesia yang jelas | |
+| N1 | Buka panel Pelayanan tanpa memanggil nomor | Tombol **Pengaduan & Catatan** mati; barisnya menyebut nomor harus dipanggil dulu | |
+| N2 | Panggil satu nomor, tekan `F9` | Dialog terbuka; tab **Pengaduan** dan **Catatan Petugas** ada | |
+| N2b | Amati formulirnya | Seluruh label dan isian terbaca utuh; tidak ada yang saling menimpa atau terpotong | |
+| N2c | Perkecil jendela dialog sekecil mungkin | Berhenti pada ukuran minimum; isian tetap tidak tergencet | |
+| N3 | Isi Catatan Petugas saja, tekan Ctrl+S | Tersimpan; waktu simpan muncul; **dialog tetap terbuka** | |
+| N4 | Isi Deskripsi Pengaduan tanpa nama, tekan Simpan | Ditolak dengan kalimat Indonesia yang jelas; isian tetap ada | |
 | N5 | Lengkapi nama dan nomor pelanggan, simpan | Tersimpan | |
 | N6 | Isi email `budi.contoh.id` (tanpa @) | Ditolak; bentuk emailnya disebut | |
 | N7 | Isi telepon `0812` | Ditolak; terlalu pendek | |
-| N8 | Isi pengaduan tanpa nama lalu tekan `F8` | Pelayanan **TIDAK** selesai; pesannya muncul; isian tetap ada | |
-| N9 | Lengkapi, lalu tekan `F8` | Pelayanan selesai **dan** lembarnya tersimpan | |
-| N10 | Panggil nomor berikutnya | Seluruh isian kosong — bukan isian nomor sebelumnya | |
-| N11 | Panggil ulang nomor yang lembarnya sudah terisi | Isian terisi kembali seperti terakhir disimpan | |
+| N8 | Ketik sesuatu lalu tutup dialog tanpa menyimpan | Ditanya lebih dahulu; menjawab tidak membuat dialog tetap terbuka | |
+| N8b | Tutup dialog tanpa mengubah apa pun | Langsung tertutup, tanpa pertanyaan | |
+| N9 | Tutup dialog, perhatikan baris di panel pelayanan | Menyebut "Pengaduan tersimpan" beserta jamnya | |
+| N10 | Selesaikan pelayanan, panggil nomor berikutnya, tekan `F9` | Formulir kosong — bukan isian nomor sebelumnya | |
+| N11 | Buka `F9` pada nomor yang lembarnya sudah terisi | Isian terisi kembali seperti terakhir disimpan | |
 | N12 | Buka menu **Pengaduan & Catatan** | Daftar lembar muncul, terbaru di atas | |
 | N13 | Cari dengan nama pelapor | Hanya lembar milik nama itu yang tampil | |
 | N14 | Cari dengan nomor pelanggan, lalu dengan sepenggal isi pengaduan | Keduanya menemukan lembar yang benar | |
