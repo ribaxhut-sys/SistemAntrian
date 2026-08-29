@@ -128,7 +128,7 @@ proyek ini memakai `"Continue"` dan memeriksa `$LASTEXITCODE`.
 | `9642b4d` | Ruang kerja pengaduan dan catatan petugas per antrian |
 | `d1e820b` | Panel kanan berpindah otomatis: Menunggu Dilayani <-> Pengaduan |
 | `210f1b6` | Layar Pengaduan & Catatan menyegar sendiri tiap 30 detik |
-| _belum di-commit_ | Anjungan tidak lagi menampilkan kartu loket; diganti angka ringkasan |
+| `dff4b3a` | Anjungan tidak lagi menampilkan kartu loket; diganti angka ringkasan |
 
 ### Yang paling penting dari `535a60e`
 
