@@ -125,7 +125,7 @@ proyek ini memakai `"Continue"` dan memeriksa `$LASTEXITCODE`.
 | `2a1f804` | Papan televisi mengikuti ukuran layar + pilihan tema |
 | `3ab265a` | Loket dan jenis layanan per petugas; istirahat dan tutup hari |
 | `0a0a727` | Televisi dipisah dari anjungan; papan menunggu per jenis layanan |
-| _belum di-commit_ | Ruang kerja pengaduan dan catatan petugas per antrian |
+| `9642b4d` | Ruang kerja pengaduan dan catatan petugas per antrian |
 
 ### Yang paling penting dari `535a60e`
 
