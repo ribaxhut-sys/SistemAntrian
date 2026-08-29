@@ -65,8 +65,14 @@ B-001  Pengaduan        B-001  Pengaduan
 C-001  Informasi
 ```
 
-**Tiket antrian** dicetak 80 × 88 mm. Cara mencetaknya diatur lewat
-pengaturan `ticket.printer`:
+**Tiket antrian** dicetak 80 × 88 mm. Selain nomor, jenis layanan, loket,
+tanggal, dan jam, tiket menyebut **sisa antrian** pada saat tiket dicetak:
+banyaknya nomor yang masih menunggu di depan pemegang tiket, dihitung lintas
+seluruh jenis layanan karena urutan pemanggilan memang lintas layanan.
+Angkanya foto sesaat, bukan janji. Bila gagal dibaca, tiket tetap tercetak
+tanpa baris itu.
+
+Cara mencetaknya diatur lewat pengaturan `ticket.printer`:
 
 | Nilai | Perilaku |
 |---|---|
@@ -77,31 +83,124 @@ pengaturan `ticket.printer`:
 **Kegagalan mencetak tidak pernah membatalkan antrian.** Nomor sudah terbit
 dan tersimpan sebelum tiket dicetak; petugas cukup menyebutkan nomornya.
 
-**Layar antrian berjalan sebagai kios.** Akun berperan `DISPLAY` membuka
-aplikasi langsung dalam layar penuh, tanpa bilah atas, tanpa menu navigasi,
-dan tanpa bilah status. Pengunjung tidak melihat nama petugas, lokasi
-database, maupun tombol "Keluar" — tombol keluar yang terpampang di layar
-publik hanya mengundang orang menutup aplikasi antrian.
+**Tiga jenis mesin, tiga layar yang berbeda.** Yang menentukan adalah
+sifat komputernya, bukan siapa yang sedang memakainya:
 
-**Layar pengunjung** (`--layar` atau pilihan saat start) menggabungkan papan
-nomor dengan pengambilan nomor sendiri pada satu mesin, tanpa login. Jeda
-`kiosk.cooldown_seconds` menahan satu orang menekan tombol berulang kali.
+| Mesin | Pintasan | Isi layar | Suara | Login |
+|---|---|---|---|---|
+| Televisi ruang tunggu | `AntrianCRO.exe --tv` | Papan nomor besar, dibaca dari seberang ruangan | ya | tidak |
+| Anjungan ambil nomor | `AntrianCRO.exe --kios` | Pilih layanan, cetak tiket, papan nomor kecil | tidak | tidak |
+| Komputer loket (3–5 unit) | `AntrianCRO.exe` | Memanggil dan melayani antrian | tidak | ya |
+
+Kedua mesin publik berjalan **tanpa login**. Komputer yang menghadap publik
+dan tidak diawasi tidak boleh menyimpan kata sandi petugas — atau lebih
+buruk, memaksa seseorang mengetikkannya setiap pagi sampai sandi itu
+tertempel di bawah keyboard. Keduanya juga membuka layar penuh tanpa bilah
+atas, tanpa menu navigasi, dan tanpa bilah status: pengunjung tidak melihat
+nama petugas, lokasi database, maupun tombol "Keluar" yang hanya mengundang
+orang menutup aplikasi antrian.
+
+**Anjungan diam secara bawaan.** Bila anjungan ikut bersuara sementara
+televisi juga bersuara, pengunjung mendengar dua pengumuman yang saling
+menyusul — keduanya menyegarkan sendiri tiap dua detik dan tidak akan
+pernah sinkron. Pemasangan satu-mesin yang anjungannya merangkap papan
+nomor menyalakannya kembali dengan `ANTRIAN_SUARA=1`.
+
+Jeda `kiosk.cooldown_seconds` menahan satu orang menekan tombol ambil nomor
+berulang kali. Akun berperan `DISPLAY` tetap ada dan tetap membuka papan
+yang sama, berguna saat supervisor ingin melihat papan dari mejanya.
 
 Petugas tetap dapat keluar dengan `Ctrl+Q`, dan `F11` mengembalikan jendela
 ke ukuran biasa saat perlu dipindahkan ke monitor yang benar.
 
-Mode ini ditentukan dari hak akses, bukan dari nama peran: akun yang hanya
-boleh melihat layar antrian dan tidak boleh apa-apa lagi memang dipasang di
-komputer publik.
-
 **Layar antrian** menyegar setiap 2 detik dan membunyikan panggilan saat
-ada panggilan baru maupun panggilan ulang: nada dua-nada, lalu pengumuman
-lisan penuh ("Nomor antrian A, dua puluh tiga, silakan menuju Loket 2")
-lewat mesin text-to-speech bawaan Windows (memakai suara Bahasa Indonesia
-bila tersedia). Tidak ada berkas audio maupun dependency tambahan yang
-perlu disiapkan — nada dibangkitkan sendiri dan TTS memakai mesin yang
-sudah terpasang di OS. Komputer tanpa perangkat suara tetap berjalan
-normal, hanya tanpa bunyi.
+ada panggilan baru maupun panggilan ulang: nada dua-nada, lalu — setelah
+nadanya selesai — pengumuman lisan penuh ("Nomor antrian A, nol dua tiga,
+silakan menuju Loket 2") lewat mesin text-to-speech bawaan Windows (memakai
+suara Bahasa Indonesia bila tersedia). Tidak ada berkas audio maupun
+dependency tambahan yang perlu disiapkan — nada dibangkitkan sendiri dan
+TTS memakai mesin yang sudah terpasang di OS. Komputer tanpa perangkat
+suara tetap berjalan normal, hanya tanpa bunyi.
+
+**Daftar menunggu di televisi terbagi per jenis layanan.** Tiga jenis
+layanan berarti separuh bawah layar terbagi tiga kolom, masing-masing
+berjudul nama layanannya:
+
+```
+MENUNGGU GILIRAN                              1 / 2
+   A · Konsultasi     B · Pengaduan     C · Informasi
+   A-013  A-018       B-006  B-011      C-002   —
+   A-014  A-019       B-007  B-012      C-003   —
+   A-015  A-020       B-008    —          —     —
+   A-016    —         B-009    —          —     —
+   A-017    —         B-010    —          —     —
+```
+
+Setiap layanan mendapat **dua kolom**, karena panel ini lebar dan pendek —
+sekitar 1800×400 piksel pada televisi 1080p. Menumpuk sepuluh nomor ke
+bawah menghabiskan sisi yang langka dan menyia-nyiakan sisi yang berlimpah:
+hurufnya terpaksa turun sampai 18px agar muat. Dua kolom membuat huruf yang
+sama muat pada 37px. Nomor dibaca menurun dulu, baru pindah ke kolom
+kanannya — urutan baca koran.
+
+Loket dapat dibatasi jenis layanan yang boleh dipanggilnya, sehingga
+urutan panggil memang berjalan per layanan. Satu antrean gabungan
+menyiratkan urutan yang tidak pernah terjadi — A-020 tampak akan dipanggil
+sebelum B-003 padahal keduanya antre di loket yang berbeda.
+
+Isinya seluruh nomor yang menunggu, bukan tiga teratas: yang dicari orang
+yang sudah duduk adalah nomornya sendiri, bukan siapa berikutnya. Bila
+tidak muat satu layar, daftarnya terbagi menjadi halaman yang berganti
+sendiri, dan judul panelnya menyebut halaman ke berapa dari berapa — tanpa
+itu, pengunjung yang belum melihat nomornya akan mengira nomornya hilang
+lalu bertanya ke loket.
+
+| Pengaturan | Bawaan | Arti |
+|---|---|---|
+| `display.list_rows` | 5 | Baris per kolom (1–12). Dua kolom per layanan, jadi 5 berarti 10 nomor per layanan |
+| `display.list_font_size` | 0 | Ukuran huruf nomor; **0 = menyesuaikan sendiri** dengan tinggi papan |
+| `display.rotate_seconds` | 3 | Jeda pergantian halaman; **0 = tidak berpindah sendiri** |
+| `display.next_count` | 3 | Hanya untuk papan kecil di dalam anjungan |
+
+**Huruf menyesuaikan tinggi papan, dan tingginya diturunkan dari metrik
+huruf.** Tinggi baris tidak lagi berupa konstanta — ia dihitung dari huruf
+yang harus dimuatnya, sehingga nomor terpotong tidak mungkin lagi terjadi
+berapa pun yang diisi admin. `display.list_font_size` diperlakukan sebagai
+batas **atas**: papan tetap memperkecilnya bila barisnya tidak muat, dan
+bila huruf sudah menyentuh batas terkecil yang masih pantas dibaca, yang
+dikurangi adalah barisnya — satu halaman lagi lebih baik daripada nomor
+yang tidak terbaca.
+
+Beberapa hal yang sengaja dibuat begitu:
+
+- **Layanan yang sedang sepi tetap mendapat kolomnya** (berisi "—"). Kolom
+  yang muncul dan hilang mengikuti isinya membuat lebar seluruh papan
+  berubah beberapa detik sekali.
+- **Layanan yang dinonaktifkan di tengah hari tetap tampil** selama masih
+  ada yang menunggu padanya. Nomor yang sudah terbit tidak batal, dan
+  orangnya masih duduk di ruangan itu.
+- **Jumlah halaman mengikuti kolom terpanjang**, sehingga halaman berhenti
+  setelah layanan paling ramai habis — bukan yang paling sepi.
+- **Rotasi berhenti sendiri bila cukup satu halaman.** Halaman yang
+  berpindah ke dirinya sendiri terbaca sebagai layar berkedip rusak.
+- **Hari yang sangat ramai dibatasi 5 halaman**, sisanya disebut sebagai
+  jumlah ("DAN 47 LAINNYA") alih-alih diputar sampai tidak ada yang sabar
+  menunggunya kembali.
+- **Lebih dari 6 jenis layanan kembali ke daftar gabungan.** Tujuh kolom
+  pada satu televisi semuanya terpotong, dan daftar berhalaman lebih
+  terbaca daripada tujuh kolom yang tak satu pun memuat nomor secara utuh.
+
+**Panel pelayanan** disusun dua kolom: kartu antrian yang sedang ditangani
+beserta seluruh tombolnya di kiri, daftar tunggu di kanan. Kartu berganti
+warna mengikuti status — abu-abu saat menganggur, jingga saat nomor sudah
+dipanggil tetapi orangnya belum datang, hijau saat pelayanan berjalan,
+kuning saat loket istirahat — dan menampilkan penghitung waktu berjalan.
+Pada daftar tunggu, baris paling depan ditandai dan kolom lama menunggu
+berubah warna setelah 10 dan 20 menit.
+
+Tombol yang tidak sah untuk status saat ini **dinonaktifkan, bukan
+disembunyikan**. Posisinya tetap sehingga petugas tidak perlu mencari ulang
+setiap kali status berubah — itulah yang menentukan bentuk kisi tombolnya.
 
 **Pintasan papan ketik** (petugas loket jarang menyentuh mouse):
 
@@ -120,7 +219,7 @@ normal, hanya tanpa bunyi.
 | `SUPERVISOR` | Ringkasan Harian · Hasil Survey |
 | `ADMIN` | Data Master · Pengaturan · Backup & Audit |
 | `DISPLAY` | Layar Antrian |
-| `KIOSK` | Layar Pengunjung (papan nomor + ambil nomor, tanpa login) |
+| `KIOSK` | Anjungan Ambil Nomor (papan nomor + ambil nomor, tanpa login) |
 
 **Status antrian:**
 
@@ -294,18 +393,22 @@ berguna saat memeriksa pemasangan di komputer baru. Hasilnya juga tercatat
 di `logs/app.log`, karena `AntrianCRO.exe` berjendela dan tidak punya
 terminal untuk menampilkannya.
 
-Saat dibuka tanpa argumen, aplikasi menanyakan layar mana yang akan dipakai:
-**Layar Pengunjung** (kios, tanpa login) atau **Layar Petugas** (wajib masuk).
+Saat dibuka tanpa argumen, aplikasi menanyakan layar mana yang akan
+dipakai: **Layar Antrian**, **Anjungan Ambil Nomor** (keduanya tanpa login),
+atau **Layar Petugas** (wajib masuk).
 
-Komputer kios sebaiknya **melewati dialog itu**, supaya mati listrik siang
-hari tidak meninggalkan papan nomor kosong sampai ada yang mengklik:
+Kedua mesin publik sebaiknya **melewati dialog itu**, supaya mati listrik
+siang hari tidak meninggalkan papan nomor kosong sampai ada yang mengklik:
 
 ```powershell
-.\.venv\Scripts\python.exe -m app.main --layar
+.\.venv\Scripts\python.exe -m app.main --tv      # televisi ruang tunggu
+.\.venv\Scripts\python.exe -m app.main --kios    # anjungan ambil nomor
 ```
 
 Pasang perintah yang sama pada pintasan Startup Windows, atau pada
-`AntrianCRO.exe --layar` di komputer kios yang sudah di-build.
+`AntrianCRO.exe --tv` / `AntrianCRO.exe --kios` di komputer yang sudah
+di-build. `--layar` adalah nama lama `--kios` dan masih berlaku, supaya
+pintasan yang sudah terpasang tidak mati saat aplikasi diperbarui.
 
 Jeda antar-pengambilan nomor di kios diatur lewat `kiosk.cooldown_seconds`
 (bawaan 10 detik). Jeda ini **hanya** berlaku pada sesi kios — meja
@@ -390,29 +493,66 @@ Sisanya tinggal menyambung.
 diarahkan ke server tidak akan diam-diam kembali memakai berkas SQLite lokal
 hanya karena variabel lama tertinggal.
 
-### User PostgreSQL terbatas untuk mesin kios
+### Setelan yang berbeda di tiap mesin
 
-Komputer kios menghadap publik. Connection string-nya tetap ada di mesin
-itu, jadi **jangan** memakai user `antrian` yang sama dengan petugas —
-user itu dapat membaca tabel `app_user` (hash kata sandi seluruh petugas).
+Pencetak tiket menempel pada satu komputer dan pengeras suara pada komputer
+lain, sedangkan `ticket.printer` dan `display.sound_enabled` di layar
+Pengaturan bernilai satu untuk seluruh sistem. Dua environment variable
+menimpanya **hanya di mesin yang bersangkutan**:
 
-1. Buat user terpisah, lalu jalankan [docs/sql/kios-grant.sql](docs/sql/kios-grant.sql)
-   sebagai superuser pada database `antrian`.
-2. Di komputer kios, arahkan ke user itu:
+| Variable | Nilai | Dipasang di |
+|---|---|---|
+| `ANTRIAN_PRINTER` | `pdf`, `system`, `none` | Mesin yang punya (atau tidak punya) pencetak tiket |
+| `ANTRIAN_SUARA` | `1` / `0` | Mesin yang harus bersuara, atau harus diam |
 
 ```powershell
+# Anjungan: mencetak tiket, tetapi diam (televisi yang mengumumkan)
+setx ANTRIAN_PRINTER "system"
+
+# Komputer loket: tidak punya pencetak tiket dan tidak perlu bersuara
+setx ANTRIAN_PRINTER "none"
+```
+
+Keduanya boleh dikosongkan. Mesin yang tidak menyebut apa-apa mengikuti
+pengaturan bersama — kecuali suara pada anjungan, yang memang diam secara
+bawaan. Nilai yang salah ketik diperlakukan seperti tidak diisi, bukan
+sebagai "tidak": satu huruf keliru tidak boleh mendiamkan panggilan tanpa
+jejak.
+
+### User PostgreSQL terbatas untuk mesin publik
+
+Anjungan dan televisi ruang tunggu menghadap publik. Connection string-nya
+tetap ada di mesin itu, jadi **jangan** memakai user `antrian` yang sama
+dengan petugas — user itu dapat membaca tabel `app_user` (hash kata sandi
+seluruh petugas).
+
+1. Buat user terpisah, lalu jalankan skripnya sebagai superuser pada
+   database `antrian`:
+   [kios-grant.sql](docs/sql/kios-grant.sql) untuk anjungan,
+   [layar-grant.sql](docs/sql/layar-grant.sql) untuk televisi.
+2. Di komputer yang bersangkutan, arahkan ke user itu:
+
+```powershell
+# Anjungan ambil nomor
 setx ANTRIAN_DB_URL "postgresql+psycopg://antrian_kios:ganti-kata-sandi-kios@192.168.1.10:5432/antrian"
+
+# Televisi ruang tunggu
+setx ANTRIAN_DB_URL "postgresql+psycopg://antrian_layar:ganti-kata-sandi-layar@192.168.1.10:5432/antrian"
 ```
 
-3. Tambah baris `pg_hba.conf` khusus untuk user kios, tetap dibatasi
-   jaringan kantor:
+3. Tambah baris `pg_hba.conf` untuk keduanya, tetap dibatasi jaringan
+   kantor:
 
 ```
-host    antrian    antrian_kios    192.168.1.0/24    scram-sha-256
+host    antrian    antrian_kios     192.168.1.0/24    scram-sha-256
+host    antrian    antrian_layar    192.168.1.0/24    scram-sha-256
 ```
 
-User kios tidak punya hak apa pun pada `app_user`. Ia hanya boleh
-menerbitkan nomor, membaca papan antrian, dan menulis jejak audit.
+Keduanya tidak punya hak apa pun pada `app_user`. Anjungan boleh
+menerbitkan nomor, membaca papan antrian, dan menulis jejak audit;
+televisi **hanya membaca** — tidak ada seorang pun yang berdiri di depannya
+untuk mengambil nomor, sehingga hak menulis di sana murni kelebihan yang
+tidak pernah dipakai.
 
 ### Backup dijalankan di komputer server
 

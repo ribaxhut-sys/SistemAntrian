@@ -1,1 +1,1 @@
-"""Layar kios pengunjung."""
+"""Anjungan ambil nomor."""

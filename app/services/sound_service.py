@@ -38,6 +38,16 @@ LAJU_SAMPEL = 44_100
 NADA_HZ = (880.0, 1174.7)  # A5 lalu D6 — dua nada naik, khas bel antrian
 DURASI_NADA = 0.18  # detik per nada
 
+#: Jeda antara nada selesai dan ucapan dimulai.
+#:
+#: Nada dan ucapan dilepas dari `announce()` yang sama. Bila keduanya
+#: dimulai bersamaan, suara TTS langsung menutupi nada yang cuma 0,36
+#: detik — nada tetap berbunyi, tetapi tidak lagi terdengar sebagai
+#: "ting" yang mendahului kalimatnya. Padahal justru itu gunanya:
+#: menarik perhatian pengunjung supaya sempat menoleh ke layar sebelum
+#: nomornya disebut.
+JEDA_UCAPAN_MS = int(len(NADA_HZ) * DURASI_NADA * 1000) + 150
+
 #: Pengumuman lisan menunggu di antrean maksimal sebanyak ini. Panggilan
 #: beruntun yang lebih banyak dari ini biasanya berarti sesuatu sudah
 #: telat diucapkan; membuang yang tertua lebih berguna bagi petugas
@@ -274,6 +284,29 @@ class ChimeSoundPlayer:
         except Exception:  # noqa: BLE001 - suara tidak boleh menggagalkan panggilan
             logger.exception("Gagal mengucapkan pengumuman panggilan")
 
+    def _jadwalkan_ucapan(self, setelah_nada: bool) -> None:
+        """
+        Lepas ucapan berikutnya, menunggu nada selesai bila nada berbunyi.
+
+        Tanpa jeda ini nada tertimpa ucapan dan terdengar seolah hilang —
+        lihat `JEDA_UCAPAN_MS`. Ketika nada TIDAK berbunyi (komputer tanpa
+        perangkat audio yang layak), menunda tidak ada gunanya: tidak ada
+        apa pun yang perlu didahulukan.
+        """
+        if not setelah_nada:
+            self._lanjutkan_antrean()
+            return
+
+        try:
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(JEDA_UCAPAN_MS, self._lanjutkan_antrean)
+        except Exception:  # noqa: BLE001 - suara tidak boleh menggagalkan panggilan
+            # Tanpa timer, lebih baik terucap bersamaan nada daripada tidak
+            # terucap sama sekali: nomornya tetap sampai ke pengunjung.
+            logger.exception("Gagal menjadwalkan ucapan; diucapkan langsung")
+            self._lanjutkan_antrean()
+
     def announce(self, queue_number: str, counter_name: str | None = None) -> bool:
         """
         Bunyikan panggilan. Mengembalikan True bila nada berhasil dibunyikan.
@@ -285,7 +318,8 @@ class ChimeSoundPlayer:
         petugas tetap dapat memanggil secara lisan sendiri.
 
         Ucapan tidak langsung diputar, melainkan masuk antrean dan menunggu
-        ucapan sebelumnya (bila ada) selesai — lihat `_lanjutkan_antrean`.
+        nada selesai serta ucapan sebelumnya (bila ada) habis — lihat
+        `_jadwalkan_ucapan` dan `_lanjutkan_antrean`.
         """
         berhasil = False
 
@@ -302,9 +336,34 @@ class ChimeSoundPlayer:
                 terbuang = self._antrean_ucapan.popleft()
                 logger.warning("Antrean ucapan penuh; pengumuman lama dibuang: %s", terbuang)
             self._antrean_ucapan.append(_teks_pengumuman(queue_number, counter_name))
-            self._lanjutkan_antrean()
+            self._jadwalkan_ucapan(setelah_nada=berhasil)
 
         return berhasil
+
+
+def suara_diaktifkan(settings, *, anjungan: bool = False) -> bool:
+    """
+    Apakah MESIN INI membunyikan panggilan.
+
+    Pengeras suara menempel pada satu komputer, bukan pada sistem, sehingga
+    `display.sound_enabled` di database — satu nilai untuk semua mesin —
+    tidak cukup begitu layar antrian dan anjungan ambil nomor berdiri
+    sebagai dua komputer terpisah. ANTRIAN_SUARA pada mesin yang
+    bersangkutan menimpanya.
+
+    Anjungan diam secara bawaan. Bila ia ikut bersuara sementara layar
+    antrian juga bersuara, pengunjung mendengar dua pengumuman yang saling
+    menyusul setengah detik — masing-masing mesin menyegarkan sendiri tiap
+    dua detik, sehingga keduanya tidak akan pernah sinkron. Pemasangan
+    satu-mesin yang lama, yang anjungannya merangkap papan nomor,
+    menyalakannya kembali dengan ANTRIAN_SUARA=1.
+    """
+    mesin = get_config().suara
+    if mesin is not None:
+        return mesin
+    if anjungan:
+        return False
+    return settings.get_bool("display.sound_enabled", True)
 
 
 def buat_pemutar(aktifkan: bool) -> SoundPlayer:

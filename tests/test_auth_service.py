@@ -293,3 +293,53 @@ def test_audit_log_tidak_memuat_kata_sandi(auth):
     assert TEST_PASSWORD not in isi
     assert "sandibaru123" not in isi
     assert "tebakan-sandi" not in isi
+
+
+# ---------------------------------------------------------------------
+# Sesi layar antrian tanpa login
+# ---------------------------------------------------------------------
+
+def test_sesi_layar_antrian_tanpa_login(auth):
+    """
+    Televisi ruang tunggu berdiri di tempat sepublik anjungan.
+
+    Sebelumnya layar itu hanya dapat dibuka lewat akun DISPLAY, sehingga
+    setiap mati listrik meninggalkan papan kosong sampai ada yang datang
+    mengetikkan sandi — dan sandi yang diketik setiap pagi di ruang tunggu
+    berakhir tertempel di bawah keyboard.
+    """
+    from app.models import UserRole
+
+    sesi = auth.mulai_sesi_layar()
+
+    assert sesi.role is UserRole.DISPLAY
+    assert sesi.user_id is None
+    assert auth.is_authenticated
+
+
+def test_layar_antrian_hanya_boleh_melihat(auth):
+    """
+    Kewenangan paling sempit di seluruh sistem.
+
+    Berbeda dari anjungan, televisi tidak boleh menerbitkan nomor
+    sekalipun: tidak ada seorang pun yang berdiri di depannya untuk itu.
+    """
+    from app.services.permissions import Permission
+
+    auth.mulai_sesi_layar()
+
+    assert auth.has_permission(Permission.DISPLAY_VIEW)
+    assert not auth.has_permission(Permission.QUEUE_CREATE)
+    assert not auth.has_permission(Permission.TICKET_PRINT)
+    assert not auth.has_permission(Permission.QUEUE_CALL)
+
+
+def test_layar_antrian_bukan_sesi_anjungan(auth):
+    """
+    `kios` menentukan menu mana yang muncul. Televisi yang dianggap
+    anjungan akan mendapat tombol ambil nomor yang tidak pernah ada orang
+    di depannya untuk menekannya.
+    """
+    assert auth.mulai_sesi_layar().kios is False
+    auth.logout()
+    assert auth.mulai_sesi_kios().kios is True

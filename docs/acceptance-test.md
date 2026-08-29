@@ -163,19 +163,48 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | K4 | Periksa `logs\app.log` | Kejadian tercatat; tidak ada kata sandi di dalamnya | |
 | K5 | Picu sebuah kegagalan (mis. hapus folder backup saat backup) | Pesan berbahasa Indonesia yang jelas, bukan traceback Python | |
 
-## L. Kios pengunjung (tanpa login)
+## L. Anjungan ambil nomor (tanpa login)
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| L1 | Buka aplikasi tanpa argumen | Dialog pilihan **Layar Pengunjung** / **Layar Petugas** | |
-| L2 | Pilih Layar Pengunjung | Langsung layar penuh; papan nomor + tombol ambil nomor; tanpa login, tanpa bilah status | |
-| L3 | Buka dengan `AntrianCRO.exe --layar` | Dialog dilewati; kios terbuka sendiri | |
+| L1 | Buka aplikasi tanpa argumen | Dialog pilihan **Layar Antrian** / **Anjungan Ambil Nomor** / **Layar Petugas** | |
+| L2 | Pilih Anjungan Ambil Nomor | Langsung layar penuh; papan nomor + tombol ambil nomor; tanpa login, tanpa bilah status | |
+| L3 | Buka dengan `AntrianCRO.exe --kios` | Dialog dilewati; anjungan terbuka sendiri | |
+| L3b | Buka dengan `AntrianCRO.exe --layar` (pintasan lama) | Sama seperti `--kios`; pintasan lama tidak mati | |
 | L4 | Sentuh satu jenis layanan | Nomor terbit (mis. `A-001`); tiket tercetak (bila printer aktif) | |
 | L5 | Sentuh lagi segera setelahnya | Tombol mati dan ada keterangan menunggu; nomor kedua belum terbit | |
 | L6 | Tunggu jeda selesai, ambil nomor lagi | Nomor berikutnya terbit | |
-| L7 | Panggil nomor dari loket | Papan di kios menyegar paling lambat 2 detik | |
+| L7 | Panggil nomor dari loket | Papan di anjungan menyegar paling lambat 2 detik | |
 | L8 | Cabut printer / kehabisan kertas, ambil nomor | Nomor tetap terbit; hanya pencetakan yang gagal | |
-| L9 | **PostgreSQL:** dari mesin kios, coba baca tabel `app_user` | Ditolak hak akses; hash kata sandi petugas tidak terbaca | |
+| L9 | **PostgreSQL:** dari mesin anjungan, coba baca tabel `app_user` | Ditolak hak akses; hash kata sandi petugas tidak terbaca | |
+| L10 | Panggil nomor dari loket, dengarkan anjungan | Anjungan **diam**; hanya televisi yang mengumumkan | |
+
+## M. Layar antrian televisi (tanpa login)
+
+Dijalankan di komputer televisi ruang tunggu, terpisah dari anjungan.
+
+| # | Langkah | Hasil yang diharapkan | Hasil |
+|---|---|---|---|
+| M1 | Buka dengan `AntrianCRO.exe --tv` | Dialog dilewati; papan nomor layar penuh, tanpa login | |
+| M2 | Amati layarnya | Hanya papan nomor — tidak ada tombol ambil nomor, bilah atas, maupun bilah status | |
+| M3 | Panggil satu nomor dari loket | Nada "ting" terdengar lebih dulu, baru pengumuman lisan | |
+| M4 | Berdiri di ujung ruang tunggu | Nomor antrian terbaca dari jarak itu | |
+| M5 | Cabut listrik komputer televisi, nyalakan lagi | Papan kembali sendiri tanpa ada yang mengetik apa pun | |
+| M6 | **PostgreSQL:** dari mesin televisi, coba terbitkan nomor lewat SQL | Ditolak hak akses; televisi hanya boleh membaca | |
+| M7 | **PostgreSQL:** dari mesin televisi, coba baca tabel `app_user` | Ditolak hak akses | |
+| M8 | Terbitkan nomor lebih banyak dari `display.list_per_page` | Daftar bawah terbagi halaman; judulnya menyebut "1 / 2" | |
+| M9 | Amati satu menit tanpa menyentuh apa pun | Halaman berganti sendiri sesuai `display.rotate_seconds`, lalu kembali ke halaman 1 | |
+| M10 | Berdiri di ujung ruang tunggu saat halaman berganti | Masih sempat membaca satu halaman penuh sebelum berganti | |
+| M11 | Sisakan antrian lebih sedikit dari satu halaman | Halaman berhenti berganti; tidak ada kedipan | |
+| M12 | Panggil nomor sampai halaman terakhir habis saat sedang tampil | Layar kembali ke halaman 1, tidak menjadi kosong | |
+| M13 | Ganti tema ke Sorotan dan Split | Daftar menunggu tetap ada, nomornya tidak berdempetan | |
+| M14 | Terbitkan nomor pada dua jenis layanan berbeda | Daftar bawah terbagi sebanyak jenis layanan; tiap kolom berjudul nama layanannya | |
+| M15 | Biarkan satu jenis layanan tanpa antrian | Kolomnya tetap ada, berisi "—"; lebar papan tidak berubah-ubah | |
+| M16 | Nonaktifkan satu jenis layanan yang masih ada yang menunggu | Kolomnya tetap tampil sampai nomor terakhirnya dipanggil | |
+| M17 | Perhatikan nomor pada daftar bawah | Angka utuh — tidak ada yang terpotong atas atau bawahnya | |
+| M18 | Isi 10 nomor pada satu layanan | Tampil 2 kolom x 5 baris di dalam kolom layanan itu | |
+| M19 | Ubah **Baris nomor per kolom** menjadi 3, buka ulang layar | Tiga baris; hurufnya membesar mengikuti ruang yang lowong | |
+| M20 | Isi **Ukuran huruf nomor menunggu** dengan 90, buka ulang | Huruf tetap diperkecil agar muat; tidak ada yang terpotong | |
 
 ---
 

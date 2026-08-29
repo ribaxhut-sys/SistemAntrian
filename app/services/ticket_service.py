@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Protocol
 
 from app.core import clock
+from app.core.config import get_config
 from app.core.logger import get_logger
 from app.services.queue_service import QueueInfo
 from app.utils.formatting import tanggal_panjang
@@ -47,6 +48,10 @@ class TicketData:
     issued_at: datetime
     footer: str = ""
     counter_name: str | None = None
+    #: Banyaknya nomor yang masih menunggu di depan pemegang tiket, lintas
+    #: seluruh jenis layanan. None berarti angkanya tidak berhasil dibaca —
+    #: barisnya dihilangkan, bukan dicetak sebagai nol yang menyesatkan.
+    sisa_antrian: int | None = None
 
     @property
     def tanggal(self) -> str:
@@ -74,9 +79,30 @@ class TicketData:
         if self.counter_name:
             baris.append(self.counter_name)
         baris += ["", self.tanggal, self.jam]
+        sisa = self.baris_sisa_antrian()
+        if sisa:
+            baris += ["", sisa]
         if self.footer:
             baris += ["", self.footer]
         return baris
+
+    def baris_sisa_antrian(self) -> str:
+        """
+        Sisa antrian saat tiket dicetak, sebagai satu baris siap cetak.
+
+        Disusun di satu tempat lalu dipakai ketiga pencetak, supaya tiket
+        PDF, tiket printer sistem, dan tiket teks tidak pernah menyebut
+        kalimat yang berbeda untuk keadaan yang sama.
+
+        Kosong berarti barisnya memang tidak dicetak — hanya sepanjang itu
+        ruang yang tersisa di struk 88 mm setelah nomor, jenis layanan,
+        loket, tanggal, jam, dan dua baris catatan kaki.
+        """
+        if self.sisa_antrian is None:
+            return ""
+        if self.sisa_antrian <= 0:
+            return "Tidak ada sisa antrian"
+        return f"Sisa antrian: {self.sisa_antrian}"
 
 
 @dataclass(frozen=True)
@@ -150,6 +176,12 @@ class PdfTicketPrinter:
     LEBAR_MM = 80
     # Tinggi dipas dengan isinya. Kertas struk terpakai setiap pengunjung,
     # jadi ruang kosong di bawah tiket adalah pemborosan harian.
+    #
+    # Ukurannya TETAP: kertas potong yang dipakai kantor memang setinggi ini.
+    # Baris sisa antrian karena itu dimuat dengan merapatkan jarak antarbaris
+    # di tengah tiket, bukan dengan menambah tinggi kertas. Menambah satu
+    # baris lagi di sini berarti catatan kaki jatuh di luar halaman dan
+    # hilang tanpa jejak — lihat MAKS_BARIS_FOOTER.
     TINGGI_MM = 88
 
     def __init__(self, folder: Path) -> None:
@@ -196,18 +228,26 @@ class PdfTicketPrinter:
 
         c.setFont("Helvetica-Bold", 14)
         c.drawCentredString(tengah, y, data.category_name[:28])
-        y -= 7 * mm
+        y -= 6 * mm
 
         if data.counter_name:
             c.setFont("Helvetica", 11)
             c.drawCentredString(tengah, y, data.counter_name)
-            y -= 7 * mm
+            y -= 6 * mm
 
         c.setFont("Helvetica", 10)
         c.drawCentredString(tengah, y, data.tanggal)
         y -= 5 * mm
         c.drawCentredString(tengah, y, data.jam)
-        y -= 10 * mm
+        y -= 7 * mm
+
+        sisa = data.baris_sisa_antrian()
+        if sisa:
+            c.setFont("Helvetica-Bold", 12)
+            c.drawCentredString(tengah, y, sisa)
+            y -= 6 * mm
+        else:
+            y -= 3 * mm
 
         if data.footer:
             c.setFont("Helvetica", 9)
@@ -328,14 +368,21 @@ class QtTicketPrinter:
         teks_tengah(38, data.queue_number, 44, True)
         teks_tengah(51, data.category_name[:28], 14, True)
 
-        y = 58.0
+        y = 57.0
         if data.counter_name:
             teks_tengah(y, data.counter_name, 11, False)
-            y += 7
+            y += 6
 
         teks_tengah(y, data.tanggal, 10, False)
         teks_tengah(y + 5, data.jam, 10, False)
-        y += 15
+        y += 12
+
+        sisa = data.baris_sisa_antrian()
+        if sisa:
+            teks_tengah(y, sisa, 12, True)
+            y += 6
+        else:
+            y += 3
 
         if data.footer:
             for potongan in _bungkus(data.footer, 38):
@@ -381,15 +428,20 @@ def _bungkus(teks: str, lebar: int, maks_baris: int = MAKS_BARIS_FOOTER) -> list
 class TicketService:
     """Menyusun dan mencetak tiket antrian."""
 
-    def __init__(self, printer: TicketPrinter, settings, master) -> None:
+    def __init__(self, printer: TicketPrinter, settings, master, queue=None) -> None:
         self.printer = printer
         self.settings = settings
         self.master = master
+        # Boleh None: tiket tetap tercetak, hanya tanpa blok ringkasan
+        # antrian. Yang tidak boleh terjadi adalah pembacaan tambahan ini
+        # menghalangi tercetaknya nomor.
+        self.queue = queue
 
     def susun(self, antrian: QueueInfo) -> TicketData:
         """Susun isi tiket dari sebuah antrian."""
         cabang = self.master.list_branches()
         nama_kantor = cabang[0].name if cabang else "Kantor Pelayanan"
+        ringkasan = self._ringkasan(antrian)
 
         return TicketData(
             queue_number=antrian.queue_number,
@@ -398,7 +450,29 @@ class TicketService:
             issued_at=antrian.created_at or clock.now(),
             footer=self.settings.get("ticket.footer", ""),
             counter_name=antrian.counter_name,
+            sisa_antrian=ringkasan.sisa_antrian if ringkasan else None,
         )
+
+    def _ringkasan(self, antrian: QueueInfo):
+        """
+        Keadaan antrian saat ini, atau None bila tidak dapat dibaca.
+
+        Kegagalannya sengaja ditelan. Angka sisa antrian adalah tambahan
+        yang menyenangkan, sedangkan nomor antriannya adalah alasan
+        pengunjung berdiri di depan mesin — database yang sedang tersendat
+        tidak boleh menahan tiketnya hanya karena hitungan ini gagal.
+        """
+        if self.queue is None:
+            return None
+        try:
+            return self.queue.ringkasan_tiket(antrian)
+        except Exception:  # noqa: BLE001 - ringkasan tidak boleh menahan tiket
+            logger.warning(
+                "Sisa antrian untuk tiket %s tidak terbaca; tiket dicetak tanpa baris itu",
+                antrian.queue_number,
+                exc_info=True,
+            )
+            return None
 
     def cetak(self, antrian: QueueInfo) -> PrintResult:
         """
@@ -418,6 +492,19 @@ class TicketService:
             )
 
         return self.printer.cetak(data)
+
+
+def mode_pencetak(settings) -> str:
+    """
+    Cara MESIN INI mencetak tiket.
+
+    Pencetak tiket menempel pada satu komputer — anjungan ambil nomor, atau
+    meja pendaftaran — sedangkan `ticket.printer` di database berlaku untuk
+    seluruh sistem. Tanpa ANTRIAN_PRINTER pada mesin yang bersangkutan,
+    menyalakan "Cetak ke printer Windows" untuk anjungan membuat kelima
+    komputer loket ikut mencoba mencetak ke pencetak yang tidak ada padanya.
+    """
+    return get_config().printer or settings.get("ticket.printer", "pdf")
 
 
 def buat_printer(mode: str, folder: Path) -> TicketPrinter:

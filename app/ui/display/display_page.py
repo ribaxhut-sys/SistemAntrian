@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
@@ -22,7 +22,7 @@ from app.core.logger import get_logger
 from app.models import QueueStatus
 from app.services.queue_service import DisplayCounterState, DisplayState, LABEL_STATUS, QueueService
 from app.services.settings_service import SettingsService
-from app.services.sound_service import SoundPlayer
+from app.services.sound_service import SoundPlayer, suara_diaktifkan
 from app.ui.common import jalankan_aman
 from app.ui.display.tema import KISI, SOROTAN, SPLIT, TEMA_BAWAAN, Palet, palet_untuk
 
@@ -36,6 +36,55 @@ SELANG_SEGAR_MS = 2_000
 #: berarti memilih antara jam yang melompat dua detik sekali atau membebani
 #: database sekali per detik.
 SELANG_JAM_MS = 1_000
+
+#: Halaman terbanyak yang ikut diputar pada daftar menunggu.
+#:
+#: Hari ramai meninggalkan ratusan orang menunggu, dan memutar dua puluh
+#: halaman berarti satu siklus lebih dari semenit — pengunjung yang mencari
+#: nomornya sudah menyerah jauh sebelum halamannya kembali. Sisanya disebut
+#: sebagai jumlah ("dan 47 lainnya"), yang lebih jujur daripada rotasi yang
+#: tidak pernah sampai kepadanya.
+MAKS_HALAMAN = 5
+
+#: Kolom terbanyak pada kisi daftar menunggu, untuk panel yang melintang
+#: selebar layar. Lebih dari ini, nomor lima huruf mulai berdempetan pada
+#: televisi 1080p.
+KOLOM_DAFTAR = 5
+
+#: Kolom untuk tema yang menaruh panel ini di kolom kanan yang sempit.
+#: Sorotan dan Split hanya menyisakan sekitar 40% lebar layar untuknya,
+#: dan lima kolom nomor di ruang selebar itu saling menempel.
+KOLOM_DAFTAR_SEMPIT = 2
+
+#: Kolom nomor untuk SETIAP jenis layanan.
+#:
+#: Panel ini lebar dan pendek — sekitar 1800x400 pada televisi 1080p —
+#: sehingga menumpuk nomor ke bawah menghabiskan sisi yang langka dan
+#: menyia-nyiakan sisi yang berlimpah. Dua kolom memakai lebarnya, dan
+#: barisnya tetap cukup tinggi untuk memuat hurufnya utuh.
+#:
+#: Tiga, dengan tiga jenis layanan, berarti sembilan kolom pada 1800px:
+#: 200px per kolom, sedangkan nomor lima huruf sudah memakan 160px.
+KOLOM_PER_LAYANAN = 2
+
+#: Padding dan tepi kartu nomor, dipakai bersama oleh stylesheet dan
+#: perhitungan tinggi barisnya. Keduanya WAJIB memakai angka yang sama;
+#: berbeda sedikit saja, huruf terpotong tanpa ada yang tahu sebabnya.
+PADDING_NOMOR_Y = 8
+TEPI_NOMOR = 2
+
+#: Font terkecil yang masih pantas dibaca dari seberang ruangan. Di bawah
+#: ini, papan berhenti mengecilkan huruf dan mulai mengurangi barisnya —
+#: lebih baik satu halaman lagi daripada nomor yang tidak terbaca.
+FONT_DAFTAR_MIN = 18
+
+#: Jenis layanan terbanyak yang masih dapat dijadikan kolom sendiri-sendiri.
+#:
+#: Di atas ini kolomnya terlalu sempit untuk memuat nomor lima huruf, dan
+#: daftar gabungan yang berhalaman justru lebih terbaca daripada tujuh
+#: kolom yang semuanya terpotong. Kantor dengan sebanyak itu jenis layanan
+#: memang tidak dapat menampilkan semuanya berdampingan pada satu televisi.
+MAKS_KOLOM_LAYANAN = 6
 
 LABEL_STATUS_LOKET: dict[QueueStatus, str] = {
     QueueStatus.CALLED: "DIPANGGIL",
@@ -556,10 +605,42 @@ class DisplayPage(QWidget):
         # layanan di panel ambil nomor yang mengalah.
         self.tata_letak = KISI if kompak else self.palet.tata_letak
 
-        self.jumlah_berikutnya = settings.get_int("display.next_count", 3)
+        # Papan kios menampilkan sederet nomor saja; televisi menampilkan
+        # daftar menunggu selengkapnya, berhalaman, dan berpindah sendiri.
+        self.baris_diminta = max(1, settings.get_int("display.list_rows", 5))
+        #: Nol berarti huruf menyesuaikan sendiri dengan tinggi papan.
+        #: Angka lain diperlakukan sebagai batas ATAS, bukan sebagai
+        #: perintah mati: papan tetap memperkecilnya bila barisnya tidak
+        #: muat, karena nomor terpotong lebih buruk daripada nomor kecil.
+        self.font_diminta = max(0, settings.get_int("display.list_font_size", 0))
+        self.jeda_putar_ms = (
+            max(0, settings.get_int("display.rotate_seconds", 3)) * 1000
+        )
+        self.jumlah_berikutnya = (
+            settings.get_int("display.next_count", 3)
+            if kompak
+            else self.baris_diminta * KOLOM_PER_LAYANAN * MAKS_HALAMAN
+        )
+        #: Halaman daftar menunggu yang sedang tampil. Milik widget, BUKAN
+        #: dihitung ulang dari data: penyegaran dua detik sekali akan
+        #: mengembalikannya ke halaman satu terus-menerus, dan rotasi tidak
+        #: akan pernah sempat terlihat.
+        self._halaman = 0
+        self._menunggu: list = []
+        self._layanan: list = []
+        self._total_menunggu = 0
+        #: Hasil pengukuran daftar menunggu terhadap tinggi panel yang ADA.
+        #: Diisi `_ukur_daftar()`; nilai awalnya sekadar penjaga sebelum
+        #: jendela pernah ditampilkan sama sekali.
+        self._font_daftar = 0
+        self._tinggi_baris = 0
+        self._baris_muat = 99
         #: Faktor tambahan khusus nomor antrian, dari pengaturan admin.
         self.skala_nomor = settings.get_int("display.number_font_scale", 100) / 100.0
-        self.suara_aktif = settings.get_bool("display.sound_enabled", True)
+        # `kompak` berarti papan kecil di dalam anjungan, dan anjungan
+        # diam secara bawaan supaya pengunjung tidak mendengar dua
+        # pengumuman dari dua mesin sekaligus.
+        self.suara_aktif = suara_diaktifkan(settings, anjungan=kompak)
         #: Nomor yang terakhir dibunyikan, supaya nada tidak berulang setiap
         #: penyegaran untuk panggilan yang sama.
         self._terakhir_dibunyikan: tuple[int, int] | None = None
@@ -585,9 +666,20 @@ class DisplayPage(QWidget):
         self.pewaktu_jam = QTimer(self)
         self.pewaktu_jam.setInterval(SELANG_JAM_MS)
         self.pewaktu_jam.timeout.connect(self.perbarui_jam)
+
+        # Rotasi halaman berdiri sendiri, terpisah dari penyegaran data.
+        # Disatukan, halaman akan ikut berpindah setiap dua detik — terlalu
+        # cepat untuk dibaca — dan justru berhenti berpindah pada saat
+        # datanya tidak berubah.
+        self.pewaktu_halaman = QTimer(self)
+        self.pewaktu_halaman.setInterval(max(1, self.jeda_putar_ms))
+        self.pewaktu_halaman.timeout.connect(self.putar_halaman)
+
         if otomatis:
             self.pewaktu.start()
             self.pewaktu_jam.start()
+            if self.berotasi:
+                self.pewaktu_halaman.start()
 
     # -----------------------------------------------------------------
     # Tampilan
@@ -663,7 +755,10 @@ class DisplayPage(QWidget):
         self.label_judul_berikutnya.setMinimumSize(1, 1)
         self.susunan_berikutnya.addWidget(self.label_judul_berikutnya)
 
-        self.baris_berikutnya = QHBoxLayout()
+        # Kisi, bukan satu baris: daftar menunggu televisi memuat sepuluh
+        # nomor atau lebih sekaligus, dan sepuluh nomor sebaris menjadi
+        # terlalu kecil untuk dibaca dari seberang ruangan.
+        self.baris_berikutnya = QGridLayout()
         self.susunan_berikutnya.addLayout(self.baris_berikutnya, stretch=1)
         return self.panel_berikutnya
 
@@ -682,11 +777,15 @@ class DisplayPage(QWidget):
         panel.setStyleSheet("background: transparent;")
         self.kisi_loket = QGridLayout(panel)
         self.kisi_loket.setContentsMargins(0, 0, 0, 0)
-        # Kartu loket mendapat porsi jauh lebih besar pada layar televisi.
-        # Di kios papan memang tidak boleh mendominasi, jadi panel
-        # "menunggu giliran" relatif lebih tinggi di sana.
-        self.susunan.addWidget(panel, stretch=5 if self.kompak else 8)
-        self.susunan.addWidget(self._bangun_panel_berikutnya(), stretch=2)
+        # Televisi membagi layarnya rata: kartu loket menjawab "siapa yang
+        # sedang dipanggil", daftar menunggu menjawab "kapan giliran saya" —
+        # dan pertanyaan kedua ditanyakan jauh lebih sering oleh orang yang
+        # sudah duduk menunggu. Di kios daftar itu tetap kecil, karena
+        # tempatnya dibutuhkan tombol ambil nomor di bawahnya.
+        self.susunan.addWidget(panel, stretch=5)
+        self.susunan.addWidget(
+            self._bangun_panel_berikutnya(), stretch=2 if self.kompak else 5
+        )
 
     def _bangun_sorotan(self) -> None:
         self.susunan.addLayout(self._bangun_kepala())
@@ -796,10 +895,31 @@ class DisplayPage(QWidget):
         skala = self.hitung_skala()
         # Ambang perubahan mencegah tulis-ulang gaya pada setiap piksel
         # perubahan tinggi jendela, yang memicu tata letak berulang.
-        if abs(skala - self.skala) < 0.02:
-            return
-        self.skala = skala
-        self._terapkan_ukuran()
+        if abs(skala - self.skala) >= 0.02:
+            self.skala = skala
+            self._terapkan_ukuran()
+
+        # Ditunda sampai Qt selesai menata isinya. Tinggi panel baru
+        # diketahui SETELAH tata letak berjalan, sedangkan resizeEvent tiba
+        # sebelum itu; mengukur di sini juga membaca tinggi yang belum
+        # final. singleShot dengan `self` sebagai konteks ikut batal
+        # sendiri bila layarnya keburu ditutup.
+        QTimer.singleShot(0, self, self._sesuaikan_daftar)
+
+    def _sesuaikan_daftar(self) -> None:
+        """
+        Ukur ulang daftar menunggu, gambar ulang bila hurufnya berubah.
+
+        Penggambaran pertama terjadi sebelum panel punya tinggi yang
+        sebenarnya, sehingga hurufnya dihitung dari angka yang belum final
+        dan nomornya terpotong beberapa piksel. Tanpa penyesuaian ini,
+        pengunjung melihat papan yang salah sampai penyegaran dua detik
+        berikutnya memperbaikinya sendiri.
+        """
+        sebelum = self._font_daftar
+        self._ukur_daftar()
+        if self._font_daftar != sebelum:
+            self._gambar_halaman()
 
     def _terapkan_ukuran(self) -> None:
         """Tulis ulang margin dan ukuran huruf sesuai skala yang berlaku."""
@@ -867,6 +987,10 @@ class DisplayPage(QWidget):
             self.kartu_sorot.set_skala(skala)
         for kartu in self.kartu_loket:
             kartu.set_skala(skala)
+        # Diukur ulang, bukan sekadar digayakan ulang: tinggi panel berubah
+        # bersama tinggi jendela, dan huruf yang muat pada layar sebelumnya
+        # belum tentu muat pada yang sekarang.
+        self._ukur_daftar()
         for label in self.label_berikutnya:
             self._gaya_berikutnya(label)
 
@@ -878,7 +1002,10 @@ class DisplayPage(QWidget):
         """Ambil keadaan terbaru dan perbarui layar."""
         self.perbarui_jam()
         berhasil, keadaan = jalankan_aman(self, lambda: self.queue.display_state(
-            self.jumlah_berikutnya
+            self.jumlah_berikutnya,
+            # Papan kios tidak berkolom, sehingga pengelompokannya tidak
+            # perlu disusun sama sekali.
+            0 if self.kompak else self.baris_diminta * KOLOM_PER_LAYANAN * MAKS_HALAMAN,
         ))
         if not berhasil or keadaan is None:
             return
@@ -904,7 +1031,19 @@ class DisplayPage(QWidget):
         if terkini is not None:
             self._bunyikan_bila_baru(terkini)
 
-        self._isi_berikutnya(keadaan.berikutnya)
+        # Halaman TIDAK dikembalikan ke satu di sini. Penyegaran terjadi
+        # dua detik sekali; mengembalikannya berarti pengunjung tidak pernah
+        # melihat halaman kedua sama sekali.
+        self._menunggu = keadaan.berikutnya
+        self._layanan = keadaan.layanan
+        self._total_menunggu = keadaan.total_menunggu
+        # Diukur SEBELUM halaman dijepit: banyaknya halaman bergantung pada
+        # berapa baris yang benar-benar muat, dan itu baru diketahui setelah
+        # tinggi panel diukur.
+        self._ukur_daftar()
+        if self._halaman >= self.jumlah_halaman:
+            self._halaman = 0
+        self._gambar_halaman()
 
     def _susun_kartu(self, loket: list[DisplayCounterState]) -> None:
         """Bangun ulang kartu hanya bila jumlah atau urutan loket berubah."""
@@ -974,33 +1113,317 @@ class DisplayPage(QWidget):
         # rgba(), bukan #RRGGBBAA. Qt tidak mendukung heksadesimal delapan
         # digit dan akan membacanya sebagai warna yang sama sekali berbeda.
         p = self.palet
-        label.setMinimumHeight(round((52 if self.kompak else 68) * self.skala))
+        # Tinggi MINIMUM sengaja hanya sebesar huruf terkecil yang masih
+        # pantas, bukan setinggi baris yang dihitung.
+        #
+        # Minimum yang setinggi barisnya membuat kisi menuntut lebih dari
+        # jatah panelnya, panel mendorong tepi bawah layar, dan tinggi yang
+        # terbaca `_ukur_daftar()` ikut membengkak — pengukuran berikutnya
+        # memakai angka yang sudah meluber itu dan meluber lagi. Dengan
+        # minimum yang rendah, panel selalu persis sebesar jatahnya, dan
+        # kartu memuai sendiri mengisi sisanya lewat SizePolicy Expanding.
+        label.setMinimumHeight(self._tinggi_baris_untuk(FONT_DAFTAR_MIN))
         label.setStyleSheet(
             f"color: {p.chip_teks}; background: {p.chip};"
-            f" border: 2px solid {p.chip_tepi}; border-radius: 14px;"
-            f" font-size: {self.px('berikutnya')}px; font-weight: 800;"
-            f" letter-spacing: {p.renggang_nomor}px; padding: 8px 12px;"
+            f" border: {TEPI_NOMOR}px solid {p.chip_tepi}; border-radius: 14px;"
+            f" font-size: {self._font_daftar}px; font-weight: 800;"
+            f" letter-spacing: {p.renggang_nomor}px;"
+            f" padding: {PADDING_NOMOR_Y}px 12px;"
         )
 
-    def _isi_berikutnya(self, berikutnya: list) -> None:
+    @property
+    def berotasi(self) -> bool:
+        """
+        Daftar menunggu berpindah halaman sendiri.
+
+        Tidak berlaku pada papan kios: pengunjung berdiri di depannya
+        beberapa detik untuk mengambil nomor, dan daftar yang berpindah
+        sendiri di sana hanya menarik matanya dari tombol layanan.
+        """
+        return not self.kompak and self.jeda_putar_ms > 0
+
+    @property
+    def kolom_daftar(self) -> int:
+        """Kolom kisi daftar menunggu, mengikuti lebar panel yang tersedia."""
+        return KOLOM_DAFTAR if self.tata_letak == KISI else KOLOM_DAFTAR_SEMPIT
+
+    @property
+    def berkolom_layanan(self) -> bool:
+        """
+        Daftar menunggu dipecah menjadi satu kolom per jenis layanan.
+
+        Tiga jenis layanan berarti tiga kolom. Papan kios tidak pernah
+        berkolom — tempatnya hanya sederet nomor — dan kantor dengan jenis
+        layanan lebih banyak daripada `MAKS_KOLOM_LAYANAN` kembali ke
+        daftar gabungan, yang pada lebar sesempit itu justru lebih terbaca.
+        """
+        return not self.kompak and 0 < len(self._layanan) <= MAKS_KOLOM_LAYANAN
+
+    @property
+    def baris_daftar(self) -> int:
+        """
+        Baris nomor per kolom, setelah dijepit oleh tinggi papan.
+
+        Pengaturan admin diperlakukan sebagai permintaan, bukan perintah.
+        Lima baris yang diminta pada papan yang hanya sanggup tiga akan
+        diperas Qt melewati tinggi minimumnya, dan hurufnya terpotong di
+        kedua ujung — kegagalan yang tidak terlihat sebagai kesalahan
+        pengaturan sama sekali.
+        """
+        return max(1, min(self.baris_diminta, self._baris_muat))
+
+    @property
+    def muat_per_halaman(self) -> int:
+        """Nomor yang tampil per jenis layanan dalam satu halaman."""
+        return self.baris_daftar * KOLOM_PER_LAYANAN
+
+    @property
+    def jumlah_halaman(self) -> int:
+        """
+        Banyaknya halaman daftar menunggu. Minimal satu, walau kosong.
+
+        Pada tampilan berkolom, yang menentukan adalah layanan TERPANJANG:
+        halaman berhenti setelah layanan yang paling ramai habis, bukan
+        setelah yang paling sepi.
+        """
+        if self.berkolom_layanan:
+            terpanjang = max((len(l.menunggu) for l in self._layanan), default=0)
+            return max(1, -(-terpanjang // self.muat_per_halaman))
+        if not self._menunggu:
+            return 1
+        return -(-len(self._menunggu) // self.muat_per_halaman)
+
+    def putar_halaman(self) -> None:
+        """
+        Pindah ke halaman berikutnya daftar menunggu.
+
+        Diam bila hanya ada satu halaman. Halaman yang "berpindah" ke
+        dirinya sendiri terbaca sebagai layar berkedip yang rusak, bukan
+        sebagai daftar yang berputar.
+        """
+        if self.jumlah_halaman <= 1:
+            return
+        self._halaman = (self._halaman + 1) % self.jumlah_halaman
+        self._gambar_halaman()
+
+    def _gambar_halaman(self) -> None:
+        """Tulis halaman yang sedang aktif beserta keterangannya."""
+        awal = self._halaman * self.muat_per_halaman
+        # Papan yang benar-benar kosong mendapat satu kalimat, bukan tiga
+        # kolom berisi strip. Pagi hari sebelum pengunjung pertama datang,
+        # "Tidak ada antrian menunggu" menjawab pertanyaannya langsung.
+        if self.berkolom_layanan and self._total_menunggu:
+            self._isi_per_layanan(awal)
+        else:
+            self._isi_berikutnya(self._menunggu[awal : awal + self.muat_per_halaman])
+        self.label_judul_berikutnya.setText(self._judul_daftar())
+
+    def _judul_daftar(self) -> str:
+        """
+        Judul panel beserta nomor halaman dan sisa yang tidak termuat.
+
+        Nomor halaman wajib terlihat. Tanpanya, pengunjung yang tidak
+        menemukan nomornya menyimpulkan nomornya hilang dan bertanya ke
+        loket — persis pekerjaan yang papan ini ada untuk mengurangi.
+        """
+        judul = "MENUNGGU GILIRAN"
+        if self.jumlah_halaman > 1:
+            judul += f"   {self._halaman + 1} / {self.jumlah_halaman}"
+
+        tampil = (
+            sum(len(l.menunggu) for l in self._layanan)
+            if self.berkolom_layanan
+            else len(self._menunggu)
+        )
+        sisa = self._total_menunggu - tampil
+        if sisa > 0:
+            judul += f"   ·   DAN {sisa} LAINNYA"
+        return judul
+
+    def _tinggi_baris_untuk(self, px: int) -> int:
+        """
+        Tinggi yang benar-benar dibutuhkan satu kartu nomor pada font ini.
+
+        Diambil dari metrik huruf, bukan dari konstanta. Konstanta yang
+        dahulu dipakai (68px) ditetapkan ketika nomor masih berjejer
+        MENDATAR dalam satu baris, dan di sana tinggi tidak pernah menjadi
+        kendala. Begitu nomor ditumpuk ke bawah, konstanta itu ternyata
+        11px lebih pendek daripada hurufnya sendiri — setiap kartu
+        terpotong bahkan sebelum kisinya diperas.
+        """
+        font = QFont(self.font())
+        font.setPixelSize(max(1, px))
+        font.setWeight(QFont.Weight.ExtraBold)
+        return QFontMetrics(font).height() + PADDING_NOMOR_Y * 2 + TEPI_NOMOR * 2
+
+    def _tinggi_judul_kolom(self) -> int:
+        """
+        Tinggi baris nama jenis layanan di DALAM kisi.
+
+        Ikut memakan tinggi kisi, terpisah dari judul panel di atasnya.
+        Terlewat dari perhitungan, seluruh panel menjadi lebih tinggi
+        daripada jatahnya dan meluber keluar tepi bawah layar.
+        """
+        font = QFont(self.font())
+        font.setPixelSize(self.px("berikutnya_judul"))
+        font.setWeight(QFont.Weight.Bold)
+        return QFontMetrics(font).height()
+
+    def _tinggi_kisi_tersedia(self) -> int:
+        """Tinggi yang tersisa di dalam panel setelah judul dan marginnya."""
+        tinggi = self.panel_berikutnya.height()
+        if tinggi <= 0:
+            return 0
+        margin = self.susunan_berikutnya.contentsMargins()
+        return (
+            tinggi
+            - margin.top()
+            - margin.bottom()
+            - self.label_judul_berikutnya.sizeHint().height()
+            - self.susunan_berikutnya.spacing()
+        )
+
+    def _ukur_daftar(self) -> None:
+        """
+        Sesuaikan huruf dan tinggi baris dengan tinggi panel yang ADA.
+
+        Ukuran huruf papan diturunkan dari ukuran JENDELA lewat `skala`,
+        dan itu memadai selama nomor berjejer mendatar. Daftar bertumpuk
+        lima baris menjadikan tinggi panel — bukan tinggi jendela — yang
+        menentukan, dan keduanya tidak sebanding: papan hanya mendapat
+        separuh layar dikurangi kepala dan margin.
+
+        Dua hasilnya: berapa baris yang muat sama sekali (`_baris_muat`,
+        dihitung pada huruf terkecil yang masih pantas), dan huruf terbesar
+        yang memuat baris sebanyak itu tanpa terpotong.
+        """
+        nominal = self.font_diminta or self.px("berikutnya")
+        tersedia = self._tinggi_kisi_tersedia()
+        jarak = round(12 * self.skala)
+        if self.berkolom_layanan:
+            tersedia -= self._tinggi_judul_kolom() + jarak
+
+        if tersedia <= 0:
+            # Jendela belum pernah ditampilkan. Dibiarkan pada ukuran
+            # nominal; resizeEvent akan mengukur ulang begitu ada geometri.
+            self._baris_muat = 99
+            self._font_daftar = nominal
+            self._tinggi_baris = self._tinggi_baris_untuk(nominal)
+            return
+
+        terkecil = self._tinggi_baris_untuk(FONT_DAFTAR_MIN)
+        self._baris_muat = max(1, (tersedia + jarak) // (terkecil + jarak))
+
+        baris = self.baris_daftar
+        px = nominal
+        while px > FONT_DAFTAR_MIN:
+            butuh = baris * self._tinggi_baris_untuk(px) + (baris - 1) * jarak
+            if butuh <= tersedia:
+                break
+            px -= 1
+
+        self._font_daftar = px
+        self._tinggi_baris = self._tinggi_baris_untuk(px)
+
+    def _kosongkan_daftar(self) -> None:
         while self.baris_berikutnya.count():
             item = self.baris_berikutnya.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self.label_berikutnya = []
 
-        if not berikutnya:
-            kosong = QLabel("Tidak ada antrian menunggu")
-            kosong.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            kosong.setMinimumSize(1, 1)
-            kosong.setStyleSheet(
+        # Regangan kolom TIDAK ikut terhapus bersama widget-nya. Tanpa
+        # dikembalikan ke nol, kolom milik jenis layanan yang baru
+        # dinonaktifkan tetap memakan lebarnya sendiri dan meninggalkan
+        # lubang kosong di tengah papan.
+        for kolom in range(self.baris_berikutnya.columnCount()):
+            self.baris_berikutnya.setColumnStretch(kolom, 0)
+
+    def _label_kosong(self, teks: str) -> QLabel:
+        """Keterangan datar, dipakai saat sebuah kolom atau papan tidak berisi."""
+        label = QLabel(teks)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setMinimumSize(1, 1)
+        label.setStyleSheet(
+            f"color: {self.palet.panel_judul}; background: transparent;"
+            f" font-size: {self.px('berikutnya_judul')}px;"
+        )
+        return label
+
+    def _isi_per_layanan(self, awal: int) -> None:
+        """
+        Satu kolom per jenis layanan, masing-masing menampilkan halaman
+        yang sama.
+
+        Baris teratas adalah nama layanannya. Tanpa itu, tiga kolom nomor
+        berdampingan tidak memberi tahu pengunjung kolom mana yang miliknya
+        — dan huruf depan nomor saja terlalu kecil untuk dipakai menebak
+        dari seberang ruangan.
+        """
+        self._kosongkan_daftar()
+
+        for kolom, layanan in enumerate(self._layanan):
+            kiri = kolom * KOLOM_PER_LAYANAN
+            judul = QLabel(f"{layanan.category_prefix} · {layanan.category_name}")
+            judul.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            judul.setMinimumSize(1, 1)
+            judul.setStyleSheet(
                 f"color: {self.palet.panel_judul}; background: transparent;"
-                f" font-size: {self.px('berikutnya_judul')}px;"
+                f" font-size: {self.px('berikutnya_judul')}px; font-weight: 700;"
+                " letter-spacing: 2px;"
             )
-            self.baris_berikutnya.addWidget(kosong)
+            # Judul melintang di atas kedua sub-kolom layanan ini.
+            self.baris_berikutnya.addWidget(judul, 0, kiri, 1, KOLOM_PER_LAYANAN)
+
+            potongan = layanan.menunggu[awal : awal + self.muat_per_halaman]
+            if not potongan:
+                # Kolom kosong tetap diberi tanda. Kolom yang benar-benar
+                # hampa terbaca sebagai bagian layar yang gagal termuat,
+                # bukan sebagai layanan yang memang sedang sepi.
+                self.baris_berikutnya.addWidget(
+                    self._label_kosong("—"), 1, kiri, 1, KOLOM_PER_LAYANAN
+                )
+                continue
+
+            for indeks, antrian in enumerate(potongan):
+                label = QLabel(antrian.queue_number)
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                label.setMinimumSize(1, 1)
+                label.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+                )
+                self._gaya_berikutnya(label)
+                self.label_berikutnya.append(label)
+                # Menurun dulu, baru pindah ke sub-kolom kanan — urutan
+                # baca koran. Nomor antrian punya urutan, dan mengisinya
+                # mendatar membuat yang kedua duduk di sebelah kanan yang
+                # pertama seolah keduanya sederajat.
+                self.baris_berikutnya.addWidget(
+                    label,
+                    indeks % self.baris_daftar + 1,
+                    kiri + indeks // self.baris_daftar,
+                )
+
+        for kolom in range(len(self._layanan) * KOLOM_PER_LAYANAN):
+            self.baris_berikutnya.setColumnStretch(kolom, 1)
+
+    def _isi_berikutnya(self, berikutnya: list) -> None:
+        """Daftar gabungan, dipakai papan kios dan saat jenis layanan terlalu banyak."""
+        self._kosongkan_daftar()
+
+        if not berikutnya:
+            self.baris_berikutnya.addWidget(
+                self._label_kosong("Tidak ada antrian menunggu"), 0, 0
+            )
             return
 
-        for antrian in berikutnya:
+        # Kolom dihitung dari isinya, bukan dipatok. Tiga nomor pada kisi
+        # lima kolom akan berdesak di sepertiga kiri panel dan menyisakan
+        # dua kolom kosong yang terbaca sebagai layar setengah termuat.
+        baris = -(-len(berikutnya) // self.kolom_daftar)
+        kolom = -(-len(berikutnya) // baris)
+
+        for indeks, antrian in enumerate(berikutnya):
             label = QLabel(antrian.queue_number)
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setMinimumSize(1, 1)
@@ -1009,9 +1432,10 @@ class DisplayPage(QWidget):
             )
             self._gaya_berikutnya(label)
             self.label_berikutnya.append(label)
-            self.baris_berikutnya.addWidget(label)
+            self.baris_berikutnya.addWidget(label, indeks // kolom, indeks % kolom)
 
     def hentikan(self) -> None:
         """Hentikan penyegaran berkala. Dipanggil saat layar ditutup."""
         self.pewaktu.stop()
         self.pewaktu_jam.stop()
+        self.pewaktu_halaman.stop()

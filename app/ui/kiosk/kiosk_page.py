@@ -1,9 +1,10 @@
 """
-Layar kios pengunjung.
+Anjungan ambil nomor.
 
-Satu layar mengerjakan dua hal: menampilkan papan nomor yang sedang
-dipanggil, dan menyediakan tombol bagi pengunjung untuk mengambil nomornya
-sendiri.
+Satu layar mengerjakan dua hal: menyediakan tombol bagi pengunjung untuk
+mengambil nomornya sendiri, dan menampilkan papan nomor kecil yang sedang
+dipanggil. Papan besarnya ada di komputer televisi ruang tunggu, mesin
+tersendiri yang dibuka dengan `--tv`.
 
 Dirancang untuk dipakai orang yang belum pernah melihatnya, sambil berdiri,
 dari jarak satu lengan. Karena itu tidak ada menu, tidak ada pilihan yang

@@ -35,3 +35,49 @@ def test_init_only_mencatat_fondasi_siap_ke_log(
     assert "Fondasi siap" in log
     assert "Migrasi selesai" in log
     assert "admin123" not in log.lower()
+
+
+# ---------------------------------------------------------------------
+# Mode mesin dari baris perintah
+# ---------------------------------------------------------------------
+
+def test_tanpa_argumen_mode_ditanyakan() -> None:
+    """None berarti dialog pilihan yang menentukan, bukan mode bawaan."""
+    from app.main import mode_dari_argumen
+
+    assert mode_dari_argumen([]) is None
+    assert mode_dari_argumen(["--init-only"]) is None
+
+
+def test_argumen_membuka_mesin_yang_sesuai() -> None:
+    from app.main import mode_dari_argumen
+    from app.ui.login.mode_dialog import ANJUNGAN, LAYAR_ANTRIAN
+
+    assert mode_dari_argumen(["--tv"]) == LAYAR_ANTRIAN
+    assert mode_dari_argumen(["--kios"]) == ANJUNGAN
+
+
+def test_pintasan_lama_layar_tetap_membuka_anjungan() -> None:
+    """
+    `--layar` sudah terpasang pada shortcut Startup komputer anjungan.
+
+    Memutusnya saat aplikasi diperbarui berarti mesin itu berhenti di
+    dialog pilihan setiap mati listrik — tepat keadaan yang argumen ini
+    diciptakan untuk mencegah.
+    """
+    from app.main import mode_dari_argumen
+    from app.ui.login.mode_dialog import ANJUNGAN
+
+    assert mode_dari_argumen(["--layar"]) == ANJUNGAN
+
+
+def test_layar_antrian_didahulukan_bila_dua_argumen_tertulis() -> None:
+    """
+    Papan kosong terlihat seluruh ruang tunggu, sedangkan anjungan yang
+    keliru masih bisa digantikan petugas yang menerbitkan nomor dari
+    mejanya.
+    """
+    from app.main import mode_dari_argumen
+    from app.ui.login.mode_dialog import LAYAR_ANTRIAN
+
+    assert mode_dari_argumen(["--kios", "--tv"]) == LAYAR_ANTRIAN

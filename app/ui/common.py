@@ -112,6 +112,20 @@ def tombol(teks: str, *, variant: str = "", default: bool = False) -> QPushButto
     return btn
 
 
+def setel_variant(btn: QPushButton, variant: str = "") -> None:
+    """
+    Ganti gaya sebuah tombol setelah tombol itu terlanjur tampil.
+
+    Mengubah property saja TIDAK cukup: Qt sudah menghitung gaya tombol
+    ketika pertama kali digambar dan tidak menghitungnya ulang dengan
+    sendirinya. Tanpa unpolish/polish, tombol Istirahat berganti tulisan
+    tetapi warnanya tetap seperti semula.
+    """
+    btn.setProperty("variant", variant)
+    btn.style().unpolish(btn)
+    btn.style().polish(btn)
+
+
 def judul(teks: str) -> QLabel:
     label = QLabel(teks)
     label.setProperty("heading", "true")

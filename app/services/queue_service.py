@@ -186,6 +186,27 @@ class DisplayCounterState:
 
 
 @dataclass(frozen=True)
+class DisplayServiceQueue:
+    """
+    Antrian menunggu pada satu jenis layanan.
+
+    Layar antrian menampilkan satu kolom per jenis layanan, bukan satu
+    antrean gabungan. Loket dapat dibatasi jenis layanan yang boleh
+    dipanggilnya (tabel counter_category), sehingga urutan panggil memang
+    berjalan per layanan — daftar gabungan justru menyiratkan urutan yang
+    tidak pernah terjadi.
+    """
+
+    category_id: int
+    category_name: str
+    category_prefix: str
+    #: Sebanyak yang diminta layar, urut waktu pengambilan nomor.
+    menunggu: list[QueueInfo]
+    #: Seluruh yang menunggu pada layanan ini, termasuk yang tidak termuat.
+    total: int
+
+
+@dataclass(frozen=True)
 class DisplayState:
     """
     Keadaan yang ditampilkan pada layar antrian.
@@ -196,9 +217,34 @@ class DisplayState:
     """
 
     terkini: QueueInfo | None
+    #: Antrian menunggu, sebanyak yang diminta layar. Televisi meminta
+    #: berhalaman-halaman; papan kios meminta sederet saja.
     berikutnya: list[QueueInfo]
     loket: list[DisplayCounterState] = field(default_factory=list)
     judul: str = ""
+    #: SELURUH antrian menunggu hari ini, termasuk yang tidak ikut terbawa
+    #: di `berikutnya`. Layar memakainya untuk menyebut sisanya sebagai
+    #: jumlah — pengunjung yang tidak menemukan nomornya perlu tahu bahwa
+    #: daftarnya terpotong, bukan bahwa nomornya hilang.
+    total_menunggu: int = 0
+    #: Antrian menunggu dikelompokkan per jenis layanan, satu butir per
+    #: kolom di layar. Kosong bila layar tidak memintanya (papan kios).
+    layanan: list[DisplayServiceQueue] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RingkasanTiket:
+    """
+    Angka yang dicetak di tiket selain nomor antriannya sendiri.
+
+    FOTO SESAAT pada detik tiket dicetak, bukan janji. Antrian bergerak,
+    nomor dibatalkan, loket istirahat — angka ini sudah berubah sebelum
+    pengunjung selesai membacanya.
+    """
+
+    #: Banyaknya nomor yang masih menunggu dan terbit lebih dahulu, lintas
+    #: seluruh jenis layanan. Nol berarti pemegang tiket paling depan.
+    sisa_antrian: int = 0
 
 
 class QueueService:
@@ -404,7 +450,43 @@ class QueueService:
                 row, repo.jumlah_pemanggilan(row.id), self.batas_panggilan()
             )
 
-    def display_state(self, jumlah_berikutnya: int = 3) -> DisplayState:
+    def ringkasan_tiket(self, antrian: QueueInfo) -> RingkasanTiket:
+        """
+        Keadaan antrian pada detik sebuah tiket dicetak.
+
+        Memakai hak TICKET_PRINT, bukan QUEUE_VIEW maupun DISPLAY_VIEW.
+        Tiket terbit dari dua tempat dengan kewenangan yang berbeda —
+        anjungan kios (DISPLAY_VIEW, tanpa QUEUE_VIEW) dan meja pendaftaran
+        (QUEUE_VIEW, tanpa DISPLAY_VIEW) — sehingga hak yang benar untuk
+        pertanyaan ini adalah hak yang keduanya sama-sama punya: hak
+        mencetak tiket itu sendiri.
+
+        Yang dikembalikan hanya satu angka ringkas, bukan daftar antrian,
+        sehingga kios di ruang publik tetap tidak dapat membaca siapa saja
+        yang sedang mengantre.
+        """
+        sesi = self.auth.require_permission(Permission.TICKET_PRINT)
+
+        with session_scope() as session:
+            repo = QueueRepository(session)
+
+            # Lintas seluruh jenis layanan, karena pemanggilan pun begitu:
+            # `berikutnya_untuk_dipanggil` mengurutkan murni dengan waktu
+            # pengambilan nomor. Menghitung hanya yang sejenis akan
+            # menghasilkan angka yang jauh lebih kecil daripada kenyataan
+            # yang dirasakan pengunjung di ruang tunggu.
+            menunggu = repo.list_menunggu(sesi.branch_id, antrian.queue_date)
+            sisa = 0
+            for antre in menunggu:
+                if antre.id == antrian.id:
+                    break
+                sisa += 1
+
+        return RingkasanTiket(sisa_antrian=sisa)
+
+    def display_state(
+        self, jumlah_berikutnya: int = 3, jumlah_per_layanan: int = 0
+    ) -> DisplayState:
         """
         Keadaan layar antrian untuk pengunjung.
 
@@ -412,6 +494,10 @@ class QueueService:
         menghadap publik dan tidak diawasi, sehingga akun yang menjalankannya
         sengaja tidak diberi kemampuan melihat daftar antrian secara penuh
         maupun mengubah apa pun.
+
+        `jumlah_per_layanan` nol berarti pengelompokan per jenis layanan
+        tidak disusun sama sekali — dipakai papan kios, yang hanya memuat
+        sederet nomor dan tidak punya tempat untuk berkolom.
         """
         sesi = self.auth.require_permission(Permission.DISPLAY_VIEW)
         hari = clock.today()
@@ -431,6 +517,13 @@ class QueueService:
 
             menunggu = repo.list_menunggu(sesi.branch_id, hari)
             berikutnya = [_as_info(q) for q in menunggu[:jumlah_berikutnya]]
+            layanan = (
+                self._kelompokkan_per_layanan(
+                    session, sesi.branch_id, menunggu, jumlah_per_layanan
+                )
+                if jumlah_per_layanan > 0
+                else []
+            )
 
             counters = CounterRepository(session).list_for_branch(
                 sesi.branch_id, only_active=True
@@ -456,7 +549,50 @@ class QueueService:
                     )
                 )
 
-        return DisplayState(terkini=terkini, berikutnya=berikutnya, loket=loket)
+        return DisplayState(
+            terkini=terkini,
+            berikutnya=berikutnya,
+            loket=loket,
+            total_menunggu=len(menunggu),
+            layanan=layanan,
+        )
+
+    @staticmethod
+    def _kelompokkan_per_layanan(
+        session, branch_id: int, menunggu: list[Queue], batas: int
+    ) -> list[DisplayServiceQueue]:
+        """
+        Susun satu kolom per jenis layanan, urut sesuai urutan tampilnya.
+
+        Jenis layanan yang sedang KOSONG tetap mendapat kolomnya. Kolom yang
+        muncul dan hilang mengikuti isinya membuat lebar seluruh papan
+        berubah beberapa detik sekali, dan pengunjung yang sedang membaca
+        kehilangan tempat matanya.
+
+        Jenis layanan NONAKTIF ikut ditampilkan selama masih ada yang
+        menunggu padanya. Dinonaktifkan di tengah hari tidak membatalkan
+        nomor yang sudah terbit, dan orangnya masih duduk di ruangan itu —
+        menghilangkan kolomnya berarti nomor mereka lenyap dari papan.
+        """
+        per_kategori: dict[int, list[Queue]] = {}
+        for antrian in menunggu:
+            per_kategori.setdefault(antrian.category_id, []).append(antrian)
+
+        hasil: list[DisplayServiceQueue] = []
+        for kategori in ServiceCategoryRepository(session).list_for_branch(branch_id):
+            antre = per_kategori.get(kategori.id, [])
+            if kategori.status is not RecordStatus.ACTIVE and not antre:
+                continue
+            hasil.append(
+                DisplayServiceQueue(
+                    category_id=kategori.id,
+                    category_name=kategori.name,
+                    category_prefix=kategori.prefix,
+                    menunggu=[_as_info(q) for q in antre[:batas]],
+                    total=len(antre),
+                )
+            )
+        return hasil
 
     def counts_today(self) -> dict[QueueStatus, int]:
         sesi = self.auth.require_permission(Permission.QUEUE_VIEW)

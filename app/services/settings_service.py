@@ -34,6 +34,9 @@ BAWAAN: dict[str, str] = {
     "display.title": "ANTRIAN PELAYANAN CRO",
     "display.info": "",
     "display.next_count": "3",
+    "display.list_rows": "5",
+    "display.list_font_size": "0",
+    "display.rotate_seconds": "3",
     "display.number_font_scale": "100",
     "display.sound_enabled": "true",
     "queue.max_call_attempts": "3",
@@ -93,8 +96,9 @@ SKEMA: tuple[Pengaturan, ...] = (
     Pengaturan(
         "ticket.printer",
         "Cara mencetak tiket",
-        "Kegagalan mencetak tidak pernah membatalkan antrian; nomor sudah "
-        "terbit sebelum tiket dicetak.",
+        "Berlaku untuk komputer yang tidak menyebut pencetaknya sendiri "
+        "lewat ANTRIAN_PRINTER. Kegagalan mencetak tidak pernah membatalkan "
+        "antrian; nomor sudah terbit sebelum tiket dicetak.",
         PILIHAN,
         pilihan=(
             ("pdf", "Simpan sebagai PDF di folder tiket"),
@@ -147,11 +151,48 @@ SKEMA: tuple[Pengaturan, ...] = (
     ),
     Pengaturan(
         "display.next_count",
-        "Jumlah nomor berikutnya",
-        "Banyaknya nomor menunggu yang ikut ditampilkan di layar antrian.",
+        "Jumlah nomor berikutnya di papan kios",
+        "Banyaknya nomor menunggu pada papan kecil di dalam anjungan. "
+        "Televisi ruang tunggu memakai dua pengaturan di bawah ini.",
         ANGKA,
         minimum=0,
         maksimum=10,
+        kelompok="Layar Antrian",
+    ),
+    Pengaturan(
+        "display.list_rows",
+        "Baris nomor per kolom",
+        "Setiap jenis layanan mendapat dua kolom, sehingga 5 baris berarti "
+        "10 nomor per layanan pada satu halaman. Sisanya masuk halaman "
+        "berikutnya. Baris yang tidak muat di layar otomatis dikurangi — "
+        "huruf yang terpotong tidak menolong siapa pun.",
+        ANGKA,
+        minimum=1,
+        maksimum=12,
+        kelompok="Layar Antrian",
+    ),
+    Pengaturan(
+        "display.list_font_size",
+        "Ukuran huruf nomor menunggu (piksel)",
+        "Isi 0 agar menyesuaikan sendiri dengan tinggi papan — itu yang "
+        "disarankan. Angka lain diperlakukan sebagai batas ATAS: papan "
+        "tetap memperkecilnya bila barisnya tidak muat, karena nomor yang "
+        "terpotong lebih buruk daripada nomor yang sedikit lebih kecil.",
+        ANGKA,
+        minimum=0,
+        maksimum=96,
+        kelompok="Layar Antrian",
+    ),
+    Pengaturan(
+        "display.rotate_seconds",
+        "Jeda pergantian halaman (detik)",
+        "Lama satu halaman daftar menunggu tampil sebelum berganti sendiri. "
+        "Isi 0 bila halaman tidak boleh berpindah sendiri. Pengunjung "
+        "membutuhkan waktu untuk mencari nomornya sendiri dari seberang "
+        "ruangan; terlalu cepat membuat daftar ini tidak terbaca sama sekali.",
+        ANGKA,
+        minimum=0,
+        maksimum=60,
         kelompok="Layar Antrian",
     ),
     Pengaturan(
@@ -167,7 +208,11 @@ SKEMA: tuple[Pengaturan, ...] = (
     Pengaturan(
         "display.sound_enabled",
         "Bunyikan panggilan",
-        "Komputer tanpa perangkat suara tetap berjalan normal, hanya tanpa bunyi.",
+        "Berlaku untuk komputer layar antrian dan loket. Anjungan ambil "
+        "nomor sengaja tetap diam agar tidak berbunyi bersahutan dengan "
+        "televisi; satu mesin dapat menyimpang dari pengaturan ini lewat "
+        "ANTRIAN_SUARA. Komputer tanpa perangkat suara tetap berjalan "
+        "normal, hanya tanpa bunyi.",
         BOOLEAN,
         kelompok="Layar Antrian",
     ),

@@ -111,6 +111,170 @@ def test_folder_tiket_dibuat_bila_belum_ada(tmp_path, reg_queue, antrian_siap, a
 
 
 # ---------------------------------------------------------------------
+# Sisa antrian pada tiket
+# ---------------------------------------------------------------------
+
+def test_tiket_menyebut_sisa_antrian(ticket_pdf, reg_queue, antrian_siap):
+    for _ in range(2):
+        reg_queue.create_queue(antrian_siap["kategori"]["A"])
+    ketiga = reg_queue.create_queue(antrian_siap["kategori"]["A"])
+
+    tiket = ticket_pdf.susun(ketiga)
+
+    assert tiket.sisa_antrian == 2
+    assert tiket.baris_sisa_antrian() == "Sisa antrian: 2"
+
+
+def test_antrian_pertama_tidak_dikabari_angka_nol(ticket_pdf, reg_queue, antrian_siap):
+    """
+    "Sisa antrian: 0" adalah kalimat yang harus dipecahkan sendiri oleh
+    pembacanya. Pengunjung paling depan berhak diberi tahu dengan kalimat,
+    bukan dengan angka nol.
+    """
+    tiket = ticket_pdf.susun(reg_queue.create_queue(antrian_siap["kategori"]["A"]))
+
+    assert tiket.sisa_antrian == 0
+    assert tiket.baris_sisa_antrian() == "Tidak ada sisa antrian"
+
+
+def test_sisa_antrian_dihitung_lintas_jenis_layanan(
+    ticket_pdf, reg_queue, antrian_siap
+):
+    """
+    Pemanggilan berjalan murni menurut waktu pengambilan nomor, lintas jenis
+    layanan. Menghitung hanya yang sejenis akan menjanjikan giliran yang
+    jauh lebih cepat daripada yang benar-benar dialami pengunjung.
+    """
+    reg_queue.create_queue(antrian_siap["kategori"]["B"])
+    reg_queue.create_queue(antrian_siap["kategori"]["B"])
+    nomor_a = reg_queue.create_queue(antrian_siap["kategori"]["A"])
+
+    assert ticket_pdf.susun(nomor_a).sisa_antrian == 2
+
+
+def test_yang_sudah_dipanggil_tidak_lagi_dihitung_sebagai_sisa(
+    ticket_pdf, cro_queue, antrian_siap, terbitkan, auth
+):
+    from tests.conftest import TEST_PASSWORD
+
+    terbitkan("A", 2)
+    cro_queue.call_next(antrian_siap["loket"][0])
+    ketiga = terbitkan("A")[0]
+
+    # Tiket disusun oleh mesin yang mencetak, yaitu meja pendaftaran.
+    auth.logout()
+    auth.login("registration", TEST_PASSWORD)
+
+    assert ticket_pdf.susun(ketiga).sisa_antrian == 1
+
+
+def test_kios_boleh_membaca_ringkasan_tiketnya_sendiri(auth, antrian_siap):
+    """
+    Kios punya TICKET_PRINT tetapi TIDAK punya QUEUE_VIEW. Ringkasan tiket
+    harus tetap terbaca olehnya, karena kios justru mesin yang paling sering
+    mencetak tiket.
+    """
+    from app.services.queue_service import QueueService
+
+    auth.logout()
+    auth.mulai_sesi_kios()
+    kios = QueueService(auth)
+
+    nomor = kios.create_queue(antrian_siap["kategori"]["A"])
+
+    assert kios.ringkasan_tiket(nomor).sisa_antrian == 0
+
+
+def test_ringkasan_tidak_membocorkan_daftar_antrian_ke_kios(auth, antrian_siap):
+    """Kios di ruang publik tetap tidak boleh membaca siapa saja yang mengantre."""
+    import pytest as _pytest
+
+    from app.core.errors import AuthorizationError
+    from app.services.queue_service import QueueService
+
+    auth.logout()
+    auth.mulai_sesi_kios()
+    kios = QueueService(auth)
+    kios.create_queue(antrian_siap["kategori"]["A"])
+
+    with _pytest.raises(AuthorizationError):
+        kios.list_waiting()
+
+
+def test_tanpa_queue_service_tiket_tetap_terbit_tanpa_ringkasan(
+    reg_queue, antrian_siap, auth
+):
+    from app.services.master_data_service import MasterDataService
+    from app.services.settings_service import SettingsService
+
+    printer = NullTicketPrinter()
+    service = TicketService(printer, SettingsService(auth), MasterDataService(auth))
+
+    assert service.cetak(reg_queue.create_queue(antrian_siap["kategori"]["A"])).berhasil
+    assert printer.tercetak[0].sisa_antrian is None
+    assert printer.tercetak[0].baris_sisa_antrian() == ""
+
+
+def test_ringkasan_yang_gagal_dibaca_tidak_menahan_tiket(
+    reg_queue, antrian_siap, auth
+):
+    """
+    Nomor antrian adalah alasan pengunjung berdiri di depan mesin; sisa
+    antrian hanya bonus. Database yang tersendat tidak boleh membuat
+    tiketnya batal tercetak.
+    """
+    from app.services.master_data_service import MasterDataService
+    from app.services.settings_service import SettingsService
+
+    class QueueRusak:
+        def ringkasan_tiket(self, antrian):
+            raise RuntimeError("database sedang tidak dapat dihubungi")
+
+    printer = NullTicketPrinter()
+    service = TicketService(
+        printer, SettingsService(auth), MasterDataService(auth), QueueRusak()
+    )
+
+    hasil = service.cetak(reg_queue.create_queue(antrian_siap["kategori"]["A"]))
+
+    assert hasil.berhasil
+    assert printer.tercetak[0].queue_number == "A-001"
+    assert printer.tercetak[0].baris_sisa_antrian() == ""
+
+
+def test_sisa_antrian_muat_di_tinggi_struk_yang_tetap(
+    ticket_pdf, reg_queue, antrian_siap
+):
+    """
+    Tinggi kertas TIDAK boleh ikut tumbuh: kantor memakai kertas potong
+    88 mm. Baris sisa antrian ditambah dua baris catatan kaki karena itu
+    harus muat pada tinggi itu juga — baris yang jatuh di luar halaman
+    hilang tanpa jejak, jadi tingginya diuji, bukan diandaikan.
+    """
+    assert PdfTicketPrinter.TINGGI_MM == 88
+
+    tiket = ticket_pdf.susun(reg_queue.create_queue(antrian_siap["kategori"]["A"]))
+    assert tiket.baris_sisa_antrian()
+
+    # Jarak antarbaris persis seperti pada PdfTicketPrinter._gambar, dihitung
+    # dari tepi atas kertas sampai baris catatan kaki yang paling bawah, pada
+    # tiket terpanjang: tiket cetak ulang yang loketnya sudah diketahui.
+    jarak = [
+        12,  # margin atas -> nama kantor
+        8,  # -> "NOMOR ANTRIAN"
+        18,  # -> nomor antrian
+        13,  # -> jenis layanan
+        6,  # -> nama loket
+        6,  # -> tanggal
+        5,  # -> jam
+        7,  # -> sisa antrian
+        6,  # -> catatan kaki baris pertama
+        4.5,  # -> catatan kaki baris kedua
+    ]
+    assert sum(jarak) <= PdfTicketPrinter.TINGGI_MM
+
+
+# ---------------------------------------------------------------------
 # Kegagalan cetak
 # ---------------------------------------------------------------------
 
@@ -376,3 +540,40 @@ def test_footer_pendek_tidak_disentuh():
     from app.services.ticket_service import _bungkus
 
     assert _bungkus("Singkat.", 38) == ["Singkat."]
+
+
+# ---------------------------------------------------------------------
+# Pencetak per mesin
+# ---------------------------------------------------------------------
+
+class _SettingsPalsu:
+    """Pengaturan bersama, seolah dibaca dari database."""
+
+    def __init__(self, nilai: str) -> None:
+        self.nilai = nilai
+
+    def get(self, key: str, default: str | None = None) -> str:
+        assert key == "ticket.printer"
+        return self.nilai
+
+
+def test_pencetak_mengikuti_pengaturan_bersama_bila_mesin_diam(env_mesin):
+    from app.services.ticket_service import mode_pencetak
+
+    env_mesin(ANTRIAN_PRINTER=None)
+    assert mode_pencetak(_SettingsPalsu("system")) == "system"
+
+
+def test_pencetak_mesin_menang_atas_pengaturan_bersama(env_mesin):
+    """
+    Pencetak tiket menempel pada satu komputer.
+
+    Tanpa penimpaan per mesin, menyalakan "Cetak ke printer Windows" untuk
+    anjungan membuat kelima komputer loket ikut mencoba mencetak ke
+    pencetak yang tidak ada padanya — persis baris "Printer tidak dapat
+    dibuka" yang memenuhi log.
+    """
+    from app.services.ticket_service import mode_pencetak
+
+    env_mesin(ANTRIAN_PRINTER="none")
+    assert mode_pencetak(_SettingsPalsu("system")) == "none"

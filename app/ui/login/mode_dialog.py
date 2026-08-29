@@ -2,13 +2,14 @@
 Pilihan layar saat aplikasi dibuka.
 
 Yang dipilih di sini sebenarnya sifat MESIN, bukan sifat momen: komputer
-layar antrian selalu menjadi layar pengunjung, komputer loket selalu layar
-petugas. Karena itu dialog ini dapat dilewati sepenuhnya dengan menjalankan
-aplikasi memakai --layar, dan itulah yang dipasang pada shortcut komputer
-kios: ia pulih sendiri setelah mati listrik tanpa perlu ada yang mengklik.
+televisi ruang tunggu selalu menjadi layar antrian, komputer anjungan
+selalu melayani pengambilan nomor, komputer loket selalu layar petugas.
+Karena itu dialog ini dapat dilewati sepenuhnya lewat argumen baris
+perintah, dan itulah yang dipasang pada shortcut kedua mesin publik: mereka
+pulih sendiri setelah mati listrik tanpa perlu ada yang mengklik.
 
 Dialog ini untuk mesin yang belum diatur, atau yang sesekali dipakai untuk
-keduanya.
+lebih dari satu hal.
 """
 
 from __future__ import annotations
@@ -21,7 +22,13 @@ from app.ui.common import judul, keterangan, tombol
 from app.ui.style import PRIMARY_DARK, TEXT_MUTED
 
 #: Hasil pilihan.
-LAYAR_PENGUNJUNG = "pengunjung"
+#:
+#: Ketiganya adalah tiga mesin yang berbeda, bukan tiga tampilan dari satu
+#: mesin. LAYAR_ANTRIAN dan ANJUNGAN sama-sama menghadap pengunjung, dan
+#: dahulu keduanya dinamai "layar pengunjung" — nama yang membuat teknisi
+#: pemasangan tidak punya cara menyebut mesin mana yang sedang dipasangnya.
+LAYAR_ANTRIAN = "antrian"
+ANJUNGAN = "anjungan"
 LAYAR_PETUGAS = "petugas"
 
 
@@ -55,29 +62,43 @@ class ModeDialog(QDialog):
 
         susunan.addWidget(
             self._bangun_pilihan(
-                "LAYAR PENGUNJUNG",
-                "Papan nomor antrian dan tempat pengunjung mengambil nomor "
-                "sendiri. Tidak perlu masuk.",
-                LAYAR_PENGUNJUNG,
-                utama=True,
+                "LAYAR ANTRIAN",
+                "Papan nomor untuk televisi ruang tunggu. Menampilkan nomor "
+                "yang sedang dipanggil dan membunyikan panggilan. Tidak perlu "
+                "masuk.",
+                LAYAR_ANTRIAN,
             )
         )
+        susunan.addWidget(
+            self._bangun_pilihan(
+                "ANJUNGAN AMBIL NOMOR",
+                "Tempat pengunjung memilih jenis layanan dan mencetak tiket "
+                "antriannya sendiri. Tidak perlu masuk.",
+                ANJUNGAN,
+            )
+        )
+        # Satu-satunya yang biasanya benar-benar dipilih lewat dialog ini.
+        # Kedua mesin publik di atas sebaiknya memakai shortcut berargumen
+        # supaya pulih sendiri, sedangkan komputer loket memang selalu ada
+        # petugas yang duduk di depannya.
         susunan.addWidget(
             self._bangun_pilihan(
                 "LAYAR PETUGAS",
                 "Melayani antrian, mengelola data, dan melihat laporan. "
                 "Wajib masuk dengan akun petugas.",
                 LAYAR_PETUGAS,
+                utama=True,
             )
         )
 
         susunan.addSpacing(6)
         catatan = keterangan(
-            "Komputer layar antrian sebaiknya dijalankan dengan pintasan "
-            "AntrianCRO.exe --layar agar langsung terbuka sendiri setelah "
-            "komputer menyala."
+            "Komputer televisi dan anjungan sebaiknya dijalankan dengan "
+            "pintasan AntrianCRO.exe --tv atau --kios agar langsung terbuka "
+            "sendiri setelah komputer menyala."
         )
         catatan.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        catatan.setWordWrap(True)
         catatan.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
         susunan.addWidget(catatan)
 
@@ -97,6 +118,7 @@ class ModeDialog(QDialog):
 
         label = keterangan(penjelasan)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setWordWrap(True)
         susunan.addWidget(label)
 
         return bungkus

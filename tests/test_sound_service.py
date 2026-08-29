@@ -233,3 +233,130 @@ def test_penyiapan_tts_gagal_tidak_menggagalkan_nada(monkeypatch, qapp, tmp_path
     assert pemutar._tts is None
     assert pemutar._siap  # nada tetap tersedia walau TTS gagal disiapkan
     assert pemutar.announce("A-001", "Loket 1") is True
+
+
+# ---------------------------------------------------------------------
+# Urutan nada lalu ucapan
+# ---------------------------------------------------------------------
+
+class _TtsPalsu:
+    """Mesin TTS yang hanya mencatat, selalu siap menerima ucapan."""
+
+    def __init__(self) -> None:
+        self.diucapkan: list[str] = []
+
+    def state(self):
+        from PySide6.QtTextToSpeech import QTextToSpeech
+
+        return QTextToSpeech.State.Ready
+
+    def say(self, teks: str) -> None:
+        self.diucapkan.append(teks)
+
+
+def test_ucapan_menunggu_nada_selesai(qtbot, tmp_path):
+    """
+    Nada harus terdengar sebagai "ting" yang mendahului kalimatnya.
+
+    Diucapkan bersamaan, suara TTS menutupi nada yang cuma 0,36 detik dan
+    petugas melaporkan nadanya hilang — padahal nada justru ada untuk
+    menarik perhatian sebelum nomornya disebut.
+    """
+    from app.services.sound_service import JEDA_UCAPAN_MS
+
+    pemutar = ChimeSoundPlayer(tmp_path)
+    if not pemutar._siap:
+        pytest.skip("perangkat audio tidak tersedia di lingkungan ini")
+
+    tts = _TtsPalsu()
+    pemutar._tts = tts
+
+    assert pemutar.announce("A-001", "Loket 1") is True
+    assert tts.diucapkan == []  # nada masih berbunyi
+
+    qtbot.wait(JEDA_UCAPAN_MS + 250)
+
+    assert tts.diucapkan == ["Nomor antrian A, nol nol satu, silakan menuju Loket satu."]
+
+
+def test_jeda_menutupi_seluruh_panjang_nada():
+    """Jeda yang lebih pendek dari nadanya sendiri tidak menyelesaikan apa pun."""
+    from app.services.sound_service import JEDA_UCAPAN_MS
+
+    assert JEDA_UCAPAN_MS > len(NADA_HZ) * DURASI_NADA * 1000
+
+
+def test_tanpa_nada_ucapan_tidak_ditunda(qtbot, tmp_path):
+    """
+    Komputer tanpa nada tidak punya apa pun untuk didahulukan.
+
+    Menunda di situ hanya menunda nomor sampai ke telinga pengunjung.
+    """
+    pemutar = ChimeSoundPlayer(tmp_path)
+    if not pemutar._siap:
+        pytest.skip("perangkat audio tidak tersedia di lingkungan ini")
+
+    class EfekRusak:
+        def play(self):
+            raise RuntimeError("perangkat audio dicabut")
+
+    pemutar._efek = EfekRusak()
+    tts = _TtsPalsu()
+    pemutar._tts = tts
+
+    assert pemutar.announce("B-002", None) is False
+    assert tts.diucapkan == ["Nomor antrian B, nol nol dua."]
+
+
+# ---------------------------------------------------------------------
+# Suara milik mesin, bukan milik sistem
+# ---------------------------------------------------------------------
+
+class _SettingsPalsu:
+    """Pengaturan bersama `display.sound_enabled`, seolah dari database."""
+
+    def __init__(self, aktif: bool) -> None:
+        self.aktif = aktif
+
+    def get_bool(self, key: str, default: bool = False) -> bool:
+        assert key == "display.sound_enabled"
+        return self.aktif
+
+
+@pytest.mark.parametrize("aktif", [True, False])
+def test_mesin_biasa_mengikuti_pengaturan_bersama(env_mesin, aktif: bool):
+    from app.services.sound_service import suara_diaktifkan
+
+    env_mesin(ANTRIAN_SUARA=None)
+    assert suara_diaktifkan(_SettingsPalsu(aktif)) is aktif
+
+
+def test_anjungan_diam_walau_pengaturan_bersama_menyalakan_suara(env_mesin):
+    """
+    Anjungan dan layar antrian adalah dua mesin dengan pengeras suara
+    masing-masing. Bila keduanya bersuara, pengunjung mendengar dua
+    pengumuman yang saling menyusul — keduanya menyegarkan sendiri tiap dua
+    detik dan tidak akan pernah sinkron.
+    """
+    from app.services.sound_service import suara_diaktifkan
+
+    env_mesin(ANTRIAN_SUARA=None)
+    assert suara_diaktifkan(_SettingsPalsu(True), anjungan=True) is False
+
+
+def test_anjungan_dapat_dinyalakan_kembali_untuk_pemasangan_satu_mesin(env_mesin):
+    """
+    Pemasangan lama yang anjungannya merangkap papan nomor tidak boleh
+    kehilangan suaranya: di sana tidak ada televisi lain yang menggantikan.
+    """
+    from app.services.sound_service import suara_diaktifkan
+
+    env_mesin(ANTRIAN_SUARA="1")
+    assert suara_diaktifkan(_SettingsPalsu(False), anjungan=True) is True
+
+
+def test_mesin_dapat_didiamkan_walau_pengaturan_bersama_menyala(env_mesin):
+    from app.services.sound_service import suara_diaktifkan
+
+    env_mesin(ANTRIAN_SUARA="0")
+    assert suara_diaktifkan(_SettingsPalsu(True)) is False

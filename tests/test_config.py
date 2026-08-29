@@ -77,3 +77,45 @@ def test_ensure_directories_membuat_folder_yang_belum_ada(
 
 def test_timezone_terkunci_asia_jakarta():
     assert TIMEZONE == "Asia/Jakarta"
+
+
+# ---------------------------------------------------------------------
+# Setelan per mesin
+# ---------------------------------------------------------------------
+
+def test_pencetak_dan_suara_kosong_bila_mesin_tidak_berpendapat(env_mesin):
+    """
+    Mesin yang tidak menyebut apa-apa mengikuti pengaturan bersama.
+
+    None BUKAN False: mendiamkan seluruh mesin hanya karena variabelnya
+    tidak diisi akan membuat sistem yang baru dipasang tampak rusak.
+    """
+    cfg = env_mesin(ANTRIAN_PRINTER=None, ANTRIAN_SUARA=None)
+
+    assert cfg.printer == ""
+    assert cfg.suara is None
+
+
+@pytest.mark.parametrize("nilai", ["1", "true", "TRUE", "ya", "yes", "on"])
+def test_suara_dinyalakan_dari_environment(env_mesin, nilai: str):
+    assert env_mesin(ANTRIAN_SUARA=nilai).suara is True
+
+
+@pytest.mark.parametrize("nilai", ["0", "false", "FALSE", "tidak", "no", "off"])
+def test_suara_dimatikan_dari_environment(env_mesin, nilai: str):
+    assert env_mesin(ANTRIAN_SUARA=nilai).suara is False
+
+
+@pytest.mark.parametrize("nilai", ["mungkin", "-", "2", " "])
+def test_nilai_suara_yang_tidak_dikenal_dianggap_tidak_diisi(env_mesin, nilai: str):
+    """
+    Salah ketik di satu komputer tidak boleh mendiamkan panggilan tanpa
+    jejak. Lebih baik jatuh ke pengaturan bersama yang terlihat di layar
+    Pengaturan daripada diam karena sebuah variabel yang tak seorang pun
+    ingat pernah diisi.
+    """
+    assert env_mesin(ANTRIAN_SUARA=nilai).suara is None
+
+
+def test_pencetak_mesin_dibaca_apa_adanya(env_mesin):
+    assert env_mesin(ANTRIAN_PRINTER="system").printer == "system"

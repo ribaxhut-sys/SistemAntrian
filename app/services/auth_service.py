@@ -198,12 +198,15 @@ class AuthService:
         logger.info("Logout: %s", sesi.username)
 
     # -----------------------------------------------------------------
-    # Sesi kios
+    # Sesi mesin publik (tanpa login)
     # -----------------------------------------------------------------
 
     def mulai_sesi_kios(self) -> AuthSession:
         """
         Buka sesi mesin kios tanpa login.
+
+        Mesin ini adalah anjungan ambil nomor: pengunjung memilih jenis
+        layanan dan mencetak tiketnya sendiri.
 
         Komputer kios menghadap publik dan tidak diawasi. Menyimpan kata
         sandi petugas di mesin seperti itu — atau menempelkannya di bawah
@@ -220,13 +223,42 @@ class AuthService:
         sesi = AuthSession(
             user_id=None,
             username="kios",
-            full_name="Layar Pengunjung",
+            full_name="Anjungan Ambil Nomor",
             role=UserRole.KIOSK,
             branch_id=cabang,
             login_at=clock.now(),
         )
         self._session = sesi
-        logger.info("Sesi kios dimulai untuk cabang %s", cabang)
+        logger.info("Sesi anjungan dimulai untuk cabang %s", cabang)
+        return sesi
+
+    def mulai_sesi_layar(self) -> AuthSession:
+        """
+        Buka sesi layar antrian ruang tunggu tanpa login.
+
+        Televisi ruang tunggu berdiri di tempat yang sama publiknya dengan
+        anjungan, dan alasan untuk tidak menyimpan kata sandi di sana persis
+        sama. Sebelumnya layar itu hanya dapat dibuka lewat akun berperan
+        DISPLAY, sehingga setiap mati listrik meninggalkan papan kosong
+        sampai ada yang datang mengetikkan sandi — dan sandi yang harus
+        diketik setiap pagi di ruang tunggu berakhir tertempel di bawah
+        keyboard.
+
+        Kewenangannya paling sempit di seluruh sistem: peran DISPLAY hanya
+        boleh MELIHAT papan. Ia tidak dapat menerbitkan nomor sekalipun,
+        berbeda dari anjungan.
+        """
+        cabang = self._cabang_pertama()
+        sesi = AuthSession(
+            user_id=None,
+            username="layar",
+            full_name="Layar Antrian",
+            role=UserRole.DISPLAY,
+            branch_id=cabang,
+            login_at=clock.now(),
+        )
+        self._session = sesi
+        logger.info("Sesi layar antrian dimulai untuk cabang %s", cabang)
         return sesi
 
     @staticmethod

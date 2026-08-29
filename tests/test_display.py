@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from PySide6.QtWidgets import QApplication
+
 from app.core.errors import AuthorizationError
 from app.services.queue_service import QueueService
 from app.services.settings_service import SettingsService
@@ -169,17 +171,36 @@ def test_layar_menampilkan_nomor_dan_loket(halaman_layar, terbitkan, antrian_sia
     assert per_nama["LOKET 3"].label_nomor.text() == "—"
 
 
-def test_layar_menampilkan_nomor_berikutnya(halaman_layar, terbitkan, auth):
+def test_layar_menampilkan_seluruh_yang_menunggu(halaman_layar, terbitkan, auth):
+    """
+    Televisi menampilkan SELURUH yang menunggu, bukan tiga teratas.
+
+    Yang dicari orang yang sudah duduk menunggu adalah nomornya sendiri.
+    Daftar tiga nomor hanya menjawab "siapa berikutnya" — pertanyaan
+    petugas, bukan pertanyaan pengunjung.
+    """
     terbitkan("A", 4)
     auth.logout()
     auth.login("display", TEST_PASSWORD)
     halaman_layar.muat_ulang()
 
-    tampil = [
-        halaman_layar.baris_berikutnya.itemAt(i).widget().text()
-        for i in range(halaman_layar.baris_berikutnya.count())
-    ]
-    assert tampil == ["A-001", "A-002", "A-003"]
+    assert _nomor_tampil(halaman_layar) == ["A-001", "A-002", "A-003", "A-004"]
+
+
+def test_papan_kios_tetap_ringkas(papan_kios, terbitkan, auth):
+    """
+    Papan di dalam anjungan tetap memakai `display.next_count`.
+
+    Tempatnya dibutuhkan tombol ambil nomor di bawahnya, dan pengunjung
+    yang berdiri di sana sedang mengambil nomor — bukan mencari nomornya
+    sendiri di dalam daftar.
+    """
+    terbitkan("A", 6)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    papan_kios.muat_ulang()
+
+    assert papan_kios.baris_berikutnya.count() == 3
 
 
 def test_layar_menyatakan_saat_tidak_ada_yang_menunggu(halaman_layar):
@@ -388,7 +409,7 @@ def test_nomor_berikutnya_memakai_warna_palet(halaman_layar, terbitkan, auth):
     auth.login("display", TEST_PASSWORD)
     halaman_layar.muat_ulang()
 
-    widget = halaman_layar.baris_berikutnya.itemAt(0).widget()
+    widget = halaman_layar.label_berikutnya[0]
     gaya = widget.styleSheet()
     assert halaman_layar.palet.chip_teks in gaya
     assert halaman_layar.palet.chip in gaya
@@ -550,10 +571,16 @@ def test_papan_kios_tidak_ikut_membesar(qtbot, papan_kios):
     assert _ukuran_huruf(papan_kios.kartu_loket[0].label_nomor) == sebelum
 
 
-def test_kartu_loket_mendapat_porsi_layar_lebih_besar_di_televisi(
+def test_daftar_menunggu_mendapat_porsi_besar_di_televisi(
     halaman_layar, papan_kios
 ):
-    """Di televisi, kartu loket yang mengisi layar — bukan panel bawahnya."""
+    """
+    Televisi membagi layarnya rata antara kartu loket dan daftar menunggu.
+
+    Di anjungan pembagian itu tidak berlaku: papannya harus tetap ringkas
+    karena tombol ambil nomor di bawahnya yang lebih dibutuhkan orang yang
+    sedang berdiri di sana.
+    """
     def _stretch(halaman):
         panel_loket = halaman.kisi_loket.parentWidget()
         return (
@@ -566,7 +593,8 @@ def test_kartu_loket_mendapat_porsi_layar_lebih_besar_di_televisi(
     loket_tv, berikutnya_tv = _stretch(halaman_layar)
     loket_kios, berikutnya_kios = _stretch(papan_kios)
 
-    assert loket_tv / berikutnya_tv > loket_kios / berikutnya_kios
+    assert berikutnya_tv / loket_tv > berikutnya_kios / loket_kios
+    assert berikutnya_tv >= loket_tv
 
 
 # ---------------------------------------------------------------------
@@ -880,3 +908,766 @@ def test_tidak_ada_warna_delapan_digit_di_seluruh_tema(qtbot, auth, antrian_siap
 
         for potongan in gaya:
             assert not re.search(r"#[0-9A-Fa-f]{8}\b", potongan), (kode_tema, potongan)
+
+
+# ---------------------------------------------------------------------
+# Daftar menunggu berhalaman
+# ---------------------------------------------------------------------
+
+@pytest.fixture
+def layar_berhalaman(qtbot, auth, antrian_siap):
+    """
+    Layar televisi dengan halaman kecil, agar pergantiannya mudah diuji.
+
+    Dua baris per kolom, dan setiap layanan mendapat dua kolom, sehingga
+    satu halaman memuat empat nomor per jenis layanan.
+    """
+    from app.ui.display.display_page import DisplayPage
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    SettingsService(auth).set("display.list_rows", "2")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+    return halaman
+
+
+def _nomor_tampil(halaman) -> list[str]:
+    """
+    Nomor yang sedang tampil di daftar menunggu, tanpa judul kolomnya.
+
+    Dibaca dari `label_berikutnya`, bukan dari kisinya: sejak daftar
+    dipecah per jenis layanan, kisi itu juga memuat baris judul kolom.
+    """
+    return [label.text() for label in halaman.label_berikutnya]
+
+
+def test_halaman_pertama_menampilkan_sebanyak_pengaturan(
+    layar_berhalaman, terbitkan, auth
+):
+    terbitkan("A", 7)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+
+    assert _nomor_tampil(layar_berhalaman) == ["A-001", "A-002", "A-003", "A-004"]
+    assert layar_berhalaman.jumlah_halaman == 2
+
+
+def test_halaman_berputar_dan_kembali_ke_awal(layar_berhalaman, terbitkan, auth):
+    terbitkan("A", 7)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+
+    layar_berhalaman.putar_halaman()
+    assert _nomor_tampil(layar_berhalaman) == ["A-005", "A-006", "A-007"]
+
+    layar_berhalaman.putar_halaman()
+    assert _nomor_tampil(layar_berhalaman) == ["A-001", "A-002", "A-003", "A-004"]
+
+
+def test_penyegaran_tidak_mengembalikan_ke_halaman_pertama(
+    layar_berhalaman, terbitkan, auth
+):
+    """
+    Inti dari fitur ini.
+
+    Papan menyegar dua detik sekali sedangkan halaman berganti tiga detik
+    sekali. Bila penyegaran ikut mengembalikan halaman ke satu, pengunjung
+    tidak akan pernah melihat halaman kedua sama sekali.
+    """
+    terbitkan("A", 7)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+    layar_berhalaman.putar_halaman()
+
+    layar_berhalaman.muat_ulang()
+
+    assert _nomor_tampil(layar_berhalaman) == ["A-005", "A-006", "A-007"]
+
+
+def test_halaman_dijepit_saat_antrian_menyusut(
+    layar_berhalaman, terbitkan, auth, antrian_siap
+):
+    """
+    Nomor dipanggil satu per satu sepanjang hari, sehingga halaman terakhir
+    dapat lenyap justru sementara layar sedang menampilkannya.
+
+    Tanpa penjepitan, indeks halaman menunjuk ke potongan daftar yang sudah
+    tidak ada dan panel bawah menjadi kosong — terbaca sebagai "tidak ada
+    yang menunggu" padahal ruangannya masih penuh.
+    """
+    terbitkan("A", 7)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+    layar_berhalaman.putar_halaman()
+    assert layar_berhalaman._halaman == 1
+
+    # Lima nomor dipanggil, menyisakan dua — dari tiga halaman tinggal satu.
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    layanan = QueueService(auth)
+    for indeks in range(5):
+        loket = antrian_siap["loket"][indeks % 2]
+        antrian = layanan.call_next(loket)
+        layanan.start_service(antrian.id)
+        layanan.complete(antrian.id)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    layar_berhalaman.muat_ulang()
+
+    assert layar_berhalaman.jumlah_halaman == 1
+    assert layar_berhalaman._halaman == 0
+    assert _nomor_tampil(layar_berhalaman) == ["A-006", "A-007"]
+
+    # Halaman kedua memang sudah tidak ada lagi untuk dituju.
+    layar_berhalaman.putar_halaman()
+    assert layar_berhalaman._halaman == 0
+
+
+def test_satu_halaman_tidak_berputar(layar_berhalaman, terbitkan, auth):
+    """Halaman yang berpindah ke dirinya sendiri terbaca sebagai layar rusak."""
+    terbitkan("A", 2)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+
+    assert layar_berhalaman.jumlah_halaman == 1
+    layar_berhalaman.putar_halaman()
+
+    assert layar_berhalaman._halaman == 0
+    assert _nomor_tampil(layar_berhalaman) == ["A-001", "A-002"]
+
+
+def test_judul_memuat_nomor_halaman(layar_berhalaman, terbitkan, auth):
+    """
+    Tanpa nomor halaman, pengunjung yang tidak menemukan nomornya
+    menyimpulkan nomornya hilang dan bertanya ke loket.
+    """
+    terbitkan("A", 7)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+
+    assert "1 / 2" in layar_berhalaman.label_judul_berikutnya.text()
+    layar_berhalaman.putar_halaman()
+    assert "2 / 2" in layar_berhalaman.label_judul_berikutnya.text()
+
+
+def test_judul_tanpa_nomor_halaman_bila_hanya_satu(layar_berhalaman, terbitkan, auth):
+    terbitkan("A", 2)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+
+    assert layar_berhalaman.label_judul_berikutnya.text() == "MENUNGGU GILIRAN"
+
+
+def test_papan_kios_tidak_berotasi(papan_kios):
+    """Daftar yang berpindah sendiri di anjungan menarik mata dari tombolnya."""
+    assert papan_kios.berotasi is False
+
+
+def test_rotasi_dapat_dimatikan_lewat_pengaturan(qtbot, auth, antrian_siap):
+    from app.ui.display.display_page import DisplayPage
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    SettingsService(auth).set("display.rotate_seconds", "0")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+
+    assert halaman.berotasi is False
+
+
+def test_jeda_rotasi_mengikuti_pengaturan(qtbot, auth, antrian_siap):
+    from app.ui.display.display_page import DisplayPage
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    SettingsService(auth).set("display.rotate_seconds", "7")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+
+    assert halaman.berotasi is True
+    assert halaman.pewaktu_halaman.interval() == 7000
+
+
+def test_kolom_daftar_lebih_sedikit_pada_tema_berkolom_sempit(qtbot, auth, antrian_siap):
+    """
+    Sorotan dan Split menaruh daftar menunggu di kolom kanan yang sempit.
+
+    Lima kolom nomor di ruang selebar itu saling menempel dan justru tidak
+    terbaca dari jarak yang menjadi alasan papan ini dipasang.
+    """
+    from app.ui.display.display_page import DisplayPage
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    lebar = {}
+    for kode_tema in ("gelap", "sorotan", "split"):
+        halaman = DisplayPage(
+            QueueService(auth),
+            SettingsService(auth),
+            NullSoundPlayer(),
+            otomatis=False,
+            tema=kode_tema,
+        )
+        qtbot.addWidget(halaman)
+        lebar[kode_tema] = halaman.kolom_daftar
+
+    assert lebar["gelap"] > lebar["sorotan"]
+    assert lebar["sorotan"] == lebar["split"]
+
+
+def test_daftar_menyebut_sisa_yang_tidak_termuat(qtbot, auth, antrian_siap, terbitkan):
+    """
+    Hari ramai melampaui batas halaman yang diputar.
+
+    Menyebut sisanya sebagai jumlah lebih jujur daripada memutar dua puluh
+    halaman yang tidak pernah sampai kepada orang yang sedang mencarinya.
+    """
+    from app.ui.display.display_page import (
+        KOLOM_PER_LAYANAN,
+        MAKS_HALAMAN,
+        DisplayPage,
+    )
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    SettingsService(auth).set("display.list_rows", "1")
+    auth.logout()
+
+    # Satu baris x dua kolom x lima halaman = sepuluh nomor yang terbawa.
+    muat = 1 * KOLOM_PER_LAYANAN * MAKS_HALAMAN
+    terbitkan("A", muat + 3)
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+    halaman.muat_ulang()
+
+    assert halaman.jumlah_halaman == MAKS_HALAMAN
+    assert "DAN 3 LAINNYA" in halaman.label_judul_berikutnya.text()
+
+
+def test_daftar_terbagi_sebanyak_jenis_layanan(layar_berhalaman, terbitkan, auth):
+    """
+    Tiga jenis layanan berarti daftar bawah terbagi tiga kolom.
+
+    Loket dapat dibatasi jenis layanan yang boleh dipanggilnya, sehingga
+    urutan panggil memang berjalan per layanan. Satu antrean gabungan
+    menyiratkan urutan yang tidak pernah terjadi — A-020 tampak akan
+    dipanggil sebelum B-003 padahal keduanya antre di loket yang berbeda.
+    """
+    terbitkan("A", 3)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+
+    from app.ui.display.display_page import KOLOM_PER_LAYANAN
+
+    assert layar_berhalaman.berkolom_layanan
+    assert len(layar_berhalaman._layanan) == 3
+    assert layar_berhalaman.baris_berikutnya.columnCount() == 3 * KOLOM_PER_LAYANAN
+
+
+def test_nomor_masuk_kolom_layanannya_sendiri(layar_berhalaman, terbitkan, auth):
+    """Kolom kedua berisi antrian B, bukan lanjutan antrian A."""
+    terbitkan("A", 2)
+    terbitkan("B", 1)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+
+    kisi = layar_berhalaman.baris_berikutnya
+
+    def _kolom(indeks: int) -> list[str]:
+        isi = []
+        for baris in range(1, kisi.rowCount()):
+            item = kisi.itemAtPosition(baris, indeks)
+            if item is not None and item.widget() is not None:
+                isi.append(item.widget().text())
+        return isi
+
+    from app.ui.display.display_page import KOLOM_PER_LAYANAN
+
+    assert _kolom(0) == ["A-001", "A-002"]
+    assert _kolom(KOLOM_PER_LAYANAN) == ["B-001"]
+
+
+def test_judul_kolom_menyebut_nama_layanan(layar_berhalaman, terbitkan, auth):
+    """
+    Tiga kolom nomor berdampingan tidak memberi tahu kolom mana yang
+    milik pengunjung. Huruf depan nomor saja terlalu kecil untuk dipakai
+    menebak dari seberang ruangan.
+    """
+    terbitkan("A", 1)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+
+    judul = layar_berhalaman.baris_berikutnya.itemAtPosition(0, 0).widget().text()
+    assert judul.startswith("A · ")
+
+    # Judulnya melintang di atas kedua sub-kolom layanan itu.
+    petak = layar_berhalaman.baris_berikutnya.getItemPosition(
+        layar_berhalaman.baris_berikutnya.indexOf(
+            layar_berhalaman.baris_berikutnya.itemAtPosition(0, 0).widget()
+        )
+    )
+    assert petak[3] == 2  # rentang kolom
+
+
+def test_layanan_sepi_tetap_mendapat_kolomnya(layar_berhalaman, terbitkan, auth):
+    """
+    Kolom yang muncul dan hilang mengikuti isinya membuat lebar seluruh
+    papan berubah beberapa detik sekali, dan pengunjung yang sedang
+    membaca kehilangan tempat matanya.
+    """
+    terbitkan("A", 2)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+
+    from app.ui.display.display_page import KOLOM_PER_LAYANAN
+
+    assert layar_berhalaman.baris_berikutnya.columnCount() == 3 * KOLOM_PER_LAYANAN
+    # Layanan B adalah yang kedua, sehingga kolom kisinya dimulai di 1x2.
+    kosong = layar_berhalaman.baris_berikutnya.itemAtPosition(1, KOLOM_PER_LAYANAN)
+    assert kosong is not None
+    assert kosong.widget().text() == "—"
+
+
+def test_halaman_mengikuti_kolom_terpanjang(layar_berhalaman, terbitkan, auth):
+    """Halaman berhenti setelah layanan paling ramai habis, bukan yang paling sepi."""
+    terbitkan("A", 7)
+    terbitkan("B", 1)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+
+    # Fixture ini memakai 2 baris x 2 kolom = 4 nomor per layanan.
+    assert layar_berhalaman.jumlah_halaman == 2
+
+
+def test_papan_kios_tidak_berkolom(papan_kios, terbitkan, auth):
+    """Papan kios hanya sederet nomor; tidak ada tempat untuk berkolom."""
+    terbitkan("A", 2)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    papan_kios.muat_ulang()
+
+    assert papan_kios.berkolom_layanan is False
+
+
+def test_papan_kosong_tetap_memakai_satu_kalimat(layar_berhalaman):
+    """Tiga kolom berisi strip tidak menjawab apa pun sebelum pengunjung datang."""
+    layar_berhalaman.muat_ulang()
+
+    assert _nomor_tampil(layar_berhalaman) == []
+    tampil = layar_berhalaman.baris_berikutnya.itemAtPosition(0, 0).widget().text()
+    assert tampil == "Tidak ada antrian menunggu"
+
+
+# ---------------------------------------------------------------------
+# Pengelompokan per layanan (service)
+# ---------------------------------------------------------------------
+
+def test_pengelompokan_tidak_disusun_bila_tidak_diminta(display_queue, terbitkan, auth):
+    """Papan kios tidak berkolom, jadi pengelompokannya tidak perlu dibangun."""
+    terbitkan("A", 2)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    assert display_queue.display_state(3).layanan == []
+
+
+def test_pengelompokan_memuat_setiap_layanan_aktif(display_queue, terbitkan, auth):
+    terbitkan("A", 2)
+    terbitkan("C", 1)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    layanan = display_queue.display_state(3, jumlah_per_layanan=10).layanan
+
+    assert [l.category_prefix for l in layanan] == ["A", "B", "C"]
+    assert [len(l.menunggu) for l in layanan] == [2, 0, 1]
+    assert [l.total for l in layanan] == [2, 0, 1]
+
+
+def test_total_per_layanan_tetap_utuh_walau_dipotong(display_queue, terbitkan, auth):
+    """`total` menghitung seluruhnya, supaya sisa yang tidak muat dapat disebut."""
+    terbitkan("A", 5)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    layanan = display_queue.display_state(3, jumlah_per_layanan=2).layanan
+    kolom_a = next(l for l in layanan if l.category_prefix == "A")
+
+    assert len(kolom_a.menunggu) == 2
+    assert kolom_a.total == 5
+
+
+def test_layanan_nonaktif_tetap_tampil_selama_masih_ada_yang_menunggu(
+    display_queue, terbitkan, auth, antrian_siap, master_service
+):
+    """
+    Dinonaktifkan di tengah hari tidak membatalkan nomor yang sudah terbit.
+
+    Orangnya masih duduk di ruangan itu; menghilangkan kolomnya berarti
+    nomor mereka lenyap dari papan tanpa pernah dipanggil.
+    """
+    terbitkan("B", 1)
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    master_service.set_category_status(antrian_siap["kategori"]["B"], False)
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layanan = display_queue.display_state(3, jumlah_per_layanan=10).layanan
+
+    assert [l.category_prefix for l in layanan] == ["A", "B", "C"]
+    assert [q.queue_number for q in layanan[1].menunggu] == ["B-001"]
+
+
+def test_layanan_nonaktif_yang_kosong_tidak_lagi_mendapat_kolom(
+    display_queue, auth, antrian_siap, master_service
+):
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    master_service.set_category_status(antrian_siap["kategori"]["B"], False)
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layanan = display_queue.display_state(3, jumlah_per_layanan=10).layanan
+
+    assert [l.category_prefix for l in layanan] == ["A", "C"]
+
+
+def test_terlalu_banyak_layanan_kembali_ke_daftar_gabungan(
+    qtbot, auth, antrian_siap, terbitkan, master_service
+):
+    """
+    Tujuh kolom pada satu televisi semuanya terpotong.
+
+    Daftar gabungan yang berhalaman lebih terbaca daripada tujuh kolom
+    yang tak satu pun memuat nomornya secara utuh.
+    """
+    from app.ui.display.display_page import MAKS_KOLOM_LAYANAN, DisplayPage
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    ada = len(master_service.list_categories())
+    # Prefix wajib satu atau dua HURUF, sehingga penomoran tambahan
+    # memakai huruf pula.
+    for huruf in "PQRSTUVW"[: MAKS_KOLOM_LAYANAN + 1 - ada]:
+        master_service.create_category(
+            code=f"EKSTRA{huruf}", name=f"Layanan {huruf}", prefix=huruf
+        )
+
+    auth.logout()
+    terbitkan("A", 2)
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+    halaman.muat_ulang()
+
+    assert halaman.berkolom_layanan is False
+    assert _nomor_tampil(halaman) == ["A-001", "A-002"]
+
+
+def test_kolom_layanan_yang_hilang_tidak_meninggalkan_lubang(
+    layar_berhalaman, terbitkan, auth, antrian_siap, master_service
+):
+    """
+    Regangan kolom tidak ikut terhapus bersama widget-nya.
+
+    Tanpa dikembalikan ke nol, kolom milik layanan yang baru dinonaktifkan
+    tetap memakan lebarnya sendiri dan meninggalkan lubang di tengah papan.
+    """
+    terbitkan("A", 1)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+    assert layar_berhalaman.baris_berikutnya.columnStretch(4) == 1
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    master_service.set_category_status(antrian_siap["kategori"]["C"], False)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+
+    assert layar_berhalaman.baris_berikutnya.columnStretch(4) == 0
+
+
+# ---------------------------------------------------------------------
+# Huruf menyesuaikan tinggi papan
+# ---------------------------------------------------------------------
+
+def _tinggi_dibutuhkan(halaman, px: int) -> int:
+    return halaman._tinggi_baris_untuk(px)
+
+
+def test_tinggi_baris_tidak_pernah_lebih_pendek_dari_hurufnya(
+    qtbot, auth, antrian_siap, terbitkan
+):
+    """
+    Kegagalan yang memicu seluruh perubahan ini.
+
+    Tinggi baris dahulu konstanta 68px berskala, sedangkan huruf 55px
+    membutuhkan 93px — setiap kartu terpotong 11px di kedua ujungnya,
+    bahkan sebelum kisinya diperas. Tinggi kini diturunkan dari metrik
+    huruf, sehingga terpotong tidak mungkin lagi terjadi karena keduanya
+    tidak dapat lagi berbeda.
+    """
+    from app.ui.display.display_page import DisplayPage
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(1920, 1080)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    halaman.muat_ulang()
+
+    assert halaman._tinggi_baris >= _tinggi_dibutuhkan(halaman, halaman._font_daftar)
+
+
+def test_huruf_mengecil_agar_seluruh_baris_muat(qtbot, auth, antrian_siap, terbitkan):
+    """
+    Lima baris pada papan setinggi ~400px hanya muat bila hurufnya
+    mengecil. Yang tidak boleh terjadi adalah huruf tetap besar lalu
+    barisnya terpotong.
+    """
+    from app.ui.display.display_page import DisplayPage
+
+    terbitkan("A", 10)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(1920, 1080)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    halaman.muat_ulang()
+
+    baris = halaman.baris_daftar
+    jarak = round(12 * halaman.skala)
+    butuh = baris * halaman._tinggi_baris + (baris - 1) * jarak
+
+    assert butuh <= halaman._tinggi_kisi_tersedia()
+    assert halaman._font_daftar < halaman.px("berikutnya")
+
+
+def test_lima_baris_dua_kolom_untuk_sepuluh_nomor(
+    qtbot, auth, antrian_siap, terbitkan
+):
+    """Bawaan yang diminta: 2 kolom x 5 baris = 10 nomor per jenis layanan."""
+    from app.ui.display.display_page import KOLOM_PER_LAYANAN, DisplayPage
+
+    terbitkan("A", 10)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(1920, 1080)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    halaman.muat_ulang()
+
+    assert KOLOM_PER_LAYANAN == 2
+    assert halaman.baris_daftar == 5
+    assert halaman.muat_per_halaman == 10
+    assert halaman.jumlah_halaman == 1
+    assert len(_nomor_tampil(halaman)) == 10
+
+
+def test_baris_dan_ukuran_huruf_dapat_diatur(qtbot, auth, antrian_siap, terbitkan):
+    """Keduanya pengaturan, bukan angka yang tertanam di kode."""
+    from app.ui.display.display_page import DisplayPage
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    pengaturan = SettingsService(auth)
+    pengaturan.set("display.list_rows", "3")
+    pengaturan.set("display.list_font_size", "30")
+    auth.logout()
+
+    terbitkan("A", 6)
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(1920, 1080)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    halaman.muat_ulang()
+
+    assert halaman.baris_daftar == 3
+    assert halaman.muat_per_halaman == 6
+    assert halaman._font_daftar == 30
+
+
+def test_ukuran_huruf_yang_diminta_tetap_diperkecil_bila_tidak_muat(
+    qtbot, auth, antrian_siap, terbitkan
+):
+    """
+    Angka dari admin adalah batas ATAS, bukan perintah mati.
+
+    Huruf 90px setinggi delapan baris tidak akan pernah muat di papan
+    setinggi 400px, dan menurutinya berarti kembali ke nomor terpotong —
+    persis kegagalan yang diperbaiki di sini.
+    """
+    from app.ui.display.display_page import DisplayPage
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    pengaturan = SettingsService(auth)
+    pengaturan.set("display.list_rows", "8")
+    pengaturan.set("display.list_font_size", "90")
+    auth.logout()
+
+    terbitkan("A", 8)
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(1920, 1080)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    halaman.muat_ulang()
+
+    assert halaman._font_daftar < 90
+    baris = halaman.baris_daftar
+    jarak = round(12 * halaman.skala)
+    butuh = baris * halaman._tinggi_baris + (baris - 1) * jarak
+    assert butuh <= halaman._tinggi_kisi_tersedia()
+
+
+def test_baris_dikurangi_bila_papan_terlalu_pendek(qtbot, auth, antrian_siap):
+    """
+    Di bawah huruf terkecil yang masih pantas, papan berhenti mengecilkan
+    dan mulai mengurangi baris — satu halaman lagi lebih baik daripada
+    nomor yang tidak terbaca.
+    """
+    from app.ui.display.display_page import DisplayPage
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    SettingsService(auth).set("display.list_rows", "12")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(1280, 720)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    halaman.muat_ulang()
+
+    assert halaman.baris_diminta == 12
+    assert halaman.baris_daftar < 12
+    assert halaman.baris_daftar == halaman._baris_muat
+
+
+def _papan_1080p(qtbot, auth):
+    from app.ui.display.display_page import DisplayPage
+
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(1920, 1080)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    halaman.muat_ulang()
+    for _ in range(4):
+        QApplication.processEvents()
+        halaman.layout().activate()
+        QApplication.processEvents()
+    return halaman
+
+
+def test_kartu_tidak_terpotong_sejak_gambar_pertama(
+    qtbot, auth, antrian_siap, terbitkan
+):
+    """
+    Papan harus benar sejak paint pertama, bukan setelah penyegaran.
+
+    Tinggi panel baru diketahui SETELAH Qt menata isinya, sedangkan
+    penggambaran pertama terjadi sebelum itu — hurufnya dihitung dari
+    angka yang belum final dan nomor terpotong beberapa piksel sampai
+    penyegaran dua detik berikutnya. Pengunjung melihat papan yang salah
+    selama itu, dan pemasang yang memotret layarnya melihat cacat yang
+    "hilang sendiri" saat diperiksa ulang.
+    """
+    terbitkan("A", 12)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = _papan_1080p(qtbot, auth)
+
+    tinggi_kartu = min(label.height() for label in halaman.label_berikutnya)
+    assert halaman._tinggi_baris <= tinggi_kartu
+
+
+def test_panel_tidak_melewati_tepi_bawah_layar(qtbot, auth, antrian_siap, terbitkan):
+    """
+    Baris judul kolom ikut memakan tinggi kisi, terpisah dari judul panel.
+
+    Terlewat dari perhitungan, kisi menuntut lebih dari jatah panelnya dan
+    seluruh panel terdorong keluar tepi bawah layar — nomor paling bawah
+    terpotong separuh, dan judul kolomnya bertumpuk dengan kartu.
+    """
+    terbitkan("A", 12)
+    terbitkan("B", 4)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = _papan_1080p(qtbot, auth)
+
+    assert halaman.panel_berikutnya.geometry().bottom() <= halaman.height()
+
+    jarak = round(12 * halaman.skala)
+    baris = halaman.baris_daftar
+    butuh = baris * halaman._tinggi_baris + (baris - 1) * jarak
+    tersedia = (
+        halaman._tinggi_kisi_tersedia() - halaman._tinggi_judul_kolom() - jarak
+    )
+    assert butuh <= tersedia

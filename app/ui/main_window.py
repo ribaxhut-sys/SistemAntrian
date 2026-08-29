@@ -26,9 +26,9 @@ from app.services.master_data_service import MasterDataService
 from app.services.permissions import Permission
 from app.services.queue_service import QueueService
 from app.services.settings_service import SettingsService
-from app.services.sound_service import buat_pemutar
+from app.services.sound_service import buat_pemutar, suara_diaktifkan
 from app.services.survey_service import SurveyService
-from app.services.ticket_service import TicketService, buat_printer
+from app.services.ticket_service import TicketService, buat_printer, mode_pencetak
 from app.services.user_service import UserService
 from app.ui.common import judul, keterangan, konfirmasi, tombol
 from app.ui.dashboard.dashboard_page import DashboardPage
@@ -111,28 +111,34 @@ class MainWindow(QMainWindow):
         self.dashboard_service = DashboardService(auth)
         self.backup_service = BackupService(auth, self.settings_service)
 
+        sesi = auth.require_session()
+
         config = get_config()
+        # Pencetak dan pengeras suara menempel pada MESIN, bukan pada sistem.
+        # Keduanya diselesaikan lewat resolver yang mendahulukan setelan
+        # mesin ini di atas pengaturan bersama di database — lihat
+        # ANTRIAN_PRINTER dan ANTRIAN_SUARA.
         self.ticket_service = TicketService(
             buat_printer(
-                self.settings_service.get("ticket.printer", "pdf"),
+                mode_pencetak(self.settings_service),
                 config.base_dir / "tiket",
             ),
             self.settings_service,
             self.master_service,
+            self.queue_service,
         )
         # Pemutar suara dibuat sekali dan dipakai bersama, supaya tidak ada
         # dua sumber bunyi yang berebut perangkat audio.
         self.sound_player = buat_pemutar(
-            self.settings_service.get_bool("display.sound_enabled", True)
+            suara_diaktifkan(self.settings_service, anjungan=sesi.kios)
         )
-
-        sesi = auth.require_session()
 
         #: Layar yang menghadap pengunjung, bukan meja petugas.
         #:
-        #: Dua bentuk yang keduanya dipasang di komputer publik: sesi kios
-        #: yang berjalan tanpa login, dan akun DISPLAY yang hanya boleh
-        #: melihat layar antrian dan tidak boleh apa-apa lagi.
+        #: Tiga bentuk, semuanya dipasang di komputer publik: sesi anjungan
+        #: dan sesi layar antrian yang berjalan tanpa login, serta akun
+        #: DISPLAY yang hanya boleh melihat layar antrian dan tidak boleh
+        #: apa-apa lagi.
         #:
         #: Untuk DISPLAY, penentunya hak akses dan bukan nama peran. Bila
         #: suatu saat peran itu diberi kewenangan tambahan, akunnya berhenti
@@ -150,7 +156,11 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(APP_NAME)
         else:
             self.setWindowTitle(f"{APP_NAME} — {sesi.full_name}")
-        self.resize(1100, 700)
+        # Panel pelayanan disusun dua kolom: kartu antrian beserta tombolnya
+        # di kiri, daftar tunggu di kanan. Pada 1100 px kolom kanan terdesak
+        # sampai nama layanan terpotong menjadi "Kons…". 1280 x 720 masih
+        # muat utuh pada layar 1366 x 768 yang paling sempit di kantor.
+        self.resize(1280, 720)
 
         self._bangun_tampilan()
         self._pasang_pintasan()
@@ -277,11 +287,11 @@ class MainWindow(QMainWindow):
                 Permission.QUEUE_CLOSE_DAY,
                 lambda: CloseDayPage(self.queue_service, self.backup_service),
             ),
-            # Kios menggabungkan papan nomor dengan pengambilan nomor pada
-            # satu layar, karena satu mesin melayani keduanya. Akun DISPLAY
-            # tetap mendapat papan nomor saja.
+            # Anjungan menggabungkan papan nomor kecil dengan pengambilan
+            # nomor pada satu layar. Televisi ruang tunggu mendapat papan
+            # besarnya saja lewat menu berikutnya.
             _Menu(
-                "Layar Pengunjung",
+                "Anjungan Ambil Nomor",
                 Permission.QUEUE_CREATE,
                 lambda: KioskPage(
                     self.queue_service,
@@ -327,10 +337,10 @@ class MainWindow(QMainWindow):
         for butir in daftar:
             if butir.hanya_kios and not sesi.kios:
                 continue
-            # Kios hanya boleh layar pengunjung. Tanpa ini ia juga mendapat
-            # "Terbitkan Nomor" karena sama-sama berhak QUEUE_CREATE, dan
-            # halaman pertamanya justru meja pendaftaran — bukan papan
-            # yang menghadap pengunjung.
+            # Anjungan hanya boleh halaman anjungan. Tanpa ini ia juga
+            # mendapat "Terbitkan Nomor" karena sama-sama berhak
+            # QUEUE_CREATE, dan halaman pertamanya justru meja pendaftaran —
+            # bukan layar yang menghadap pengunjung.
             if sesi.kios and not butir.hanya_kios:
                 continue
             if any(self.auth.has_permission(p) for p in butir.kecuali):
@@ -408,7 +418,16 @@ class MainWindow(QMainWindow):
         ChangePasswordDialog(self.auth, self).exec()
 
     def keluar(self) -> None:
-        if not konfirmasi(self, "Keluar dan kembali ke layar masuk?"):
+        # Mesin publik tidak pernah sampai ke layar masuk: keluar dari sana
+        # mengembalikan ke pilihan layar. Menjanjikan "layar masuk" kepada
+        # orang yang menekan Ctrl+Q di anjungan hanya membuatnya mengira
+        # aplikasinya salah.
+        pertanyaan = (
+            "Tutup layar ini dan kembali ke pilihan layar?"
+            if self.mode_kios
+            else "Keluar dan kembali ke layar masuk?"
+        )
+        if not konfirmasi(self, pertanyaan):
             return
         self.auth.logout()
         self.close()

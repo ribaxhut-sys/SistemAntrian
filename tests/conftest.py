@@ -81,6 +81,30 @@ def app_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config_module.reset_config()
 
 
+@pytest.fixture
+def env_mesin(monkeypatch: pytest.MonkeyPatch):
+    """
+    Setel environment variable per-mesin lalu bangun ulang konfigurasi.
+
+    Pencetak dan pengeras suara adalah sifat MESIN, sehingga jalur yang
+    diuji memang jalur environment variable — bukan pengaturan database.
+    Konfigurasi dikembalikan setelah test supaya nilainya tidak bocor ke
+    test berikutnya lewat cache `get_config()`.
+    """
+
+    def setel(**nilai: str | None):
+        for kunci, isi in nilai.items():
+            if isi is None:
+                monkeypatch.delenv(kunci, raising=False)
+            else:
+                monkeypatch.setenv(kunci, isi)
+        config_module.reset_config()
+        return config_module.get_config()
+
+    yield setel
+    config_module.reset_config()
+
+
 def _kosongkan_schema() -> None:
     """
     Kembalikan database PostgreSQL ke keadaan benar-benar kosong.
@@ -322,12 +346,16 @@ def settings_service(auth):
 def ticket_pdf(tmp_path, auth, seeded):
     """TicketService yang menulis tiket sebagai PDF ke folder sementara."""
     from app.services.master_data_service import MasterDataService
+    from app.services.queue_service import QueueService
     from app.services.settings_service import SettingsService
     from app.services.ticket_service import PdfTicketPrinter, TicketService
 
     folder = tmp_path / "tiket"
     return TicketService(
-        PdfTicketPrinter(folder), SettingsService(auth), MasterDataService(auth)
+        PdfTicketPrinter(folder),
+        SettingsService(auth),
+        MasterDataService(auth),
+        QueueService(auth),
     )
 
 

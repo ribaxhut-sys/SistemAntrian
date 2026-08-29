@@ -131,8 +131,16 @@ RETURNING last_number
 
 | Dialect | Hasil |
 |---|---|
-| SQLite | **623 lolos** |
-| PostgreSQL | **598 lolos, 25 dilewati** |
+| SQLite | **833 lolos** (29 Agustus 2026, termasuk papan per-layanan dan sisa antrian di tiket) |
+| PostgreSQL | **598 lolos, 25 dilewati** — putaran lama, SEBELUM perubahan papan per-layanan |
+
+**Angka PostgreSQL itu sudah basi.** Suite belum pernah dijalankan ulang
+terhadap PostgreSQL sejak papan per-layanan, `ringkasan_tiket`, dan
+pengaturan per-mesin masuk. Docker Desktop tidak berjalan di mesin
+pengembang saat putaran terakhir, sehingga skrip `test-postgres.ps1` tidak dapat
+dipakai. **Jalankan sebelum rilis** — `ringkasan_tiket` dan
+`_kelompokkan_per_layanan` membaca antrian dengan cara baru, dan itu justru
+lapisan yang dialect-nya paling menentukan.
 
 Skip PostgreSQL lebih banyak dari 6 yang tercatat sebelumnya. Test
 `sqlite_saja` memang dilewati; sisanya hampir seluruhnya backup karena
@@ -145,23 +153,29 @@ Yang paling menentukan dan **sudah terbukti hijau di PostgreSQL**:
 
 ---
 
-## 5. Kios pengunjung — SUDAH di-commit
+## 5. Mesin publik — SUDAH di-commit
 
-Kios tanpa login, `--layar`, jeda pengambilan, GRANT PostgreSQL, dan
-dokumentasinya sudah masuk tree. Test UI kios sudah dijalankan (bukan
-hanya test service).
+Anjungan dan layar antrian tanpa login, `--kios`/`--tv`, jeda pengambilan,
+GRANT PostgreSQL, dan dokumentasinya sudah masuk tree. Test UI keduanya
+sudah dijalankan (bukan hanya test service).
 
 ### Keputusan desain yang sudah disepakati pemilik
 
-1. **Dialog pilihan saat start** — "Layar Pengunjung" atau "Layar Petugas".
-   Pengunjung langsung masuk tanpa login; petugas wajib login.
-2. **Argumen `--layar`** melewati dialog itu. Dipasang pada shortcut
-   Startup komputer kios supaya mati listrik tidak berhenti di dialog.
-3. **User PostgreSQL terpisah** untuk mesin kios, **tanpa akses `app_user`**.
-   Skripnya: [sql/kios-grant.sql](sql/kios-grant.sql).
+1. **Dialog pilihan saat start** — "Layar Antrian", "Anjungan Ambil Nomor",
+   atau "Layar Petugas". Dua yang pertama langsung masuk tanpa login;
+   petugas wajib login.
+2. **Argumen `--tv` dan `--kios`** melewati dialog itu. Dipasang pada
+   shortcut Startup kedua mesin publik supaya mati listrik tidak berhenti
+   di dialog. `--layar` dipertahankan sebagai nama lama `--kios`.
+3. **User PostgreSQL terpisah** untuk tiap mesin publik, **tanpa akses
+   `app_user`**. Skripnya: [sql/kios-grant.sql](sql/kios-grant.sql) dan
+   [sql/layar-grant.sql](sql/layar-grant.sql) — yang kedua hanya membaca.
 4. **Jeda antar-pengambilan nomor** (`kiosk.cooldown_seconds`, bawaan 10
-   detik). Hanya sesi kios — meja pendaftaran tidak ikut diperlambat.
-5. Kegagalan di layar kios memakai **label sebaris**, bukan `QMessageBox`.
+   detik). Hanya sesi anjungan — meja pendaftaran tidak ikut diperlambat.
+5. Kegagalan di layar anjungan memakai **label sebaris**, bukan `QMessageBox`.
+6. **Pencetak dan pengeras suara adalah sifat MESIN**, ditimpa lewat
+   `ANTRIAN_PRINTER` dan `ANTRIAN_SUARA`. Anjungan diam secara bawaan
+   supaya tidak berbunyi bersahutan dengan televisi.
 
 ### Langkah berikutnya
 
@@ -185,7 +199,11 @@ Ini penting dan jangan dianggap selesai:
   (`QT_QPA_PLATFORM=offscreen`). Yang terbukti adalah struktur widget dan
   perilakunya, **bukan** bahwa tata letaknya tidak berantakan, teks tidak
   terpotong, atau `showFullScreen()` benar-benar memenuhi layar.
-- **Suara panggilan TTS** — belum pernah didengarkan.
+- **Suara panggilan TTS** — nada dan urutannya belum pernah didengarkan
+  di komputer sungguhan setelah jeda nada→ucapan ditambahkan.
+- **Pemasangan dua mesin publik sekaligus** (televisi + anjungan). Yang
+  terbukti adalah pemutar anjungan benar-benar diam; bahwa keduanya tidak
+  bersahutan hanya dapat dipastikan dengan mendengarnya di ruangan.
 - **Cetak ke printer Windows sungguhan** (`ticket.printer` = `system`).
 - **Pemasangan 5 komputer + PostgreSQL sungguhan.** Konkurensi terbukti
   lewat 8 utas dalam satu proses, bukan lewat 5 mesin di jaringan.
@@ -205,7 +223,8 @@ docker compose down -v          # menghentikan container uji
 
 # Jalankan aplikasi
 .\.venv\Scripts\python.exe -m app.main
-.\.venv\Scripts\python.exe -m app.main --layar        # langsung kios
+.\.venv\Scripts\python.exe -m app.main --tv           # televisi ruang tunggu
+.\.venv\Scripts\python.exe -m app.main --kios         # anjungan ambil nomor
 .\.venv\Scripts\python.exe -m app.main --init-only    # periksa pemasangan
 
 # Build .exe (menjalankan test dan memverifikasi .exe di folder bersih)

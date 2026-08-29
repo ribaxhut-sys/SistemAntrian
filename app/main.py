@@ -8,12 +8,18 @@ Urutan yang dijalankan:
     siapkan database -> pilih layar -> masuk -> jendela utama
 
 Argumen:
-    --layar       langsung membuka layar pengunjung tanpa dialog pilihan dan
-                  tanpa login. Dipasang pada shortcut komputer kios supaya
-                  layar antrian pulih sendiri setelah komputer menyala ulang,
-                  tanpa perlu ada yang mengklik apa pun.
+    --tv          langsung membuka layar antrian ruang tunggu, tanpa dialog
+                  pilihan dan tanpa login.
+    --kios        langsung membuka anjungan ambil nomor, tanpa dialog
+                  pilihan dan tanpa login.
+    --layar       nama lama --kios. Dipertahankan supaya pintasan yang sudah
+                  terpasang di komputer anjungan tidak mati saat aplikasi
+                  diperbarui.
     --init-only   hanya siapkan database lalu keluar, tanpa membuka jendela.
                   Berguna untuk memeriksa pemasangan di komputer baru.
+
+Kedua mesin publik dipasang dengan argumennya masing-masing supaya pulih
+sendiri setelah mati listrik, tanpa perlu ada yang mengklik apa pun.
 """
 
 from __future__ import annotations
@@ -95,24 +101,24 @@ def _laporkan_kegagalan_database(config, *, berjendela: bool) -> None:
         logger.exception("Pesan kegagalan database tidak dapat ditampilkan")
 
 
-def _jalankan_ui(*, langsung_kios: bool = False) -> int:
+def _jalankan_ui(*, mode_awal: str | None = None) -> int:
     """
     Buka aplikasi berjendela. Import Qt ditunda sampai benar-benar dipakai.
 
-    Keluar dari layar pengunjung (kios) atau layar petugas TIDAK menutup
-    proses aplikasi — hanya mengembalikan ke layar sebelumnya, seolah
-    komputer baru dinyalakan. Kios kembali ke layar pilihan mode (Login /
-    Layar Pengunjung); petugas yang logout kembali langsung ke layar masuk,
-    tanpa mampir ke layar pilihan lagi. Menutup aplikasi sepenuhnya hanya
-    terjadi lewat tombol silang (X) pada layar pilihan atau layar masuk —
-    sama seperti alur "batal" yang sudah ada sebelumnya.
+    Keluar dari salah satu mesin publik atau dari layar petugas TIDAK
+    menutup proses aplikasi — hanya mengembalikan ke layar sebelumnya,
+    seolah komputer baru dinyalakan. Mesin publik kembali ke layar pilihan
+    mode; petugas yang logout kembali langsung ke layar masuk, tanpa mampir
+    ke layar pilihan lagi. Menutup aplikasi sepenuhnya hanya terjadi lewat
+    tombol silang (X) pada layar pilihan atau layar masuk — sama seperti
+    alur "batal" yang sudah ada sebelumnya.
     """
     from PySide6.QtWidgets import QApplication, QDialog
 
     from app.services.auth_service import get_auth_service
     from app.ui.login.change_password_dialog import ChangePasswordDialog
     from app.ui.login.login_window import LoginWindow
-    from app.ui.login.mode_dialog import LAYAR_PENGUNJUNG, ModeDialog
+    from app.ui.login.mode_dialog import ANJUNGAN, LAYAR_ANTRIAN, ModeDialog
     from app.ui.main_window import MainWindow
     from app.ui.style import STYLESHEET
 
@@ -121,29 +127,32 @@ def _jalankan_ui(*, langsung_kios: bool = False) -> int:
     app.setStyleSheet(STYLESHEET)
 
     auth = get_auth_service()
-    kios_pertama = langsung_kios
+    #: Argumen baris perintah hanya berlaku pada peluncuran pertama. Setelah
+    #: layarnya ditutup, tetap lewat dialog pilihan seperti biasa — seseorang
+    #: sudah hadir untuk menekan Ctrl+Q.
+    mode_pertama = mode_awal
 
     while True:
-        if kios_pertama:
-            # --layar: langsung ke kios tanpa dialog, hanya pada peluncuran
-            # pertama. Setelah kios itu ditutup, tetap lewat layar pilihan
-            # seperti biasa — seseorang sudah hadir untuk menekan Ctrl+Q.
-            kios_pertama = False
-            mode_kios = True
+        if mode_pertama is not None:
+            mode = mode_pertama
+            mode_pertama = None
         else:
             pilihan = ModeDialog()
             if pilihan.exec() != QDialog.DialogCode.Accepted:
                 logger.info("Aplikasi ditutup dari layar pilihan")
                 return 0
-            mode_kios = pilihan.pilihan == LAYAR_PENGUNJUNG
+            mode = pilihan.pilihan
 
-        if mode_kios:
+        if mode in (ANJUNGAN, LAYAR_ANTRIAN):
             # Tanpa login: komputernya menghadap publik dan tidak diawasi.
-            auth.mulai_sesi_kios()
+            if mode == ANJUNGAN:
+                auth.mulai_sesi_kios()
+            else:
+                auth.mulai_sesi_layar()
             jendela = MainWindow(auth)
             jendela.tampilkan()
             app.exec()
-            continue  # kios ditutup -> kembali ke layar pilihan mode
+            continue  # mesin publik ditutup -> kembali ke layar pilihan mode
 
         # Mode petugas: logout kembali langsung ke layar masuk, tidak
         # mampir dulu ke layar pilihan mode.
@@ -172,10 +181,29 @@ def _jalankan_ui(*, langsung_kios: bool = False) -> int:
             # petugas logout -> kembali langsung ke layar masuk
 
 
+def mode_dari_argumen(argv: list[str]) -> str | None:
+    """
+    Mode mesin yang diminta lewat baris perintah, atau None bila tidak ada.
+
+    `--tv` didahulukan bila keduanya tertulis: layar antrian adalah yang
+    paling merugikan bila salah — papan kosong terlihat seluruh ruang
+    tunggu, sedangkan anjungan yang keliru masih bisa digantikan petugas
+    yang menerbitkan nomor dari mejanya.
+    """
+    from app.ui.login.mode_dialog import ANJUNGAN, LAYAR_ANTRIAN
+
+    if "--tv" in argv:
+        return LAYAR_ANTRIAN
+    # --layar adalah nama lama --kios, dipertahankan supaya pintasan yang
+    # sudah terpasang di komputer anjungan tidak mati saat aplikasi diperbarui.
+    if "--kios" in argv or "--layar" in argv:
+        return ANJUNGAN
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     hanya_init = "--init-only" in argv
-    langsung_kios = "--layar" in argv
 
     config = get_config()
     setup_logging(config)
@@ -207,7 +235,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        return _jalankan_ui(langsung_kios=langsung_kios)
+        # Import Qt ditunda sampai jendela benar-benar dibuka, sehingga mode
+        # dibaca di sini dan bukan di awal main(): --init-only harus tetap
+        # berjalan di komputer yang PySide6-nya belum lengkap.
+        return _jalankan_ui(mode_awal=mode_dari_argumen(argv))
     except Exception:
         logger.exception("Kesalahan tak terduga pada aplikasi")
         print(

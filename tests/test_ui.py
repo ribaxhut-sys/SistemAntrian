@@ -897,6 +897,147 @@ def test_menu_petugas_cro_dan_pendaftaran_tidak_tumpang_tindih(qtbot, auth, antr
 
 
 # ---------------------------------------------------------------------
+# Tampilan panel petugas
+# ---------------------------------------------------------------------
+
+def test_kartu_antrian_berganti_warna_mengikuti_status(
+    halaman_layanan, terbitkan, auth
+):
+    """
+    Petugas mengenali keadaan loketnya dari warna sebelum sempat membaca.
+    Warna yang tidak ikut berubah membuat kartu berbohong: hijau padahal
+    orangnya belum datang.
+    """
+    from app.ui.style import SUCCESS, WARNING
+
+    terbitkan("A", 1)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+
+    halaman_layanan.panggil_berikutnya()
+    assert WARNING in halaman_layanan.panel_antrian.styleSheet()
+
+    halaman_layanan.mulai_melayani()
+    assert SUCCESS in halaman_layanan.panel_antrian.styleSheet()
+
+
+def test_loket_istirahat_terlihat_pada_kartu_dan_tombolnya(halaman_layanan):
+    from app.ui.style import WARNING
+
+    halaman_layanan.alihkan_istirahat()
+
+    assert "istirahat" in halaman_layanan.label_status.text().lower()
+    assert WARNING in halaman_layanan.panel_antrian.styleSheet()
+    assert halaman_layanan.tombol_istirahat.property("variant") == "warning"
+    assert not halaman_layanan.tombol_panggil.isEnabled()
+
+    halaman_layanan.alihkan_istirahat()
+    assert halaman_layanan.tombol_istirahat.property("variant") == ""
+    assert halaman_layanan.tombol_panggil.isEnabled()
+
+
+def test_penghitung_waktu_berjalan_saat_melayani_dan_kosong_saat_menganggur(
+    halaman_layanan, terbitkan, auth
+):
+    """
+    Penghitung ini yang membuat petugas tahu ada pengunjung yang sudah
+    lama dipanggil tetapi belum juga datang, tanpa perlu melihat jam.
+    """
+    terbitkan("A", 1)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+    assert halaman_layanan.label_durasi.text() == ""
+
+    halaman_layanan.panggil_berikutnya()
+    halaman_layanan.mulai_melayani()
+    assert "00:" in halaman_layanan.label_durasi.text()
+
+    halaman_layanan.selesaikan()
+    assert halaman_layanan.label_durasi.text() == ""
+
+
+def test_penghitung_waktu_tidak_menyentuh_database(halaman_layanan, terbitkan, auth):
+    """
+    Dipanggil sedetik sekali di setiap loket. Satu query per detik per
+    loket akan membebani server hanya untuk menampilkan angka yang sudah
+    dapat dihitung dari data di tangan.
+    """
+    terbitkan("A", 1)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+    halaman_layanan.panggil_berikutnya()
+
+    class ServiceTerlarang:
+        def __getattr__(self, nama):
+            raise AssertionError(f"penghitung waktu memanggil service: {nama}")
+
+    queue, master = halaman_layanan.queue, halaman_layanan.master
+    halaman_layanan.queue = ServiceTerlarang()
+    halaman_layanan.master = ServiceTerlarang()
+    try:
+        halaman_layanan._perbarui_durasi()
+    finally:
+        halaman_layanan.queue, halaman_layanan.master = queue, master
+
+    assert halaman_layanan.label_durasi.text()
+
+
+def test_baris_terdepan_daftar_tunggu_ditandai(halaman_layanan, terbitkan, auth):
+    """Nomor yang akan terpanggil bila PANGGIL BERIKUTNYA ditekan sekarang."""
+    terbitkan("A", 2)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+
+    assert halaman_layanan.tabel.item(0, 0).font().bold()
+    assert not halaman_layanan.tabel.item(1, 0).font().bold()
+
+
+def test_lama_menunggu_diberi_warna_menurut_ambangnya(halaman_layanan):
+    """
+    Angka menit tidak berarti apa-apa tanpa pembanding. Warnanya yang
+    memberi tahu petugas siapa yang sudah terlalu lama duduk.
+    """
+    from PySide6.QtWidgets import QTableWidgetItem
+
+    from app.ui.queue.service_page import (
+        TUNGGU_LAMA_MENIT,
+        TUNGGU_SANGAT_LAMA_MENIT,
+    )
+    from app.ui.style import DANGER, TEXT_MUTED, WARNING
+
+    def warna(menit: int) -> str:
+        sel = QTableWidgetItem("x")
+        halaman_layanan._gayai_sel(sel, baris=1, kolom=3, menit=menit)
+        return sel.foreground().color().name().upper()
+
+    assert warna(0) == TEXT_MUTED.upper()
+    assert warna(TUNGGU_LAMA_MENIT) == WARNING.upper()
+    assert warna(TUNGGU_SANGAT_LAMA_MENIT) == DANGER.upper()
+
+
+def test_daftar_kosong_menjelaskan_dirinya(halaman_layanan):
+    """Tabel kosong tanpa satu barispun terbaca seperti aplikasi menggantung."""
+    assert halaman_layanan.label_jumlah.text() == "0"
+    assert halaman_layanan.label_kosong.isVisibleTo(halaman_layanan)
+    assert not halaman_layanan.tabel.isVisibleTo(halaman_layanan)
+
+
+def test_jumlah_menunggu_ikut_terhitung(halaman_layanan, terbitkan, auth):
+    terbitkan("A", 2)
+    terbitkan("B", 1)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+
+    assert halaman_layanan.label_jumlah.text() == "3"
+    assert halaman_layanan.tabel.isVisibleTo(halaman_layanan)
+
+
+# ---------------------------------------------------------------------
 # Survey kepuasan (Phase 6)
 # ---------------------------------------------------------------------
 
@@ -1348,7 +1489,11 @@ def test_tombol_minta_survey_aktif_setelah_pelayanan_selesai(
 
 @pytest.mark.parametrize(
     ("nama_fixture", "atribut"),
-    [("halaman_daftar", "panel_hasil")],
+    [
+        ("halaman_daftar", "panel_hasil"),
+        ("halaman_layanan", "panel_antrian"),
+        ("halaman_layanan", "panel_menunggu"),
+    ],
 )
 def test_gaya_panel_dibatasi_pada_panelnya_sendiri(request, nama_fixture, atribut):
     """

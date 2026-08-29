@@ -12,6 +12,15 @@ Environment variable yang dikenali:
     ANTRIAN_BACKUP_DIR   folder hasil backup
     ANTRIAN_LOG_DIR      folder file log
     ANTRIAN_LOG_LEVEL    DEBUG | INFO | WARNING | ERROR
+    ANTRIAN_PRINTER      pencetak tiket mesin ini: pdf | system | none
+    ANTRIAN_SUARA        1/0 — mesin ini membunyikan panggilan atau tidak
+
+Dua yang terakhir menimpa pengaturan bersama di database, dan memang harus
+bisa begitu: pencetak tiket menempel pada satu mesin dan pengeras suara
+pada mesin lain, sedangkan `ticket.printer` dan `display.sound_enabled` di
+database bernilai satu untuk seluruh sistem. Tanpa penimpaan per mesin,
+menyalakan pencetak di anjungan berarti kelima komputer loket ikut mencoba
+mencetak ke pencetak yang tidak ada padanya.
 
 Beberapa loket yang melayani bersamaan WAJIB memakai PostgreSQL lewat
 ANTRIAN_DB_URL. SQLite hanya sanggup melayani satu komputer: mode WAL
@@ -64,9 +73,35 @@ def resource_dir() -> Path:
     return Path(bundel) if bundel else base_dir()
 
 
+#: Nilai yang dibaca sebagai "ya" pada environment variable boolean.
+#: Sama persis dengan yang diterima pengaturan database, supaya admin tidak
+#: perlu mengingat dua daftar kata yang berbeda.
+_BENAR = {"true", "1", "ya", "yes", "on"}
+_SALAH = {"false", "0", "tidak", "no", "off"}
+
+
 def _path_from_env(var: str, default: Path) -> Path:
     raw = os.environ.get(var, "").strip()
     return Path(raw).expanduser().resolve() if raw else default
+
+
+def _bool_from_env(var: str) -> bool | None:
+    """
+    Baca environment variable boolean, atau None bila mesin ini tidak
+    berpendapat.
+
+    None BUKAN sama dengan False. Mesin yang tidak menyebut apa-apa
+    mengikuti pengaturan bersama; hanya mesin yang menyebut secara
+    eksplisit yang menimpanya. Nilai yang tidak dikenali diperlakukan
+    seperti tidak diisi — salah ketik di satu komputer tidak boleh
+    mendiamkan panggilan tanpa jejak.
+    """
+    raw = os.environ.get(var, "").strip().lower()
+    if raw in _BENAR:
+        return True
+    if raw in _SALAH:
+        return False
+    return None
 
 
 @dataclass(frozen=True)
@@ -80,6 +115,12 @@ class AppConfig:
     log_level: str
     #: URL SQLAlchemy lengkap. Kosong berarti memakai SQLite pada db_path.
     db_url: str = ""
+    #: Pencetak tiket mesin ini. Kosong berarti mengikuti `ticket.printer`
+    #: yang berlaku untuk seluruh sistem.
+    printer: str = ""
+    #: Mesin ini membunyikan panggilan atau tidak. None berarti mengikuti
+    #: pengaturan bersama dan bawaan modenya.
+    suara: bool | None = None
     timezone: str = TIMEZONE
 
     @property
@@ -134,6 +175,8 @@ def load_config() -> AppConfig:
         backup_dir=_path_from_env("ANTRIAN_BACKUP_DIR", root / "backup"),
         log_dir=_path_from_env("ANTRIAN_LOG_DIR", root / "logs"),
         log_level=os.environ.get("ANTRIAN_LOG_LEVEL", "INFO").upper(),
+        printer=os.environ.get("ANTRIAN_PRINTER", "").strip(),
+        suara=_bool_from_env("ANTRIAN_SUARA"),
     )
 
 

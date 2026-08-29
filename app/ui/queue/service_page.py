@@ -2,38 +2,99 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QBrush, QColor, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from app.models import QueueStatus
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
 from app.services.queue_service import QueueInfo, QueueService
 from app.services.settings_service import SettingsService
 from app.services.survey_service import SurveyService
-from app.ui.common import jalankan_aman, judul, keterangan, konfirmasi, tombol
-from app.ui.style import BORDER, FONT_SIZE_HUGE, PRIMARY, TEXT_MUTED, WARNING
+from app.ui.common import (
+    jalankan_aman,
+    judul,
+    keterangan,
+    konfirmasi,
+    setel_variant,
+    tombol,
+)
+from app.ui.style import (
+    BORDER,
+    BORDER_STRONG,
+    DANGER,
+    FONT_SIZE_HUGE,
+    FONT_SIZE_LARGE,
+    FONT_SIZE_SMALL,
+    FONT_SIZE_XL,
+    PRIMARY,
+    PRIMARY_DARK,
+    PRIMARY_SOFT,
+    RADIUS,
+    SUCCESS,
+    SUCCESS_SOFT,
+    SURFACE,
+    SURFACE_ALT,
+    TEXT,
+    TEXT_MUTED,
+    WARNING,
+    WARNING_SOFT,
+)
 from app.ui.survey.survey_dialog import SurveyDialog
+
+#: Selang perbaruan penghitung lama pelayanan, dalam milidetik.
+#:
+#: Hanya menghitung ulang selisih waktu dan menulis satu label — TIDAK
+#: menyentuh database. Penyegaran data tetap terjadi saat petugas menekan
+#: tombol atau F5, seperti sebelumnya.
+SELANG_DURASI_MS = 1000
+
+#: Ambang lama menunggu yang diberi warna pada daftar tunggu, dalam menit.
+#:
+#: Angka pada kolom "Menunggu" tidak berarti apa-apa sampai ada
+#: pembandingnya. Warna memberi pembanding itu tanpa menambah satu kolom
+#: pun: petugas melihat siapa yang sudah terlalu lama duduk tanpa membaca
+#: satu angka pun.
+TUNGGU_LAMA_MENIT = 10
+TUNGGU_SANGAT_LAMA_MENIT = 20
+
+
+def _pil(warna_teks: str, latar: str) -> str:
+    """Gaya label berbentuk kapsul, dipakai untuk menandai keadaan."""
+    return (
+        f"background: {latar}; color: {warna_teks}; border-radius: 11px;"
+        f" padding: 5px 14px; font-size: {FONT_SIZE_SMALL}px; font-weight: 700;"
+    )
 
 
 class ServicePage(QWidget):
     """
     Panel kerja petugas CRO.
 
+    Tata letaknya dua kolom: kolom kiri untuk satu antrian yang sedang
+    ditangani beserta seluruh tindakannya, kolom kanan untuk daftar yang
+    menunggu. Pemisahan ini disengaja — petugas hampir sepanjang hari hanya
+    melihat kolom kiri, dan kolom kanan cukup dilirik.
+
     Tombol yang tidak sah untuk status saat ini dinonaktifkan, bukan
     disembunyikan — posisinya tetap sehingga petugas tidak perlu mencari
-    ulang setiap kali status berubah.
+    ulang setiap kali status berubah. Aturan ini yang menentukan bentuk
+    kisi tombolnya: seluruh tombol selalu tampak, yang berubah hanya
+    warna dan keaktifannya.
     """
 
     def __init__(
@@ -44,6 +105,8 @@ class ServicePage(QWidget):
         settings: SettingsService,
         auth: AuthService | None = None,
         parent: QWidget | None = None,
+        *,
+        otomatis: bool = True,
     ) -> None:
         super().__init__(parent)
         self.queue = queue
@@ -66,6 +129,15 @@ class ServicePage(QWidget):
 
         self._bangun_tampilan()
         self._pasang_pintasan()
+
+        # Penghitung lama pelayanan. Dipisahkan dari penyegaran data supaya
+        # angka detiknya berjalan tanpa membebani database sedetik sekali.
+        self.pewaktu_durasi = QTimer(self)
+        self.pewaktu_durasi.setInterval(SELANG_DURASI_MS)
+        self.pewaktu_durasi.timeout.connect(self._perbarui_durasi)
+        if otomatis:
+            self.pewaktu_durasi.start()
+
         self.muat_loket()
         # Wajib setelah muat_loket(): `muat_ulang()` hanya menyusun ulang
         # pilihan jenis layanan ketika daftar loketnya BERUBAH, dan pada
@@ -79,113 +151,211 @@ class ServicePage(QWidget):
 
     def _bangun_tampilan(self) -> None:
         susunan = QVBoxLayout(self)
-        susunan.setContentsMargins(24, 20, 24, 20)
-        susunan.setSpacing(16)
+        susunan.setContentsMargins(18, 14, 18, 14)
+        susunan.setSpacing(12)
 
-        baris_atas = QHBoxLayout()
-        baris_atas.addWidget(judul("Pelayanan Antrian"))
-        baris_atas.addStretch()
-        baris_atas.addWidget(QLabel("Loket:"))
+        susunan.addWidget(self._bangun_kepala())
+
+        isi = QHBoxLayout()
+        isi.setSpacing(16)
+        isi.addLayout(self._bangun_kolom_kerja(), stretch=5)
+        isi.addWidget(self._bangun_panel_menunggu(), stretch=4)
+        susunan.addLayout(isi, stretch=1)
+
+    def _bangun_kepala(self) -> QWidget:
+        """
+        Bilah judul beserta pilihan loket dan jenis layanan.
+
+        Loket dan jenis layanan diletakkan di sini, bukan di dekat tombol,
+        karena keduanya diatur sekali di awal giliran lalu tidak disentuh
+        lagi sepanjang hari. Menaruhnya bersebelahan dengan tombol yang
+        ditekan ratusan kali hanya menambah peluang tersenggol.
+        """
+        kepala = QFrame()
+        kepala.setObjectName("panelKepala")
+        kepala.setStyleSheet(
+            f"QFrame#panelKepala {{ background: {SURFACE};"
+            f" border: 1px solid {BORDER}; border-radius: {RADIUS}px; }}"
+        )
+
+        susunan = QHBoxLayout(kepala)
+        susunan.setContentsMargins(18, 12, 18, 12)
+        susunan.setSpacing(14)
+
+        teks = QVBoxLayout()
+        teks.setSpacing(2)
+        teks.addWidget(judul("Pelayanan Antrian"))
+        petunjuk = keterangan("F2 panggil · F3 ulangi · F4 mulai · F8 selesai")
+        petunjuk.setWordWrap(False)
+        petunjuk.setStyleSheet(f"color: {TEXT_MUTED}; font-size: {FONT_SIZE_SMALL}px;")
+        teks.addWidget(petunjuk)
+        susunan.addLayout(teks)
+        susunan.addStretch()
+
         self.pilih_loket = QComboBox()
-        self.pilih_loket.setMinimumWidth(160)
+        self.pilih_loket.setMinimumWidth(170)
         self.pilih_loket.currentIndexChanged.connect(self.loket_diganti)
-        baris_atas.addWidget(self.pilih_loket)
+        susunan.addLayout(self._berlabel("LOKET", self.pilih_loket))
 
-        baris_atas.addWidget(QLabel("Jenis Layanan:"))
         self.pilih_kategori = QComboBox()
-        self.pilih_kategori.setMinimumWidth(160)
-        baris_atas.addWidget(self.pilih_kategori)
+        self.pilih_kategori.setMinimumWidth(200)
+        susunan.addLayout(self._berlabel("JENIS LAYANAN", self.pilih_kategori))
 
         self.tombol_istirahat = tombol("Mulai Istirahat")
+        self.tombol_istirahat.setMinimumHeight(40)
         self.tombol_istirahat.clicked.connect(self.alihkan_istirahat)
-        baris_atas.addWidget(self.tombol_istirahat)
-        susunan.addLayout(baris_atas)
+        susunan.addLayout(self._berlabel("", self.tombol_istirahat))
 
-        susunan.addWidget(self._bangun_panel_antrian())
-        susunan.addLayout(self._bangun_tombol_aksi())
-        susunan.addLayout(self._bangun_baris_survey())
+        return kepala
 
-        susunan.addWidget(keterangan("Menunggu dilayani"))
-        self.tabel = QTableWidget(0, 4)
-        self.tabel.setHorizontalHeaderLabels(
-            ["Nomor", "Jenis Layanan", "Diambil Pukul", "Menunggu"]
-        )
-        self.tabel.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.tabel.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.tabel.verticalHeader().setVisible(False)
-        self.tabel.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
-        susunan.addWidget(self.tabel, stretch=1)
+    @staticmethod
+    def _berlabel(kapsi: str, kontrol: QWidget) -> QVBoxLayout:
+        """Satu kontrol beserta keterangan kecil di atasnya."""
+        kotak = QVBoxLayout()
+        kotak.setSpacing(4)
+        label = QLabel(kapsi)
+        label.setProperty("kapsi", "true")
+        kotak.addWidget(label)
+        kotak.addWidget(kontrol)
+        return kotak
+
+    def _bangun_kolom_kerja(self) -> QVBoxLayout:
+        kolom = QVBoxLayout()
+        kolom.setSpacing(10)
+        kolom.addWidget(self._bangun_panel_antrian())
+        kolom.addLayout(self._bangun_tombol_aksi())
+        kolom.addStretch()
+        kolom.addWidget(self._bangun_baris_survey())
+        return kolom
 
     def _bangun_panel_antrian(self) -> QWidget:
+        """
+        Kartu antrian yang sedang ditangani.
+
+        Warnanya berubah mengikuti status — abu-abu saat menganggur, jingga
+        saat nomor sudah dipanggil tetapi orangnya belum datang, hijau saat
+        pelayanan berjalan. Petugas mengenali keadaannya dari sudut mata,
+        sebelum sempat membaca satu kata pun.
+        """
         panel = QFrame()
         # objectName wajib: QLabel turunan QFrame, dan selector "QFrame"
         # polos akan membingkai setiap label di dalam panel.
         panel.setObjectName("panelAntrian")
-        panel.setStyleSheet(
-            f"QFrame#panelAntrian {{ background: white; border: 1px solid {BORDER};"
-            " border-radius: 6px; }}"
-        )
         panel.setMinimumHeight(150)
+        self.panel_antrian = panel
 
         susunan = QVBoxLayout(panel)
-        susunan.setContentsMargins(24, 18, 24, 18)
+        susunan.setContentsMargins(22, 14, 22, 14)
         susunan.setSpacing(4)
+
+        baris_atas = QHBoxLayout()
+        self.label_status = QLabel("")
+        self.label_status.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        baris_atas.addWidget(self.label_status)
+        baris_atas.addStretch()
+
+        self.label_durasi = QLabel("")
+        self.label_durasi.setStyleSheet(
+            f"color: {TEXT_MUTED}; font-size: {FONT_SIZE_LARGE}px; font-weight: 700;"
+        )
+        baris_atas.addWidget(self.label_durasi)
+        susunan.addLayout(baris_atas)
+
+        susunan.addStretch()
 
         self.label_nomor = QLabel("—")
         self.label_nomor.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_nomor.setStyleSheet(
-            f"font-size: {FONT_SIZE_HUGE + 12}px; font-weight: 700; color: {PRIMARY};"
-        )
         susunan.addWidget(self.label_nomor)
 
         self.label_layanan = QLabel("Tidak ada antrian yang sedang ditangani")
         self.label_layanan.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_layanan.setStyleSheet(
+            f"color: {TEXT_MUTED}; font-size: {FONT_SIZE_LARGE}px;"
+        )
         susunan.addWidget(self.label_layanan)
 
-        self.label_status = QLabel("")
-        self.label_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_status.setStyleSheet(f"color: {TEXT_MUTED};")
-        susunan.addWidget(self.label_status)
+        susunan.addStretch()
 
         self.label_batas = QLabel("")
         self.label_batas.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label_batas.setWordWrap(True)
-        self.label_batas.setStyleSheet(f"color: {WARNING}; font-weight: 600;")
+        self.label_batas.setStyleSheet(
+            f"background: {WARNING_SOFT}; color: {WARNING}; font-weight: 700;"
+            " border-radius: 6px; padding: 8px 12px;"
+        )
         self.label_batas.setVisible(False)
         susunan.addWidget(self.label_batas)
 
+        self._warnai_panel_antrian()
         return panel
 
-    def _bangun_tombol_aksi(self) -> QHBoxLayout:
-        baris = QHBoxLayout()
-        baris.setSpacing(8)
+    def _bangun_tombol_aksi(self) -> QVBoxLayout:
+        """
+        Tombol tindakan, disusun menurun dari yang paling sering ditekan.
 
-        self.tombol_panggil = tombol("PANGGIL BERIKUTNYA", variant="primary")
-        self.tombol_panggil.setMinimumHeight(52)
+        PANGGIL BERIKUTNYA mendapat satu barisnya sendiri karena itulah
+        tombol yang ditekan ratusan kali sehari; sisanya berkelompok tiga
+        kolom. Dua tindakan yang menutup antrian tanpa melayani dipisahkan
+        ke kelompok terakhir supaya tidak tertekan karena refleks.
+        """
+        kotak = QVBoxLayout()
+        kotak.setSpacing(8)
+
+        self.tombol_panggil = tombol("PANGGIL BERIKUTNYA  ·  F2", variant="primary")
+        self.tombol_panggil.setMinimumHeight(56)
+        self.tombol_panggil.setStyleSheet(f"font-size: {FONT_SIZE_XL}px;")
         self.tombol_panggil.clicked.connect(self.panggil_berikutnya)
-        baris.addWidget(self.tombol_panggil, stretch=2)
+        kotak.addWidget(self.tombol_panggil)
+
+        kotak.addWidget(self._kapsi("ALUR PELAYANAN"))
 
         self.aksi: dict[str, object] = {}
-        for kunci, teks, handler, variant in (
-            ("panggil_ulang", "Panggil Ulang", self.panggil_ulang, ""),
-            ("mulai_layani", "Mulai Melayani", self.mulai_melayani, ""),
-            ("selesai", "Selesai", self.selesaikan, "primary"),
-            ("tunda", "Tunda", self.tunda, ""),
-            ("lanjutkan", "Lanjutkan", self.lanjutkan, ""),
-            ("tidak_hadir", "Tidak Hadir", self.tidak_hadir, ""),
-            ("batal", "Batal", self.batalkan, "danger"),
+        kisi = QGridLayout()
+        kisi.setSpacing(8)
+        for kolom in range(3):
+            kisi.setColumnStretch(kolom, 1)
+
+        for posisi, (kunci, teks, handler, variant) in enumerate(
+            (
+                ("panggil_ulang", "Panggil Ulang  ·  F3", self.panggil_ulang, ""),
+                ("mulai_layani", "Mulai Melayani  ·  F4", self.mulai_melayani, ""),
+                ("selesai", "Selesai  ·  F8", self.selesaikan, "success"),
+                ("tunda", "Tunda", self.tunda, ""),
+                ("lanjutkan", "Lanjutkan", self.lanjutkan, ""),
+            )
         ):
             btn = tombol(teks, variant=variant)
-            btn.setMinimumHeight(52)
+            btn.setMinimumHeight(42)
             btn.clicked.connect(handler)
-            baris.addWidget(btn, stretch=1)
+            kisi.addWidget(btn, posisi // 3, posisi % 3)
             self.aksi[kunci] = btn
+        kotak.addLayout(kisi)
 
-        return baris
+        kotak.addWidget(self._kapsi("BILA PENGUNJUNG TIDAK DATANG"))
 
-    def _bangun_baris_survey(self) -> QHBoxLayout:
+        baris_tutup = QHBoxLayout()
+        baris_tutup.setSpacing(8)
+        for kunci, teks, handler in (
+            ("tidak_hadir", "Tidak Hadir", self.tidak_hadir),
+            ("batal", "Batalkan Antrian", self.batalkan),
+        ):
+            btn = tombol(teks, variant="danger")
+            btn.setMinimumHeight(38)
+            btn.clicked.connect(handler)
+            baris_tutup.addWidget(btn)
+            self.aksi[kunci] = btn
+        baris_tutup.addStretch()
+        kotak.addLayout(baris_tutup)
+
+        return kotak
+
+    @staticmethod
+    def _kapsi(teks: str) -> QLabel:
+        label = QLabel(teks)
+        label.setProperty("kapsi", "true")
+        return label
+
+    def _bangun_baris_survey(self) -> QWidget:
         """
         Permintaan pengisian survey, terpisah dari tombol alur pelayanan.
 
@@ -193,20 +363,96 @@ class ServicePage(QWidget):
         yang tahu apakah pengunjung masih di depan meja dan bersedia menilai;
         dialog yang menyembul sendiri justru menghambat antrian berikutnya.
         """
-        baris = QHBoxLayout()
+        panel = QFrame()
+        panel.setObjectName("panelSurvey")
+        panel.setStyleSheet(
+            f"QFrame#panelSurvey {{ background: {SURFACE_ALT};"
+            f" border: 1px solid {BORDER}; border-radius: {RADIUS}px; }}"
+        )
+
+        baris = QHBoxLayout(panel)
+        baris.setContentsMargins(14, 8, 14, 8)
         baris.setSpacing(8)
 
         self.label_survey = QLabel("")
         self.label_survey.setStyleSheet(f"color: {TEXT_MUTED};")
-        baris.addWidget(self.label_survey)
-        baris.addStretch()
+        self.label_survey.setWordWrap(True)
+        baris.addWidget(self.label_survey, stretch=1)
 
         self.tombol_survey = tombol("Minta Survey")
+        self.tombol_survey.setMinimumHeight(36)
         self.tombol_survey.setEnabled(False)
         self.tombol_survey.clicked.connect(self.minta_survey)
         baris.addWidget(self.tombol_survey)
 
-        return baris
+        return panel
+
+    def _bangun_panel_menunggu(self) -> QWidget:
+        panel = QFrame()
+        panel.setObjectName("panelMenunggu")
+        panel.setStyleSheet(
+            f"QFrame#panelMenunggu {{ background: {SURFACE};"
+            f" border: 1px solid {BORDER}; border-radius: {RADIUS}px; }}"
+        )
+        panel.setMinimumWidth(320)
+        self.panel_menunggu = panel
+
+        susunan = QVBoxLayout(panel)
+        susunan.setContentsMargins(16, 14, 16, 14)
+        susunan.setSpacing(10)
+
+        baris_judul = QHBoxLayout()
+        baris_judul.addWidget(self._kapsi("MENUNGGU DILAYANI"))
+        baris_judul.addStretch()
+        self.label_jumlah = QLabel("0")
+        self.label_jumlah.setStyleSheet(_pil(PRIMARY_DARK, PRIMARY_SOFT))
+        baris_judul.addWidget(self.label_jumlah)
+        susunan.addLayout(baris_judul)
+
+        self.tabel = QTableWidget(0, 4)
+        # Judul kolom sengaja sesingkat mungkin. Panel ini hanya sepertiga
+        # lebar halaman, dan judul yang tidak muat TIDAK dipotong dengan
+        # "…" oleh Qt melainkan dipangkas di kedua sisinya — "Jenis
+        # Layanan" terbaca "nis Layana", yang lebih buruk daripada
+        # singkatannya.
+        self.tabel.setHorizontalHeaderLabels(
+            ["Nomor", "Layanan", "Diambil", "Menunggu"]
+        )
+        self.tabel.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tabel.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tabel.setShowGrid(False)
+        self.tabel.setWordWrap(False)
+        self.tabel.verticalHeader().setVisible(False)
+        self.tabel.verticalHeader().setDefaultSectionSize(40)
+
+        kepala = self.tabel.horizontalHeader()
+        kepala.setHighlightSections(False)
+        # Hanya nama layanan yang boleh memuai. Tiga kolom lainnya
+        # panjangnya tetap — nomor, jam, dan hitungan menit — sehingga
+        # seluruh sisa lebar jatuh ke kolom yang isinya memang paling
+        # bervariasi.
+        for kolom, mode in (
+            (0, QHeaderView.ResizeMode.ResizeToContents),
+            (1, QHeaderView.ResizeMode.Stretch),
+            (2, QHeaderView.ResizeMode.ResizeToContents),
+            (3, QHeaderView.ResizeMode.ResizeToContents),
+        ):
+            kepala.setSectionResizeMode(kolom, mode)
+        susunan.addWidget(self.tabel, stretch=1)
+
+        self.label_kosong = QLabel(
+            "Tidak ada yang menunggu.\nSemua nomor hari ini sudah dipanggil."
+        )
+        self.label_kosong.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_kosong.setWordWrap(True)
+        self.label_kosong.setStyleSheet(f"color: {TEXT_MUTED};")
+        self.label_kosong.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
+        self.label_kosong.setVisible(False)
+        susunan.addWidget(self.label_kosong, stretch=1)
+
+        return panel
 
     def _pasang_pintasan(self) -> None:
         """Pintasan untuk tindakan yang paling sering dipakai."""
@@ -332,7 +578,9 @@ class ServicePage(QWidget):
         if self.antrian is None:
             self.label_nomor.setText("—")
             self.label_layanan.setText("Tidak ada antrian yang sedang ditangani")
-            self.label_status.setText("")
+            self.label_status.setText(
+                "Loket sedang istirahat" if self.loket_istirahat else "Siap memanggil"
+            )
         else:
             self.label_nomor.setText(self.antrian.queue_number)
             self.label_layanan.setText(self.antrian.category_name)
@@ -345,8 +593,86 @@ class ServicePage(QWidget):
                 f"{self.antrian.label_status}{keterangan_panggilan}"
             )
 
+        self._warnai_panel_antrian()
+        self._perbarui_durasi()
         self._tampilkan_pengingat_panggilan()
         self._perbarui_tombol()
+
+    def _warnai_panel_antrian(self) -> None:
+        """
+        Selaraskan warna kartu dengan status antrian yang dipegang loket.
+
+        Satu tempat untuk seluruh warnanya. Tersebar di beberapa tempat,
+        kartu dan kapsul statusnya cepat atau lambat akan menyebut dua
+        keadaan yang berbeda pada saat yang sama.
+        """
+        aksen, latar, teks_pil, latar_pil = self._palet_keadaan()
+
+        self.panel_antrian.setStyleSheet(
+            f"QFrame#panelAntrian {{ background: {latar};"
+            f" border: 1px solid {BORDER}; border-left: 6px solid {aksen};"
+            f" border-radius: {RADIUS}px; }}"
+        )
+        self.label_status.setStyleSheet(_pil(teks_pil, latar_pil))
+        self.label_nomor.setStyleSheet(
+            f"font-size: {FONT_SIZE_HUGE + 22}px; font-weight: 800;"
+            f" color: {aksen if self.antrian else TEXT_MUTED};"
+        )
+
+    def _palet_keadaan(self) -> tuple[str, str, str, str]:
+        """
+        Warna aksen kartu, latar kartu, teks kapsul, dan latar kapsul.
+
+        Kapsul mendapat latarnya sendiri karena kartu yang menganggur
+        berlatar putih: kapsul putih di atasnya tidak akan terlihat sebagai
+        kapsul sama sekali, hanya sebagai tulisan yang menggantung.
+        """
+        if self.antrian is None:
+            if self.loket_istirahat:
+                return WARNING, WARNING_SOFT, WARNING, SURFACE
+            return BORDER_STRONG, SURFACE, TEXT_MUTED, SURFACE_ALT
+        if self.antrian.status is QueueStatus.SERVING:
+            return SUCCESS, SUCCESS_SOFT, SUCCESS, SURFACE
+        if self.antrian.status is QueueStatus.PAUSED:
+            return PRIMARY, PRIMARY_SOFT, PRIMARY_DARK, SURFACE
+        # CALLED: nomor sudah disebut, orangnya belum tentu datang.
+        return WARNING, WARNING_SOFT, WARNING, SURFACE
+
+    def _perbarui_durasi(self) -> None:
+        """
+        Perbarui penghitung waktu pada kartu antrian.
+
+        Sengaja TIDAK menyentuh database: dipanggil sedetik sekali, dan
+        satu query per detik per loket akan membebani server hanya untuk
+        menampilkan angka yang bisa dihitung sendiri dari data yang sudah
+        ada di tangan.
+        """
+        if self.antrian is None:
+            self.label_durasi.setText("")
+            return
+
+        from app.core import clock
+
+        sejak = (
+            self.antrian.called_at
+            if self.antrian.status is QueueStatus.CALLED
+            else self.antrian.serving_at
+        )
+
+        if sejak is None:
+            self.label_durasi.setText("")
+            return
+
+        detik = max(0, int((clock.now() - sejak).total_seconds()))
+        menit, sisa = divmod(detik, 60)
+        jam, menit = divmod(menit, 60)
+        waktu = f"{jam}:{menit:02d}:{sisa:02d}" if jam else f"{menit:02d}:{sisa:02d}"
+
+        aksen = self._palet_keadaan()[0]
+        self.label_durasi.setText(f"berjalan {waktu}")
+        self.label_durasi.setStyleSheet(
+            f"color: {aksen}; font-size: {FONT_SIZE_LARGE}px; font-weight: 700;"
+        )
 
     def _tampilkan_pengingat_panggilan(self) -> None:
         """
@@ -383,6 +709,7 @@ class ServicePage(QWidget):
         self.tombol_istirahat.setText(
             "Akhiri Istirahat" if self.loket_istirahat else "Mulai Istirahat"
         )
+        setel_variant(self.tombol_istirahat, "warning" if self.loket_istirahat else "")
 
     def _perbarui_tombol_survey(self) -> None:
         aktif = self.settings.get_bool("survey.enabled", True)
@@ -393,7 +720,9 @@ class ServicePage(QWidget):
 
         if self.baru_selesai is None:
             self.tombol_survey.setEnabled(False)
-            self.label_survey.setText("")
+            self.label_survey.setText(
+                "Survey ditawarkan setelah sebuah pelayanan diselesaikan."
+            )
             return
 
         self.tombol_survey.setEnabled(True)
@@ -405,6 +734,10 @@ class ServicePage(QWidget):
         from app.core import clock
 
         sekarang = clock.now()
+        self.label_jumlah.setText(str(len(menunggu)))
+        self.tabel.setVisible(bool(menunggu))
+        self.label_kosong.setVisible(not menunggu)
+
         self.tabel.setRowCount(len(menunggu))
         for baris, q in enumerate(menunggu):
             lama = int((sekarang - q.created_at).total_seconds() // 60)
@@ -415,7 +748,36 @@ class ServicePage(QWidget):
                 f"{lama} menit",
             ]
             for kolom, teks in enumerate(nilai):
-                self.tabel.setItem(baris, kolom, QTableWidgetItem(teks))
+                sel = QTableWidgetItem(teks)
+                self._gayai_sel(sel, baris=baris, kolom=kolom, menit=lama)
+                self.tabel.setItem(baris, kolom, sel)
+
+    def _gayai_sel(
+        self, sel: QTableWidgetItem, *, baris: int, kolom: int, menit: int
+    ) -> None:
+        """
+        Beri warna satu sel daftar tunggu.
+
+        Dua hal yang ditandai: baris paling depan — nomor yang akan terpanggil
+        bila PANGGIL BERIKUTNYA ditekan sekarang — dan lama menunggu yang
+        sudah melewati ambang. Keduanya pertanyaan yang dijawab petugas
+        berkali-kali sehari, dan keduanya kini terjawab tanpa membaca.
+        """
+        if baris == 0:
+            sel.setBackground(QBrush(QColor(PRIMARY_SOFT)))
+            huruf = QFont()
+            huruf.setBold(True)
+            sel.setFont(huruf)
+
+        if kolom == 3:
+            if menit >= TUNGGU_SANGAT_LAMA_MENIT:
+                sel.setForeground(QBrush(QColor(DANGER)))
+            elif menit >= TUNGGU_LAMA_MENIT:
+                sel.setForeground(QBrush(QColor(WARNING)))
+            else:
+                sel.setForeground(QBrush(QColor(TEXT_MUTED)))
+        elif kolom == 0:
+            sel.setForeground(QBrush(QColor(TEXT)))
 
     # -----------------------------------------------------------------
     # Tindakan

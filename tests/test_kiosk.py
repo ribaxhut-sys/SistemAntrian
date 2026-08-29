@@ -1,10 +1,10 @@
 """
-Test mesin kios pengunjung.
+Test dua mesin publik: anjungan ambil nomor dan layar antrian.
 
-Kios berjalan TANPA login di komputer yang menghadap publik dan tidak
-diawasi. Yang dikunci di sini terutama batas kewenangannya: kios boleh
-menampilkan papan nomor dan menerbitkan nomor, dan tidak boleh apa pun
-selain itu.
+Keduanya berjalan TANPA login di komputer yang menghadap publik dan tidak
+diawasi. Yang dikunci di sini terutama batas kewenangannya: anjungan boleh
+menampilkan papan nomor dan menerbitkan nomor, layar antrian hanya boleh
+melihat, dan keduanya tidak boleh apa pun selain itu.
 """
 
 from __future__ import annotations
@@ -391,7 +391,7 @@ def test_gagal_cetak_tidak_membatalkan_nomor_di_kios(qtbot, kios, antrian_siap, 
     assert tersimpan.status is QueueStatus.WAITING
 
 
-def test_sesi_kios_hanya_menu_layar_pengunjung(qtbot, auth, antrian_siap):
+def test_sesi_anjungan_hanya_menu_anjungan(qtbot, auth, antrian_siap):
     from app.ui.kiosk.kiosk_page import KioskPage
     from app.ui.main_window import MainWindow
 
@@ -401,7 +401,7 @@ def test_sesi_kios_hanya_menu_layar_pengunjung(qtbot, auth, antrian_siap):
     qtbot.addWidget(jendela)
 
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-    assert menu == ["Layar Pengunjung"]
+    assert menu == ["Anjungan Ambil Nomor"]
     assert jendela.mode_kios
     assert isinstance(jendela.halaman.currentWidget(), KioskPage)
     assert jendela.findChild(QFrame, "panelHeader") is None
@@ -412,7 +412,7 @@ def test_sesi_kios_hanya_menu_layar_pengunjung(qtbot, auth, antrian_siap):
 @pytest.mark.parametrize(
     "peran", ["cro", "supervisor", "registration", "admin", "display"]
 )
-def test_petugas_tidak_melihat_menu_layar_pengunjung(qtbot, auth, peran):
+def test_petugas_tidak_melihat_menu_anjungan(qtbot, auth, peran):
     from app.ui.main_window import MainWindow
     from tests.conftest import TEST_PASSWORD
 
@@ -422,24 +422,59 @@ def test_petugas_tidak_melihat_menu_layar_pengunjung(qtbot, auth, peran):
     qtbot.addWidget(jendela)
 
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-    assert "Layar Pengunjung" not in menu
+    assert "Anjungan Ambil Nomor" not in menu
 
 
-def test_mode_dialog_memilih_layar_pengunjung(qtbot):
+def test_mode_dialog_memilih_anjungan(qtbot):
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QDialog, QPushButton
 
-    from app.ui.login.mode_dialog import LAYAR_PENGUNJUNG, ModeDialog
+    from app.ui.login.mode_dialog import ANJUNGAN, ModeDialog
 
     dialog = ModeDialog()
     qtbot.addWidget(dialog)
-    tombol_pengunjung = next(
-        b for b in dialog.findChildren(QPushButton) if "PENGUNJUNG" in b.text()
+    tombol_anjungan = next(
+        b for b in dialog.findChildren(QPushButton) if "ANJUNGAN" in b.text()
     )
-    qtbot.mouseClick(tombol_pengunjung, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(tombol_anjungan, Qt.MouseButton.LeftButton)
 
-    assert dialog.pilihan == LAYAR_PENGUNJUNG
+    assert dialog.pilihan == ANJUNGAN
     assert dialog.result() == int(QDialog.DialogCode.Accepted)
+
+
+def test_mode_dialog_memilih_layar_antrian(qtbot):
+    """
+    Televisi ruang tunggu adalah pilihan tersendiri, bukan bagian dari
+    anjungan. Sebelumnya keduanya satu tombol bernama "Layar Pengunjung",
+    dan mesin televisi terpaksa dibuka lewat login akun DISPLAY.
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog, QPushButton
+
+    from app.ui.login.mode_dialog import LAYAR_ANTRIAN, ModeDialog
+
+    dialog = ModeDialog()
+    qtbot.addWidget(dialog)
+    tombol_antrian = next(
+        b for b in dialog.findChildren(QPushButton) if "LAYAR ANTRIAN" in b.text()
+    )
+    qtbot.mouseClick(tombol_antrian, Qt.MouseButton.LeftButton)
+
+    assert dialog.pilihan == LAYAR_ANTRIAN
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+
+
+def test_mode_dialog_menawarkan_tiga_mesin(qtbot):
+    """Tiga mesin yang berbeda harus dapat dipilih tanpa saling menumpang."""
+    from PySide6.QtWidgets import QPushButton
+
+    from app.ui.login.mode_dialog import ANJUNGAN, LAYAR_ANTRIAN, LAYAR_PETUGAS, ModeDialog
+
+    dialog = ModeDialog()
+    qtbot.addWidget(dialog)
+
+    assert len(dialog.findChildren(QPushButton)) == 3
+    assert len({LAYAR_ANTRIAN, ANJUNGAN, LAYAR_PETUGAS}) == 3
 
 
 def test_mode_dialog_memilih_layar_petugas(qtbot):
@@ -457,3 +492,132 @@ def test_mode_dialog_memilih_layar_petugas(qtbot):
 
     assert dialog.pilihan == LAYAR_PETUGAS
     assert dialog.result() == int(QDialog.DialogCode.Accepted)
+
+
+# ---------------------------------------------------------------------
+# Layar antrian sebagai mesin tersendiri
+# ---------------------------------------------------------------------
+
+def test_sesi_layar_hanya_menu_layar_antrian(qtbot, auth, antrian_siap):
+    """
+    Televisi ruang tunggu membuka papan besar, bukan halaman anjungan.
+
+    Menu-nya dibuktikan di sini karena keduanya sama-sama berjalan tanpa
+    login: yang membedakan hanyalah peran sesinya, dan tertukarnya berarti
+    televisi memunculkan tombol ambil nomor yang tidak ada orang di
+    depannya untuk menekan.
+    """
+    from app.ui.display.display_page import DisplayPage
+    from app.ui.main_window import MainWindow
+
+    auth.logout()
+    auth.mulai_sesi_layar()
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
+    assert menu == ["Layar Antrian"]
+    assert isinstance(jendela.halaman.currentWidget(), DisplayPage)
+
+
+def test_sesi_layar_menyembunyikan_seluruh_perkakas_petugas(qtbot, auth, antrian_siap):
+    """
+    Sama seperti anjungan: tidak ada bilah atas, navigasi, maupun bilah
+    status. Tombol "Keluar" yang terpampang di ruang tunggu hanya
+    mengundang orang menutup aplikasi antrian.
+    """
+    from app.ui.main_window import MainWindow
+
+    auth.logout()
+    auth.mulai_sesi_layar()
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    assert jendela.mode_kios
+    assert jendela.findChild(QFrame, "panelHeader") is None
+    assert jendela.findChild(QStatusBar) is None
+    assert jendela.navigasi.parent() is None
+
+
+def test_papan_televisi_bukan_papan_kompak(qtbot, auth, antrian_siap):
+    """
+    Televisi dibaca dari seberang ruangan, anjungan dari jarak satu lengan.
+
+    Papan kompak di televisi berarti nomor sebesar papan kios pada layar 50
+    inci — terbaca, tetapi membuang seluruh alasan televisi itu dipasang.
+    """
+    from app.ui.main_window import MainWindow
+
+    auth.logout()
+    auth.mulai_sesi_layar()
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    assert jendela.halaman.currentWidget().kompak is False
+
+
+# ---------------------------------------------------------------------
+# Pencetak dan pengeras suara menempel pada mesin
+# ---------------------------------------------------------------------
+
+def test_anjungan_diam_walau_suara_dinyalakan_di_pengaturan(
+    qtbot, auth, antrian_siap, env_mesin
+):
+    """
+    Dua mesin publik dengan pengeras suara masing-masing akan mengumumkan
+    nomor yang sama dua kali, saling menyusul, karena keduanya menyegarkan
+    sendiri tiap dua detik.
+
+    Yang dibuktikan di sini adalah pemutarnya benar-benar diam — bukan
+    sekadar penanda `suara_aktif` di papan, yang masih menyisakan
+    kemungkinan bunyi lewat jalur lain.
+    """
+    from app.services.sound_service import NullSoundPlayer
+    from app.ui.main_window import MainWindow
+
+    env_mesin(ANTRIAN_SUARA=None)
+    SettingsService(auth).set("display.sound_enabled", "true")
+
+    auth.logout()
+    auth.mulai_sesi_kios()
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    assert isinstance(jendela.sound_player, NullSoundPlayer)
+    assert jendela.halaman.currentWidget().papan.suara_aktif is False
+
+
+def test_anjungan_bersuara_kembali_bila_mesin_memintanya(
+    qtbot, auth, antrian_siap, env_mesin
+):
+    """Pemasangan satu-mesin yang anjungannya merangkap papan nomor."""
+    from app.ui.main_window import MainWindow
+
+    env_mesin(ANTRIAN_SUARA="1")
+    SettingsService(auth).set("display.sound_enabled", "false")
+
+    auth.logout()
+    auth.mulai_sesi_kios()
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    assert jendela.halaman.currentWidget().papan.suara_aktif is True
+
+
+def test_pencetak_mesin_dipakai_jendela_utama(qtbot, auth, antrian_siap, env_mesin):
+    """
+    Komputer loket tanpa pencetak tiket tidak boleh ikut mencoba mencetak
+    hanya karena pengaturan bersama menyebut "Cetak ke printer Windows".
+    """
+    from app.services.ticket_service import NullTicketPrinter
+    from app.ui.main_window import MainWindow
+
+    env_mesin(ANTRIAN_PRINTER="none")
+    SettingsService(auth).set("ticket.printer", "system")
+
+    auth.logout()
+    auth.mulai_sesi_kios()
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    assert isinstance(jendela.ticket_service.printer, NullTicketPrinter)
