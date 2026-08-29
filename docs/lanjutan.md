@@ -70,6 +70,24 @@ PySide6 UI → Service Layer → Repository Layer → SQLAlchemy → PostgreSQL/
 - UI memanggil service lewat `jalankan_aman()` dari `app/ui/common.py`
 - Detail teknis masuk `logs/app.log`
 
+### Data pribadi hanya di satu tempat
+
+Sejak lembar pengaduan ada, aplikasi ini menyimpan nama, nomor pelanggan,
+telepon, email, dan alamat pelapor. Seluruhnya **hanya** di tabel
+`queue_note`. Yang harus tetap benar:
+
+- **Jangan memindahkannya menjadi kolom di `queue`.** User PostgreSQL
+  anjungan punya `SELECT` pada tabel itu, dan komputernya berdiri di ruang
+  publik tanpa diawasi. Sudah dikunci test:
+  `tests/test_note_service.py::test_anjungan_kios_tidak_dapat_membaca_lembar`.
+- **Jangan memasukkan isinya ke audit log.** Audit dibaca ADMIN dan ikut ke
+  setiap berkas backup. Dikunci
+  `tests/test_note_service.py::test_isi_lembar_tidak_pernah_masuk_audit_log`.
+- **Penulis tidak boleh menghapus.** Menulis milik CRO, menghapus milik
+  ADMIN, dan penghapusan tercatat.
+- **Berkas backup kini berisi data pribadi.** Siapa pun yang menyalin
+  folder backup menyalin arsip pelapor.
+
 ### Jebakan yang sudah pernah menggigit
 
 **Jangan pakai `QMessageBox.exec()` pada layar yang tidak diawasi petugas.**
@@ -102,6 +120,12 @@ proyek ini memakai `"Continue"` dan memeriksa `$LASTEXITCODE`.
 | `7ca5bb2` | Layar antrian sebagai kios layar penuh |
 | `cc377d0` | Penegakan batas panggilan + layar hasil survey supervisor |
 | `535a60e` | **Port PostgreSQL** untuk beberapa loket serentak |
+| `8d30d0b` | Kios pengunjung tanpa login |
+| `152ac4d` | Layar pengunjung terbaca dari seberang ruangan |
+| `2a1f804` | Papan televisi mengikuti ukuran layar + pilihan tema |
+| `3ab265a` | Loket dan jenis layanan per petugas; istirahat dan tutup hari |
+| `0a0a727` | Televisi dipisah dari anjungan; papan menunggu per jenis layanan |
+| _belum di-commit_ | Ruang kerja pengaduan dan catatan petugas per antrian |
 
 ### Yang paling penting dari `535a60e`
 
@@ -131,7 +155,7 @@ RETURNING last_number
 
 | Dialect | Hasil |
 |---|---|
-| SQLite | **833 lolos** (29 Agustus 2026, termasuk papan per-layanan dan sisa antrian di tiket) |
+| SQLite | **865 lolos** (29 Agustus 2026, termasuk papan per-layanan, sisa antrian di tiket, dan lembar pengaduan) |
 | PostgreSQL | **598 lolos, 25 dilewati** — putaran lama, SEBELUM perubahan papan per-layanan |
 
 **Angka PostgreSQL itu sudah basi.** Suite belum pernah dijalankan ulang
@@ -176,6 +200,24 @@ sudah dijalankan (bukan hanya test service).
 6. **Pencetak dan pengeras suara adalah sifat MESIN**, ditimpa lewat
    `ANTRIAN_PRINTER` dan `ANTRIAN_SUARA`. Anjungan diam secara bawaan
    supaya tidak berbunyi bersahutan dengan televisi.
+
+### Keputusan pemilik atas lembar pengaduan (29 Agustus 2026)
+
+Diputuskan setelah tegangannya dengan sifat anonim disampaikan, dan
+ditegaskan ulang oleh pemilik:
+
+1. Lembar menempel pada **nomor antrian**, bukan buku catatan harian.
+2. **Seluruh petugas CRO** boleh membaca, karena itu ada layar
+   **Pengaduan & Catatan** dengan pencarian. Tanpa layar itu, "semua boleh
+   membaca" tidak berarti apa-apa.
+3. Isian: nama, nomor pelanggan, deskripsi (**wajib** bila ada pengaduan);
+   telepon, email, alamat (opsional); catatan petugas (berdiri sendiri).
+4. **Tanpa nomor pengaduan tersendiri** — dirujuk lewat nomor antrian dan
+   tanggalnya.
+5. **Tanpa status tindak lanjut.** Cukup dicatat.
+6. **Disimpan selamanya, dihapus manual** oleh ADMIN. Tidak ada pembersihan
+   otomatis — yang berarti tabel ini hanya bertambah, dan pencariannya
+   sengaja selalu dibatasi jumlah.
 
 ### Langkah berikutnya
 

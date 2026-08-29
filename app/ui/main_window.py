@@ -27,6 +27,7 @@ from app.services.permissions import Permission
 from app.services.queue_service import QueueService
 from app.services.settings_service import SettingsService
 from app.services.sound_service import buat_pemutar, suara_diaktifkan
+from app.services.note_service import NoteService
 from app.services.survey_service import SurveyService
 from app.services.ticket_service import TicketService, buat_printer, mode_pencetak
 from app.services.user_service import UserService
@@ -37,6 +38,7 @@ from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.settings.dialogs import LABEL_PERAN
 from app.ui.display.display_page import DisplayPage
 from app.ui.kiosk.kiosk_page import KioskPage
+from app.ui.notes.note_page import NotePage
 from app.ui.queue.service_page import ServicePage
 from app.ui.registration.registration_page import RegistrationPage
 from app.ui.settings.backup_page import BackupPage
@@ -108,6 +110,7 @@ class MainWindow(QMainWindow):
         self.queue_service = QueueService(auth)
         self.settings_service = SettingsService(auth)
         self.survey_service = SurveyService(auth)
+        self.note_service = NoteService(auth)
         self.dashboard_service = DashboardService(auth)
         self.backup_service = BackupService(auth, self.settings_service)
 
@@ -260,12 +263,23 @@ class MainWindow(QMainWindow):
                     self.survey_service,
                     self.settings_service,
                     self.auth,
+                    note=self.note_service,
                 ),
             ),
             _Menu(
                 "Survey Kepuasan",
                 Permission.SURVEY_SUBMIT,
                 lambda: SurveyPage(self.survey_service, self.settings_service),
+            ),
+            # Terpisah dari panel pelayanan karena menjawab pertanyaan yang
+            # berbeda: panel menjawab "apa yang terjadi di meja ini
+            # sekarang", layar ini menjawab "apa yang pernah diadukan
+            # orang ini sebelumnya" — dan yang kedua ditanyakan justru
+            # ketika nomornya sudah lewat berhari-hari.
+            _Menu(
+                "Pengaduan & Catatan",
+                Permission.NOTE_VIEW,
+                lambda: NotePage(self.note_service, self.auth),
             ),
             _Menu(
                 "Data Master",

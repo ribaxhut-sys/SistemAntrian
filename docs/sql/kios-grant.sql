@@ -25,3 +25,13 @@ GRANT INSERT ON TABLE audit_log TO antrian_kios;
 GRANT USAGE, SELECT ON SEQUENCE queue_id_seq, audit_log_id_seq TO antrian_kios;
 
 REVOKE ALL ON TABLE app_user FROM antrian_kios;
+
+-- Lembar pengaduan berisi nama, nomor pelanggan, telepon, email, dan
+-- alamat pelapor — satu-satunya data pribadi di seluruh database.
+-- Mesin ini berdiri di ruang publik tanpa diawasi siapa pun, dan
+-- tidak punya satu pun alasan untuk membacanya. Ditulis eksplisit,
+-- bukan sekadar dibiarkan tidak di-GRANT: GRANT yang tidak pernah
+-- diberikan tidak terbaca sebagai keputusan, dan orang berikutnya
+-- yang menambahkan hak akses tidak akan tahu bahwa tabel ini
+-- memang sengaja ditinggalkan.
+REVOKE ALL ON TABLE queue_note FROM antrian_kios;

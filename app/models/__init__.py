@@ -12,6 +12,7 @@ from app.models.counter import Counter
 from app.models.enums import AuditAction, QueueStatus, RecordStatus, UserRole
 from app.models.queue import Queue, QueueSequence
 from app.models.queue_call import QueueCall
+from app.models.queue_note import QueueNote
 from app.models.service_category import ServiceCategory
 from app.models.setting import ApplicationSetting
 from app.models.survey import RATING_LABELS, SatisfactionSurvey
@@ -27,6 +28,7 @@ __all__ = [
     "Counter",
     "Queue",
     "QueueCall",
+    "QueueNote",
     "QueueSequence",
     "QueueStatus",
     "RecordStatus",

@@ -44,11 +44,21 @@ Data disimpan agar dapat diketahui **jumlah antrian** dan **hasil survey**.
 ### Yang TIDAK termasuk
 
 - Pendaftaran / data wajib pajak
-- Pengaduan dan nomor pengaduan
-- Data pribadi pengunjung dalam bentuk apa pun
+- Nomor pengaduan dan penelusuran tindak lanjutnya
 
-Antrian bersifat **anonim**: pengunjung memilih jenis layanan lalu menerima
-nomor. Tidak ada nama, NIK, nomor HP, maupun alamat yang dicatat.
+**Antrian sendiri tetap anonim.** Pengunjung memilih jenis layanan lalu
+menerima nomor; tabel `queue` tidak pernah memuat nama, NIK, nomor HP,
+maupun alamat.
+
+**Satu pengecualian, dan tempatnya satu saja.** Petugas dapat menulis
+pengaduan beserta identitas pelapor pada tabel terpisah `queue_note` —
+lihat [Pengaduan dan catatan petugas](#pengaduan-dan-catatan-petugas).
+Terpisah bukan karena rapi, melainkan karena hak akses: komputer anjungan
+dapat membaca tabel `queue`, dan pengaduan tidak boleh ikut terbaca dari
+mesin yang berdiri di ruang publik tanpa diawasi.
+
+Akibat yang tidak boleh dilupakan: **berkas backup kini berisi data
+pribadi.** Folder backup setara lemari arsip, bukan lagi salinan angka.
 
 ---
 
@@ -215,8 +225,8 @@ setiap kali status berubah — itulah yang menentukan bentuk kisi tombolnya.
 | Peran | Menu |
 |---|---|
 | `REGISTRATION` | Terbitkan Nomor |
-| `CRO` | Pelayanan · Survey Kepuasan |
-| `SUPERVISOR` | Ringkasan Harian · Hasil Survey |
+| `CRO` | Pelayanan · Survey Kepuasan · Pengaduan & Catatan |
+| `SUPERVISOR` | Pengaduan & Catatan · Ringkasan Harian · Hasil Survey |
 | `ADMIN` | Data Master · Pengaturan · Backup & Audit |
 | `DISPLAY` | Layar Antrian |
 | `KIOSK` | Anjungan Ambil Nomor (papan nomor + ambil nomor, tanpa login) |
@@ -287,6 +297,44 @@ selalu menyalin database yang sedang berjalan terlebih dahulu sebagai
 cadangan pengaman. Setelah dipulihkan, aplikasi perlu ditutup dan dibuka
 kembali agar seluruh layar membaca data yang baru.
 
+### Pengaduan dan catatan petugas
+
+Setiap nomor antrian punya satu **lembar kerja** yang dibuka petugas dari
+panel pelayanan, berisi dua bagian:
+
+| Bagian | Isi | Wajib |
+|---|---|---|
+| **Pengaduan** | Nama, nomor pelanggan, telepon, email, alamat, deskripsi keluhan | Nama, nomor pelanggan, dan deskripsi — bila pengaduan diisi sama sekali |
+| **Catatan petugas** | Catatan internal atas pelayanan itu | Tidak. Boleh berdiri sendiri tanpa pengaduan |
+
+**Deskripsi dan catatan sengaja tidak disatukan.** Deskripsi adalah kata
+pengunjung; catatan adalah penilaian petugas. Bercampur dalam satu kotak,
+penilaian internal ikut terbaca sebagai keluhan pelanggan oleh siapa pun
+yang membukanya kemudian.
+
+Aturan yang menjaganya:
+
+- **Satu antrian satu lembar.** Petugas kedua menyunting lembar yang sama,
+  bukan menumpuk lembar tandingan yang isinya saling bertentangan.
+- **Hanya dapat disunting pada hari yang sama.** Pengaduan yang masih bisa
+  diubah berhari-hari kemudian tidak berguna sebagai bukti apa pun.
+- **Isinya tidak pernah masuk audit log.** Audit mencatat *bahwa* sebuah
+  lembar disimpan, oleh siapa, untuk nomor mana — tidak pernah apa yang
+  tertulis di dalamnya.
+- **Menutup pelayanan menyimpan lembarnya lebih dahulu**, dan kegagalan
+  menyimpan membatalkan penyelesaian: kartu antrian berganti kosong begitu
+  selesai, sedangkan yang menceritakan keluhannya sudah meninggalkan meja.
+- **Menulis milik CRO, menghapus milik ADMIN.** Penulis yang sekaligus
+  dapat menghilangkan tulisannya membuat catatan itu tidak berguna sebagai
+  bukti. Penghapusan tercatat di audit log.
+- **Tidak ada pembersihan otomatis.** Lembar disimpan sampai ada yang
+  menghapusnya lewat menu **Pengaduan & Catatan**.
+
+Seluruh petugas CRO dan supervisor dapat mencari lembar lama menurut nama,
+nomor pelanggan, isi pengaduan, catatan, atau nomor antrian — pengunjung
+yang kembali esok hari ke loket lain tidak perlu menceritakan keluhannya
+dari awal.
+
 ---
 
 ## Status Pengembangan
@@ -326,10 +374,10 @@ Menghapusnya setelah membuat akun sendiri tidak akan memunculkannya lagi.
 
 | Peran | Kewenangan |
 |---|---|
-| `ADMIN` | user, cabang, loket, jenis layanan, konfigurasi, backup |
-| `SUPERVISOR` | dashboard, laporan, hasil survey (tanpa mengubah antrian) |
+| `ADMIN` | user, cabang, loket, jenis layanan, konfigurasi, backup, **menghapus lembar pengaduan** |
+| `SUPERVISOR` | dashboard, laporan, hasil survey, membaca pengaduan (tanpa mengubah apa pun) |
 | `REGISTRATION` | menerbitkan nomor antrian, mencetak tiket |
-| `CRO` | memanggil, melayani, menunda, menyelesaikan, no-show, batal |
+| `CRO` | memanggil, melayani, menunda, menyelesaikan, no-show, batal, menulis dan membaca pengaduan |
 | `DISPLAY` | hanya layar antrian |
 | `KIOSK` | papan nomor dan pengambilan nomor sendiri, **tanpa akun** |
 

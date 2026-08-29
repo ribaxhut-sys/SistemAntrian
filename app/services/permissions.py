@@ -34,6 +34,11 @@ class Permission(str, Enum):
     # Layar antrian
     DISPLAY_VIEW = "DISPLAY_VIEW"
 
+    # Pengaduan dan catatan petugas
+    NOTE_WRITE = "NOTE_WRITE"
+    NOTE_VIEW = "NOTE_VIEW"
+    NOTE_DELETE = "NOTE_DELETE"
+
     # Survey
     SURVEY_SUBMIT = "SURVEY_SUBMIT"
     SURVEY_VIEW = "SURVEY_VIEW"
@@ -69,6 +74,11 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
             Permission.QUEUE_CANCEL,
             Permission.QUEUE_NO_SHOW,
             Permission.SURVEY_SUBMIT,
+            # Menulis pengaduan dan catatan, serta membaca milik rekannya.
+            # Pengunjung yang sama kembali besok ke loket yang berbeda, dan
+            # petugas di sana perlu tahu apa yang sudah pernah diadukan.
+            Permission.NOTE_WRITE,
+            Permission.NOTE_VIEW,
         }
     ),
     # Pemantauan dan pelaporan, tanpa kewenangan mengubah antrian.
@@ -78,6 +88,7 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
             Permission.DASHBOARD_VIEW,
             Permission.REPORT_VIEW,
             Permission.SURVEY_VIEW,
+            Permission.NOTE_VIEW,
         }
     ),
     # Pengelolaan data master, user, konfigurasi, dan backup.
@@ -89,6 +100,12 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
             Permission.BACKUP_MANAGE,
             Permission.QUEUE_CLOSE_DAY,
             Permission.QUEUE_TOGGLE_INTAKE,
+            # Menghapus pengaduan adalah tindakan administratif, dan
+            # sengaja TIDAK diberikan kepada petugas yang menulisnya:
+            # penulis yang sekaligus dapat menghilangkan tulisannya
+            # membuat catatan itu tidak berguna sebagai bukti apa pun.
+            Permission.NOTE_VIEW,
+            Permission.NOTE_DELETE,
         }
     ),
     # Hanya layar antrian, tanpa fungsi administrasi apa pun.

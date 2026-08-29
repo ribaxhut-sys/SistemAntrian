@@ -886,7 +886,10 @@ def test_menu_petugas_cro_dan_pendaftaran_tidak_tumpang_tindih(qtbot, auth, antr
     jendela = MainWindow(auth)
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-    assert menu == ["Pelayanan", "Survey Kepuasan"]
+    # "Pengaduan & Catatan" BUKAN pekerjaan yang sama dengan "Pelayanan":
+    # panel pelayanan menulis lembar untuk nomor yang sedang di depan meja,
+    # layar ini mencari lembar milik hari-hari sebelumnya.
+    assert menu == ["Pelayanan", "Survey Kepuasan", "Pengaduan & Catatan"]
 
     auth.logout()
     auth.login("registration", TEST_PASSWORD)
@@ -1448,7 +1451,7 @@ def test_menu_hasil_survey_hanya_untuk_supervisor(qtbot, auth, antrian_siap):
     jendela = MainWindow(auth)
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-    assert menu == ["Ringkasan Harian", "Hasil Survey"]
+    assert menu == ["Pengaduan & Catatan", "Ringkasan Harian", "Hasil Survey"]
 
     for peran in ("cro", "admin", "registration"):
         auth.logout()
@@ -1469,7 +1472,10 @@ def test_supervisor_hanya_memantau(qtbot, auth, antrian_siap):
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
 
-    assert menu == ["Ringkasan Harian", "Hasil Survey"]
+    # "Pengaduan & Catatan" ikut ada, dan itu tetap memantau: supervisor
+    # boleh MEMBACA lembar pengaduan, tidak boleh menulis maupun
+    # menghapusnya — menulis milik CRO, menghapus milik ADMIN.
+    assert menu == ["Pengaduan & Catatan", "Ringkasan Harian", "Hasil Survey"]
 
 
 def test_tombol_minta_survey_aktif_setelah_pelayanan_selesai(

@@ -77,6 +77,9 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | D5 | Periksa folder `tiket\` | Berkas PDF tiket terbentuk (bila `ticket.printer` = `pdf`) | |
 | D6 | Setel `ticket.printer` = `none`, terbitkan nomor | Nomor tetap terbit, tidak ada PDF, tidak ada error | |
 | D7 | Ubah tanggal komputer ke hari berikutnya, terbitkan nomor | Kembali ke `A-001` | |
+| D8 | Terbitkan nomor saat sudah ada 3 orang menunggu | Tiket menyebut "Sisa antrian: 3" | |
+| D9 | Terbitkan nomor saat tidak ada seorang pun menunggu | Tiket menyebut "Tidak ada sisa antrian" | |
+| D10 | Terbitkan nomor layanan B saat yang menunggu semuanya layanan A | Angka sisa antrian menghitung SELURUH layanan, bukan layanan B saja | |
 
 ## E. Alur pelayanan
 
@@ -178,6 +181,9 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | L8 | Cabut printer / kehabisan kertas, ambil nomor | Nomor tetap terbit; hanya pencetakan yang gagal | |
 | L9 | **PostgreSQL:** dari mesin anjungan, coba baca tabel `app_user` | Ditolak hak akses; hash kata sandi petugas tidak terbaca | |
 | L10 | Panggil nomor dari loket, dengarkan anjungan | Anjungan **diam**; hanya televisi yang mengumumkan | |
+| L11 | Setel `ANTRIAN_SUARA=1` di anjungan, buka ulang, panggil nomor | Anjungan ikut bersuara — pemasangan satu-mesin tetap bisa | |
+| L12 | Setel `ANTRIAN_PRINTER=none` di satu komputer loket, terbitkan nomor dari sana | Loket itu tidak mencetak; anjungan tetap mencetak | |
+| L13 | Setel `ANTRIAN_SUARA=yaa` (salah ketik) di televisi | Diperlakukan seperti tidak diisi; panggilan TETAP bersuara | |
 
 ## M. Layar antrian televisi (tanpa login)
 
@@ -192,7 +198,7 @@ Dijalankan di komputer televisi ruang tunggu, terpisah dari anjungan.
 | M5 | Cabut listrik komputer televisi, nyalakan lagi | Papan kembali sendiri tanpa ada yang mengetik apa pun | |
 | M6 | **PostgreSQL:** dari mesin televisi, coba terbitkan nomor lewat SQL | Ditolak hak akses; televisi hanya boleh membaca | |
 | M7 | **PostgreSQL:** dari mesin televisi, coba baca tabel `app_user` | Ditolak hak akses | |
-| M8 | Terbitkan nomor lebih banyak dari `display.list_per_page` | Daftar bawah terbagi halaman; judulnya menyebut "1 / 2" | |
+| M8 | Terbitkan nomor pada satu layanan lebih banyak dari `display.list_rows` x 2 | Daftar bawah terbagi halaman; judulnya menyebut "1 / 2" | |
 | M9 | Amati satu menit tanpa menyentuh apa pun | Halaman berganti sendiri sesuai `display.rotate_seconds`, lalu kembali ke halaman 1 | |
 | M10 | Berdiri di ujung ruang tunggu saat halaman berganti | Masih sempat membaca satu halaman penuh sebelum berganti | |
 | M11 | Sisakan antrian lebih sedikit dari satu halaman | Halaman berhenti berganti; tidak ada kedipan | |
@@ -205,6 +211,38 @@ Dijalankan di komputer televisi ruang tunggu, terpisah dari anjungan.
 | M18 | Isi 10 nomor pada satu layanan | Tampil 2 kolom x 5 baris di dalam kolom layanan itu | |
 | M19 | Ubah **Baris nomor per kolom** menjadi 3, buka ulang layar | Tiga baris; hurufnya membesar mengikuti ruang yang lowong | |
 | M20 | Isi **Ukuran huruf nomor menunggu** dengan 90, buka ulang | Huruf tetap diperkecil agar muat; tidak ada yang terpotong | |
+
+## N. Pengaduan dan catatan petugas
+
+Bagian ini menguji satu-satunya tempat data pribadi pengunjung disimpan.
+Jalankan seluruhnya, termasuk yang tampak sepele.
+
+| # | Langkah | Hasil yang diharapkan | Hasil |
+|---|---|---|---|
+| N1 | Buka panel Pelayanan tanpa memanggil nomor | Panel Ruang Kerja terlihat tetapi seluruh isiannya mati | |
+| N2 | Panggil satu nomor | Isian hidup; tab **Pengaduan** dan **Catatan Petugas** dapat dibuka | |
+| N3 | Isi Catatan Petugas saja, tekan Ctrl+S | Tersimpan; keterangan waktu simpan muncul di bawah | |
+| N4 | Isi Deskripsi Pengaduan tanpa nama, tekan Simpan | Ditolak dengan kalimat Indonesia yang jelas | |
+| N5 | Lengkapi nama dan nomor pelanggan, simpan | Tersimpan | |
+| N6 | Isi email `budi.contoh.id` (tanpa @) | Ditolak; bentuk emailnya disebut | |
+| N7 | Isi telepon `0812` | Ditolak; terlalu pendek | |
+| N8 | Isi pengaduan tanpa nama lalu tekan `F8` | Pelayanan **TIDAK** selesai; pesannya muncul; isian tetap ada | |
+| N9 | Lengkapi, lalu tekan `F8` | Pelayanan selesai **dan** lembarnya tersimpan | |
+| N10 | Panggil nomor berikutnya | Seluruh isian kosong — bukan isian nomor sebelumnya | |
+| N11 | Panggil ulang nomor yang lembarnya sudah terisi | Isian terisi kembali seperti terakhir disimpan | |
+| N12 | Buka menu **Pengaduan & Catatan** | Daftar lembar muncul, terbaru di atas | |
+| N13 | Cari dengan nama pelapor | Hanya lembar milik nama itu yang tampil | |
+| N14 | Cari dengan nomor pelanggan, lalu dengan sepenggal isi pengaduan | Keduanya menemukan lembar yang benar | |
+| N15 | Centang **Hanya pengaduan** | Lembar yang hanya berisi catatan petugas hilang dari daftar | |
+| N16 | Pilih satu baris | Rincian muncul di kanan; isian yang kosong tidak ditampilkan sebagai "-" | |
+| N17 | Periksa layar ini sebagai CRO | Tombol **Hapus Lembar** tidak ada sama sekali | |
+| N18 | Masuk sebagai SUPERVISOR, buka menu yang sama | Dapat membaca; tidak ada tombol Hapus | |
+| N19 | Masuk sebagai ADMIN, hapus satu lembar | Dikonfirmasi lebih dahulu, lalu hilang dari daftar | |
+| N20 | Periksa tab Jejak Aktivitas | Ada `SAVE_NOTE` dan `DELETE_NOTE`; **tidak ada** nama, telepon, atau isi pengaduan di dalamnya | |
+| N21 | Buka lembar kemarin dari panel pelayanan, coba ubah | Ditolak: lembar hari sebelumnya tidak dapat disunting | |
+| N22 | **PostgreSQL:** dari mesin anjungan, `SELECT * FROM queue_note` | Ditolak hak akses | |
+| N23 | **PostgreSQL:** dari mesin televisi, perintah yang sama | Ditolak hak akses | |
+| N24 | Buat satu backup, lalu periksa siapa yang dapat membuka folder backup | Folder backup kini berisi data pribadi — pastikan aksesnya memang terbatas | |
 
 ---
 

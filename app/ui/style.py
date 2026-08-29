@@ -130,6 +130,57 @@ QLineEdit:focus, QComboBox:focus {{
     padding: 7px 9px;
 }}
 
+/* Kotak teks panjang mengikuti gaya QLineEdit. Tanpa ini, isian alamat
+   dan deskripsi pengaduan tampil sebagai kotak putih bergaris tipis bawaan
+   Qt di tengah formulir yang seluruh isiannya sudah bergaya lain. */
+QPlainTextEdit, QTextEdit {{
+    background: {SURFACE};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: {RADIUS_SM}px;
+    padding: 6px 8px;
+}}
+
+QPlainTextEdit:hover, QTextEdit:hover {{
+    border: 1px solid {PRIMARY};
+}}
+
+QPlainTextEdit:focus, QTextEdit:focus {{
+    border: 2px solid {PRIMARY};
+    padding: 5px 7px;
+}}
+
+QPlainTextEdit:disabled, QTextEdit:disabled {{
+    background: {SURFACE_ALT};
+    color: #A3AEC0;
+}}
+
+QTabWidget::pane {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_SM}px;
+    top: -1px;
+}}
+
+QTabBar::tab {{
+    background: {SURFACE_ALT};
+    border: 1px solid {BORDER};
+    border-bottom: none;
+    border-top-left-radius: {RADIUS_SM}px;
+    border-top-right-radius: {RADIUS_SM}px;
+    color: {TEXT_MUTED};
+    padding: 7px 16px;
+    margin-right: 3px;
+    font-weight: 600;
+}}
+
+/* Tab terpilih dibedakan warna DAN garis atas tebal. Perbedaan warna saja
+   terlalu tipis dilihat sekilas pada monitor kantor yang jarang dikalibrasi. */
+QTabBar::tab:selected {{
+    background: {SURFACE};
+    color: {PRIMARY_DARK};
+    border-top: 2px solid {PRIMARY};
+}}
+
 QLineEdit[invalid="true"] {{
     border: 2px solid {DANGER};
     padding: 7px 9px;

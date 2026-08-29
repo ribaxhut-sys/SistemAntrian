@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from app.models import QueueStatus
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
+from app.services.note_service import NoteService
 from app.services.queue_service import QueueInfo, QueueService
 from app.services.settings_service import SettingsService
 from app.services.survey_service import SurveyService
@@ -33,6 +34,7 @@ from app.ui.common import (
     setel_variant,
     tombol,
 )
+from app.ui.queue.note_panel import NotePanel, bingkai_ruang_kerja
 from app.ui.style import (
     BORDER,
     BORDER_STRONG,
@@ -106,6 +108,7 @@ class ServicePage(QWidget):
         auth: AuthService | None = None,
         parent: QWidget | None = None,
         *,
+        note: NoteService | None = None,
         otomatis: bool = True,
     ) -> None:
         super().__init__(parent)
@@ -113,6 +116,10 @@ class ServicePage(QWidget):
         self.master = master
         self.survey = survey
         self.settings = settings
+        #: Ruang kerja pengaduan/catatan. Boleh None: panelnya lalu tidak
+        #: dibangun sama sekali, dipakai test yang hanya menguji alur
+        #: pelayanan. Pemasangan sungguhan selalu mengirimkannya.
+        self.note = note
         #: Dipakai untuk memilih loket petugas ini sendiri saat halaman
         #: dibuka, dan mengingat kepindahannya bila ia berganti meja.
         self.auth = auth
@@ -224,7 +231,18 @@ class ServicePage(QWidget):
         kolom.setSpacing(10)
         kolom.addWidget(self._bangun_panel_antrian())
         kolom.addLayout(self._bangun_tombol_aksi())
-        kolom.addStretch()
+
+        # Ruang kerja mengisi ruang yang dahulu hanya diregangkan kosong.
+        # Ditaruh di kolom kiri bersama kartu antrian yang sedang ditangani
+        # karena isinya milik nomor ITU — dipindah ke kolom kanan, ia
+        # terbaca sebagai catatan atas daftar tunggu di sebelahnya.
+        self.panel_kerja: NotePanel | None = None
+        if self.note is not None:
+            self.panel_kerja = NotePanel(self.note)
+            kolom.addWidget(bingkai_ruang_kerja(self.panel_kerja), stretch=1)
+        else:
+            kolom.addStretch()
+
         kolom.addWidget(self._bangun_baris_survey())
         return kolom
 
@@ -461,6 +479,7 @@ class ServicePage(QWidget):
             ("F3", self.panggil_ulang),
             ("F4", self.mulai_melayani),
             ("F8", self.selesaikan),
+            ("Ctrl+S", self.simpan_catatan),
         ):
             QShortcut(QKeySequence(kombinasi), self, handler)
 
@@ -592,6 +611,9 @@ class ServicePage(QWidget):
             self.label_status.setText(
                 f"{self.antrian.label_status}{keterangan_panggilan}"
             )
+
+        if self.panel_kerja is not None:
+            self.panel_kerja.set_antrian(self.antrian)
 
         self._warnai_panel_antrian()
         self._perbarui_durasi()
@@ -822,8 +844,34 @@ class ServicePage(QWidget):
             return
         self._jalankan(lambda: self.queue.start_service(self.antrian.id))
 
+    def simpan_catatan(self) -> bool:
+        """
+        Simpan ruang kerja untuk antrian yang sedang ditangani.
+
+        Terpisah sebagai metode sendiri karena dipanggil dari dua arah:
+        Ctrl+S oleh petugas, dan `selesaikan()` sebelum antrian ditutup.
+        """
+        if self.panel_kerja is None:
+            return False
+        return self.panel_kerja.simpan()
+
     def selesaikan(self) -> None:
+        """
+        Tutup pelayanan, setelah ruang kerjanya ikut tersimpan.
+
+        Pengaduan disimpan LEBIH DAHULU, dan kegagalannya membatalkan
+        seluruh tindakan. Begitu antrian selesai, kartunya berganti kosong
+        dan isian ruang kerja ikut terhapus dari layar — pengaduan yang
+        gagal tersimpan pada detik itu hilang tanpa dapat diketik ulang,
+        karena yang menceritakannya sudah berdiri meninggalkan meja.
+        """
         if self.antrian is None or not self.aksi["selesai"].isEnabled():
+            return
+        if (
+            self.panel_kerja is not None
+            and self.panel_kerja.ada_isian
+            and not self.panel_kerja.simpan()
+        ):
             return
         berhasil, selesai = jalankan_aman(
             self, lambda: self.queue.complete(self.antrian.id)

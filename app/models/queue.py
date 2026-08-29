@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from app.models.counter import Counter
     from app.models.queue_call import QueueCall
     from app.models.service_category import ServiceCategory
+    from app.models.queue_note import QueueNote
     from app.models.survey import SatisfactionSurvey
     from app.models.user import User
 
@@ -87,6 +88,9 @@ class Queue(TimestampMixin, Base):
         back_populates="queue", order_by="QueueCall.call_number"
     )
     survey: Mapped[SatisfactionSurvey | None] = relationship(back_populates="queue")
+    note: Mapped[QueueNote | None] = relationship(
+        back_populates="queue", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Queue {self.queue_number} {self.status.value}>"
