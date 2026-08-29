@@ -127,7 +127,7 @@ proyek ini memakai `"Continue"` dan memeriksa `$LASTEXITCODE`.
 | `0a0a727` | Televisi dipisah dari anjungan; papan menunggu per jenis layanan |
 | `9642b4d` | Ruang kerja pengaduan dan catatan petugas per antrian |
 | `d1e820b` | Panel kanan berpindah otomatis: Menunggu Dilayani <-> Pengaduan |
-| _belum di-commit_ | Layar Pengaduan & Catatan menyegar sendiri tiap 30 detik |
+| `210f1b6` | Layar Pengaduan & Catatan menyegar sendiri tiap 30 detik |
 
 ### Yang paling penting dari `535a60e`
 
