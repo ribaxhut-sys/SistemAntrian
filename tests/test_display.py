@@ -474,16 +474,15 @@ def test_huruf_televisi_jauh_lebih_besar_daripada_kios(halaman_layar, papan_kios
     """
     Televisi dibaca dari seberang ruangan, kios dari jarak satu lengan.
 
-    Selisihnya harus tegas. Papan televisi yang hanya sedikit lebih besar
-    daripada kios terbaca sebagai kios yang kehilangan panel bawahnya.
+    Selisihnya harus tegas untuk nomor, nama loket, dan jenis layanan —
+    itu yang mendesak dibaca dari jarak jauh. Judul kepala papan dikecualikan
+    dengan sengaja: di kios, judul berdiri sendiri di kepala papan (bukan
+    berbagi baris dengan kartu loket) dan boleh besar untuk keterbacaan
+    sejak pengunjung mendekat, bukan hanya mengikuti rasio panel lain.
     """
-    for kunci in ("nomor", "nama", "judul", "layanan"):
+    for kunci in ("nomor", "nama", "layanan"):
         assert halaman_layar.px(kunci) > papan_kios.px(kunci) * 1.4, kunci
-
-    besar = halaman_layar.kartu_loket[0]
-    assert _ukuran_huruf(besar.label_nomor) > _ukuran_huruf(
-        papan_kios.label_ringkas_angka
-    ) * 1.4
+    assert halaman_layar.px("judul") >= papan_kios.px("judul")
 
 
 def test_margin_televisi_lebih_lapang_daripada_kios(halaman_layar, papan_kios):
@@ -561,7 +560,7 @@ def test_papan_kios_tidak_ikut_membesar(qtbot, papan_kios):
     Bila ikut membesar, ia menelan panel ambil nomor dan nama layanan di
     bawah tombol A/B/C terpotong.
     """
-    sebelum = _ukuran_huruf(papan_kios.label_ringkas_angka)
+    sebelum = _ukuran_huruf(papan_kios.label_info_kios)
 
     assert papan_kios.hitung_skala(1080) == 1.0
     papan_kios.resize(1920, 1080)
@@ -569,34 +568,18 @@ def test_papan_kios_tidak_ikut_membesar(qtbot, papan_kios):
     qtbot.waitExposed(papan_kios)
 
     assert papan_kios.skala == 1.0
-    assert _ukuran_huruf(papan_kios.label_ringkas_angka) == sebelum
+    assert _ukuran_huruf(papan_kios.label_info_kios) == sebelum
 
 
-def test_daftar_menunggu_mendapat_porsi_besar_di_kios(halaman_layar, papan_kios):
+def test_papan_kios_tidak_menampilkan_daftar_menunggu(papan_kios):
     """
-    Televisi membagi layarnya rata antara kartu loket dan daftar menunggu.
-
-    Anjungan tidak punya kartu loket sama sekali — pengunjung yang belum
-    memegang nomor tidak perlu tahu loket mana yang kosong — sehingga
-    ruang yang tersisa untuk daftar menunggu di sana harus JAUH lebih
-    besar dibanding ruang ringkasannya sendiri, lebih besar lagi daripada
-    porsi televisi yang memang dibagi rata dengan kartu loketnya.
+    Anjungan sudah tidak punya kartu loket (lihat test di bawah); ia juga
+    tidak lagi menampilkan daftar nomor menunggu di sampingnya. Pengunjung
+    yang belum memegang nomor tidak mencari nomornya sendiri di sana —
+    seluruh papan kios diserahkan pada informasi/pengumuman yang berputar.
     """
-    def _stretch(halaman, panel_atas):
-        return (
-            halaman.susunan.stretch(halaman.susunan.indexOf(panel_atas)),
-            halaman.susunan.stretch(
-                halaman.susunan.indexOf(halaman.panel_berikutnya)
-            ),
-        )
-
-    loket_tv, berikutnya_tv = _stretch(halaman_layar, halaman_layar.kisi_loket.parentWidget())
-    ringkas_kios, berikutnya_kios = _stretch(
-        papan_kios, papan_kios.label_ringkas_angka.parentWidget()
-    )
-
-    assert berikutnya_kios / ringkas_kios > berikutnya_tv / loket_tv
-    assert berikutnya_tv >= loket_tv
+    assert papan_kios.susunan.indexOf(papan_kios.panel_berikutnya) == -1
+    assert papan_kios.susunan.indexOf(papan_kios.label_info_kios.parentWidget()) >= 0
 
 
 def test_papan_kios_tidak_menampilkan_kartu_loket(papan_kios):
@@ -610,34 +593,49 @@ def test_papan_kios_tidak_menampilkan_kartu_loket(papan_kios):
     assert papan_kios.kisi_loket is None
 
 
-def test_ringkasan_kios_menghitung_menunggu_dan_dilayani(
-    qtbot, auth, antrian_siap, terbitkan
-):
+def test_papan_kios_menyambut_sebelum_layanan_disentuh(papan_kios):
     """
-    "Berlangsung" mencakup yang masih menunggu MAUPUN yang sedang
-    dilayani — keduanya sama-sama belum selesai. Satu dari tiga nomor
-    lalu dipanggil, dan jumlahnya harus tetap tiga: nomor itu berpindah
-    kategori, bukan hilang dari hitungan.
+    Belum ada layanan yang disentuh pengunjung.
+
+    Panel tidak boleh tampil kosong — pengunjung yang melihat panel hampa
+    mengiranya rusak, bukan sekadar belum ada yang disentuh.
     """
-    from app.ui.display.display_page import DisplayPage
+    from app.ui.display.display_page import TEKS_SAMBUTAN_KIOS
 
-    terbitkan("A", 3)
-    auth.logout()
-    auth.login("cro", TEST_PASSWORD)
-    QueueService(auth).call_next(antrian_siap["loket"][0])
+    assert papan_kios.label_info_kios.text() == TEKS_SAMBUTAN_KIOS
 
-    auth.logout()
-    auth.login("display", TEST_PASSWORD)
-    halaman = DisplayPage(
-        QueueService(auth),
-        SettingsService(auth),
-        NullSoundPlayer(),
-        otomatis=False,
-        kompak=True,
-    )
-    qtbot.addWidget(halaman)
 
-    assert halaman.label_ringkas_angka.text() == "3"
+def test_tampilkan_info_kios_berganti_lewat_transisi_pudar(qtbot, papan_kios):
+    """
+    Isinya berganti SETELAH pudar-keluar selesai, bukan seketika dipanggil
+    — supaya pergantiannya terbaca sebagai transisi, bukan kedipan.
+    """
+    from app.ui.display.display_page import TEKS_SAMBUTAN_KIOS, DURASI_FADE_INFO_KIOS_MS
+
+    papan_kios.tampilkan_info_kios("Bawa fotokopi KTP dan KK.")
+    assert papan_kios.label_info_kios.text() == TEKS_SAMBUTAN_KIOS
+
+    qtbot.wait(DURASI_FADE_INFO_KIOS_MS + 100)
+    assert papan_kios.label_info_kios.text() == "Bawa fotokopi KTP dan KK."
+
+    # Kembali ke sambutan bawaan saat dipanggil dengan None.
+    papan_kios.tampilkan_info_kios(None)
+    qtbot.wait(DURASI_FADE_INFO_KIOS_MS + 100)
+    assert papan_kios.label_info_kios.text() == TEKS_SAMBUTAN_KIOS
+
+
+def test_tampilkan_info_kios_kosong_kembali_ke_sambutan(qtbot, papan_kios):
+    """Layanan tanpa info anjungan tidak boleh menyisakan panel kosong."""
+    from app.ui.display.display_page import TEKS_SAMBUTAN_KIOS, DURASI_FADE_INFO_KIOS_MS
+
+    papan_kios.tampilkan_info_kios("Layanan ini tidak butuh berkas apa pun.")
+    qtbot.wait(DURASI_FADE_INFO_KIOS_MS * 2 + 200)
+    assert papan_kios.label_info_kios.text() == "Layanan ini tidak butuh berkas apa pun."
+
+    # Layanan berikutnya tidak mengisi info anjungan sama sekali.
+    papan_kios.tampilkan_info_kios("")
+    qtbot.wait(DURASI_FADE_INFO_KIOS_MS * 2 + 200)
+    assert papan_kios.label_info_kios.text() == TEKS_SAMBUTAN_KIOS
 
 
 # ---------------------------------------------------------------------

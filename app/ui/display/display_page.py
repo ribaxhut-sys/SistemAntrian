@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QPropertyAnimation, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
+    QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -36,6 +37,16 @@ SELANG_SEGAR_MS = 2_000
 #: berarti memilih antara jam yang melompat dua detik sekali atau membebani
 #: database sekali per detik.
 SELANG_JAM_MS = 1_000
+
+#: Lama satu arah transisi pudar saat panel informasi papan kios berganti
+#: isi — baik karena pengunjung menyentuh sebuah layanan maupun karena
+#: kembali ke teks sambutan. Berpindah begitu saja terbaca sebagai kedipan;
+#: pudar-keluar lalu pudar-masuk terasa sebagai pergantian yang disengaja.
+DURASI_FADE_INFO_KIOS_MS = 300
+
+#: Teks panel informasi papan kios sebelum pengunjung menyentuh layanan
+#: apa pun, dan sesudah ia kembali ke kisi pilihan.
+TEKS_SAMBUTAN_KIOS = "Sentuh salah satu layanan di bawah untuk mengambil nomor."
 
 #: Halaman terbanyak yang ikut diputar pada daftar menunggu.
 #:
@@ -121,13 +132,15 @@ UKURAN_TV: dict[str, int] = {
     # Panel pengumuman tema split.
     "info_judul": 32,
     "info": 26,
+    # Panel informasi berputar papan kios, menggantikan kartu ringkasan.
+    "kios_info": 26,
 }
 
 #: Ukuran huruf papan di dalam kios. Layar kios dibaca dari jarak satu
 #: lengan dan harus berbagi tempat dengan panel ambil nomor, jadi papannya
 #: tetap kompak berapa pun besar layarnya.
 UKURAN_KIOS: dict[str, int] = {
-    "judul": 22,
+    "judul": 34,
     "jam": 15,
     "nama": 16,
     "status": 13,
@@ -144,6 +157,7 @@ UKURAN_KIOS: dict[str, int] = {
     "sorot_layanan": 15,
     "info_judul": 18,
     "info": 14,
+    "kios_info": 20,
 }
 
 #: Tinggi layar tempat UKURAN_TV berlaku apa adanya. Di atasnya huruf
@@ -654,6 +668,17 @@ class DisplayPage(QWidget):
         #: Hanya ada pada tata letak kisi.
         self.kisi_loket: QGridLayout | None = None
 
+        #: Hanya ada pada papan kios. Isinya diisi KioskPage lewat
+        #: `tampilkan_info_kios()` saat pengunjung menyentuh sebuah
+        #: layanan — lihat `_bangun_info_kios`.
+        self.label_info_kios: QLabel | None = None
+        self._efek_info_kios: QGraphicsOpacityEffect | None = None
+        self._teks_info_kios_aktif = TEKS_SAMBUTAN_KIOS
+        #: Animasi pudar yang sedang berjalan, disimpan supaya tidak
+        #: dikumpulkan sampah Python sebelum selesai dan supaya `hentikan()`
+        #: dapat menghentikannya bila layar ditutup di tengah transisi.
+        self._animasi_info_kios: QPropertyAnimation | None = None
+
         self._bangun_tampilan()
         self.muat_ulang()
 
@@ -715,27 +740,43 @@ class DisplayPage(QWidget):
 
     # --- bagian yang dipakai bersama ---------------------------------
 
-    def _bangun_kepala(self) -> QHBoxLayout:
-        """Judul di kiri, tanggal dan jam di kanan."""
-        self.kepala = QHBoxLayout()
+    def _bangun_kepala(self) -> QHBoxLayout | QVBoxLayout:
+        """
+        Judul dan jam papan.
+
+        Televisi menaruh judul di kiri dan jam di kanan, sebaris: lebar
+        layarnya cukup untuk keduanya tanpa berdesakan. Papan kios jauh
+        lebih sempit dan dibaca dari dekat, sehingga judul dan jam
+        ditumpuk — judul besar di tengah, jam di bawahnya — supaya
+        keduanya tetap terbaca penuh alih-alih saling mempersempit.
+        """
+        self.kepala = QVBoxLayout() if self.kompak else QHBoxLayout()
 
         self.label_judul = QLabel(self.settings.get("display.title"))
-        self.label_judul.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
         self.label_judul.setMinimumSize(1, 1)
-        self.kepala.addWidget(self.label_judul)
-        self.kepala.addStretch()
 
-        # Jam sengaja lebih kecil daripada nomor loket. Yang dicari
-        # pengunjung dari seberang ruangan adalah nomornya, bukan jamnya.
         self.label_jam = QLabel(teks_waktu())
         self.label_jam.setObjectName("jamPapan")
-        self.label_jam.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
         self.label_jam.setMinimumSize(1, 1)
-        self.kepala.addWidget(self.label_jam)
+
+        if self.kompak:
+            self.label_judul.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.label_jam.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.kepala.addWidget(self.label_judul)
+            self.kepala.addWidget(self.label_jam)
+        else:
+            self.label_judul.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            )
+            self.kepala.addWidget(self.label_judul)
+            self.kepala.addStretch()
+
+            # Jam sengaja lebih kecil daripada nomor loket. Yang dicari
+            # pengunjung dari seberang ruangan adalah nomornya, bukan jamnya.
+            self.label_jam.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            self.kepala.addWidget(self.label_jam)
         return self.kepala
 
     def _bangun_panel_berikutnya(self) -> QWidget:
@@ -774,14 +815,20 @@ class DisplayPage(QWidget):
         self.susunan.addLayout(self._bangun_kepala())
 
         if self.kompak:
-            # Papan kios TIDAK menampilkan kartu per loket. Pengunjung yang
-            # berdiri di anjungan belum memegang nomor sama sekali, sehingga
-            # "loket mana yang kosong" bukan pertanyaannya — itu urusan
-            # orang yang sudah punya tiket, dan televisi ruang tunggu yang
-            # menjawabnya. Yang berguna baginya sekadar seberapa ramai
-            # kantor ini sekarang, lewat `_bangun_ringkasan_kios`.
-            self.susunan.addWidget(self._bangun_ringkasan_kios(), stretch=1)
-            self.susunan.addWidget(self._bangun_panel_berikutnya(), stretch=4)
+            # Papan kios TIDAK menampilkan kartu per loket maupun daftar
+            # nomor menunggu. Pengunjung yang berdiri di anjungan belum
+            # memegang nomor sama sekali, sehingga "loket mana yang kosong"
+            # atau "nomor apa saja yang menunggu" bukan pertanyaannya — itu
+            # urusan orang yang sudah punya tiket, dan televisi ruang
+            # tunggu yang menjawabnya. Seluruh papan kios diserahkan pada
+            # informasi/pengumuman yang berputar lewat `_bangun_info_kios`.
+            self.susunan.addWidget(self._bangun_info_kios(), stretch=1)
+            # Dibangun tetap, TIDAK ditambahkan ke tata letak: kode bersama
+            # (_terapkan_ukuran, tampilkan, _ukur_daftar) menulis ke
+            # objeknya tanpa syarat kompak, dan membelah metode itu demi
+            # satu panel yang sengaja disembunyikan berisiko merusak
+            # televisi ruang tunggu yang masih memakainya.
+            self._bangun_panel_berikutnya()
             return
 
         panel = QWidget()
@@ -795,31 +842,105 @@ class DisplayPage(QWidget):
         self.susunan.addWidget(panel, stretch=5)
         self.susunan.addWidget(self._bangun_panel_berikutnya(), stretch=5)
 
-    def _bangun_ringkasan_kios(self) -> QWidget:
-        """Angka tunggal: berapa banyak antrian yang sedang berlangsung."""
+    def _bangun_info_kios(self) -> QWidget:
+        """
+        Panel informasi yang berganti isinya, menggantikan kartu angka.
+
+        Mulai dengan teks sambutan; berganti ke info sebuah layanan begitu
+        KioskPage memanggil `tampilkan_info_kios()` saat layanan itu
+        disentuh — lihat `KioskPage._pilih_layanan`. Isinya berasal dari
+        data Jenis Layanan (kolom info anjungan), bukan ditanam di kode —
+        yang tahu apa yang perlu dijelaskan untuk tiap layanan adalah
+        petugas, bukan pemrogram.
+        """
         panel = QFrame()
-        panel.setObjectName("panelRingkasKios")
+        panel.setObjectName("panelInfoKios")
         panel.setStyleSheet(
-            f"QFrame#panelRingkasKios {{ background: {self.palet.panel};"
+            f"QFrame#panelInfoKios {{ background: {self.palet.panel};"
             " border-radius: 20px; }"
         )
 
         susunan = QVBoxLayout(panel)
         susunan.setContentsMargins(16, 8, 16, 8)
-        susunan.setSpacing(0)
-        susunan.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.label_ringkas_angka = QLabel("0")
-        self.label_ringkas_angka.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_ringkas_angka.setMinimumSize(1, 1)
-        susunan.addWidget(self.label_ringkas_angka)
+        self.label_info_kios = QLabel(self._teks_info_kios_aktif)
+        self.label_info_kios.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_info_kios.setWordWrap(True)
+        self.label_info_kios.setMinimumSize(1, 1)
+        # Lebar WAJIB mengikuti panel, bukan sizeHint()-nya sendiri.
+        #
+        # `susunan.setAlignment(AlignCenter)` pada layout (dicoba lebih
+        # dahulu) membuat Qt menyusutkan label ke sizeHint()-nya — dan
+        # sizeHint() label berbungkus kata TANPA lebar yang dipaksakan
+        # cenderung memilih kolom sempit dan tinggi, bukan baris lebar.
+        # Hasilnya teks panjang jatuh ke bawah satu huruf demi satu huruf
+        # alih-alih melebar mengikuti panel. Kombinasi Expanding di sini
+        # dengan stretch di kedua sisi (bukan alignment pada layout)
+        # memaksanya memakai lebar penuh dan tetap centang secara vertikal.
+        self.label_info_kios.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        susunan.addStretch()
+        susunan.addWidget(self.label_info_kios)
+        susunan.addStretch()
 
-        self.label_ringkas_caption = QLabel("ANTRIAN SEDANG BERLANGSUNG")
-        self.label_ringkas_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_ringkas_caption.setMinimumSize(1, 1)
-        susunan.addWidget(self.label_ringkas_caption)
+        # Dipakai `tampilkan_info_kios()` untuk transisi pudar. Dipasang
+        # pada labelnya, bukan pada panel — panel sudah memakai
+        # QGraphicsEffect untuk bayangan, dan satu widget hanya boleh
+        # punya satu efek.
+        self._efek_info_kios = QGraphicsOpacityEffect(self.label_info_kios)
+        self.label_info_kios.setGraphicsEffect(self._efek_info_kios)
+
+        # Kartu loket dan panel sorotan di televisi sama-sama memakai
+        # bayangan tipis supaya terasa mengambang di atas latar gelap;
+        # tanpa ini panel info-kios terasa datar sendirian di antaranya.
+        self._bayangan(panel, 40, 12, 110)
 
         return panel
+
+    def tampilkan_info_kios(self, teks: str | None) -> None:
+        """
+        Ganti isi panel informasi papan kios lewat transisi pudar.
+
+        Dipanggil KioskPage: dengan info sebuah layanan saat layanan itu
+        disentuh, dan dengan `None` saat kembali ke kisi pilihan (pudar ke
+        teks sambutan bawaan). Tidak berlaku pada televisi ruang tunggu —
+        panel ini hanya ada pada papan kios.
+
+        Berpindah begitu saja terbaca sebagai kedipan pada layar yang
+        jarang berubah; pudar-keluar dahulu, ganti teksnya SETELAH benar-
+        benar tak terlihat, baru pudar-masuk, supaya pergantiannya terasa
+        disengaja.
+        """
+        if self.label_info_kios is None:
+            return
+        baru = (teks or "").strip() or TEKS_SAMBUTAN_KIOS
+        if baru == self._teks_info_kios_aktif:
+            return
+        self._teks_info_kios_aktif = baru
+
+        # Sentuhan beruntun sebelum transisi sebelumnya selesai tidak boleh
+        # menumpuk dua animasi yang berebut label yang sama.
+        if self._animasi_info_kios is not None:
+            self._animasi_info_kios.stop()
+
+        self._animasi_info_kios = QPropertyAnimation(self._efek_info_kios, b"opacity", self)
+        self._animasi_info_kios.setDuration(DURASI_FADE_INFO_KIOS_MS)
+        self._animasi_info_kios.setStartValue(1.0)
+        self._animasi_info_kios.setEndValue(0.0)
+        self._animasi_info_kios.finished.connect(
+            lambda teks=baru: self._selesaikan_pudar_info_kios(teks)
+        )
+        self._animasi_info_kios.start()
+
+    def _selesaikan_pudar_info_kios(self, teks: str) -> None:
+        self.label_info_kios.setText(teks)
+
+        self._animasi_info_kios = QPropertyAnimation(self._efek_info_kios, b"opacity", self)
+        self._animasi_info_kios.setDuration(DURASI_FADE_INFO_KIOS_MS)
+        self._animasi_info_kios.setStartValue(0.0)
+        self._animasi_info_kios.setEndValue(1.0)
+        self._animasi_info_kios.start()
 
     def _bangun_sorotan(self) -> None:
         self.susunan.addLayout(self._bangun_kepala())
@@ -997,14 +1118,9 @@ class DisplayPage(QWidget):
         self.baris_berikutnya.setSpacing(round(12 * skala))
 
         if self.kompak:
-            self.label_ringkas_angka.setStyleSheet(
-                f"color: {p.nomor}; background: transparent;"
-                f" font-size: {self.px('nomor_baris')}px; font-weight: 800;"
-            )
-            self.label_ringkas_caption.setStyleSheet(
+            self.label_info_kios.setStyleSheet(
                 f"color: {p.panel_judul}; background: transparent;"
-                f" font-size: {self.px('status_baris')}px; font-weight: 700;"
-                " letter-spacing: 3px;"
+                f" font-size: {self.px('kios_info')}px; font-weight: 700;"
             )
 
         if self.tata_letak == SOROTAN:
@@ -1064,11 +1180,10 @@ class DisplayPage(QWidget):
         """Perbarui layar dari sebuah keadaan. Dipisah agar mudah diuji."""
         terkini = keadaan.terkini
 
-        if self.kompak:
+        if not self.kompak:
             # Papan kios tidak punya kartu loket sama sekali — lihat
-            # `_bangun_ringkasan_kios`. Ganti dengan angka tunggal.
-            self._perbarui_ringkasan_kios(keadaan)
-        else:
+            # `_bangun_info_kios`. Isi panel informasinya diganti KioskPage
+            # lewat `tampilkan_info_kios()`, lepas dari penyegaran data ini.
             self._susun_kartu(keadaan.loket)
             id_unggulan = terkini.id if terkini is not None else None
             for kartu, loket in zip(self.kartu_loket, keadaan.loket, strict=False):
@@ -1096,18 +1211,6 @@ class DisplayPage(QWidget):
         if self._halaman >= self.jumlah_halaman:
             self._halaman = 0
         self._gambar_halaman()
-
-    def _perbarui_ringkasan_kios(self, keadaan: DisplayState) -> None:
-        """
-        Hitung berapa antrian yang sedang berlangsung SEKARANG.
-
-        Bukan sekadar `total_menunggu`: nomor yang sudah dipanggil dan
-        sedang dilayani juga masih "berlangsung", belum selesai — hanya
-        yang sudah COMPLETED/CANCELLED/NO_SHOW yang tidak lagi dihitung.
-        """
-        sedang_dilayani = sum(1 for l in keadaan.loket if l.antrian is not None)
-        berlangsung = keadaan.total_menunggu + sedang_dilayani
-        self.label_ringkas_angka.setText(str(berlangsung))
 
     def _susun_kartu(self, loket: list[DisplayCounterState]) -> None:
         """Bangun ulang kartu hanya bila jumlah atau urutan loket berubah."""
@@ -1503,3 +1606,5 @@ class DisplayPage(QWidget):
         self.pewaktu.stop()
         self.pewaktu_jam.stop()
         self.pewaktu_halaman.stop()
+        if self._animasi_info_kios is not None:
+            self._animasi_info_kios.stop()

@@ -92,6 +92,8 @@ class CategoryInfo:
     prefix: str
     display_order: int
     status: RecordStatus
+    #: Ditampilkan di panel informasi anjungan begitu layanan ini disentuh.
+    info_text: str = ""
 
     @property
     def is_active(self) -> bool:
@@ -127,6 +129,7 @@ def _as_category(row: ServiceCategory) -> CategoryInfo:
         row.prefix,
         row.display_order,
         row.status,
+        row.info_text,
     )
 
 
@@ -404,7 +407,13 @@ class MasterDataService:
     # =================================================================
 
     def create_category(
-        self, *, code: str, name: str, prefix: str, branch_id: int | None = None
+        self,
+        *,
+        code: str,
+        name: str,
+        prefix: str,
+        branch_id: int | None = None,
+        info_text: str = "",
     ) -> int:
         sesi = self.auth.require_permission(Permission.MASTER_MANAGE)
         kode = _kode(code, "Kode jenis layanan")
@@ -437,6 +446,7 @@ class MasterDataService:
                     prefix=awalan,
                     display_order=repo.next_display_order(cabang),
                     status=RecordStatus.ACTIVE,
+                    info_text=_bersihkan(info_text),
                 )
             )
             audit_service.record(
@@ -453,7 +463,12 @@ class MasterDataService:
             return category.id
 
     def update_category(
-        self, category_id: int, *, name: str, prefix: str | None = None
+        self,
+        category_id: int,
+        *,
+        name: str,
+        prefix: str | None = None,
+        info_text: str = "",
     ) -> CategoryInfo:
         """
         Ubah jenis layanan.
@@ -472,6 +487,7 @@ class MasterDataService:
                 raise NotFoundError("Jenis layanan tidak ditemukan.")
 
             category.name = nama
+            category.info_text = _bersihkan(info_text)
 
             if prefix is not None:
                 awalan = _wajib(prefix, "Prefix").upper()

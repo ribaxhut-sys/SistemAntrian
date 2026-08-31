@@ -302,7 +302,10 @@ class CategoryTab(_TabelTab):
         berhasil, _ = jalankan_aman(
             self,
             lambda: self.master.create_category(
-                code=dialog.kode, name=dialog.nama, prefix=dialog.prefix
+                code=dialog.kode,
+                name=dialog.nama,
+                prefix=dialog.prefix,
+                info_text=dialog.info_text,
             ),
         )
         if berhasil:
@@ -320,16 +323,23 @@ class CategoryTab(_TabelTab):
 
         def simpan():
             return self.master.update_category(
-                layanan.id, name=dialog.nama, prefix=dialog.prefix
+                layanan.id,
+                name=dialog.nama,
+                prefix=dialog.prefix,
+                info_text=dialog.info_text,
             )
 
         try:
             simpan()
         except BusinessRuleError:
-            # Prefix terkunci karena sudah dipakai antrian. Nama tetap
-            # disimpan supaya perubahan petugas tidak hilang percuma.
+            # Prefix terkunci karena sudah dipakai antrian. Nama dan info
+            # anjungan tetap disimpan supaya perubahan petugas tidak hilang
+            # percuma.
             berhasil, _ = jalankan_aman(
-                self, lambda: self.master.update_category(layanan.id, name=dialog.nama)
+                self,
+                lambda: self.master.update_category(
+                    layanan.id, name=dialog.nama, info_text=dialog.info_text
+                ),
             )
             if berhasil:
                 tampilkan_info(

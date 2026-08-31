@@ -304,6 +304,44 @@ def test_nama_layanan_tetap_tampil_pada_layar_penuh(qtbot, halaman_kios):
         assert label.height() >= label.heightForWidth(label.width())
 
 
+def test_tombol_layanan_proporsional_pada_layar_penuh(qtbot, halaman_kios):
+    """
+    Tiga tombol A/B/C tidak boleh meregang jadi batang pipih selebar panel.
+
+    Pada 1080p, Expanding tanpa batas lebar membuat tiap kartu ~600px
+    lebar pada tinggi ~120px — terbaca sebagai pita, bukan tombol sentuh.
+    """
+    from app.ui.kiosk.kiosk_page import (
+        CELAH_TOMBOL,
+        LEBAR_TOMBOL_MAKS,
+        TINGGI_TOMBOL_MAKS,
+        TINGGI_TOMBOL_MIN,
+    )
+
+    halaman_kios.resize(1920, 1080)
+    halaman_kios.show()
+    qtbot.waitExposed(halaman_kios)
+    halaman_kios._sesuaikan_ukuran_tombol()
+
+    ukuran = {(btn.width(), btn.height()) for btn in halaman_kios.tombol_layanan}
+    assert len(ukuran) == 1
+
+    lebar, tinggi = next(iter(ukuran))
+    assert TINGGI_TOMBOL_MIN <= tinggi <= TINGGI_TOMBOL_MAKS
+    # Pada 1080p ruangnya cukup: lebar harus tepat angka yang diminta.
+    assert lebar == LEBAR_TOMBOL_MAKS
+
+    kotak = [btn.geometry() for btn in halaman_kios.tombol_layanan]
+    for i, a in enumerate(kotak):
+        for b in kotak[i + 1 :]:
+            assert not a.intersects(b)
+
+    urut = sorted(halaman_kios.tombol_layanan, key=lambda btn: btn.x())
+    for kiri, kanan in zip(urut, urut[1:]):
+        jarak = kanan.x() - (kiri.x() + kiri.width())
+        assert jarak >= CELAH_TOMBOL
+
+
 def test_papan_kios_tetap_kompak_di_layar_penuh(qtbot, halaman_kios):
     """Pembedanya `kompak`, bukan aplikasi yang berbeda."""
     sebelum = halaman_kios.papan.px("nomor")

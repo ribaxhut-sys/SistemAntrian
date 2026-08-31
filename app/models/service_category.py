@@ -43,6 +43,9 @@ class ServiceCategory(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(sa.String(80), nullable=False)
     prefix: Mapped[str] = mapped_column(sa.String(2), nullable=False)
     display_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    #: Ditampilkan di panel informasi anjungan begitu pengunjung menyentuh
+    #: layanan ini. Kosong berarti anjungan memakai teks sambutan bawaan.
+    info_text: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
     status: Mapped[RecordStatus] = mapped_column(
         sa.Enum(RecordStatus, native_enum=False, length=10),
         nullable=False,

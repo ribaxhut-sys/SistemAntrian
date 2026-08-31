@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLineEdit,
+    QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -189,6 +190,14 @@ class CategoryDialog(_DialogIsian):
         self.form.addRow("", self.contoh)
         self._perbarui_contoh(self.input_prefix.text())
 
+        self.input_info = QPlainTextEdit(category.info_text if ubah else "")
+        self.input_info.setPlaceholderText(
+            "Ditampilkan di panel anjungan begitu pengunjung menyentuh "
+            "layanan ini. Kosongkan bila tidak perlu."
+        )
+        self.input_info.setMaximumHeight(90)
+        self.form.addRow("Info Anjungan", self.input_info)
+
         if prefix_terkunci:
             self.form.addRow(
                 "",
@@ -217,6 +226,10 @@ class CategoryDialog(_DialogIsian):
     @property
     def prefix(self) -> str:
         return self.input_prefix.text().strip().upper()
+
+    @property
+    def info_text(self) -> str:
+        return self.input_info.toPlainText().strip()
 
     def simpan(self) -> None:
         if self.category is None and not self.kode:
