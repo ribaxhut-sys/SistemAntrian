@@ -579,7 +579,7 @@ def test_papan_kios_tidak_menampilkan_daftar_menunggu(papan_kios):
     seluruh papan kios diserahkan pada informasi/pengumuman yang berputar.
     """
     assert papan_kios.susunan.indexOf(papan_kios.panel_berikutnya) == -1
-    assert papan_kios.susunan.indexOf(papan_kios.label_info_kios.parentWidget()) >= 0
+    assert papan_kios.susunan.indexOf(papan_kios.panel_info_kios) >= 0
 
 
 def test_papan_kios_tidak_menampilkan_kartu_loket(papan_kios):
@@ -636,6 +636,678 @@ def test_tampilkan_info_kios_kosong_kembali_ke_sambutan(qtbot, papan_kios):
     papan_kios.tampilkan_info_kios("")
     qtbot.wait(DURASI_FADE_INFO_KIOS_MS * 2 + 200)
     assert papan_kios.label_info_kios.text() == TEKS_SAMBUTAN_KIOS
+
+
+def test_path_media_kios_menolak_rayapan_keluar_folder(tmp_path, monkeypatch):
+    from app.ui.kiosk import sambutan as modul
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    (tmp_path / "rahasia.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    assert modul.path_media_kios("../rahasia.txt") is None
+    assert modul.path_media_kios("") is None
+    assert modul.jenis_sambutan_dari_berkas("poster.PNG") == "media"
+    assert modul.jenis_sambutan_dari_berkas("sambutan.mp4") == "media"
+    assert modul.jenis_sambutan_dari_berkas("catatan.txt") is None
+
+
+def test_salin_ke_media_kios_menyalin_berkas(tmp_path, monkeypatch):
+    from app.ui.kiosk import sambutan as modul
+
+    folder = tmp_path / "kiosk"
+    sumber = tmp_path / "sambutan.mp4"
+    sumber.write_bytes(b"mp4")
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    tujuan = modul.salin_ke_media_kios(sumber)
+
+    assert tujuan == folder / "sambutan.mp4"
+    assert tujuan.is_file()
+    assert tujuan.read_bytes() == b"mp4"
+
+
+def test_sambutan_gambar_hilang_kembali_ke_teks(
+    qtbot, admin_auth, auth, antrian_siap, tmp_path, monkeypatch
+):
+    """Folder media kosong tidak boleh mengosongkan panel anjungan."""
+    from app.ui.display.display_page import DisplayPage, TEKS_SAMBUTAN_KIOS
+    from app.ui.kiosk import sambutan as modul
+    from app.ui.kiosk.sambutan import HALAMAN_TEKS
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    SettingsService(admin_auth).set("kiosk.welcome_kind", "media")
+    SettingsService(admin_auth).set("kiosk.welcome_file", "tidak-ada.png")
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+
+    assert halaman.panel_info_kios.tumpukan.currentIndex() == HALAMAN_TEKS
+    assert halaman.label_info_kios.text() == TEKS_SAMBUTAN_KIOS
+
+
+def test_sambutan_menampilkan_gambar_bila_berkasnya_ada(
+    qtbot, admin_auth, auth, antrian_siap, tmp_path, monkeypatch
+):
+    from PySide6.QtGui import QColor, QImage
+
+    from app.ui.display.display_page import DisplayPage, DURASI_FADE_INFO_KIOS_MS
+    from app.ui.kiosk import sambutan as modul
+    from app.ui.kiosk.sambutan import HALAMAN_GAMBAR, HALAMAN_TEKS
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    gambar = QImage(80, 40, QImage.Format.Format_RGB32)
+    gambar.fill(QColor("#0F766E"))
+    assert gambar.save(str(folder / "poster.png"))
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    SettingsService(admin_auth).set("kiosk.welcome_kind", "gambar")
+    SettingsService(admin_auth).set("kiosk.welcome_file", "poster.png")
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(800, 480)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+
+    assert halaman.panel_info_kios.tumpukan.currentIndex() == HALAMAN_GAMBAR
+    pixmap = halaman.panel_info_kios.label_gambar.pixmap()
+    assert pixmap is not None and not pixmap.isNull()
+
+    halaman.tampilkan_info_kios("Bawa fotokopi KTP.")
+    qtbot.wait(DURASI_FADE_INFO_KIOS_MS + 100)
+    assert halaman.panel_info_kios.tumpukan.currentIndex() == HALAMAN_TEKS
+    assert halaman.label_info_kios.text() == "Bawa fotokopi KTP."
+
+    halaman.tampilkan_info_kios(None)
+    qtbot.wait(DURASI_FADE_INFO_KIOS_MS + 100)
+    assert halaman.panel_info_kios.tumpukan.currentIndex() == HALAMAN_GAMBAR
+
+
+def test_daftar_media_kios_urut_nama_mengabaikan_titik(tmp_path, monkeypatch):
+    from app.ui.kiosk import sambutan as modul
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    (folder / ".gitkeep").write_text("", encoding="utf-8")
+    (folder / "02_b.jpg").write_bytes(b"x")
+    (folder / "01_a.png").write_bytes(b"x")
+    (folder / "catatan.txt").write_text("bukan media", encoding="utf-8")
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    nama = [p.name for p in modul.daftar_media_kios()]
+    assert nama == ["01_a.png", "02_b.jpg"]
+
+
+def test_jejak_media_berubah_bila_isi_berkas_diganti(tmp_path, monkeypatch):
+    from app.ui.kiosk import sambutan as modul
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    berkas = folder / "poster.png"
+    berkas.write_bytes(b"aaa")
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    sebelum = modul.jejak_media(modul.daftar_media_kios())
+    berkas.write_bytes(b"bbb-lebih-panjang")
+    sesudah = modul.jejak_media(modul.daftar_media_kios())
+    assert sebelum != sesudah
+
+
+def test_ganti_berkas_di_folder_mengulang_putaran_dari_awal(
+    qtbot, admin_auth, auth, antrian_siap, tmp_path, monkeypatch
+):
+    """Tambah/ganti file di media/kiosk langsung dipakai, tanpa buka ulang aplikasi."""
+    from PySide6.QtGui import QColor, QImage
+
+    from app.ui.display.display_page import DisplayPage
+    from app.ui.kiosk import sambutan as modul
+    from app.ui.kiosk.sambutan import HALAMAN_GAMBAR
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+
+    def _tulis(nama: str, warna: str) -> None:
+        gambar = QImage(80, 40, QImage.Format.Format_RGB32)
+        gambar.fill(QColor(warna))
+        assert gambar.save(str(folder / nama))
+
+    _tulis("01_a.png", "#0F766E")
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    SettingsService(admin_auth).set("kiosk.welcome_kind", "media")
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(800, 480)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+
+    panel = halaman.panel_info_kios
+    assert panel.berkas_tampil is not None
+    assert panel.berkas_tampil.name == "01_a.png"
+    assert panel._jantung.isActive()
+
+    _tulis("02_b.png", "#B45309")
+    panel.muat_pengaturan()
+
+    assert [p.name for p in panel._daftar] == ["01_a.png", "02_b.png"]
+    assert panel.tumpukan.currentIndex() == HALAMAN_GAMBAR
+    assert panel.berkas_tampil.name == "01_a.png"
+    assert panel._jantung.isActive()
+    assert panel._jam_item.isValid()
+
+
+def test_sambutan_folder_bergantian_gambar(
+    qtbot, admin_auth, auth, antrian_siap, tmp_path, monkeypatch
+):
+    from PySide6.QtGui import QColor, QImage
+
+    from app.ui.display.display_page import DisplayPage, DURASI_FADE_INFO_KIOS_MS
+    from app.ui.kiosk import sambutan as modul
+    from app.ui.kiosk.sambutan import HALAMAN_GAMBAR, HALAMAN_TEKS
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    for nama, warna in (("01_a.png", "#0F766E"), ("02_b.png", "#B45309")):
+        gambar = QImage(80, 40, QImage.Format.Format_RGB32)
+        gambar.fill(QColor(warna))
+        assert gambar.save(str(folder / nama))
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    SettingsService(admin_auth).set("kiosk.welcome_kind", "media")
+    SettingsService(admin_auth).set("kiosk.welcome_slide_seconds", "5")
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(800, 480)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+
+    panel = halaman.panel_info_kios
+    assert panel.tumpukan.currentIndex() == HALAMAN_GAMBAR
+    assert panel.berkas_tampil is not None
+    assert panel.berkas_tampil.name == "01_a.png"
+    assert panel._jantung.isActive()
+
+    panel._item_berikutnya()
+    assert panel.berkas_tampil.name == "02_b.png"
+
+    panel._item_berikutnya()
+    assert panel.berkas_tampil.name == "01_a.png"
+
+    halaman.tampilkan_info_kios("Bawa KTP.")
+    qtbot.wait(DURASI_FADE_INFO_KIOS_MS + 100)
+    assert panel.tumpukan.currentIndex() == HALAMAN_TEKS
+    assert not panel._jantung.isActive()
+
+    halaman.tampilkan_info_kios(None)
+    qtbot.wait(DURASI_FADE_INFO_KIOS_MS + 100)
+    assert panel.tumpukan.currentIndex() == HALAMAN_GAMBAR
+    assert panel.berkas_tampil.name == "01_a.png"
+
+
+def test_jaga_putaran_video_terakhir_selesai_kembali_ke_awal(
+    qtbot, admin_auth, auth, antrian_siap, tmp_path, monkeypatch
+):
+    """
+    Habis video terakhir, putaran wajib kembali ke berkas pertama.
+
+    Dideteksi lewat _jaga_putaran() (posisi >= durasi) — jalur yang
+    sungguh dipakai di mesin nyata saat sinyal EndOfMedia/StoppedState
+    Qt absen — BUKAN dengan memanggil _video_selesai() secara manual
+    setelah menyetel currentIndex sendiri; pola itu lolos tes tapi
+    terbukti gagal di lapangan.
+
+    Sekaligus regresi untuk balapan nyata di Windows: stop()/setSource()
+    yang dipanggil _lepaskan_berkas_video() saat pindah ke gambar
+    pertama bisa memancarkan playbackStateChanged(StoppedState) SEREMPAK
+    (bukan diantre di event loop). Tanpa penjagaan di _item_berikutnya(),
+    sinyal itu memicu pergantian item kedua kalinya secara bersarang di
+    tengah pergantian pertama, merusak indeks dan mengunci lagi berkas
+    video yang baru saja dilepas — itulah akar penyebab putaran macet di
+    item terakhir walau semua tes lama hijau.
+    """
+    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    from app.ui.display.display_page import DisplayPage
+    from app.ui.kiosk import sambutan as modul
+    from app.ui.kiosk.sambutan import HALAMAN_GAMBAR, HALAMAN_VIDEO
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    gambar = QImage(80, 40, QImage.Format.Format_RGB32)
+    gambar.fill(QColor("#0F766E"))
+    assert gambar.save(str(folder / "01_a.png"))
+    (folder / "02_b.mp4").write_bytes(b"bukan video sungguhan, cukup ada namanya")
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    SettingsService(admin_auth).set("kiosk.welcome_kind", "media")
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(800, 480)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+
+    panel = halaman.panel_info_kios
+    assert panel.berkas_tampil.name == "01_a.png"
+
+    # Anggap video (item terakhir) sedang tampil dan sudah sampai akhir,
+    # tanpa benar-benar memutar berkas palsu itu.
+    panel._indeks = 1
+    panel.berkas_tampil = folder / "02_b.mp4"
+    panel._tampilkan_halaman(HALAMAN_VIDEO)
+    panel._dijeda_sengaja = False
+    panel._abaikan_selesai_video = False
+    panel._sedang_ganti_item = False
+    monkeypatch.setattr(panel._pemutar, "duration", lambda: 5000)
+    monkeypatch.setattr(panel._pemutar, "position", lambda: 5000)
+
+    def stop_serempak() -> None:
+        panel._keadaan_putar(QMediaPlayer.PlaybackState.StoppedState)
+
+    monkeypatch.setattr(panel._pemutar, "stop", stop_serempak)
+    panel._mulai_jam_item()
+
+    panel._jaga_putaran()
+
+    assert panel._indeks == 0
+    assert panel.berkas_tampil.name == "01_a.png"
+    assert panel.tumpukan.currentIndex() == HALAMAN_GAMBAR
+    assert panel._jantung.isActive()
+    assert not panel._sedang_ganti_item
+
+
+def test_durasi_slide_gambar_bawaan_sepuluh_detik(
+    qtbot, auth, antrian_siap, tmp_path, monkeypatch
+):
+    """kiosk.welcome_slide_seconds bawaan 10, dipakai apa adanya jadi ms."""
+    from app.ui.display.display_page import DisplayPage
+    from app.ui.kiosk import sambutan as modul
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(800, 480)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+
+    panel = halaman.panel_info_kios
+    assert panel._durasi_slide_ms() == 10_000
+
+    # Ganti nilainya lewat sesi admin (sesi "display" tidak boleh), lalu
+    # kembali ke "display": panel harus ikut nilai baru, bukan menyimpan
+    # nilai lama.
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    SettingsService(auth).set("kiosk.welcome_slide_seconds", "8")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    assert panel._durasi_slide_ms() == 8000
+
+
+def test_gambar_tampil_penuh_sebelum_pindah_ke_item_berikutnya(
+    qtbot, admin_auth, auth, antrian_siap, tmp_path, monkeypatch
+):
+    """
+    Gambar wajib tampil selama durasi yang dikonfigurasi (bukan lebih
+    cepat) sebelum pindah — diverifikasi lewat jam sungguhan (qtbot.wait),
+    bukan panggilan manual, supaya detak (_jantung) yang benar-benar
+    dipakai di produksi yang diuji.
+    """
+    from PySide6.QtGui import QColor, QImage
+
+    from app.ui.display.display_page import DisplayPage
+    from app.ui.kiosk import sambutan as modul
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    for nama, warna in (("01_a.png", "#0F766E"), ("02_b.png", "#B45309")):
+        gambar = QImage(80, 40, QImage.Format.Format_RGB32)
+        gambar.fill(QColor(warna))
+        assert gambar.save(str(folder / nama))
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    SettingsService(admin_auth).set("kiosk.welcome_kind", "media")
+    # Durasi minimum yang diizinkan (3 detik) supaya tes cepat; mekanismenya
+    # sama dengan bawaan 5 detik.
+    SettingsService(admin_auth).set("kiosk.welcome_slide_seconds", "3")
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(800, 480)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+
+    panel = halaman.panel_info_kios
+    assert panel.berkas_tampil.name == "01_a.png"
+
+    # Sebelum durasinya (3 detik) lewat, harus TETAP di gambar pertama.
+    qtbot.wait(2400)
+    assert panel.berkas_tampil.name == "01_a.png"
+
+    # Setelah durasinya lewat (3 detik + jeda detak), baru pindah.
+    qtbot.wait(1000)
+    assert panel.berkas_tampil.name == "02_b.png"
+
+
+def test_sinyal_error_video_basi_tidak_memotong_durasi_gambar(
+    qtbot, admin_auth, auth, antrian_siap, tmp_path, monkeypatch
+):
+    """
+    Regresi: setSource(QUrl()) yang dipanggil _lepaskan_berkas_video() saat
+    pindah dari video ke gambar bisa memicu errorOccurred Qt yang basi
+    ("no media"/"immediate exit requested"). _gagal_video() dulu tidak
+    memeriksa halaman yang sedang tampil sama sekali, jadi sinyal basi itu
+    langsung memotong durasi tampil gambar sebelum 5 detiknya lewat.
+    """
+    from PySide6.QtGui import QColor, QImage
+
+    from app.ui.display.display_page import DisplayPage
+    from app.ui.kiosk import sambutan as modul
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    gambar = QImage(80, 40, QImage.Format.Format_RGB32)
+    gambar.fill(QColor("#0F766E"))
+    assert gambar.save(str(folder / "01_a.png"))
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    SettingsService(admin_auth).set("kiosk.welcome_kind", "media")
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(800, 480)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+
+    panel = halaman.panel_info_kios
+    assert panel.berkas_tampil.name == "01_a.png"
+
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    # Sinyal errorOccurred basi tiba SAAT gambar sedang tampil (bukan
+    # video) — persis seperti setSource(QUrl()) yang telat dipancarkan
+    # dari pergantian item sebelumnya.
+    panel._gagal_video(QMediaPlayer.Error.ResourceError, "no media")
+
+    assert panel.berkas_tampil.name == "01_a.png"
+
+
+def test_kembali_dari_video_ke_gambar_tidak_dirusak_efek_bayangan(
+    qtbot, admin_auth, auth, antrian_siap, tmp_path, monkeypatch
+):
+    """
+    Regresi akar penyebab "gambar tampil kurang dari 5 detik".
+
+    QWidget MEMILIKI QGraphicsEffect-nya: setGraphicsEffect(None) —
+    dipakai _lepas_bayangan() saat pindah ke video — MENGHAPUS objek C++
+    efeknya, meninggalkan referensi Python yang menunjuk objek mati. Saat
+    putaran kembali ke gambar, _pulihkan_bayangan() melempar RuntimeError
+    di tengah _tampilkan_item(), SEBELUM berkas_tampil diisi dan
+    _mulai_jam_item() dipanggil. Gambar jadi tidak pernah tercatat tampil
+    dan jam itemnya tidak di-restart, sehingga detak 250ms berikutnya
+    membaca elapsed basi (dari video) dan langsung melompat balik ke
+    video — gambar hanya berkedip sekejap.
+
+    Hanya muncul bila ada VIDEO di folder (hanya video yang memanggil
+    _lepas_bayangan), itulah sebabnya semua tes gambar-saja lolos.
+    """
+    from PySide6.QtGui import QColor, QImage
+
+    from app.ui.display.display_page import DisplayPage
+    from app.ui.kiosk import sambutan as modul
+    from app.ui.kiosk.sambutan import HALAMAN_GAMBAR
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    for nama, warna in (("01_a.png", "#0F766E"), ("02_b.png", "#B45309")):
+        gambar = QImage(80, 40, QImage.Format.Format_RGB32)
+        gambar.fill(QColor(warna))
+        assert gambar.save(str(folder / nama))
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    SettingsService(admin_auth).set("kiosk.welcome_kind", "media")
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(800, 480)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+
+    panel = halaman.panel_info_kios
+    # DisplayPage memasang bayangan pada panel ini; tanpa itu bug-nya
+    # tidak mungkin terpicu.
+    assert panel.graphicsEffect() is not None
+    assert panel.berkas_tampil.name == "01_a.png"
+
+    # Tiru pergantian ke video: bayangan dilepas.
+    panel._lepas_bayangan()
+
+    # Lalu putaran kembali ke gambar. Dulu baris ini melempar
+    # RuntimeError dari _pulihkan_bayangan() dan menggagalkan pencatatan.
+    panel._item_berikutnya()
+
+    assert panel.berkas_tampil.name == "02_b.png"
+    assert panel.tumpukan.currentIndex() == HALAMAN_GAMBAR
+    # Jam item WAJIB di-restart, kalau tidak detak berikutnya langsung
+    # menganggap durasinya sudah lewat.
+    assert panel._jam_item.isValid()
+    assert panel._jam_item.elapsed() < 1000
+    # Bayangannya hidup lagi, bukan objek mati.
+    assert panel.graphicsEffect() is not None
+    assert panel.graphicsEffect().isEnabled()
+
+
+def test_sinyal_folder_berubah_basi_tidak_mengulang_dari_awal(
+    qtbot, admin_auth, auth, antrian_siap, tmp_path, monkeypatch
+):
+    """
+    Regresi: QFileSystemWatcher Windows bisa memancarkan directoryChanged/
+    fileChanged tanpa isi folder sungguh berubah (waktu akses disentuh
+    antivirus/pengindeks, dsb). _muat_ulang_dari_folder() dulu memaksa
+    _kunci_aktif=None sebelum memeriksa ulang, jadi SETIAP sinyal (basi
+    atau bukan) membuat muat_pengaturan() menganggap "berubah" dan
+    me-reset putaran ke item pertama — memotong gambar/video yang sedang
+    tampil sebelum durasinya lewat, walau isi foldernya sama persis.
+    """
+    from PySide6.QtGui import QColor, QImage
+
+    from app.ui.display.display_page import DisplayPage
+    from app.ui.kiosk import sambutan as modul
+    from app.ui.kiosk.sambutan import HALAMAN_GAMBAR
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    for nama, warna in (("01_a.png", "#0F766E"), ("02_b.png", "#B45309")):
+        gambar = QImage(80, 40, QImage.Format.Format_RGB32)
+        gambar.fill(QColor(warna))
+        assert gambar.save(str(folder / nama))
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    SettingsService(admin_auth).set("kiosk.welcome_kind", "media")
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(800, 480)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+
+    panel = halaman.panel_info_kios
+    assert panel.berkas_tampil.name == "01_a.png"
+
+    # Pindah ke item kedua (bukan indeks 0) sebelum sinyal folder basi tiba.
+    panel._item_berikutnya()
+    assert panel.berkas_tampil.name == "02_b.png"
+    elapsed_sebelum = panel._jam_item.elapsed()
+
+    # Isi folder TIDAK berubah sama sekali — simulasikan sinyal watcher
+    # basi yang tetap terpancar (mis. waktu akses disentuh proses lain).
+    panel._folder_media_berubah()
+    qtbot.wait(500)  # lewati debounce 400ms _timer_folder
+
+    assert panel.berkas_tampil.name == "02_b.png"
+    assert panel.tumpukan.currentIndex() == HALAMAN_GAMBAR
+    # Jam item tidak di-reset oleh sinyal basi — pergantian sungguhan
+    # ditolak karena kuncinya memang sama, bukan diam-diam diizinkan.
+    assert panel._jam_item.elapsed() >= elapsed_sebelum
+
+
+def test_jaga_putaran_dari_gambar_terakhir_kembali_ke_awal(
+    qtbot, admin_auth, auth, antrian_siap, tmp_path, monkeypatch
+):
+    from PySide6.QtGui import QColor, QImage
+
+    from app.ui.display.display_page import DisplayPage
+    from app.ui.kiosk import sambutan as modul
+    from app.ui.kiosk.sambutan import HALAMAN_GAMBAR
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    for nama, warna in (("01_a.png", "#0F766E"), ("02_b.png", "#B45309")):
+        gambar = QImage(80, 40, QImage.Format.Format_RGB32)
+        gambar.fill(QColor(warna))
+        assert gambar.save(str(folder / nama))
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    SettingsService(admin_auth).set("kiosk.welcome_kind", "media")
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(800, 480)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+
+    panel = halaman.panel_info_kios
+    panel._item_berikutnya()
+    assert panel.berkas_tampil.name == "02_b.png"
+    monkeypatch.setattr(panel, "_durasi_slide_ms", lambda: 0)
+    panel._jam_item.start()
+    panel._dijeda_sengaja = False
+    panel._sedang_ganti_item = False
+    panel._jaga_putaran()
+
+    assert panel.berkas_tampil.name == "01_a.png"
+    assert panel.tumpukan.currentIndex() == HALAMAN_GAMBAR
+
+
+def test_teks_sambutan_dapat_diganti_dari_pengaturan(
+    qtbot, admin_auth, auth, antrian_siap
+):
+    from app.ui.display.display_page import DisplayPage
+
+    SettingsService(admin_auth).set("kiosk.welcome_text", "Selamat datang.")
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+
+    assert halaman.label_info_kios.text() == "Selamat datang."
 
 
 # ---------------------------------------------------------------------

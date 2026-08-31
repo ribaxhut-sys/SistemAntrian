@@ -79,9 +79,19 @@ FONT_SIZE_LARGE = 18
 FONT_SIZE_XL = 22
 FONT_SIZE_HUGE = 32
 
+#: Urutan font, dari yang paling diinginkan ke cadangan yang pasti ada.
+#:
+#: Inter dan Poppins TIDAK ikut Windows: bila belum dipasang di mesin
+#: anjungan, Qt diam-diam turun ke nama berikutnya — Segoe UI Variable,
+#: font modern bawaan Windows 11. Jadi tampilannya tetap rapi tanpa font
+#: tambahan, dan otomatis memakai Inter/Poppins begitu font itu dipasang.
+#: Jangan hapus cadangannya: nama font yang tidak ada tanpa cadangan
+#: membuat Qt memilih font pengganti apa adanya.
+FONT_UI = '"Inter", "Poppins", "Segoe UI Variable", "Segoe UI", Arial, sans-serif'
+
 STYLESHEET = f"""
 QWidget {{
-    font-family: "Segoe UI", Arial, sans-serif;
+    font-family: {FONT_UI};
     font-size: {FONT_SIZE_BASE}px;
     color: {TEXT};
 }}

@@ -1192,6 +1192,48 @@ def test_pengaturan_terisi_dari_nilai_tersimpan(halaman_pengaturan):
     assert halaman_pengaturan.baris["display.next_count"].nilai() == "3"
 
 
+def test_pengaturan_berkas_anjungan_punya_tombol_pilih(halaman_pengaturan):
+    from PySide6.QtWidgets import QPushButton
+
+    baris = halaman_pengaturan.baris["kiosk.welcome_file"]
+    pilih = baris.findChild(QPushButton, "tombolPilihBerkas")
+    assert pilih is not None
+    assert "pilih" in pilih.text().lower()
+
+
+def test_memilih_berkas_menyalin_ke_folder_media(
+    qtbot, halaman_pengaturan, tmp_path, monkeypatch
+):
+    """Dialog hanya memilih; yang tersimpan adalah nama berkas di media/kiosk."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QFileDialog, QPushButton
+
+    from app.ui import settings as settings_ui
+    from app.ui.kiosk import sambutan as modul
+
+    folder = tmp_path / "kiosk"
+    sumber = tmp_path / "poster.png"
+    sumber.write_bytes(b"png")
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+    monkeypatch.setattr(
+        settings_ui.settings_page, "folder_media_kios", lambda: folder
+    )
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        lambda *args, **kwargs: (str(sumber), ""),
+    )
+
+    pilih = halaman_pengaturan.baris["kiosk.welcome_file"].findChild(
+        QPushButton, "tombolPilihBerkas"
+    )
+    qtbot.mouseClick(pilih, Qt.MouseButton.LeftButton)
+
+    assert halaman_pengaturan.baris["kiosk.welcome_file"].nilai() == "poster.png"
+    assert halaman_pengaturan.baris["kiosk.welcome_kind"].nilai() == "media"
+    assert (folder / "poster.png").is_file()
+
+
 def test_menyimpan_perubahan_pengaturan(halaman_pengaturan, admin_auth):
     from app.services.settings_service import SettingsService
 

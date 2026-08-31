@@ -216,6 +216,47 @@ PALET: dict[str, Palet] = {
         chip_tepi="#FFFFFF",
         radius=26,
     ),
+    "modern": Palet(
+        kode="modern",
+        label="Modern Cerah",
+        keterangan=(
+            "Latar cerah berlapis dengan aksen biru-teal. Paling nyaman di "
+            "anjungan yang dilihat dari dekat, dan terang di ruangan berjendela."
+        ),
+        tata_letak=KISI,
+        # Cerah tapi tidak putih polos: gradien halus memberi kedalaman
+        # tanpa mengurangi keterbacaan di ruangan terang.
+        latar=(
+            "qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+            " stop:0 #F8FAFC, stop:1 #EAF0F6)"
+        ),
+        judul="#0F172A",
+        jam="#64748B",
+        kartu="#FFFFFF",
+        kartu_kosong="#F1F5F9",
+        kartu_unggulan=(
+            "qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+            " stop:0 #FFFFFF, stop:1 #E0F2FE)"
+        ),
+        tepi_kartu="#E2E8F0",
+        tepi_unggulan="#0EA5E9",
+        pita="",
+        nama="#0F766E",
+        nomor="#0F172A",
+        nomor_kosong="#CBD5E1",
+        layanan="#64748B",
+        status_berpil=True,
+        status="#0369A1",
+        status_unggulan="#FFFFFF",
+        pil_latar="#0EA5E9",
+        pil_latar_mati="#E2E8F0",
+        panel="#FFFFFF",
+        panel_judul="#64748B",
+        chip="#F1F5F9",
+        chip_teks="#0F172A",
+        chip_tepi="#E2E8F0",
+        radius=28,
+    ),
     "led": Palet(
         kode="led",
         label="Papan LED",

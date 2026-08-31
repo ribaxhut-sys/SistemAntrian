@@ -30,6 +30,10 @@ BAWAAN: dict[str, str] = {
     "backup.retention_days": "30",
     "dashboard.refresh_seconds": "30",
     "kiosk.cooldown_seconds": "10",
+    "kiosk.welcome_kind": "teks",
+    "kiosk.welcome_text": "",
+    "kiosk.welcome_file": "",
+    "kiosk.welcome_slide_seconds": "10",
     "display.theme": "gelap",
     "display.title": "ANTRIAN PELAYANAN CRO",
     "display.info": "",
@@ -54,6 +58,7 @@ TEKS = "teks"
 ANGKA = "angka"
 BOOLEAN = "boolean"
 PILIHAN = "pilihan"
+BERKAS = "berkas"
 
 
 @dataclass(frozen=True)
@@ -127,6 +132,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         pilihan=(
             ("gelap", "Kartu Gelap (bawaan)"),
             ("terang", "Terang Minimal"),
+            ("modern", "Modern Cerah"),
             ("sorotan", "Sorotan"),
             ("split", "Split Informasi"),
             ("led", "Papan LED"),
@@ -269,6 +275,49 @@ SKEMA: tuple[Pengaturan, ...] = (
         kelompok="Antrian",
     ),
     Pengaturan(
+        "kiosk.welcome_kind",
+        "Tampilan panel anjungan",
+        "Isi panel besar di atas tombol A/B/C sebelum pengunjung memilih "
+        "layanan. Folder media memutar semua gambar dan video di "
+        "media/kiosk bergiliran menurut nama file. Bila foldernya kosong "
+        "atau berkasnya gagal, panel kembali ke teks.",
+        PILIHAN,
+        pilihan=(
+            ("teks", "Teks sambutan"),
+            ("media", "Folder media (gambar & video bergantian)"),
+        ),
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.welcome_text",
+        "Teks sambutan anjungan",
+        "Ditampilkan bila jenisnya teks, dan sebagai cadangan bila folder "
+        "media kosong atau gagal. Kosongkan untuk memakai teks bawaan.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.welcome_file",
+        "Tambah berkas ke folder anjungan",
+        "Berkas disalin ke media/kiosk. Semua gambar dan video di folder "
+        "itu diputar bergiliran (urut nama: 01_, 02_, …). Memilih berkas "
+        "juga mengganti tampilan panel ke folder media. Tetap klik Simpan.",
+        BERKAS,
+        boleh_kosong=True,
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.welcome_slide_seconds",
+        "Lama tampil tiap gambar (detik)",
+        "Hanya untuk gambar di folder media. Video diputar sampai selesai "
+        "lalu ganti ke berkas berikutnya. Satu gambar saja tampil terus.",
+        ANGKA,
+        minimum=3,
+        maksimum=60,
+        kelompok="Antrian",
+    ),
+    Pengaturan(
         "survey.enabled",
         "Aktifkan survey kepuasan",
         "Bila dimatikan, layar survey dan tombol Minta Survey ikut padam.",
@@ -350,6 +399,10 @@ def _validasi(kunci: str, nilai: str) -> str:
         return "true" if nilai.lower() in _BENAR else "false"
 
     if butir.jenis == PILIHAN:
+        if kunci == "kiosk.welcome_kind" and nilai in {"gambar", "video"}:
+            # Nilai lama: gambar atau video terpisah sekarang sama artinya
+            # dengan seluruh folder media.
+            nilai = "media"
         sah = {v for v, _ in butir.pilihan}
         if nilai not in sah:
             raise ValidationError(

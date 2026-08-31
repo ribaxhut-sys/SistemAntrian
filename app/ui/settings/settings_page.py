@@ -12,10 +12,13 @@ kesalahan lebih sulit dilakukan.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer
+from pathlib import Path
+
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -28,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from app.services.settings_service import (
     ANGKA,
+    BERKAS,
     BOOLEAN,
     PILIHAN,
     Pengaturan,
@@ -35,10 +39,64 @@ from app.services.settings_service import (
     kelompok_pengaturan,
 )
 from app.ui.common import jalankan_aman, judul, keterangan, tombol
+from app.ui.kiosk.sambutan import (
+    folder_media_kios,
+    jenis_sambutan_dari_berkas,
+    salin_ke_media_kios,
+)
 from app.ui.style import BORDER, SUCCESS, TEXT_MUTED
 
 #: Lama pesan hasil penyimpanan tampil, dalam milidetik.
 JEDA_PESAN = 4000
+
+FILTER_BERKAS_ANJUNGAN = (
+    "Gambar dan video (*.png *.jpg *.jpeg *.bmp *.webp *.gif *.mp4 *.mkv *.webm *.avi);;"
+    "Gambar (*.png *.jpg *.jpeg *.bmp *.webp *.gif);;"
+    "Video (*.mp4 *.mkv *.webm *.avi);;"
+    "Semua berkas (*)"
+)
+
+
+class _PemilihBerkas(QWidget):
+    """Kotak path plus tombol untuk memilih berkas di komputer ini."""
+
+    berkasDipilih = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        susunan = QHBoxLayout(self)
+        susunan.setContentsMargins(0, 0, 0, 0)
+        susunan.setSpacing(8)
+
+        self.isian = QLineEdit()
+        self.isian.setPlaceholderText("ditambah ke folder media/kiosk")
+        susunan.addWidget(self.isian, stretch=1)
+
+        pilih = tombol("Pilih berkas…")
+        pilih.setObjectName("tombolPilihBerkas")
+        pilih.clicked.connect(self._pilih)
+        susunan.addWidget(pilih)
+
+    def text(self) -> str:
+        return self.isian.text()
+
+    def setText(self, nilai: str) -> None:  # noqa: N802 - menyamai QLineEdit
+        self.isian.setText(nilai)
+
+    def _pilih(self) -> None:
+        folder = folder_media_kios()
+        awal = str(folder) if folder.is_dir() else ""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Pilih gambar atau video anjungan",
+            awal,
+            FILTER_BERKAS_ANJUNGAN,
+        )
+        if not path:
+            return
+        tujuan = salin_ke_media_kios(Path(path))
+        self.isian.setText(tujuan.name)
+        self.berkasDipilih.emit(tujuan.name)
 
 
 class _BarisPengaturan(QWidget):
@@ -89,6 +147,9 @@ class _BarisPengaturan(QWidget):
             )
             return angka
 
+        if self.butir.jenis == BERKAS:
+            return _PemilihBerkas()
+
         return QLineEdit()
 
     # -----------------------------------------------------------------
@@ -97,7 +158,13 @@ class _BarisPengaturan(QWidget):
         if self.butir.jenis == BOOLEAN:
             self.kontrol.setChecked(nilai.strip().lower() == "true")
         elif self.butir.jenis == PILIHAN:
-            indeks = self.kontrol.findData(nilai)
+            tampil = nilai
+            if self.butir.kunci == "kiosk.welcome_kind" and nilai in (
+                "gambar",
+                "video",
+            ):
+                tampil = "media"
+            indeks = self.kontrol.findData(tampil)
             # Nilai yang tidak dikenal (misalnya dari database lama) tidak
             # boleh membuat pilihan tampak kosong tanpa sebab.
             self.kontrol.setCurrentIndex(indeks if indeks >= 0 else 0)
@@ -136,6 +203,9 @@ class SettingsPage(QWidget):
 
         self._bangun_tampilan()
         self.muat_ulang()
+        pemilih = self.baris.get("kiosk.welcome_file")
+        if pemilih is not None and isinstance(pemilih.kontrol, _PemilihBerkas):
+            pemilih.kontrol.berkasDipilih.connect(self._sesuaikan_jenis_sambutan)
 
     # -----------------------------------------------------------------
     # Tampilan
@@ -263,6 +333,13 @@ class SettingsPage(QWidget):
 
         self.muat_ulang()
         self._beritahu(f"{len(berubah)} pengaturan tersimpan.")
+
+    def _sesuaikan_jenis_sambutan(self, nama: str) -> None:
+        """Pilih berkas gambar/video ikut mengganti jenis tampilan panel."""
+        jenis = jenis_sambutan_dari_berkas(nama)
+        if jenis is None or "kiosk.welcome_kind" not in self.baris:
+            return
+        self.baris["kiosk.welcome_kind"].tampilkan(jenis)
 
     def _beritahu(self, teks: str) -> None:
         self.pesan.setText(teks)

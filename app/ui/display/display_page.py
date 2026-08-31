@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QPropertyAnimation, QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
-    QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -26,6 +25,7 @@ from app.services.settings_service import SettingsService
 from app.services.sound_service import SoundPlayer, suara_diaktifkan
 from app.ui.common import jalankan_aman
 from app.ui.display.tema import KISI, SOROTAN, SPLIT, TEMA_BAWAAN, Palet, palet_untuk
+from app.ui.kiosk.sambutan import PanelSambutanKios
 
 logger = get_logger("ui.display")
 
@@ -672,12 +672,7 @@ class DisplayPage(QWidget):
         #: `tampilkan_info_kios()` saat pengunjung menyentuh sebuah
         #: layanan — lihat `_bangun_info_kios`.
         self.label_info_kios: QLabel | None = None
-        self._efek_info_kios: QGraphicsOpacityEffect | None = None
-        self._teks_info_kios_aktif = TEKS_SAMBUTAN_KIOS
-        #: Animasi pudar yang sedang berjalan, disimpan supaya tidak
-        #: dikumpulkan sampah Python sebelum selesai dan supaya `hentikan()`
-        #: dapat menghentikannya bila layar ditutup di tengah transisi.
-        self._animasi_info_kios: QPropertyAnimation | None = None
+        self.panel_info_kios: PanelSambutanKios | None = None
 
         self._bangun_tampilan()
         self.muat_ulang()
@@ -846,57 +841,23 @@ class DisplayPage(QWidget):
         """
         Panel informasi yang berganti isinya, menggantikan kartu angka.
 
-        Mulai dengan teks sambutan; berganti ke info sebuah layanan begitu
-        KioskPage memanggil `tampilkan_info_kios()` saat layanan itu
-        disentuh — lihat `KioskPage._pilih_layanan`. Isinya berasal dari
-        data Jenis Layanan (kolom info anjungan), bukan ditanam di kode —
-        yang tahu apa yang perlu dijelaskan untuk tiap layanan adalah
-        petugas, bukan pemrogram.
+        Mulai dengan sambutan (teks, gambar, atau video menurut pengaturan);
+        berganti ke info sebuah layanan — selalu teks — begitu KioskPage
+        memanggil `tampilkan_info_kios()` saat layanan itu disentuh.
         """
-        panel = QFrame()
-        panel.setObjectName("panelInfoKios")
-        panel.setStyleSheet(
-            f"QFrame#panelInfoKios {{ background: {self.palet.panel};"
-            " border-radius: 20px; }"
+        self.panel_info_kios = PanelSambutanKios(
+            self.settings,
+            self.palet,
+            teks_bawaan=TEKS_SAMBUTAN_KIOS,
+            durasi_fade_ms=DURASI_FADE_INFO_KIOS_MS,
         )
-
-        susunan = QVBoxLayout(panel)
-        susunan.setContentsMargins(16, 8, 16, 8)
-
-        self.label_info_kios = QLabel(self._teks_info_kios_aktif)
-        self.label_info_kios.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_info_kios.setWordWrap(True)
-        self.label_info_kios.setMinimumSize(1, 1)
-        # Lebar WAJIB mengikuti panel, bukan sizeHint()-nya sendiri.
-        #
-        # `susunan.setAlignment(AlignCenter)` pada layout (dicoba lebih
-        # dahulu) membuat Qt menyusutkan label ke sizeHint()-nya — dan
-        # sizeHint() label berbungkus kata TANPA lebar yang dipaksakan
-        # cenderung memilih kolom sempit dan tinggi, bukan baris lebar.
-        # Hasilnya teks panjang jatuh ke bawah satu huruf demi satu huruf
-        # alih-alih melebar mengikuti panel. Kombinasi Expanding di sini
-        # dengan stretch di kedua sisi (bukan alignment pada layout)
-        # memaksanya memakai lebar penuh dan tetap centang secara vertikal.
-        self.label_info_kios.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-        )
-        susunan.addStretch()
-        susunan.addWidget(self.label_info_kios)
-        susunan.addStretch()
-
-        # Dipakai `tampilkan_info_kios()` untuk transisi pudar. Dipasang
-        # pada labelnya, bukan pada panel — panel sudah memakai
-        # QGraphicsEffect untuk bayangan, dan satu widget hanya boleh
-        # punya satu efek.
-        self._efek_info_kios = QGraphicsOpacityEffect(self.label_info_kios)
-        self.label_info_kios.setGraphicsEffect(self._efek_info_kios)
-
-        # Kartu loket dan panel sorotan di televisi sama-sama memakai
-        # bayangan tipis supaya terasa mengambang di atas latar gelap;
-        # tanpa ini panel info-kios terasa datar sendirian di antaranya.
-        self._bayangan(panel, 40, 12, 110)
-
-        return panel
+        self.label_info_kios = self.panel_info_kios.label_teks
+        # Bayangan pada panel, pudar pada label teks di dalamnya: satu
+        # widget hanya boleh punya satu QGraphicsEffect. Video melepaskan
+        # bayangan ini sendiri — QVideoWidget hitam di bawah efek grafis.
+        self._bayangan(self.panel_info_kios, 40, 12, 110)
+        self.panel_info_kios.muat_pengaturan()
+        return self.panel_info_kios
 
     def tampilkan_info_kios(self, teks: str | None) -> None:
         """
@@ -904,43 +865,11 @@ class DisplayPage(QWidget):
 
         Dipanggil KioskPage: dengan info sebuah layanan saat layanan itu
         disentuh, dan dengan `None` saat kembali ke kisi pilihan (pudar ke
-        teks sambutan bawaan). Tidak berlaku pada televisi ruang tunggu —
-        panel ini hanya ada pada papan kios.
-
-        Berpindah begitu saja terbaca sebagai kedipan pada layar yang
-        jarang berubah; pudar-keluar dahulu, ganti teksnya SETELAH benar-
-        benar tak terlihat, baru pudar-masuk, supaya pergantiannya terasa
-        disengaja.
+        sambutan). Tidak berlaku pada televisi ruang tunggu.
         """
-        if self.label_info_kios is None:
+        if self.panel_info_kios is None:
             return
-        baru = (teks or "").strip() or TEKS_SAMBUTAN_KIOS
-        if baru == self._teks_info_kios_aktif:
-            return
-        self._teks_info_kios_aktif = baru
-
-        # Sentuhan beruntun sebelum transisi sebelumnya selesai tidak boleh
-        # menumpuk dua animasi yang berebut label yang sama.
-        if self._animasi_info_kios is not None:
-            self._animasi_info_kios.stop()
-
-        self._animasi_info_kios = QPropertyAnimation(self._efek_info_kios, b"opacity", self)
-        self._animasi_info_kios.setDuration(DURASI_FADE_INFO_KIOS_MS)
-        self._animasi_info_kios.setStartValue(1.0)
-        self._animasi_info_kios.setEndValue(0.0)
-        self._animasi_info_kios.finished.connect(
-            lambda teks=baru: self._selesaikan_pudar_info_kios(teks)
-        )
-        self._animasi_info_kios.start()
-
-    def _selesaikan_pudar_info_kios(self, teks: str) -> None:
-        self.label_info_kios.setText(teks)
-
-        self._animasi_info_kios = QPropertyAnimation(self._efek_info_kios, b"opacity", self)
-        self._animasi_info_kios.setDuration(DURASI_FADE_INFO_KIOS_MS)
-        self._animasi_info_kios.setStartValue(0.0)
-        self._animasi_info_kios.setEndValue(1.0)
-        self._animasi_info_kios.start()
+        self.panel_info_kios.tampilkan_info(teks)
 
     def _bangun_sorotan(self) -> None:
         self.susunan.addLayout(self._bangun_kepala())
@@ -1117,8 +1046,8 @@ class DisplayPage(QWidget):
         )
         self.baris_berikutnya.setSpacing(round(12 * skala))
 
-        if self.kompak:
-            self.label_info_kios.setStyleSheet(
+        if self.kompak and self.panel_info_kios is not None:
+            self.panel_info_kios.ganti_gaya_teks(
                 f"color: {p.panel_judul}; background: transparent;"
                 f" font-size: {self.px('kios_info')}px; font-weight: 700;"
             )
@@ -1171,6 +1100,8 @@ class DisplayPage(QWidget):
         if not berhasil or keadaan is None:
             return
         self.tampilkan(keadaan)
+        if self.panel_info_kios is not None:
+            self.panel_info_kios.muat_pengaturan()
 
     def perbarui_jam(self) -> None:
         """Tulis tanggal dan jam terkini di kepala papan."""
@@ -1606,5 +1537,5 @@ class DisplayPage(QWidget):
         self.pewaktu.stop()
         self.pewaktu_jam.stop()
         self.pewaktu_halaman.stop()
-        if self._animasi_info_kios is not None:
-            self._animasi_info_kios.stop()
+        if self.panel_info_kios is not None:
+            self.panel_info_kios.hentikan()
