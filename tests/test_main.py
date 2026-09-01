@@ -51,10 +51,12 @@ def test_tanpa_argumen_mode_ditanyakan() -> None:
 
 def test_argumen_membuka_mesin_yang_sesuai() -> None:
     from app.main import mode_dari_argumen
-    from app.ui.login.mode_dialog import ANJUNGAN, LAYAR_ANTRIAN
+    from app.ui.login.mode_dialog import ANJUNGAN, LAYAR_ADMIN, LAYAR_ANTRIAN, LAYAR_PETUGAS
 
     assert mode_dari_argumen(["--tv"]) == LAYAR_ANTRIAN
     assert mode_dari_argumen(["--kios"]) == ANJUNGAN
+    assert mode_dari_argumen(["--admin"]) == LAYAR_ADMIN
+    assert mode_dari_argumen(["--petugas"]) == LAYAR_PETUGAS
 
 
 def test_pintasan_lama_layar_tetap_membuka_anjungan() -> None:

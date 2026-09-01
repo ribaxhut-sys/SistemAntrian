@@ -73,6 +73,25 @@ def test_login_berhasil_menutup_jendela(qtbot, auth):
     assert jendela.session.role is UserRole.CRO
 
 
+def test_tombol_kembali_menutup_layar_masuk_tanpa_login(qtbot, auth):
+    """
+    Layar masuk dimundurkan ke pilihan mode, bukan ditutup aplikasinya.
+
+    Dahulu tombolnya bernama "Keluar" dan benar-benar mematikan aplikasi,
+    sehingga petugas yang salah memilih layar harus membukanya ulang.
+    """
+    jendela = LoginWindow(auth)
+    qtbot.addWidget(jendela)
+
+    assert jendela.tombol_kembali.text() == "Kembali"
+
+    jendela.tombol_kembali.click()
+
+    assert jendela.result() == QDialog.DialogCode.Rejected
+    assert jendela.session is None
+    assert not auth.is_authenticated
+
+
 def test_kata_sandi_salah_tampil_sebaris_bukan_dialog(qtbot, auth):
     """
     Kotak dialog memaksa petugas menutupnya dulu sebelum mengetik ulang.
@@ -599,6 +618,7 @@ def test_muat_ulang_menampilkan_data_terbaru(halaman_master, admin_auth):
 
     halaman_master.tab_loket.muat_ulang()
     assert halaman_master.tab_loket.tabel.rowCount() == 4
+
 
 
 def test_identitas_kantor_terisi(halaman_master):
@@ -1232,6 +1252,10 @@ def test_memilih_berkas_menyalin_ke_folder_media(
     assert halaman_pengaturan.baris["kiosk.welcome_file"].nilai() == "poster.png"
     assert halaman_pengaturan.baris["kiosk.welcome_kind"].nilai() == "media"
     assert (folder / "poster.png").is_file()
+    # Jenis tampilan yang ikut berganti tetap terhitung sebagai perubahan
+    # yang harus disimpan. Dianggap sebagai nilai tersimpan, tombol Simpan
+    # akan diam saja dan pilihannya hilang begitu layar ditutup.
+    assert halaman_pengaturan.berubah()["kiosk.welcome_kind"] == "media"
 
 
 def test_menyimpan_perubahan_pengaturan(halaman_pengaturan, admin_auth):
@@ -1256,6 +1280,35 @@ def test_membatalkan_mengembalikan_nilai_tersimpan(halaman_pengaturan, admin_aut
     assert SettingsService(admin_auth).get("display.next_count") == "3"
 
 
+def test_tombol_batal_meminta_konfirmasi(halaman_pengaturan, monkeypatch):
+    """Ketukan salah pada Batalkan tidak boleh membuang pekerjaan diam-diam."""
+    ditanya = []
+
+    def _konfirmasi(*_args, **_kwargs):
+        ditanya.append(True)
+        return True
+
+    monkeypatch.setattr(
+        "app.ui.settings.settings_page.konfirmasi", _konfirmasi
+    )
+    halaman_pengaturan.baris["display.next_count"].kontrol.setValue(9)
+    halaman_pengaturan.tombol_batal.click()
+
+    assert ditanya
+    assert halaman_pengaturan.baris["display.next_count"].nilai() == "3"
+
+
+def test_menolak_batal_mempertahankan_perubahan(halaman_pengaturan, monkeypatch):
+    monkeypatch.setattr(
+        "app.ui.settings.settings_page.konfirmasi", lambda *_a, **_k: False
+    )
+    halaman_pengaturan.baris["display.next_count"].kontrol.setValue(9)
+    halaman_pengaturan.tombol_batal.click()
+
+    assert halaman_pengaturan.baris["display.next_count"].nilai() == "9"
+    assert halaman_pengaturan.tombol_simpan.isEnabled()
+
+
 def test_pilihan_cara_cetak_tidak_dapat_diisi_bebas(halaman_pengaturan):
     """Kontrolnya daftar pilihan, sehingga nilai asal tidak mungkin diketik."""
     kotak = halaman_pengaturan.baris["ticket.printer"].kontrol
@@ -1270,6 +1323,119 @@ def test_kotak_angka_menahan_nilai_di_luar_batas(halaman_pengaturan):
     kotak.setValue(1)
 
     assert kotak.value() == 5
+
+
+def test_setiap_kelompok_pengaturan_punya_halamannya_sendiri(halaman_pengaturan):
+    """
+    Dua puluh dua pengaturan pada satu halaman gulung hanya dapat
+    ditemukan dengan menggulung sampai ketemu. Daftar kelompok di kiri
+    adalah daftar isinya, dan setiap kelompok berdiri sebagai halaman
+    tersendiri.
+    """
+    from app.services.settings_service import kelompok_pengaturan
+
+    nama_kelompok = list(kelompok_pengaturan())
+
+    assert halaman_pengaturan.rail.count() == len(nama_kelompok)
+    assert [
+        halaman_pengaturan.rail.item(i).text()
+        for i in range(halaman_pengaturan.rail.count())
+    ] == nama_kelompok
+
+    halaman_pengaturan.rail.setCurrentRow(2)
+    assert halaman_pengaturan.tumpukan.currentIndex() == 2
+
+
+def test_pengaturan_menandai_baris_yang_belum_disimpan(halaman_pengaturan):
+    """
+    "Apa saja yang tadi saya ubah" harus dapat dijawab dengan melihat,
+    bukan dengan mengingat — terutama pada layar yang perubahannya baru
+    berlaku setelah layar lain dimuat ulang.
+    """
+    baris = halaman_pengaturan.baris["display.next_count"]
+    assert baris.property("berubah") in (None, "false")
+    assert not halaman_pengaturan.tombol_simpan.isEnabled()
+
+    baris.kontrol.setValue(7)
+
+    assert baris.property("berubah") == "true"
+    assert halaman_pengaturan.berubah() == {"display.next_count": "7"}
+    assert halaman_pengaturan.tombol_simpan.isEnabled()
+    assert "1" in halaman_pengaturan.pesan.text()
+
+    # Dikembalikan ke nilai semula: penandanya ikut padam, bukan menetap
+    # sampai disimpan.
+    baris.kontrol.setValue(3)
+    assert baris.property("berubah") == "false"
+    assert not halaman_pengaturan.tombol_simpan.isEnabled()
+
+
+def test_pengaturan_bersih_lagi_setelah_disimpan(halaman_pengaturan):
+    halaman_pengaturan.baris["display.next_count"].kontrol.setValue(6)
+    halaman_pengaturan.simpan()
+
+    assert halaman_pengaturan.berubah() == {}
+    assert not halaman_pengaturan.tombol_simpan.isEnabled()
+    assert halaman_pengaturan.baris["display.next_count"].property("berubah") == "false"
+
+
+def test_pencarian_menyaring_baris_dan_kelompoknya(halaman_pengaturan):
+    """
+    Pencarian menyaring seluruh kelompok, bukan hanya yang sedang terbuka.
+    Kalau tidak, hasil yang berada di kelompok lain tampak seperti tidak
+    ada hasil sama sekali.
+    """
+    halaman_pengaturan.cari.setText("backup")
+
+    tampil = [
+        kunci
+        for kunci, baris in halaman_pengaturan.baris.items()
+        if not baris.isHidden()
+    ]
+    assert set(tampil) == {
+        "backup.auto_enabled",
+        "backup.pg_dump_path",
+        "backup.retention_days",
+    }
+
+    terlihat = [
+        halaman_pengaturan.rail.item(i).text()
+        for i in range(halaman_pengaturan.rail.count())
+        if not halaman_pengaturan.rail.item(i).isHidden()
+    ]
+    assert len(terlihat) == 1
+    assert terlihat[0].startswith("Backup")
+    # Jumlah hasilnya ikut disebut, supaya daftar kiri berfungsi sebagai
+    # daftar hasil.
+    assert "3" in terlihat[0]
+
+    halaman_pengaturan.cari.setText("")
+    assert not halaman_pengaturan.baris["ticket.footer"].isHidden()
+
+
+def test_pencarian_tanpa_hasil_menjelaskan_dirinya(halaman_pengaturan):
+    """Layar kosong tanpa keterangan terbaca sebagai layar yang gagal termuat."""
+    halaman_pengaturan.cari.setText("zzz tidak ada")
+
+    assert (
+        halaman_pengaturan.tumpukan.currentWidget()
+        is halaman_pengaturan._halaman_kosong
+    )
+    assert "zzz tidak ada" in halaman_pengaturan.label_kosong.text()
+
+
+def test_satuan_angka_ditulis_di_dalam_kotaknya(halaman_pengaturan):
+    """
+    Satuan yang menempel pada angkanya terbaca bersama angka itu; pada
+    nama pengaturannya, ia terbaca beberapa detik sebelumnya.
+    """
+    assert halaman_pengaturan.baris["display.rotate_seconds"].kontrol.suffix() == " detik"
+    # Dan nilai terkecil yang punya arti khusus ditulis dengan artinya,
+    # bukan sebagai angka 0 yang harus dicari dulu maksudnya.
+    assert (
+        halaman_pengaturan.baris["display.list_font_size"].kontrol.specialValueText()
+        == "Otomatis"
+    )
 
 
 def test_menu_pengaturan_hanya_untuk_admin(qtbot, auth, antrian_siap):
@@ -1663,3 +1829,98 @@ def test_loket_tanpa_batasan_menawarkan_semua_layanan(qtbot, auth, antrian_siap)
     halaman = _halaman_layanan(qtbot, auth)
 
     assert halaman.pilih_kategori.count() == len(antrian_siap["kategori"]) + 1
+
+
+def test_pengaturan_punya_pemilih_media_tiap_jenis_layanan(
+    qtbot, admin_auth, seeded, tmp_path, monkeypatch
+):
+    """
+    Media A/B/C dipasang dari satu layar, bukan dengan membuka tiga dialog
+    jenis layanan satu per satu.
+    """
+    from app.services.master_data_service import MasterDataService
+    from app.services.settings_service import SettingsService
+    from app.ui.kiosk import sambutan as modul
+    from app.ui.settings.settings_page import SettingsPage
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    halaman = SettingsPage(
+        SettingsService(admin_auth), MasterDataService(admin_auth)
+    )
+    qtbot.addWidget(halaman)
+
+    assert set(halaman.media_layanan) == {"KONSULTASI", "PENGADUAN", "INFORMASI"}
+    assert any(
+        halaman.rail.item(i).text() == "Media Anjungan"
+        for i in range(halaman.rail.count())
+    )
+
+
+def test_pencarian_menemukan_media_lewat_nama_layanan(
+    qtbot, admin_auth, seeded, tmp_path, monkeypatch
+):
+    """Nama layanan tidak ada di judul kelompok, tetapi itulah yang diketik orang."""
+    from app.services.master_data_service import MasterDataService
+    from app.services.settings_service import SettingsService
+    from app.ui.kiosk import sambutan as modul
+    from app.ui.settings.settings_page import SettingsPage
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    halaman = SettingsPage(
+        SettingsService(admin_auth), MasterDataService(admin_auth)
+    )
+    qtbot.addWidget(halaman)
+    halaman.cari.setText("konsultasi")
+
+    terlihat = [
+        halaman.rail.item(i).text()
+        for i in range(halaman.rail.count())
+        if not halaman.rail.item(i).isHidden()
+    ]
+    assert any(teks.startswith("Media Anjungan") for teks in terlihat)
+
+
+def test_pemilih_media_pengaturan_dan_dialog_widget_yang_sama(
+    qtbot, admin_auth, seeded, tmp_path, monkeypatch
+):
+    """
+    Dua pintu masuk ke hal yang sama tidak boleh berperilaku berbeda, jadi
+    keduanya wajib memakai widget yang sama persis — bukan dua salinan
+    yang kelak berubah sendiri-sendiri.
+    """
+    from app.services.master_data_service import MasterDataService
+    from app.services.settings_service import SettingsService
+    from app.ui.kiosk import sambutan as modul
+    from app.ui.settings.dialogs import CategoryDialog, PemilihMediaLayanan
+    from app.ui.settings.settings_page import SettingsPage
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+
+    master = MasterDataService(admin_auth)
+    halaman = SettingsPage(SettingsService(admin_auth), master)
+    qtbot.addWidget(halaman)
+
+    layanan = next(k for k in master.list_categories() if k.code == "KONSULTASI")
+    dialog = CategoryDialog(category=layanan)
+    qtbot.addWidget(dialog)
+
+    assert isinstance(halaman.media_layanan["KONSULTASI"], PemilihMediaLayanan)
+    assert isinstance(dialog.media, PemilihMediaLayanan)
+
+
+def test_dialog_jenis_layanan_baru_belum_bisa_pasang_media(qtbot, admin_auth, seeded):
+    """Foldernya dinamai menurut kode, dan kode itu belum ada sebelum disimpan."""
+    from app.ui.settings.dialogs import CategoryDialog
+
+    dialog = CategoryDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.media is None

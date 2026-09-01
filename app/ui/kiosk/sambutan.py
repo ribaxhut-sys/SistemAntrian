@@ -4,6 +4,17 @@ Panel sambutan anjungan: teks, atau isi folder media/kiosk.
 Berkas hidup di mesin anjungan, bukan di database. Pengaturan bersama
 hanya menyimpan jenis tampilan; semua gambar dan video di folder
 diputar bergiliran menurut nama file, lalu diulang dari awal.
+
+Panel yang sama diambil alih sementara oleh KioskPage untuk dua hal,
+lalu dikembalikan ke putaran sambutan:
+
+* media (atau teks) satu jenis layanan, selama layar konfirmasi tampil;
+* kartu nomor yang baru terbit, selama layar hasil tampil.
+
+Media per jenis layanan mengikuti aturan yang sama seperti sambutan —
+berkasnya di mesin anjungan, bukan di database — dan dialamatkan lewat
+konvensi folder `media/kiosk/layanan/<code>/`, sehingga tidak perlu
+kolom baru maupun migrasi.
 """
 
 from __future__ import annotations
@@ -48,17 +59,51 @@ JENIS_FOLDER = frozenset({JENIS_MEDIA, JENIS_GAMBAR, JENIS_VIDEO})
 HALAMAN_TEKS = 0
 HALAMAN_GAMBAR = 1
 HALAMAN_VIDEO = 2
+#: Kartu nomor yang baru terbit. Halaman teks biasa tidak dipakai untuk
+#: ini karena kartunya butuh empat ukuran huruf yang berbeda sekaligus,
+#: sedangkan halaman teks sengaja satu label bergaya seragam.
+HALAMAN_KARTU = 3
 
 EKSTENSI_GAMBAR = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif"}
 EKSTENSI_VIDEO = {".mp4", ".mkv", ".webm", ".avi"}
 EKSTENSI_MEDIA = EKSTENSI_GAMBAR | EKSTENSI_VIDEO
 
+
+def _pola(ekstensi: set[str]) -> str:
+    return " ".join(f"*{e}" for e in sorted(ekstensi))
+
+
+#: Filter QFileDialog, diturunkan dari daftar ekstensi di atas supaya
+#: berkas yang boleh dipilih admin dan berkas yang benar-benar dapat
+#: diputar panel tidak pernah berbeda.
+FILTER_BERKAS_ANJUNGAN = (
+    f"Gambar dan video ({_pola(EKSTENSI_MEDIA)});;"
+    f"Gambar ({_pola(EKSTENSI_GAMBAR)});;"
+    f"Video ({_pola(EKSTENSI_VIDEO)});;"
+    "Semua berkas (*)"
+)
+
 DURASI_SLIDE_BAWAAN_DETIK = 10
+
+#: Lama posisi video boleh diam di tempat sebelum dianggap tersendat.
+#:
+#: Putaran sambutan memakai ambang pendek: item berikutnya tetap tampil,
+#: jadi salah menduga pun tidak merugikan. Media layanan memakai ambang
+#: jauh lebih panjang karena kesimpulannya berbeda — ia MENYERAH ke teks,
+#: dan menyerah terlalu cepat berarti membuang video yang sebenarnya
+#: cuma tersendat sesaat saat mulai diputar.
+MACET_PUTARAN_MS = 2_000
+MACET_LAYANAN_MS = 5_000
 
 #: Tebal tepi panel di sekeliling gambar/video, dalam piksel. Naikkan bila
 #: ingin bingkainya lebih tebal; 0 membuat media mepet ke tepi panel (dan
 #: sudut membulatnya ikut terlihat terpotong).
 MARGIN_PANEL = 4
+
+#: Subfolder di dalam media/kiosk tempat media per jenis layanan disimpan.
+#: `daftar_media_kios()` hanya mengambil `path.is_file()`, sehingga folder
+#: ini otomatis tidak ikut terputar sebagai sambutan.
+NAMA_FOLDER_LAYANAN = "layanan"
 
 
 def jenis_sambutan_dari_berkas(nama: str) -> str | None:
@@ -142,6 +187,104 @@ def salin_ke_media_kios(sumber: Path) -> Path:
     return tujuan
 
 
+def folder_media_layanan(code: str) -> Path | None:
+    """
+    Folder media satu jenis layanan, atau None bila `code` tidak aman.
+
+    Foldernya dinamai `code`, bukan prefix: prefix masih boleh diubah admin
+    selama jenis layanannya belum dipakai antrian, sedangkan code dikunci
+    sejak dibuat — sehingga foldernya tidak pernah jadi yatim karena
+    namanya berganti.
+
+    `code` datang dari isian admin, jadi diperlakukan sebagai nama yang
+    tidak dipercaya: wajib satu segmen nama saja, dan hasilnya wajib tetap
+    berada di dalam media/kiosk/layanan. Penjagaan yang sama dengan
+    `path_media_kios`, dengan alasan yang sama.
+    """
+    bersih = (code or "").strip()
+    if not bersih or bersih != Path(bersih).name:
+        return None
+    induk = (folder_media_kios() / NAMA_FOLDER_LAYANAN).resolve()
+    calon = (induk / bersih).resolve()
+    if calon == induk:
+        return None
+    try:
+        calon.relative_to(induk)
+    except ValueError:
+        return None
+    return calon
+
+
+def media_layanan(code: str) -> Path | None:
+    """
+    SATU berkas media untuk jenis layanan ini, atau None.
+
+    Sengaja satu, bukan daftar. Panel layanan hanya tampil selama layar
+    konfirmasi dan layar hasil — terlalu singkat untuk sebuah putaran —
+    dan putaran kedua akan bertabrakan dengan mesin putar sambutan yang
+    dijaga `_jaga_putaran`. Bila foldernya berisi lebih dari satu berkas,
+    yang pertama menurut nama yang dipakai.
+    """
+    folder = folder_media_layanan(code)
+    if folder is None or not folder.is_dir():
+        return None
+    for path in sorted(folder.iterdir(), key=lambda p: p.name.lower()):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        if path.suffix.lower() in EKSTENSI_MEDIA:
+            return path
+    return None
+
+
+def salin_ke_media_layanan(code: str, sumber: Path) -> Path | None:
+    """
+    Pasang satu berkas media untuk sebuah jenis layanan.
+
+    Berkas lain di folder itu DIHAPUS. Hanya satu berkas yang pernah
+    dipakai (lihat `media_layanan`), jadi membiarkan yang lama menumpuk
+    berarti menyimpan berkas yang tidak akan pernah tampil — dan lebih
+    buruk lagi, memilih berkas baru yang namanya jatuh setelah nama lama
+    secara alfabet akan tampak seperti tidak terjadi apa-apa.
+
+    Hanya menyentuh isi media/kiosk/layanan/<code>/, folder yang memang
+    tidak dipakai untuk apa pun selain ini.
+    """
+    folder = folder_media_layanan(code)
+    if folder is None:
+        return None
+    folder.mkdir(parents=True, exist_ok=True)
+    sumber = sumber.resolve()
+    tujuan = (folder / sumber.name).resolve()
+    for lama in folder.iterdir():
+        if not lama.is_file() or lama.resolve() == tujuan:
+            continue
+        try:
+            lama.unlink()
+        except OSError:
+            logger.warning(
+                "Media layanan lama %s tidak dapat dihapus; "
+                "berkas baru mungkin tidak terpilih",
+                lama.name,
+            )
+    if sumber != tujuan:
+        shutil.copy2(sumber, tujuan)
+    return tujuan
+
+
+def hapus_media_layanan(code: str) -> None:
+    """Kosongkan folder media sebuah jenis layanan."""
+    folder = folder_media_layanan(code)
+    if folder is None or not folder.is_dir():
+        return
+    for berkas in folder.iterdir():
+        if not berkas.is_file():
+            continue
+        try:
+            berkas.unlink()
+        except OSError:
+            logger.warning("Media layanan %s tidak dapat dihapus", berkas.name)
+
+
 class _LabelGambar(QLabel):
     """Gambar yang selalu muat di panel, tanpa dipotong atau diregang."""
 
@@ -184,10 +327,19 @@ class _LabelGambar(QLabel):
 
 class PanelSambutanKios(QFrame):
     """
-    Satu panel: teks, atau putaran berkas di folder media.
+    Satu panel dengan empat isi yang bergantian.
 
-    Info jenis layanan (setelah A/B/C disentuh) selalu teks, berapa pun
-    jenis sambutannya: video tidak sempat selesai dalam jeda konfirmasi.
+    Keadaan bakunya adalah sambutan: teks, atau putaran berkas di folder
+    media. KioskPage mengambil alih panel ini dua kali per pengunjung —
+    dengan media/teks jenis layanan saat A/B/C disentuh, lalu dengan kartu
+    nomor saat nomornya terbit — dan `_kembali_ke_sambutan()` yang
+    mengembalikannya.
+
+    Selama diambil alih, `_menampilkan_info_layanan` bernilai True. Flag
+    itu MENAHAN seluruh mesin putar sambutan: detak `_jaga_putaran`,
+    penyegaran `muat_pengaturan` yang datang dua detik sekali dari papan,
+    dan sinyal selesai/gagal pemutar video. Setiap jalan masuk ke keadaan
+    "diambil alih" wajib menyalakannya sebelum menyentuh pemutar.
     """
 
     def __init__(
@@ -215,6 +367,21 @@ class PanelSambutanKios(QFrame):
         self._daftar: list[Path] = []
         self._indeks = 0
         self.berkas_tampil: Path | None = None
+        #: Media jenis layanan yang sedang mengambil alih panel, bila ada.
+        self._berkas_layanan: Path | None = None
+        #: Teks yang dipakai bila media layanan itu ternyata gagal diputar.
+        self._teks_cadangan_layanan = ""
+        #: True bila pengambilalihan sempat mengganti SUMBER pemutar, bukan
+        #: sekadar menjedanya. Menentukan jalan pulang: sumber yang masih
+        #: utuh boleh disambung, sumber yang sudah tergantikan tidak —
+        #: lihat `_kembali_ke_sambutan`.
+        self._pemutar_disentuh = False
+        #: Perubahan folder media yang tiba selagi panel diambil alih.
+        #: Ditunda, bukan dibuang: timer debounce-nya sudah terlanjur
+        #: meletus dan tidak akan mencoba lagi sampai ada perubahan
+        #: berikutnya, sehingga berkas yang baru disalin admin bisa
+        #: tertinggal tidak tampil entah sampai kapan.
+        self._perlu_muat_ulang = False
         # Mesin putar: SATU detak berkala yang memutuskan kapan lanjut ke
         # item berikutnya. Sinyal "selesai" Qt (EndOfMedia/StoppedState)
         # dipakai sebagai jalan cepat opsional saja — di Windows dengan
@@ -295,6 +462,8 @@ class PanelSambutanKios(QFrame):
         if self._widget_video is not None:
             self._widget_video.hide()
 
+        self.tumpukan.addWidget(self._bangun_halaman_kartu())
+
         # Pudar hanya pada label teks. QVideoWidget adalah jendela native:
         # QGraphicsOpacityEffect pada tumpukan membuat videonya hitam.
         self._efek = QGraphicsOpacityEffect(self.label_teks)
@@ -303,6 +472,43 @@ class PanelSambutanKios(QFrame):
         # muat_pengaturan() dipanggil DisplayPage SETELAH bayangan dipasang
         # pada panel ini. Memuat video di sini, sebelum bayangan ada,
         # lalu bayangan ditambahkan di atasnya, membuat video hitam.
+
+    def _bangun_halaman_kartu(self) -> QWidget:
+        """
+        Kartu nomor yang baru terbit: nomor, layanan, sisa antrian, arahan.
+
+        Nomornya dibuat sebesar mungkin dengan sengaja. `_cetak()` di
+        KioskPage tidak pernah menggagalkan pengambilan nomor — printer
+        yang kehabisan kertas tetap meninggalkan nomor yang sah — dan pada
+        saat itu layar inilah SATU-SATUNYA catatan nomor yang dipegang
+        pengunjung. Cukup besar untuk difoto dengan ponsel dari jarak
+        berdiri, bukan sekadar terbaca.
+        """
+        halaman = QWidget()
+        isi = QVBoxLayout(halaman)
+        isi.setContentsMargins(12, 4, 12, 4)
+        isi.setSpacing(2)
+
+        self.label_kartu_judul = QLabel("NOMOR ANDA")
+        self.label_kartu_nomor = QLabel("")
+        self.label_kartu_layanan = QLabel("")
+        self.label_kartu_sisa = QLabel("")
+        self.label_kartu_arahan = QLabel("")
+
+        isi.addStretch(1)
+        for label in (
+            self.label_kartu_judul,
+            self.label_kartu_nomor,
+            self.label_kartu_layanan,
+            self.label_kartu_sisa,
+            self.label_kartu_arahan,
+        ):
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setWordWrap(True)
+            label.setMinimumSize(1, 1)
+            isi.addWidget(label)
+        isi.addStretch(1)
+        return halaman
 
     # -----------------------------------------------------------------
     # Pengaturan
@@ -336,19 +542,45 @@ class PanelSambutanKios(QFrame):
         self._terapkan(jenis, daftar)
 
     # -----------------------------------------------------------------
-    # Info layanan (selalu teks)
+    # Pengambilalihan panel oleh KioskPage
     # -----------------------------------------------------------------
 
-    def tampilkan_info(self, teks: str | None) -> None:
+    def tampilkan_info(self, teks: str | None, *, berkas: Path | None = None) -> None:
         """
-        Ganti isi lewat pudar. `None` atau string kosong kembali ke sambutan.
+        Tampilkan info sebuah jenis layanan, atau kembali ke sambutan.
+
+        `berkas` diutamakan atas `teks`: panel ini kecil dan nama layanan
+        sudah tampil besar di panel konfirmasi di bawahnya, jadi menumpuk
+        gambar dan tulisan hanya membuat dua-duanya sulit dibaca. `teks`
+        tetap dipakai sebagai cadangan bila berkasnya gagal dimuat.
+
+        `None` pada keduanya berarti kembali ke sambutan.
         """
+        if berkas is not None and self._ambil_alih_media(berkas, teks or ""):
+            return
+
         menuju_sambutan = not (teks or "").strip()
         baru = self.teks_sambutan() if menuju_sambutan else (teks or "").strip()
-        if baru == self._teks_tampil and (
-            menuju_sambutan == (not self._menampilkan_info_layanan)
+        # Perbandingan teks saja tidak cukup lagi sejak panel bisa dipegang
+        # media atau kartu nomor: teksnya mungkin sama persis dengan yang
+        # terakhir tampil, sedangkan yang kelihatan di layar bukan teks.
+        if (
+            not self._sedang_dipegang()
+            and baru == self._teks_tampil
+            and menuju_sambutan == (not self._menampilkan_info_layanan)
         ):
             return
+
+        if menuju_sambutan and self._sedang_dipegang():
+            # Memudarkan media tidak mungkin: efek opacity hanya terpasang
+            # pada label teks, dan QGraphicsOpacityEffect di atas
+            # QVideoWidget membuat videonya hitam (lihat _lepas_bayangan).
+            self._teks_tampil = baru
+            self._hentikan_animasi()
+            self._efek.setOpacity(1.0)
+            self._kembali_ke_sambutan()
+            return
+
         self._teks_tampil = baru
         # Kunci sejak awal fade, supaya penyegaran papan dua detik sekali
         # tidak mengembalikan video di tengah transisi ke info layanan.
@@ -369,13 +601,118 @@ class PanelSambutanKios(QFrame):
         )
         self._animasi.start()
 
+    def tampilkan_kartu(
+        self, *, nomor: str, layanan: str, sisa: str, arahan: str
+    ) -> None:
+        """
+        Ganti isi panel dengan kartu nomor yang baru terbit.
+
+        Seketika, tanpa pudar: yang tergantikan hampir selalu media
+        layanan, dan media tidak bisa dipudarkan.
+
+        Pemutar hanya DIJEDA, tidak dilepas. Bila layanan tadi tidak punya
+        media, sumber pemutar masih memegang klip sambutan pada posisi
+        terakhirnya, dan `_kembali_ke_sambutan()` bisa menyambungnya.
+        """
+        self._hentikan_animasi()
+        self._efek.setOpacity(1.0)
+        # Dinyalakan SEBELUM menyentuh apa pun: inilah yang menahan detak
+        # putaran dan penyegaran papan selama kartu tampil.
+        self._menampilkan_info_layanan = True
+        self._jeda_putaran()
+        self._berkas_layanan = None
+        self._teks_cadangan_layanan = ""
+
+        self.label_kartu_nomor.setText(nomor)
+        self.label_kartu_layanan.setText(layanan)
+        self.label_kartu_sisa.setText(sisa)
+        self.label_kartu_sisa.setVisible(bool(sisa))
+        self.label_kartu_arahan.setText(arahan)
+        self.label_kartu_arahan.setVisible(bool(arahan))
+
+        self._tampilkan_halaman(HALAMAN_KARTU)
+        self._pulihkan_bayangan()
+
+    def _sedang_dipegang(self) -> bool:
+        """True bila panel sedang menampilkan media layanan atau kartu."""
+        return (
+            self._berkas_layanan is not None
+            or self.tumpukan.currentIndex() == HALAMAN_KARTU
+        )
+
+    def _ambil_alih_media(self, berkas: Path, teks_cadangan: str) -> bool:
+        """
+        Tampilkan media satu jenis layanan. False bila berkasnya tak terpakai.
+
+        Seketika, tanpa pudar — alasannya sama dengan `tampilkan_kartu`.
+        """
+        if self._berkas_layanan == berkas:
+            return True
+
+        self._hentikan_animasi()
+        self._efek.setOpacity(1.0)
+        # Dinyalakan SEBELUM menyentuh pemutar. stop()/setSource() di dalam
+        # _tampilkan_item memancarkan sinyal "selesai" dan "error" palsu,
+        # dan flag inilah yang menahan keduanya supaya tidak memajukan
+        # putaran sambutan di tengah pengambilalihan.
+        self._menampilkan_info_layanan = True
+        self._jeda_putaran()
+        self._teks_cadangan_layanan = teks_cadangan
+        # Berlaku untuk gambar JUGA, bukan video saja: jalur gambar di
+        # _tampilkan_item() memanggil _lepaskan_berkas_video(), sehingga
+        # klip sambutan yang sedang berjalan tetap kehilangan sumbernya.
+        # Hanya info layanan yang murni teks — yang tidak pernah masuk ke
+        # sini — meninggalkan pemutar sekadar terjeda.
+        self._pemutar_disentuh = True
+
+        if self._tampilkan_item(berkas, ulang=True):
+            self._berkas_layanan = berkas
+            return True
+
+        logger.warning("Media layanan %s gagal dimuat, memakai teks", berkas.name)
+        self._berkas_layanan = None
+        return False
+
+    def _kembali_ke_sambutan(self) -> None:
+        """
+        Lepaskan panel dari pengambilalihan, kembali ke putaran sambutan.
+
+        Dua jalan pulang, dipilih dari apakah SUMBER pemutar sempat
+        tergantikan. Bila tidak — info layanan hanya teks, atau hanya
+        gambar — klip sambutan cuma dijeda dan posisinya masih utuh, jadi
+        disambung seperti sebelumnya. Bila iya, posisinya sudah hilang dan
+        tidak ada gunanya memaksa mengulang klip yang sama dari nol: orang
+        yang tadi menontonnya sudah pergi membawa nomornya, dan yang
+        berdiri berikutnya lebih baik disambut item berikutnya dari awal.
+        """
+        self._berkas_layanan = None
+        self._teks_cadangan_layanan = ""
+        # Dibersihkan lebih dulu: _item_berikutnya() dan _jaga_putaran()
+        # sama-sama menolak berjalan selama flag ini menyala. Tidak ada
+        # celah balapan — seluruh sisa fungsi ini berjalan sinkron, jadi
+        # tidak ada detak pewaktu maupun penyegaran papan yang bisa
+        # menyelip di antaranya.
+        self._menampilkan_info_layanan = False
+
+        if self._pemutar_disentuh and self._daftar:
+            self._pemutar_disentuh = False
+            self._dijeda_sengaja = False
+            self._item_berikutnya()
+        else:
+            self._pemutar_disentuh = False
+            self._lanjutkan_sambutan()
+
+        if self._perlu_muat_ulang:
+            self._perlu_muat_ulang = False
+            self.muat_pengaturan()
+
     def _setelah_pudar(self, teks: str, menuju_sambutan: bool) -> None:
         if menuju_sambutan:
-            self._menampilkan_info_layanan = False
-            self._lanjutkan_sambutan()
+            self._kembali_ke_sambutan()
         else:
             self.label_teks.setText(teks)
             self._tampilkan_halaman(HALAMAN_TEKS)
+            self._pulihkan_bayangan()
 
         self._hentikan_animasi()
         self._animasi = QPropertyAnimation(self._efek, b"opacity", self)
@@ -387,11 +724,19 @@ class PanelSambutanKios(QFrame):
     def hentikan(self) -> None:
         self._hentikan_animasi()
         self._dijeda_sengaja = True
+        self._berkas_layanan = None
         self._jeda_putaran()
         self._lepaskan_berkas_video()
 
     def ganti_gaya_teks(self, stylesheet: str) -> None:
         self.label_teks.setStyleSheet(stylesheet)
+
+    def ganti_gaya_kartu(self, gaya: dict[str, str]) -> None:
+        """Gaya tiap baris kartu nomor, dikirim papan bersama ukurannya."""
+        for nama, stylesheet in gaya.items():
+            label = getattr(self, f"label_kartu_{nama}", None)
+            if label is not None:
+                label.setStyleSheet(stylesheet)
 
     def showEvent(self, event) -> None:  # noqa: N802 - nama API Qt
         super().showEvent(event)
@@ -471,6 +816,11 @@ class PanelSambutanKios(QFrame):
         dalamnya sudah benar mendeteksi perubahan SUNGGUHAN saja.
         """
         if self._menampilkan_info_layanan:
+            # Ditunda, bukan dibuang. Timer debounce sudah meletus dan
+            # tidak akan mencoba lagi sampai ada perubahan folder
+            # BERIKUTNYA, sehingga berkas yang baru saja disalin admin
+            # bisa tertinggal tidak tampil entah sampai kapan.
+            self._perlu_muat_ulang = True
             return
         self.muat_pengaturan()
 
@@ -511,6 +861,10 @@ class PanelSambutanKios(QFrame):
         self.label_teks.setText(self.teks_sambutan())
         self._teks_tampil = self.teks_sambutan()
         self._tampilkan_halaman(HALAMAN_TEKS)
+        # Media layanan boleh berupa video walaupun sambutannya cuma teks,
+        # dan video mematikan bayangan panel. Tanpa baris ini panel pulang
+        # ke sambutan tanpa bayangannya.
+        self._pulihkan_bayangan()
 
     def _item_berikutnya(self) -> None:
         """
@@ -550,7 +904,9 @@ class PanelSambutanKios(QFrame):
         finally:
             self._sedang_ganti_item = False
 
-    def _tampilkan_item(self, berkas: Path, *, lanjut: bool = False) -> bool:
+    def _tampilkan_item(
+        self, berkas: Path, *, lanjut: bool = False, ulang: bool = False
+    ) -> bool:
         ekstensi = berkas.suffix.lower()
         if ekstensi in EKSTENSI_GAMBAR:
             if not self._pasang_gambar(berkas):
@@ -570,7 +926,7 @@ class PanelSambutanKios(QFrame):
             return True
 
         if ekstensi in EKSTENSI_VIDEO:
-            if not self._pasang_video(berkas, lanjut=lanjut):
+            if not self._pasang_video(berkas, lanjut=lanjut, ulang=ulang):
                 logger.warning(
                     "Sambutan anjungan: video %s gagal dimuat, dilewati", berkas.name
                 )
@@ -595,13 +951,25 @@ class PanelSambutanKios(QFrame):
         Detak berkala: satu-satunya pemicu yang WAJIB benar, termasuk di
         item terakhir. Timer/sinyal video Qt di Windows sering absen —
         jangan andalkan mereka, baca posisi/durasi langsung di sini.
+
+        Melayani DUA pemakai dengan kesimpulan berbeda dari pembacaan yang
+        sama: putaran sambutan maju ke item berikutnya, media jenis layanan
+        mengulang dirinya sendiri sampai pengunjung memilih.
         """
+        if self._sedang_ganti_item or not self._jam_item.isValid():
+            return
+
+        # Didahulukan atas penjagaan di bawahnya: selama media layanan
+        # tampil, `_menampilkan_info_layanan` menyala dan `_daftar` tidak
+        # relevan — keduanya akan memulangkan fungsi ini terlalu awal.
+        if self._berkas_layanan is not None:
+            self._jaga_ulangan_layanan()
+            return
+
         if (
             self._menampilkan_info_layanan
             or self._dijeda_sengaja
-            or self._sedang_ganti_item
             or not self._daftar
-            or not self._jam_item.isValid()
         ):
             return
         halaman = self.tumpukan.currentIndex()
@@ -612,6 +980,23 @@ class PanelSambutanKios(QFrame):
         if halaman != HALAMAN_VIDEO or self._pemutar is None:
             return
 
+        selesai, macet_ms = self._periksa_ujung_video()
+        if selesai or macet_ms >= MACET_PUTARAN_MS:
+            self._item_berikutnya()
+
+    def _periksa_ujung_video(self) -> tuple[bool, int]:
+        """
+        Baca sendiri apakah video sudah di ujung, dan berapa lama ia diam.
+
+        Satu pembacaan untuk dua pemakai, karena kesalahannya sama:
+        `EndOfMedia`/`StoppedState` sering tidak terpancar di Windows
+        dengan backend FFmpeg, jadi posisi dan durasi dibaca langsung di
+        sini alih-alih dipercayakan pada sinyal.
+
+        Yang dikembalikan sengaja mentah — "sudah di ujung" dan "berapa
+        milidetik posisinya tidak bergerak" — supaya tiap pemakai memilih
+        ambang macetnya sendiri.
+        """
         durasi = self._pemutar.duration()
         posisi = self._pemutar.position()
         selesai_posisi = durasi > 0 and posisi > 0 and posisi >= max(0, durasi - 250)
@@ -623,10 +1008,66 @@ class PanelSambutanKios(QFrame):
         else:
             self._tick_macet = 0
         self._posisi_tick_lalu = posisi
-        posisi_macet = self._tick_macet * self._jantung.interval() >= 2_000
 
-        if selesai_posisi or lewat_batas or posisi_macet:
-            self._item_berikutnya()
+        return (
+            selesai_posisi or lewat_batas,
+            self._tick_macet * self._jantung.interval(),
+        )
+
+    def _jaga_ulangan_layanan(self) -> None:
+        """
+        Ulang video jenis layanan sampai pengunjung menekan YA atau BATAL.
+
+        Video yang membeku di frame terakhir salah untuk panel ini:
+        pengunjung menontonnya SAMBIL memutuskan, dan yang datang di
+        tengah putaran hanya akan melihat gambar diam.
+        """
+        if self._dijeda_sengaja or self._pemutar is None:
+            return
+        if self.tumpukan.currentIndex() != HALAMAN_VIDEO:
+            return
+
+        selesai, macet_ms = self._periksa_ujung_video()
+        if selesai:
+            self._ulang_video_layanan()
+            return
+        if macet_ms >= MACET_LAYANAN_MS:
+            # SENGAJA tidak diulang. Berkas yang rusak akan tersendat lagi
+            # seketika, dan mengulangnya tiap detak menghasilkan kedutan
+            # berulang di layar publik — jauh lebih buruk daripada teks.
+            self._jatuhkan_media_layanan("tersendat")
+
+    def _ulang_video_layanan(self) -> None:
+        """
+        Kembali ke detik nol.
+
+        `setLoops(Infinite)` sudah dipasang sebagai jalan cepat, tetapi
+        pengulangan internal Qt bertumpu pada deteksi akhir-media yang
+        sama dengan sinyal yang sering absen itu. Jalur inilah yang WAJIB
+        benar; yang di atas hanya bonus bila kebetulan bekerja.
+        """
+        if self._pemutar is None:
+            return
+        self._pemutar.setPosition(0)
+        self._pemutar.play()
+        # WAJIB. `lewat_batas` di _periksa_ujung_video dihitung dari jam
+        # ini; tanpa direstart ia langsung benar lagi pada detak berikutnya
+        # dan videonya diulang setiap 250 milidetik.
+        self._mulai_jam_item()
+
+    def _jatuhkan_media_layanan(self, alasan: str) -> None:
+        """Lepas media layanan yang tidak dapat diputar, ganti dengan teks."""
+        berkas = self._berkas_layanan
+        if berkas is None:
+            return
+        self._berkas_layanan = None
+        teks = self._teks_cadangan_layanan or self.teks_sambutan()
+        self._teks_tampil = teks
+        self.label_teks.setText(teks)
+        self._lepaskan_berkas_video()
+        self._tampilkan_halaman(HALAMAN_TEKS)
+        self._pulihkan_bayangan()
+        logger.warning("Media layanan %s %s; memakai teks", berkas.name, alasan)
 
     def _jeda_putaran(self) -> None:
         self._jantung.stop()
@@ -721,23 +1162,34 @@ class PanelSambutanKios(QFrame):
         self._pemutar.playbackStateChanged.connect(self._keadaan_putar)
         return self._widget_video
 
-    def _pasang_video(self, berkas: Path | None, *, lanjut: bool = False) -> bool:
+    def _pasang_video(
+        self, berkas: Path | None, *, lanjut: bool = False, ulang: bool = False
+    ) -> bool:
+        from PySide6.QtMultimedia import QMediaPlayer
+
         if berkas is None or self._pemutar is None:
             return False
+
+        # Ditentukan di SATU baris dari argumen, bukan disimpulkan dari
+        # keadaan di tempat lain: sambutan sekali putar lalu maju ke item
+        # berikutnya, media jenis layanan mengulang sampai pengunjung
+        # memilih. Dipasang sebelum jalan pintas `lanjut` supaya jalur
+        # mana pun tidak pernah mewarisi nilai pemakai sebelumnya.
+        self._pemutar.setLoops(
+            QMediaPlayer.Loops.Infinite if ulang else QMediaPlayer.Loops.Once
+        )
 
         if lanjut and self.berkas_tampil == berkas:
             self._dijeda_sengaja = False
             self._pemutar.play()
             return True
 
-        # Selalu sekali putar. Habis itu detak (_jaga_putaran) atau sinyal
-        # Qt memaju ke item berikutnya lewat _video_selesai(). setSource
-        # ke URL yang sama diabaikan Qt, jadi sumber dikosongkan dulu —
-        # stop()/setSource() itu sendiri bisa memancarkan sinyal "selesai"
-        # palsu, karena itu diabaikan sampai _timer_izinkan_selesai lewat.
+        # setSource ke URL yang sama diabaikan Qt, jadi sumber dikosongkan
+        # dulu — stop()/setSource() itu sendiri bisa memancarkan sinyal
+        # "selesai" palsu, karena itu diabaikan sampai
+        # _timer_izinkan_selesai lewat.
         self._dijeda_sengaja = False
         self._abaikan_selesai_video = True
-        self._pemutar.setLoops(1)
         self._pemutar.stop()
         self._pemutar.setSource(QUrl())
         self._pemutar.setSource(QUrl.fromLocalFile(str(berkas)))
@@ -800,6 +1252,14 @@ class PanelSambutanKios(QFrame):
         """
         logger.warning("Pemutar video sambutan gagal: %s", pesan)
         if self._abaikan_selesai_video:
+            return
+        if self._berkas_layanan is not None:
+            # Video jenis layanan yang rusak. Qt baru melaporkannya jauh
+            # setelah _tampilkan_item() mengaku berhasil, jadi ini salah
+            # satu dari dua tempat kegagalannya dapat ditangkap — yang
+            # lain adalah ambang macet di _jaga_ulangan_layanan, untuk
+            # berkas yang gagal tanpa memancarkan error sama sekali.
+            self._jatuhkan_media_layanan("tidak dapat diputar")
             return
         if self._dijeda_sengaja or self._menampilkan_info_layanan or not self._daftar:
             return

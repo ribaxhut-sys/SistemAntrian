@@ -14,6 +14,8 @@ Environment variable yang dikenali:
     ANTRIAN_LOG_LEVEL    DEBUG | INFO | WARNING | ERROR
     ANTRIAN_PRINTER      pencetak tiket mesin ini: pdf | system | none
     ANTRIAN_SUARA        1/0 — mesin ini membunyikan panggilan atau tidak
+    ANTRIAN_LEWATI_LOGIN 1/0 — masuk sebagai admin tanpa nama/sandi
+                         (hanya dari source; .exe mengabaikannya)
 
 Dua yang terakhir menimpa pengaturan bersama di database, dan memang harus
 bisa begitu: pencetak tiket menempel pada satu mesin dan pengeras suara
@@ -43,6 +45,27 @@ APP_SLUG = "antrian-cro"
 # Timezone operasional. Seluruh timestamp transaksi memakai zona ini,
 # bukan zona komputer, agar konsisten di mesin mana pun.
 TIMEZONE = "Asia/Jakarta"
+
+#: Pintasan uji tampilan: layar petugas masuk sebagai admin tanpa nama
+#: dan sandi. Matikan sebelum build .exe — dan tetap diabaikan bila
+#: aplikasi sudah dibekukan, supaya lupa mencabutnya tidak membuka loket
+#: tanpa kunci di komputer petugas.
+LEWATI_LOGIN_PENGEMBANG = True
+
+
+def lewati_login_pengembang() -> bool:
+    """
+    True hanya saat dijalankan dari source dan pintasannya masih menyala.
+
+    Environment `ANTRIAN_LEWATI_LOGIN` menimpa konstanta di atas, supaya
+    tes dapat mematikan pintasan tanpa mengubah berkas.
+    """
+    if getattr(sys, "frozen", False):
+        return False
+    env = _bool_from_env("ANTRIAN_LEWATI_LOGIN")
+    if env is not None:
+        return env
+    return LEWATI_LOGIN_PENGEMBANG
 
 
 def base_dir() -> Path:

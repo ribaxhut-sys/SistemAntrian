@@ -342,6 +342,186 @@ def test_tombol_layanan_proporsional_pada_layar_penuh(qtbot, halaman_kios):
         assert jarak >= CELAH_TOMBOL
 
 
+# ---------------------------------------------------------------------
+# Kisi kartu menyesuaikan banyaknya layanan
+# ---------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "jumlah, harapan",
+    [
+        (1, [1]),
+        (2, [2]),
+        (3, [3]),
+        (4, [2, 2]),
+        (5, [3, 2]),
+        (6, [3, 3]),
+        (7, [3, 2, 2]),
+        (8, [3, 3, 2]),
+        (9, [3, 3, 3]),
+    ],
+)
+def test_baris_kisi_membagi_kartu_serata_mungkin(jumlah, harapan):
+    """
+    Empat layanan disusun 2×2 dan tujuh layanan 3+2+2, bukan 3+1 dan 3+3+1.
+
+    Kartu yang sendirian di baris bawah terbaca sebagai kartu yang berbeda
+    derajat, padahal semua jenis layanan setara.
+    """
+    from app.ui.kiosk.kiosk_page import baris_kisi
+
+    assert baris_kisi(jumlah) == harapan
+
+
+@pytest.fixture
+def bikin_halaman_kios(qtbot, auth, master_service):
+    """Layar kios dengan sekian jenis layanan aktif."""
+    from app.services.master_data_service import MasterDataService
+    from app.services.queue_service import QueueService
+    from app.services.settings_service import SettingsService
+    from app.services.sound_service import NullSoundPlayer
+    from app.ui.kiosk.kiosk_page import KioskPage
+
+    def bikin(jumlah: int, lebar: int = 1366, tinggi: int = 768):
+        for nomor, huruf in enumerate("DEFG", start=4):
+            if len(master_service.list_categories()) >= jumlah:
+                break
+            master_service.create_category(
+                code=f"LAYANAN-{huruf}", name=f"Layanan {huruf}", prefix=huruf
+            )
+        for kategori in master_service.list_categories()[jumlah:]:
+            master_service.set_category_status(kategori.id, False)
+
+        auth.logout()
+        auth.mulai_sesi_kios()
+        halaman = KioskPage(
+            QueueService(auth),
+            MasterDataService(auth),
+            SettingsService(auth),
+            NullSoundPlayer(),
+        )
+        qtbot.addWidget(halaman)
+        halaman.papan.hentikan()
+        halaman._penghitung.stop()
+        halaman.resize(lebar, tinggi)
+        halaman.show()
+        qtbot.waitExposed(halaman)
+        halaman._sesuaikan_ukuran_tombol()
+        return halaman
+
+    return bikin
+
+
+@pytest.mark.parametrize("jumlah", [1, 2, 3, 4, 5, 6, 7])
+def test_kartu_tidak_pernah_meluber_keluar_layar(bikin_halaman_kios, jumlah):
+    """
+    Baris kartu paling bawah adalah bagian yang harus disentuh.
+
+    Sempat panel meminta tinggi lebih daripada sisa layar, dan yang keluar
+    dari tepi bawah justru baris itu — kartunya tidak mengecil, tetapi
+    terpotong beserta nama layanannya.
+    """
+    halaman = bikin_halaman_kios(jumlah)
+
+    for btn in halaman.tombol_layanan:
+        bawah = btn.mapTo(halaman, btn.rect().bottomLeft()).y()
+        assert bawah <= halaman.height()
+
+
+@pytest.mark.parametrize("jumlah", [4, 5, 6, 7])
+def test_kartu_tidak_saling_menindih(bikin_halaman_kios, jumlah):
+    """
+    Baris kartu tidak boleh bertumpuk pada jendela yang pendek.
+
+    Kartu punya ukuran tetap; begitu jumlah tinggi seluruh barisnya
+    melebihi panel, layout menumpuk baris kedua di atas baris pertama dan
+    nama layanan yang tertimbun hilang sama sekali. Tingginya harus
+    mengalah, bukan barisnya.
+    """
+    halaman = bikin_halaman_kios(jumlah)
+
+    kotak = [btn.geometry() for btn in halaman.tombol_layanan]
+    for indeks, satu in enumerate(kotak):
+        for lain in kotak[indeks + 1 :]:
+            assert not satu.intersects(lain)
+
+
+def test_lima_layanan_tersusun_tiga_di_atas_dua_di_bawah(bikin_halaman_kios):
+    halaman = bikin_halaman_kios(5)
+
+    per_baris: dict[int, list] = {}
+    for btn in halaman.tombol_layanan:
+        per_baris.setdefault(btn.y(), []).append(btn)
+
+    assert sorted(len(isi) for isi in per_baris.values()) == [2, 3]
+
+
+def test_kartu_baris_terakhir_dilebarkan_secukupnya(bikin_halaman_kios):
+    """
+    Dua kartu terakhir mengisi barisnya, tetapi tidak sampai jauh lebih
+    besar daripada kartu di atasnya — ukuran yang berbeda terbaca sebagai
+    derajat yang berbeda.
+    """
+    from app.ui.kiosk.kiosk_page import PEMBESAR_BARIS_AKHIR
+
+    halaman = bikin_halaman_kios(5)
+    atas, bawah = halaman.tombol_layanan[:3], halaman.tombol_layanan[3:]
+
+    assert bawah[0].width() > atas[0].width()
+    assert bawah[0].width() <= round(atas[0].width() * PEMBESAR_BARIS_AKHIR)
+    assert bawah[0].height() == atas[0].height()
+
+
+def test_empat_layanan_dua_baris_dua_kolom(bikin_halaman_kios):
+    halaman = bikin_halaman_kios(4)
+
+    per_baris: dict[int, list] = {}
+    for btn in halaman.tombol_layanan:
+        per_baris.setdefault(btn.y(), []).append(btn)
+
+    assert sorted(len(isi) for isi in per_baris.values()) == [2, 2]
+    ukuran = {(btn.width(), btn.height()) for btn in halaman.tombol_layanan}
+    assert len(ukuran) == 1
+
+
+def test_kartu_melebar_saat_layanannya_sedikit(bikin_halaman_kios):
+    """
+    Kantor berlayanan tunggal tidak seharusnya mendapat kartu seukuran
+    kantor berlayanan tiga, lalu menyisakan separuh panel kosong.
+    """
+    from app.ui.kiosk.kiosk_page import LEBAR_TOMBOL_MAKS
+
+    halaman = bikin_halaman_kios(1, lebar=1920, tinggi=1080)
+
+    assert halaman.tombol_layanan[0].width() > LEBAR_TOMBOL_MAKS
+
+
+def test_petunjuk_tidak_menyuruh_memilih_saat_layanannya_satu(bikin_halaman_kios):
+    """
+    "Jenis layanan yang Anda butuhkan" mengandaikan ada yang perlu
+    dipilih, dan membuat pengunjung mencari tombol lain yang tidak ada.
+    """
+    halaman = bikin_halaman_kios(1)
+
+    assert halaman.label_petunjuk.text() == (
+        "Sentuh tombol di bawah untuk mengambil nomor"
+    )
+
+
+def test_kartu_berubah_warna_saat_ditekan(halaman_kios):
+    """
+    Layar sentuh resistif tidak terasa ditekan.
+
+    Kartu yang warnanya tidak berubah apa pun saat disentuh membuat
+    pengunjung menekannya dua kali — dan tekanan kedua mendarat di layar
+    konfirmasi yang baru saja muncul.
+    """
+    from app.ui.style import DISPLAY_KIOS_TOMBOL, DISPLAY_KIOS_TOMBOL_TEKAN
+
+    assert DISPLAY_KIOS_TOMBOL_TEKAN != DISPLAY_KIOS_TOMBOL
+    gaya = halaman_kios.tombol_layanan[0].styleSheet()
+    assert f"QPushButton:pressed {{ background: {DISPLAY_KIOS_TOMBOL_TEKAN}" in gaya
+
+
 def test_papan_kios_tetap_kompak_di_layar_penuh(qtbot, halaman_kios):
     """Pembedanya `kompak`, bukan aplikasi yang berbeda."""
     sebelum = halaman_kios.papan.px("nomor")
@@ -502,17 +682,49 @@ def test_mode_dialog_memilih_layar_antrian(qtbot):
     assert dialog.result() == int(QDialog.DialogCode.Accepted)
 
 
-def test_mode_dialog_menawarkan_tiga_mesin(qtbot):
-    """Tiga mesin yang berbeda harus dapat dipilih tanpa saling menumpang."""
+def test_mode_dialog_menawarkan_empat_pilihan_saat_uji(qtbot):
+    """
+    Dari source, admin dan petugas harus dapat dipilih terpisah.
+
+    Satu tombol 'Layar Petugas' yang selalu masuk sebagai admin membuat
+    uji panggilan tidak bisa dilakukan tanpa mematikan pintasan login.
+    """
     from PySide6.QtWidgets import QPushButton
 
-    from app.ui.login.mode_dialog import ANJUNGAN, LAYAR_ANTRIAN, LAYAR_PETUGAS, ModeDialog
+    from app.ui.login.mode_dialog import (
+        ANJUNGAN,
+        LAYAR_ADMIN,
+        LAYAR_ANTRIAN,
+        LAYAR_PETUGAS,
+        ModeDialog,
+    )
 
     dialog = ModeDialog()
     qtbot.addWidget(dialog)
 
-    assert len(dialog.findChildren(QPushButton)) == 3
-    assert len({LAYAR_ANTRIAN, ANJUNGAN, LAYAR_PETUGAS}) == 3
+    teks = [b.text() for b in dialog.findChildren(QPushButton)]
+    assert len(teks) == 4
+    assert any("ANTRIAN" in t for t in teks)
+    assert any("ANJUNGAN" in t for t in teks)
+    assert any("ADMIN" in t for t in teks)
+    assert any("PETUGAS" in t for t in teks)
+    assert len({LAYAR_ANTRIAN, ANJUNGAN, LAYAR_ADMIN, LAYAR_PETUGAS}) == 4
+
+
+def test_mode_dialog_satu_tombol_petugas_bila_wajib_login(qtbot, monkeypatch):
+    """Pada .exe, peran dipisah oleh akun yang masuk, bukan oleh tombol."""
+    monkeypatch.setenv("ANTRIAN_LEWATI_LOGIN", "0")
+    from PySide6.QtWidgets import QPushButton
+
+    from app.ui.login.mode_dialog import ModeDialog
+
+    dialog = ModeDialog()
+    qtbot.addWidget(dialog)
+
+    teks = [b.text() for b in dialog.findChildren(QPushButton)]
+    assert len(teks) == 3
+    assert not any("ADMIN" in t for t in teks)
+    assert any("PETUGAS" in t for t in teks)
 
 
 def test_mode_dialog_memilih_layar_petugas(qtbot):
@@ -529,6 +741,23 @@ def test_mode_dialog_memilih_layar_petugas(qtbot):
     qtbot.mouseClick(tombol_petugas, Qt.MouseButton.LeftButton)
 
     assert dialog.pilihan == LAYAR_PETUGAS
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+
+
+def test_mode_dialog_memilih_layar_admin(qtbot):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog, QPushButton
+
+    from app.ui.login.mode_dialog import LAYAR_ADMIN, ModeDialog
+
+    dialog = ModeDialog()
+    qtbot.addWidget(dialog)
+    tombol_admin = next(
+        b for b in dialog.findChildren(QPushButton) if "ADMIN" in b.text()
+    )
+    qtbot.mouseClick(tombol_admin, Qt.MouseButton.LeftButton)
+
+    assert dialog.pilihan == LAYAR_ADMIN
     assert dialog.result() == int(QDialog.DialogCode.Accepted)
 
 
@@ -659,3 +888,471 @@ def test_pencetak_mesin_dipakai_jendela_utama(qtbot, auth, antrian_siap, env_mes
     qtbot.addWidget(jendela)
 
     assert isinstance(jendela.ticket_service.printer, NullTicketPrinter)
+
+
+# ---------------------------------------------------------------------
+# Media per jenis layanan
+# ---------------------------------------------------------------------
+
+@pytest.fixture
+def folder_media(tmp_path, monkeypatch):
+    """Alihkan media/kiosk ke folder sementara milik test ini."""
+    from app.ui.kiosk import sambutan as modul
+
+    folder = tmp_path / "kiosk"
+    folder.mkdir()
+    monkeypatch.setattr(modul, "folder_media_kios", lambda: folder)
+    return folder
+
+
+def _gambar(path):
+    """PNG 1x1 yang benar-benar dapat dimuat QPixmap."""
+    from PySide6.QtGui import QImage
+
+    gambar = QImage(1, 1, QImage.Format.Format_RGB32)
+    gambar.fill(0)
+    assert gambar.save(str(path))
+    return path
+
+
+def test_media_layanan_menolak_kode_yang_merayap_keluar(folder_media):
+    """
+    `code` datang dari isian admin dan tidak boleh jadi jalan ke luar
+    folder media, persis seperti penjagaan pada path_media_kios.
+    """
+    from app.ui.kiosk.sambutan import folder_media_layanan
+
+    assert folder_media_layanan("..") is None
+    assert folder_media_layanan("../rahasia") is None
+    assert folder_media_layanan("a/b") is None
+    assert folder_media_layanan("") is None
+    assert folder_media_layanan("   ") is None
+    assert folder_media_layanan("KONSULTASI") is not None
+
+
+def test_media_layanan_mengambil_berkas_pertama_menurut_nama(folder_media):
+    """Satu berkas, bukan playlist — layar konfirmasi terlalu singkat."""
+    from app.ui.kiosk.sambutan import folder_media_layanan, media_layanan
+
+    folder = folder_media_layanan("KONSULTASI")
+    folder.mkdir(parents=True)
+    _gambar(folder / "02_kedua.png")
+    _gambar(folder / "01_pertama.png")
+
+    assert media_layanan("KONSULTASI").name == "01_pertama.png"
+
+
+def test_media_layanan_kosong_bila_belum_ada_berkas(folder_media):
+    from app.ui.kiosk.sambutan import media_layanan
+
+    assert media_layanan("KONSULTASI") is None
+
+
+def test_folder_layanan_tidak_ikut_diputar_sebagai_sambutan(folder_media):
+    """
+    Subfolder layanan hidup DI DALAM media/kiosk. Kalau ikut terbaca,
+    putaran sambutan akan mencoba memutar sebuah folder.
+    """
+    from app.ui.kiosk.sambutan import daftar_media_kios, folder_media_layanan
+
+    folder = folder_media_layanan("KONSULTASI")
+    folder.mkdir(parents=True)
+    _gambar(folder / "info.png")
+    _gambar(folder_media / "sambutan.png")
+
+    assert [p.name for p in daftar_media_kios()] == ["sambutan.png"]
+
+
+def test_pasang_media_layanan_mengganti_berkas_sebelumnya(folder_media):
+    """
+    Hanya berkas pertama menurut nama yang pernah tampil. Berkas lama yang
+    dibiarkan menumpuk membuat pilihan admin tampak tidak berpengaruh.
+    """
+    from app.ui.kiosk.sambutan import (
+        folder_media_layanan,
+        media_layanan,
+        salin_ke_media_layanan,
+    )
+
+    folder = folder_media_layanan("KONSULTASI")
+    folder.mkdir(parents=True)
+    _gambar(folder / "01_lama.png")
+
+    sumber = _gambar(folder_media.parent / "99_baru.png")
+    salin_ke_media_layanan("KONSULTASI", sumber)
+
+    assert [p.name for p in folder.iterdir()] == ["99_baru.png"]
+    assert media_layanan("KONSULTASI").name == "99_baru.png"
+
+
+def test_hapus_media_layanan_mengosongkan_folder(folder_media):
+    from app.ui.kiosk.sambutan import (
+        folder_media_layanan,
+        hapus_media_layanan,
+        media_layanan,
+    )
+
+    folder = folder_media_layanan("KONSULTASI")
+    folder.mkdir(parents=True)
+    _gambar(folder / "info.png")
+
+    hapus_media_layanan("KONSULTASI")
+
+    assert media_layanan("KONSULTASI") is None
+
+
+# ---------------------------------------------------------------------
+# Panel anjungan: media layanan dan kartu nomor
+# ---------------------------------------------------------------------
+
+def test_sentuh_layanan_menampilkan_media_bukan_teks(halaman_kios, folder_media):
+    """Media mengalahkan info teks bila jenis layanan itu punya berkas."""
+    from app.ui.kiosk.sambutan import HALAMAN_GAMBAR, folder_media_layanan
+
+    folder = folder_media_layanan("KONSULTASI")
+    folder.mkdir(parents=True)
+    berkas = _gambar(folder / "info.png")
+
+    layanan = next(k for k in halaman_kios.kategori if k.code == "KONSULTASI")
+    halaman_kios._pilih_layanan(layanan)
+
+    panel = halaman_kios.papan.panel_info_kios
+    assert panel.tumpukan.currentIndex() == HALAMAN_GAMBAR
+    assert panel.berkas_tampil == berkas
+
+
+def test_layanan_tanpa_media_tetap_memakai_info_teks(qtbot, halaman_kios, folder_media):
+    """Rantai cadangannya utuh: berkas, lalu info teks, lalu sambutan."""
+    from app.ui.display.display_page import DURASI_FADE_INFO_KIOS_MS
+    from app.ui.kiosk.sambutan import HALAMAN_TEKS
+
+    layanan = next(k for k in halaman_kios.kategori if k.code == "KONSULTASI")
+    halaman_kios._pilih_layanan(layanan)
+    qtbot.wait(DURASI_FADE_INFO_KIOS_MS * 2 + 200)
+
+    panel = halaman_kios.papan.panel_info_kios
+    assert panel.tumpukan.currentIndex() == HALAMAN_TEKS
+
+
+def test_batal_mengembalikan_panel_ke_sambutan(halaman_kios, folder_media):
+    from app.ui.kiosk.sambutan import HALAMAN_TEKS, folder_media_layanan
+
+    folder = folder_media_layanan("KONSULTASI")
+    folder.mkdir(parents=True)
+    _gambar(folder / "info.png")
+
+    layanan = next(k for k in halaman_kios.kategori if k.code == "KONSULTASI")
+    halaman_kios._pilih_layanan(layanan)
+    halaman_kios._batal_konfirmasi()
+
+    panel = halaman_kios.papan.panel_info_kios
+    assert panel.tumpukan.currentIndex() == HALAMAN_TEKS
+    assert panel._berkas_layanan is None
+
+
+def test_sentuh_layanan_tidak_mereset_putaran_sambutan(halaman_kios, folder_media):
+    """
+    Jebakan yang paling gampang terlewat: menyentuh _kunci_aktif akan
+    membuat penyegaran papan menganggap pengaturan berubah dan membangun
+    ulang putaran dari berkas pertama pada SETIAP sentuhan pengunjung.
+    """
+    from app.ui.kiosk.sambutan import folder_media_layanan
+
+    folder = folder_media_layanan("KONSULTASI")
+    folder.mkdir(parents=True)
+    _gambar(folder / "info.png")
+
+    panel = halaman_kios.papan.panel_info_kios
+    kunci_sebelum = panel._kunci_aktif
+
+    layanan = next(k for k in halaman_kios.kategori if k.code == "KONSULTASI")
+    halaman_kios._pilih_layanan(layanan)
+    halaman_kios._batal_konfirmasi()
+
+    assert panel._kunci_aktif == kunci_sebelum
+
+
+def test_kartu_nomor_menyebut_nomor_layanan_dan_sisa_antrian(halaman_kios, antrian_siap):
+    """
+    Kartu ini yang dibaca pengunjung sambil menunggu tiketnya keluar —
+    dan satu-satunya catatan nomornya bila printer kehabisan kertas.
+    """
+    halaman_kios.ambil_nomor(antrian_siap["kategori"]["A"])
+
+    panel = halaman_kios.papan.panel_info_kios
+    assert panel.label_kartu_nomor.text() == "A-001"
+    assert panel.label_kartu_layanan.text() == "Konsultasi"
+    assert panel.label_kartu_sisa.text() == "Tidak ada sisa antrian"
+
+
+def test_kartu_nomor_menghitung_antrian_di_depannya(
+    halaman_kios, antrian_siap, monkeypatch
+):
+    """Angkanya lintas jenis layanan, sama seperti yang tercetak di tiket."""
+    # Jeda antar-pengambilan dimatikan: yang diuji di sini hitungannya,
+    # bukan penahan tombol beruntun yang sudah punya testnya sendiri.
+    monkeypatch.setattr(halaman_kios.queue, "jeda_kios_detik", lambda: 0)
+
+    halaman_kios.ambil_nomor(antrian_siap["kategori"]["A"])
+    halaman_kios.ambil_nomor(antrian_siap["kategori"]["B"])
+    halaman_kios.ambil_nomor(antrian_siap["kategori"]["C"])
+
+    panel = halaman_kios.papan.panel_info_kios
+    assert panel.label_kartu_nomor.text() == "C-001"
+    assert panel.label_kartu_sisa.text() == "Sisa antrian: 2"
+
+
+def test_kartu_nomor_dan_panel_bawah_memakai_kalimat_yang_sama(
+    halaman_kios, antrian_siap
+):
+    """Dua tempat yang menjawab pertanyaan sama tidak boleh berbeda bunyi."""
+    halaman_kios.ambil_nomor(antrian_siap["kategori"]["A"])
+
+    panel = halaman_kios.papan.panel_info_kios
+    assert panel.label_kartu_arahan.text() == halaman_kios.label_petunjuk.text()
+
+
+def test_arahan_menyuruh_mencatat_nomor_saat_cetak_gagal(
+    qtbot, kios, auth, antrian_siap
+):
+    """
+    Menyuruh "ambil tiket Anda" di depan printer yang tidak mengeluarkan
+    apa pun jauh lebih menyesatkan daripada tidak berkata apa-apa.
+    """
+    from app.services.master_data_service import MasterDataService
+    from app.services.settings_service import SettingsService
+    from app.services.sound_service import NullSoundPlayer
+    from app.services.ticket_service import GagalTicketPrinter, TicketService
+    from app.ui.kiosk.kiosk_page import ARAHAN_CETAK, CETAK_GAGAL, KioskPage
+
+    tiket = TicketService(
+        GagalTicketPrinter("Kertas habis."),
+        SettingsService(auth),
+        MasterDataService(auth),
+    )
+    halaman = KioskPage(
+        kios,
+        MasterDataService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        tiket,
+    )
+    qtbot.addWidget(halaman)
+    halaman._penghitung.stop()
+
+    halaman.ambil_nomor(antrian_siap["kategori"]["A"])
+
+    panel = halaman.papan.panel_info_kios
+    assert panel.label_kartu_arahan.text() == ARAHAN_CETAK[CETAK_GAGAL]
+    # Nomornya tetap tampil besar: justru inilah saat layar paling perlu
+    # dibaca, karena tidak ada kertas yang membawanya pulang.
+    assert panel.label_kartu_nomor.text() == "A-001"
+    halaman.papan.hentikan()
+
+
+def test_kartu_nomor_bertahan_sampai_tombol_hidup_lagi(halaman_kios, antrian_siap):
+    """
+    Tanpa penyelarasan ini ada beberapa detik saat panel sudah kembali ke
+    sambutan padahal tombolnya masih mati — layar tampak siap dipakai
+    padahal belum.
+    """
+    from app.ui.kiosk.kiosk_page import JEDA_HASIL
+
+    jeda_ms = halaman_kios.queue.jeda_kios_detik() * 1000
+
+    assert halaman_kios._lama_hasil_ms() >= jeda_ms
+    assert halaman_kios._lama_hasil_ms() >= JEDA_HASIL
+
+
+def test_panel_dibebaskan_saat_nomor_gagal_terbit(halaman_kios, folder_media):
+    """
+    Kartu nomor tidak akan pernah tampil bila nomornya gagal terbit, jadi
+    tidak ada lagi yang akan membebaskan panel dari media layanan.
+    """
+    from app.core.errors import BusinessRuleError
+    from app.ui.kiosk.sambutan import HALAMAN_TEKS, folder_media_layanan
+
+    folder = folder_media_layanan("KONSULTASI")
+    folder.mkdir(parents=True)
+    _gambar(folder / "info.png")
+
+    layanan = next(k for k in halaman_kios.kategori if k.code == "KONSULTASI")
+    halaman_kios._pilih_layanan(layanan)
+
+    def gagal(_category_id):
+        raise BusinessRuleError("Pendaftaran ditutup.")
+
+    halaman_kios.queue.create_queue = gagal
+    halaman_kios._konfirmasi_ambil()
+
+    panel = halaman_kios.papan.panel_info_kios
+    assert panel.tumpukan.currentIndex() == HALAMAN_TEKS
+    assert panel._berkas_layanan is None
+    assert not panel._menampilkan_info_layanan
+
+
+# ---------------------------------------------------------------------
+# Video jenis layanan diulang sampai pengunjung memilih
+# ---------------------------------------------------------------------
+
+def _panel_dengan_video_layanan(halaman_kios, folder_media):
+    """
+    Panel anjungan yang sedang memegang video sebuah jenis layanan.
+
+    Berkasnya palsu — yang diuji keputusan detaknya, bukan kemampuan Qt
+    memutar berkas. Pola yang sama dipakai test putaran sambutan.
+    """
+    from app.ui.kiosk.sambutan import HALAMAN_VIDEO, folder_media_layanan
+
+    folder = folder_media_layanan("KONSULTASI")
+    folder.mkdir(parents=True)
+    berkas = folder / "info.mp4"
+    berkas.write_bytes(b"bukan video sungguhan, cukup ada namanya")
+
+    layanan = next(k for k in halaman_kios.kategori if k.code == "KONSULTASI")
+    halaman_kios._pilih_layanan(layanan)
+
+    panel = halaman_kios.papan.panel_info_kios
+    panel._berkas_layanan = berkas
+    panel.berkas_tampil = berkas
+    panel._tampilkan_halaman(HALAMAN_VIDEO)
+    panel._dijeda_sengaja = False
+    panel._sedang_ganti_item = False
+    panel._mulai_jam_item()
+    return panel
+
+
+def test_video_layanan_diulang_dari_awal_saat_habis(
+    halaman_kios, folder_media, monkeypatch
+):
+    """
+    Membeku di frame terakhir salah untuk panel ini: pengunjung
+    menontonnya SAMBIL memutuskan, dan yang datang di tengah putaran
+    hanya akan melihat gambar diam.
+    """
+    panel = _panel_dengan_video_layanan(halaman_kios, folder_media)
+
+    diulang = []
+    monkeypatch.setattr(panel._pemutar, "duration", lambda: 5000)
+    monkeypatch.setattr(panel._pemutar, "position", lambda: 5000)
+    monkeypatch.setattr(panel._pemutar, "setPosition", lambda ms: diulang.append(ms))
+
+    panel._jaga_putaran()
+
+    assert diulang == [0]
+
+
+def test_mengulang_video_layanan_tidak_menyentuh_putaran_sambutan(
+    halaman_kios, folder_media, monkeypatch
+):
+    """Media layanan hidup di luar daftar sambutan dan tidak boleh memajukannya."""
+    panel = _panel_dengan_video_layanan(halaman_kios, folder_media)
+    indeks_sebelum = panel._indeks
+
+    monkeypatch.setattr(panel._pemutar, "duration", lambda: 5000)
+    monkeypatch.setattr(panel._pemutar, "position", lambda: 5000)
+    monkeypatch.setattr(panel._pemutar, "setPosition", lambda ms: None)
+
+    panel._jaga_putaran()
+
+    assert panel._indeks == indeks_sebelum
+    assert panel._berkas_layanan is not None
+
+
+def test_jam_item_direstart_supaya_tidak_mengulang_tiap_detak(
+    halaman_kios, folder_media, monkeypatch
+):
+    """
+    `lewat_batas` dihitung dari jam item. Tanpa restart, ia langsung benar
+    lagi pada detak berikutnya dan videonya diulang setiap 250 milidetik.
+    """
+    panel = _panel_dengan_video_layanan(halaman_kios, folder_media)
+
+    diulang = []
+    monkeypatch.setattr(panel._pemutar, "duration", lambda: 5000)
+    monkeypatch.setattr(panel._pemutar, "setPosition", lambda ms: diulang.append(ms))
+
+    monkeypatch.setattr(panel._pemutar, "position", lambda: 5000)
+    panel._jaga_putaran()
+
+    # Detak berikutnya: video sudah mulai lagi dari awal.
+    monkeypatch.setattr(panel._pemutar, "position", lambda: 120)
+    panel._jaga_putaran()
+
+    assert diulang == [0]
+
+
+def test_video_layanan_yang_tersendat_menyerah_ke_teks(
+    halaman_kios, folder_media, monkeypatch
+):
+    """
+    Berkas rusak tidak boleh diulang tiap detak — kedutan berulang di
+    layar publik lebih buruk daripada teks yang diam.
+    """
+    from app.ui.kiosk.sambutan import HALAMAN_TEKS, MACET_LAYANAN_MS
+
+    panel = _panel_dengan_video_layanan(halaman_kios, folder_media)
+
+    diulang = []
+    monkeypatch.setattr(panel._pemutar, "duration", lambda: 0)
+    monkeypatch.setattr(panel._pemutar, "position", lambda: 0)
+    monkeypatch.setattr(panel._pemutar, "setPosition", lambda ms: diulang.append(ms))
+
+    detak = MACET_LAYANAN_MS // panel._jantung.interval() + 2
+    for _ in range(detak):
+        panel._jaga_putaran()
+
+    assert panel._berkas_layanan is None
+    assert panel.tumpukan.currentIndex() == HALAMAN_TEKS
+    assert diulang == []
+
+
+def test_sambutan_tetap_sekali_putar_setelah_media_layanan(
+    halaman_kios, folder_media, monkeypatch
+):
+    """
+    Penjaga kebocoran: pengaturan Infinite milik media layanan tidak boleh
+    tertinggal pada klip sambutan berikutnya, yang harus maju ke item lain
+    setelah selesai.
+    """
+    from PySide6.QtMultimedia import QMediaPlayer
+    from app.ui.kiosk.sambutan import folder_media_layanan
+
+    folder = folder_media_layanan("KONSULTASI")
+    folder.mkdir(parents=True)
+    berkas_layanan = folder / "info.mp4"
+    berkas_layanan.write_bytes(b"palsu")
+    berkas_sambutan = folder_media / "01_sambutan.mp4"
+    berkas_sambutan.write_bytes(b"palsu")
+
+    panel = halaman_kios.papan.panel_info_kios
+    diminta = []
+    monkeypatch.setattr(panel._pemutar, "setLoops", lambda n: diminta.append(n))
+
+    panel._pasang_video(berkas_layanan, ulang=True)
+    panel._pasang_video(berkas_sambutan)
+
+    assert diminta == [QMediaPlayer.Loops.Infinite, QMediaPlayer.Loops.Once]
+
+
+def test_gambar_layanan_tidak_ikut_diulang(halaman_kios, folder_media, monkeypatch):
+    """Gambar sudah "mengulang" dengan cara tetap diam di layar."""
+    from app.ui.kiosk.sambutan import HALAMAN_GAMBAR, folder_media_layanan
+
+    folder = folder_media_layanan("KONSULTASI")
+    folder.mkdir(parents=True)
+    _gambar(folder / "info.png")
+
+    layanan = next(k for k in halaman_kios.kategori if k.code == "KONSULTASI")
+    halaman_kios._pilih_layanan(layanan)
+
+    panel = halaman_kios.papan.panel_info_kios
+    diulang = []
+    monkeypatch.setattr(panel._pemutar, "setPosition", lambda ms: diulang.append(ms))
+
+    panel._mulai_jam_item()
+    panel._jaga_putaran()
+
+    assert panel.tumpukan.currentIndex() == HALAMAN_GAMBAR
+    assert diulang == []
+    assert panel._berkas_layanan is not None

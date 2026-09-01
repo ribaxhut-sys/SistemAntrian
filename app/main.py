@@ -15,6 +15,10 @@ Argumen:
     --layar       nama lama --kios. Dipertahankan supaya pintasan yang sudah
                   terpasang di komputer anjungan tidak mati saat aplikasi
                   diperbarui.
+    --admin       langsung membuka layar admin. Dari source, masuk sebagai
+                  administrator tanpa sandi; pada .exe tetap minta login.
+    --petugas     langsung membuka layar petugas. Dari source, masuk sebagai
+                  petugas CRO tanpa sandi; pada .exe tetap minta login.
     --init-only   hanya siapkan database lalu keluar, tanpa membuka jendela.
                   Berguna untuk memeriksa pemasangan di komputer baru.
 
@@ -26,7 +30,7 @@ from __future__ import annotations
 
 import sys
 
-from app.core.config import APP_NAME, get_config
+from app.core.config import APP_NAME, get_config, lewati_login_pengembang
 from app.core.database import dispose_engine, init_database
 from app.core.logger import get_logger, setup_logging
 from app.core.migrations import current_revision
@@ -105,20 +109,31 @@ def _jalankan_ui(*, mode_awal: str | None = None) -> int:
     """
     Buka aplikasi berjendela. Import Qt ditunda sampai benar-benar dipakai.
 
-    Keluar dari salah satu mesin publik atau dari layar petugas TIDAK
-    menutup proses aplikasi — hanya mengembalikan ke layar sebelumnya,
-    seolah komputer baru dinyalakan. Mesin publik kembali ke layar pilihan
-    mode; petugas yang logout kembali langsung ke layar masuk, tanpa mampir
-    ke layar pilihan lagi. Menutup aplikasi sepenuhnya hanya terjadi lewat
-    tombol silang (X) pada layar pilihan atau layar masuk — sama seperti
-    alur "batal" yang sudah ada sebelumnya.
+    Menutup sebuah layar TIDAK pernah menutup proses aplikasi, hanya
+    memundurkan satu langkah, seolah komputer baru dinyalakan:
+
+        ganti kata sandi wajib dibatalkan -> kembali ke layar masuk
+        layar masuk ditutup               -> kembali ke layar pilihan mode
+        mesin publik ditutup              -> kembali ke layar pilihan mode
+        layar pilihan mode ditutup        -> aplikasi berhenti
+
+    Petugas yang logout tetap kembali langsung ke layar masuk, tanpa
+    mampir ke layar pilihan. Layar pilihan mode adalah satu-satunya pintu
+    keluar aplikasi. Dahulu menutup layar masuk ikut mematikan aplikasi,
+    sehingga satu tekan Esc yang tidak sengaja membuat loket berhenti
+    melayani.
     """
     from PySide6.QtWidgets import QApplication, QDialog
 
     from app.services.auth_service import get_auth_service
     from app.ui.login.change_password_dialog import ChangePasswordDialog
     from app.ui.login.login_window import LoginWindow
-    from app.ui.login.mode_dialog import ANJUNGAN, LAYAR_ANTRIAN, ModeDialog
+    from app.ui.login.mode_dialog import (
+        ANJUNGAN,
+        LAYAR_ADMIN,
+        LAYAR_ANTRIAN,
+        ModeDialog,
+    )
     from app.ui.main_window import MainWindow
     from app.ui.style import STYLESHEET
 
@@ -157,27 +172,43 @@ def _jalankan_ui(*, mode_awal: str | None = None) -> int:
         # Mode petugas: logout kembali langsung ke layar masuk, tidak
         # mampir dulu ke layar pilihan mode.
         while True:
-            login = LoginWindow(auth)
-            if login.exec() != QDialog.DialogCode.Accepted:
-                logger.info("Aplikasi ditutup dari layar masuk")
-                return 0
+            if lewati_login_pengembang():
+                # Uji tampilan: jangan minta nama/sandi, dan jangan paksa
+                # ganti sandi bawaan — keduanya menghalangi pekerjaan yang
+                # sedang diuji. Admin dan petugas dipisah: admin tidak
+                # punya hak memanggil, petugas tidak punya hak pengaturan.
+                # Setelah jendela ditutup, kembali ke pilihan mode supaya
+                # tidak masuk lagi diam-diam.
+                if mode == LAYAR_ADMIN:
+                    auth.mulai_sesi_pengembang()
+                else:
+                    auth.mulai_sesi_petugas()
+            else:
+                login = LoginWindow(auth)
+                if login.exec() != QDialog.DialogCode.Accepted:
+                    logger.info("Layar masuk ditutup, kembali ke layar pilihan")
+                    break  # -> layar pilihan mode
 
             sesi = auth.require_session()
 
             # Akun dengan kata sandi bawaan tidak boleh dipakai bekerja
-            # sebelum kata sandinya diganti. Dialognya tidak dapat dibatalkan.
+            # sebelum kata sandinya diganti. Membatalkannya mengembalikan ke
+            # layar masuk, bukan menutup aplikasi: petugas lain yang kata
+            # sandinya sudah benar masih bisa langsung memakai loketnya.
             if sesi.must_change_password:
                 dialog = ChangePasswordDialog(auth, wajib=True)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     auth.logout()
-                    logger.info("Aplikasi ditutup tanpa mengganti kata sandi wajib")
-                    return 0
+                    logger.info("Kata sandi wajib tidak diganti, kembali ke layar masuk")
+                    continue
 
             jendela = MainWindow(auth)
             # tampilkan(), bukan show(): akun layar antrian dibuka penuh
             # tanpa bingkai jendela karena layarnya menghadap pengunjung.
             jendela.tampilkan()
             app.exec()
+            if lewati_login_pengembang():
+                break
             # petugas logout -> kembali langsung ke layar masuk
 
 
@@ -190,7 +221,7 @@ def mode_dari_argumen(argv: list[str]) -> str | None:
     tunggu, sedangkan anjungan yang keliru masih bisa digantikan petugas
     yang menerbitkan nomor dari mejanya.
     """
-    from app.ui.login.mode_dialog import ANJUNGAN, LAYAR_ANTRIAN
+    from app.ui.login.mode_dialog import ANJUNGAN, LAYAR_ADMIN, LAYAR_ANTRIAN, LAYAR_PETUGAS
 
     if "--tv" in argv:
         return LAYAR_ANTRIAN
@@ -198,6 +229,10 @@ def mode_dari_argumen(argv: list[str]) -> str | None:
     # sudah terpasang di komputer anjungan tidak mati saat aplikasi diperbarui.
     if "--kios" in argv or "--layar" in argv:
         return ANJUNGAN
+    if "--admin" in argv:
+        return LAYAR_ADMIN
+    if "--petugas" in argv:
+        return LAYAR_PETUGAS
     return None
 
 

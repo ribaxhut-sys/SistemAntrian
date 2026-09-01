@@ -119,3 +119,30 @@ def test_nilai_suara_yang_tidak_dikenal_dianggap_tidak_diisi(env_mesin, nilai: s
 
 def test_pencetak_mesin_dibaca_apa_adanya(env_mesin):
     assert env_mesin(ANTRIAN_PRINTER="system").printer == "system"
+
+
+def test_lewati_login_menyala_dari_source(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("ANTRIAN_LEWATI_LOGIN", raising=False)
+    monkeypatch.setattr(config_module.sys, "frozen", False, raising=False)
+    from app.core.config import lewati_login_pengembang
+
+    assert lewati_login_pengembang() is True
+
+
+def test_lewati_login_mati_pada_exe(monkeypatch: pytest.MonkeyPatch):
+    """Lupa mencabut pintasan tidak boleh membuka .exe petugas tanpa kunci."""
+    monkeypatch.setenv("ANTRIAN_LEWATI_LOGIN", "1")
+    monkeypatch.setattr(config_module.sys, "frozen", True, raising=False)
+    from app.core.config import lewati_login_pengembang
+
+    assert lewati_login_pengembang() is False
+
+
+def test_lewati_login_dapat_dimatikan_dari_environment(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("ANTRIAN_LEWATI_LOGIN", "0")
+    monkeypatch.setattr(config_module.sys, "frozen", False, raising=False)
+    from app.core.config import lewati_login_pengembang
+
+    assert lewati_login_pengembang() is False

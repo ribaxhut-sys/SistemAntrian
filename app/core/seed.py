@@ -60,7 +60,7 @@ _SETTINGS: list[tuple[str, str, str]] = [
      "Lama backup disimpan sebelum dihapus, dalam hari"),
     ("dashboard.refresh_seconds", "30",
      "Jeda penyegaran layar ringkasan harian, dalam detik"),
-    ("display.theme", "gelap", "Tampilan layar antrian"),
+    ("display.theme", "kaca", "Tampilan layar antrian"),
     ("display.title", "ANTRIAN PELAYANAN CRO", "Judul pada layar display"),
     ("display.info", "", "Pengumuman pada tema Split Informasi"),
     ("display.next_count", "3", "Jumlah nomor berikutnya pada papan kios"),

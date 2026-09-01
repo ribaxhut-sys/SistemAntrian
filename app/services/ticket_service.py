@@ -38,6 +38,30 @@ logger = get_logger("ticket")
 MAKS_BARIS_FOOTER = 2
 
 
+def baris_sisa_antrian(sisa: int | None) -> str:
+    """
+    Sisa antrian sebagai satu baris siap tampil.
+
+    Disusun di satu tempat lalu dipakai SEMUA yang menyebutkannya: tiket
+    PDF, tiket printer sistem, tiket teks, dan kartu nomor di layar
+    anjungan. Empat tempat yang menjawab pertanyaan yang sama tidak boleh
+    menyebut kalimat yang berbeda.
+
+    Angkanya dihitung lintas seluruh jenis layanan (lihat
+    `QueueService.ringkasan_tiket`), jadi kalimatnya sengaja tidak
+    menyebut jenis layanan mana pun.
+
+    Kosong berarti barisnya memang tidak ditampilkan — di struk 88 mm
+    hanya sepanjang itu ruang yang tersisa setelah nomor, jenis layanan,
+    loket, tanggal, jam, dan dua baris catatan kaki.
+    """
+    if sisa is None:
+        return ""
+    if sisa <= 0:
+        return "Tidak ada sisa antrian"
+    return f"Sisa antrian: {sisa}"
+
+
 @dataclass(frozen=True)
 class TicketData:
     """Isi satu tiket antrian."""
@@ -87,22 +111,8 @@ class TicketData:
         return baris
 
     def baris_sisa_antrian(self) -> str:
-        """
-        Sisa antrian saat tiket dicetak, sebagai satu baris siap cetak.
-
-        Disusun di satu tempat lalu dipakai ketiga pencetak, supaya tiket
-        PDF, tiket printer sistem, dan tiket teks tidak pernah menyebut
-        kalimat yang berbeda untuk keadaan yang sama.
-
-        Kosong berarti barisnya memang tidak dicetak — hanya sepanjang itu
-        ruang yang tersisa di struk 88 mm setelah nomor, jenis layanan,
-        loket, tanggal, jam, dan dua baris catatan kaki.
-        """
-        if self.sisa_antrian is None:
-            return ""
-        if self.sisa_antrian <= 0:
-            return "Tidak ada sisa antrian"
-        return f"Sisa antrian: {self.sisa_antrian}"
+        """Baris sisa antrian tiket ini. Lihat `baris_sisa_antrian()`."""
+        return baris_sisa_antrian(self.sisa_antrian)
 
 
 @dataclass(frozen=True)

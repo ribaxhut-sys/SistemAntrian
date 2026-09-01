@@ -9,6 +9,7 @@ from app.core.database import session_scope
 from app.core.errors import (
     AuthenticationError,
     AuthorizationError,
+    BusinessRuleError,
     ValidationError,
 )
 from app.models import AuditLog, RecordStatus, User, UserRole
@@ -40,6 +41,42 @@ def test_login_kata_sandi_salah_ditolak(auth):
     with pytest.raises(AuthenticationError):
         auth.login("cro", "salah-sekali")
     assert not auth.is_authenticated
+
+
+def test_sesi_pengembang_masuk_sebagai_admin_tanpa_sandi(auth, users):
+    """Uji tampilan: jangan minta nama/sandi, dan jangan paksa ganti sandi."""
+    sesi = auth.mulai_sesi_pengembang()
+
+    assert sesi.role is UserRole.ADMIN
+    assert sesi.must_change_password is False
+    assert auth.has_permission(Permission.CONFIG_MANAGE)
+
+
+def test_sesi_pengembang_ditolak_bila_pintasan_mati(auth, users, monkeypatch):
+    monkeypatch.setenv("ANTRIAN_LEWATI_LOGIN", "0")
+    with pytest.raises(BusinessRuleError):
+        auth.mulai_sesi_pengembang()
+
+
+def test_sesi_petugas_masuk_sebagai_cro_tanpa_sandi(auth, users):
+    """
+    Layar petugas harus masuk sebagai CRO, bukan admin.
+
+    Admin tidak punya hak memanggil. Pintasan uji yang selalu membuka
+    admin membuat tombol F2 tidak pernah muncul.
+    """
+    sesi = auth.mulai_sesi_petugas()
+
+    assert sesi.role is UserRole.CRO
+    assert sesi.must_change_password is False
+    assert auth.has_permission(Permission.QUEUE_CALL)
+    assert not auth.has_permission(Permission.CONFIG_MANAGE)
+
+
+def test_sesi_petugas_ditolak_bila_pintasan_mati(auth, users, monkeypatch):
+    monkeypatch.setenv("ANTRIAN_LEWATI_LOGIN", "0")
+    with pytest.raises(BusinessRuleError):
+        auth.mulai_sesi_petugas()
 
 
 def test_login_nama_pengguna_tidak_terdaftar_ditolak(auth):

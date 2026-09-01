@@ -10,7 +10,14 @@ from app.core.errors import AuthorizationError
 from app.services.queue_service import QueueService
 from app.services.settings_service import SettingsService
 from app.services.sound_service import NullSoundPlayer
+from app.ui.display.tema import PALET
 from tests.conftest import TEST_PASSWORD
+
+#: Seluruh kode tema yang ada, dibaca dari palet alih-alih ditulis ulang.
+#: Ditulis ulang, setiap tema baru akan lolos tanpa pernah sekali pun
+#: dibuka oleh test — dan tema yang tidak pernah dibuka adalah tema yang
+#: tidak pernah diketahui rusak.
+TEMA_SEMUA: tuple[str, ...] = tuple(PALET)
 
 
 # ---------------------------------------------------------------------
@@ -418,8 +425,6 @@ def test_nomor_berikutnya_memakai_warna_palet(halaman_layar, terbitkan, auth):
 def test_loket_unggulan_saat_baru_dipanggil(
     halaman_layar, terbitkan, antrian_siap, auth
 ):
-    from app.ui.style import DISPLAY_AKSEN
-
     for kartu in halaman_layar.kartu_loket:
         assert kartu.label_status.text() == "KOSONG"
 
@@ -435,7 +440,10 @@ def test_loket_unggulan_saat_baru_dipanggil(
     unggulan = halaman_layar.kartu_loket[0]
     assert unggulan.label_status.text() == "SEDANG DIPANGGIL"
     assert unggulan.label_nomor.text() == "A-001"
-    assert DISPLAY_AKSEN in unggulan.styleSheet()
+    # Tepi yang menyala diambil dari palet tema, bukan dari satu warna
+    # aksen aplikasi: sejak papan bertema, setiap tema membawa warna
+    # penandanya sendiri.
+    assert halaman_layar.palet.tepi_unggulan in unggulan.styleSheet()
 
 
 # ---------------------------------------------------------------------
@@ -1339,6 +1347,32 @@ def test_kepala_papan_menampilkan_tanggal_dan_jam(halaman_layar, monkeypatch):
     assert halaman_layar.label_jam.text() == "Rabu, 26 Agustus 2026  ·  14:30:00"
 
 
+def test_kepala_papan_judul_tengah_jam_di_bawah(halaman_layar, papan_kios, qtbot):
+    """
+    Nama instansi yang panjang tidak boleh berebut baris dengan jam.
+
+    Ditulis sebaris, judul terpotong di huruf terakhir dan jam kehilangan
+    nama hari. Ditumpuk dan rata tengah, keduanya mendapat lebar penuh.
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QVBoxLayout
+
+    for halaman in (halaman_layar, papan_kios):
+        halaman.resize(1280, 720)
+        halaman.show()
+        qtbot.waitExposed(halaman)
+        QApplication.processEvents()
+        halaman.layout().activate()
+
+        assert isinstance(halaman.kepala, QVBoxLayout)
+        assert halaman.label_judul.alignment() & Qt.AlignmentFlag.AlignHCenter
+        assert halaman.label_jam.alignment() & Qt.AlignmentFlag.AlignHCenter
+        assert halaman.label_judul.height() > 0
+        assert halaman.label_jam.height() > 0
+        assert halaman.label_jam.y() > halaman.label_judul.y()
+        assert halaman.label_jam.geometry().top() >= halaman.label_judul.geometry().bottom()
+
+
 def test_jam_ikut_diperbarui_saat_data_disegarkan(halaman_layar, monkeypatch):
     from datetime import datetime
 
@@ -1406,11 +1440,11 @@ def test_seluruh_tema_terdaftar_di_pengaturan():
     assert kode_pengaturan == set(PALET)
 
 
-@pytest.mark.parametrize("kode_tema", ["gelap", "terang", "sorotan", "split", "led"])
+@pytest.mark.parametrize("kode_tema", list(TEMA_SEMUA))
 def test_setiap_tema_dapat_dibuka_dan_menampilkan_loket(
     qtbot, auth, antrian_siap, terbitkan, kode_tema
 ):
-    """Kelima tema harus bisa dibuka dan menampilkan seluruh loket, bukan sebagian."""
+    """Setiap tema harus bisa dibuka dan menampilkan seluruh loket, bukan sebagian."""
     from app.ui.display.display_page import DisplayPage
 
     terbitkan("A", 2)
@@ -1555,6 +1589,320 @@ def test_tema_split_menampilkan_pengumuman_dari_pengaturan(qtbot, auth, antrian_
     assert "fotokopi KTP" in halaman.label_info.text()
 
 
+@pytest.mark.parametrize("kode_tema", list(TEMA_SEMUA))
+def test_papan_terbagi_wajar_antara_kartu_dan_daftar(
+    qtbot, auth, antrian_siap, master_service, terbitkan, kode_tema
+):
+    """
+    Kartu loket dan daftar menunggu harus sama-sama mendapat tempat.
+
+    Keduanya menghitung ukurannya sendiri dari tinggi yang tersisa, dan
+    tanpa batas, yang satu memakan jatah yang lain: papan bento yang
+    kartunya bertumpuk dua baris pernah menyisakan satu baris nomor saja
+    untuk daftar menunggu, dan papan bertumpuk lima loket pernah menggusur
+    judulnya sendiri sampai terpotong di tepi atas layar.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    from app.ui.display.display_page import DisplayPage
+
+    # Lima loket, bukan tiga. Papan tiga loket muat pada hampir semua
+    # pembagian tinggi; yang memaksa keduanya berebut adalah loket yang
+    # bertumpuk dua baris — dan lima loket itulah pemasangan yang
+    # sebenarnya direncanakan.
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    master = master_service
+    for nomor in (4, 5):
+        master.create_counter(
+            code=f"L{nomor}",
+            name=f"Loket {nomor}",
+            branch_id=antrian_siap["branch_id"],
+        )
+
+    terbitkan("A", 6)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    QueueService(auth).call_next(antrian_siap["loket"][0])
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        tema=kode_tema,
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(1600, 900)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    QApplication.processEvents()
+    halaman.layout().activate()
+
+    # Judul papan tidak boleh ikut diperas menjadi separuh hurufnya.
+    judul = halaman.label_judul
+    assert judul.height() >= judul.sizeHint().height(), kode_tema
+
+    # Daftar menunggu tidak boleh mengambil lebih dari separuh papan.
+    assert halaman.panel_berikutnya.height() <= round(halaman.height() * 0.55), kode_tema
+
+    # Dan kartu loket harus tetap punya tinggi yang wajar untuk nomornya.
+    assert min(kartu.height() for kartu in halaman.kartu_loket) >= 60, kode_tema
+
+
+def test_tema_lama_dipetakan_ke_tema_penggantinya(qtbot, auth, antrian_siap):
+    """
+    Kode tema tersimpan di database. Kantor yang sudah pernah memilih
+    temanya tidak boleh mendapati papannya kembali ke tema bawaan setelah
+    pembaruan, hanya karena nama temanya berganti.
+    """
+    from app.ui.display.display_page import DisplayPage
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        tema="gelap",
+    )
+    qtbot.addWidget(halaman)
+
+    assert halaman.palet.kode == "kaca"
+
+
+def test_peta_bento_tidak_menyisakan_sel_kosong():
+    """
+    Lubang di tengah papan publik terbaca sebagai layar yang rusak, bukan
+    sebagai ruang kosong yang disengaja. Diperiksa untuk setiap jumlah
+    loket yang wajar, karena bentuk bento ditulis per jumlah.
+    """
+    from app.ui.display.display_page import _peta_bento
+
+    for jumlah in range(1, 10):
+        peta = _peta_bento(jumlah)
+        assert len(peta) == jumlah
+
+        terisi: list[tuple[int, int]] = []
+        for baris, kolom, tinggi, lebar in peta:
+            for b in range(baris, baris + tinggi):
+                for k in range(kolom, kolom + lebar):
+                    terisi.append((b, k))
+
+        # Tidak ada sel yang ditempati dua kartu sekaligus.
+        assert len(terisi) == len(set(terisi)), jumlah
+        # Dan tidak ada sel kosong di dalam persegi yang dipakainya.
+        baris_akhir = max(b for b, _ in terisi) + 1
+        kolom_akhir = max(k for _, k in terisi) + 1
+        assert len(terisi) == baris_akhir * kolom_akhir, jumlah
+
+
+def test_tema_bento_memberi_sel_besar_kepada_loket_yang_memanggil(
+    qtbot, auth, antrian_siap, terbitkan
+):
+    """
+    Inti tema bento: hierarki datang dari UKURAN kartu, bukan dari warnanya
+    saja. Loket yang sedang memanggil menempati sel dua kali lebih besar,
+    dan sel itu berpindah mengikuti panggilan berikutnya.
+    """
+    from app.ui.display.display_page import DisplayPage
+
+    terbitkan("A", 2)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    QueueService(auth).call_next(antrian_siap["loket"][1])
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        tema="bento",
+    )
+    qtbot.addWidget(halaman)
+
+    def sel(kartu):
+        return halaman.kisi_loket.getItemPosition(halaman.kisi_loket.indexOf(kartu))
+
+    assert len(halaman.kartu_loket) == 3
+    assert sel(halaman.kartu_loket[1]) == (0, 0, 2, 2)
+    assert sel(halaman.kartu_loket[0])[2:] == (1, 2)
+
+    # Panggilan berikutnya memindahkan sel besar, bukan sekadar mengganti
+    # warnanya.
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    QueueService(auth).call_next(antrian_siap["loket"][2])
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman.muat_ulang()
+
+    assert sel(halaman.kartu_loket[2]) == (0, 0, 2, 2)
+    assert sel(halaman.kartu_loket[1])[2:] == (1, 2)
+
+
+def test_nomor_sel_kecil_bento_tidak_terpotong(
+    qtbot, auth, antrian_siap, terbitkan
+):
+    """
+    Sel kecil bento tingginya setengah sel besar.
+
+    Huruf nomor televisi (132px) tidak muat di situ: A-003 terpotong di
+    tepi atas kartunya dan nama layanan menempel ke tepi bawah.
+    """
+    from PySide6.QtGui import QFontMetrics
+    from PySide6.QtWidgets import QApplication
+
+    from app.ui.display.display_page import DisplayPage
+
+    terbitkan("A", 3)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    layanan = QueueService(auth)
+    for loket in antrian_siap["loket"]:
+        layanan.call_next(loket)
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        tema="bento",
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(1280, 800)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    for _ in range(6):
+        QApplication.processEvents()
+        halaman.layout().activate()
+        QApplication.processEvents()
+    halaman._sesuaikan_daftar()
+    halaman._muatkan_huruf_kartu()
+
+    kecil = [
+        kartu
+        for indeks, kartu in enumerate(halaman.kartu_loket)
+        if indeks != halaman._indeks_besar
+    ]
+    assert kecil
+    for kartu in kecil:
+        nomor = kartu.label_nomor
+        assert nomor.text() not in ("", "—")
+        fm = QFontMetrics(nomor.font())
+        assert fm.height() <= nomor.height() + 1, (
+            f"{nomor.text()} huruf={fm.height()} label={nomor.height()} "
+            f"kartu={kartu.height()}"
+        )
+        layanan_lbl = kartu.label_layanan
+        assert layanan_lbl.sizeHint().height() <= layanan_lbl.height() + 1
+
+
+def test_tema_tabel_menyusun_loket_sebagai_baris_bergaris(
+    qtbot, auth, antrian_siap, terbitkan
+):
+    """
+    Papan LED tidak berkartu: setiap loket menjadi satu baris dengan nomor
+    di kolom kiri, dipisahkan garis rambut.
+    """
+    from app.ui.display.display_page import DisplayPage
+
+    terbitkan("A", 2)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    QueueService(auth).call_next(antrian_siap["loket"][0])
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        tema="led",
+    )
+    qtbot.addWidget(halaman)
+
+    assert halaman.kisi_loket is None
+    assert len(halaman.kartu_loket) == 3
+    assert all(kartu.varian == "tabel" for kartu in halaman.kartu_loket)
+    assert [label.text() for label in halaman.label_kolom_tabel] == [
+        "NOMOR",
+        "LOKET",
+        "STATUS",
+    ]
+    # Barisnya dipisah garis bawah, bukan dijadikan kartu bertepi penuh.
+    assert "border-bottom" in halaman.kartu_loket[0].styleSheet()
+    assert halaman.kartu_loket[0].label_nomor.text() == "A-001"
+
+
+def test_tema_fokus_menampilkan_panggilan_terbaru_dan_seluruh_loket(
+    qtbot, auth, antrian_siap, terbitkan
+):
+    """
+    Fokus memperbesar satu nomor, tetapi TIDAK menyembunyikan loket lain:
+    pengunjung tetap harus tahu ke loket mana ia dipanggil.
+    """
+    from app.ui.display.display_page import DisplayPage
+
+    terbitkan("A", 2)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    QueueService(auth).call_next(antrian_siap["loket"][0])
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        tema="fokus",
+    )
+    qtbot.addWidget(halaman)
+
+    assert halaman.kartu_sorot is not None
+    assert halaman.kartu_sorot.label_nomor.text() == "A-001"
+    assert len(halaman.kartu_loket) == 3
+    # Pita loket memakai kartu tegak yang diperkecil: pada lebar seperlima
+    # layar, kartu melebar menaruh nomornya menimpa nama loketnya sendiri.
+    assert all(kartu.varian == "kisi" for kartu in halaman.kartu_loket)
+
+
+def test_tema_datar_tidak_memasang_bayangan(qtbot, auth, antrian_siap, terbitkan):
+    """
+    Tema Papan LED dan Kontras Tinggi sengaja datar. QGraphicsDropShadowEffect
+    memaksa setiap kartu digambar lewat lapisan tersendiri — biaya yang tidak
+    dibayar apa pun bila bayangannya memang tidak diinginkan.
+    """
+    from app.ui.display.display_page import DisplayPage
+
+    terbitkan("A", 1)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    for kode_tema in ("led", "kontras"):
+        halaman = DisplayPage(
+            QueueService(auth),
+            SettingsService(auth),
+            NullSoundPlayer(),
+            otomatis=False,
+            tema=kode_tema,
+        )
+        qtbot.addWidget(halaman)
+        assert halaman.palet.bayangan == 0, kode_tema
+        assert all(
+            kartu.graphicsEffect() is None for kartu in halaman.kartu_loket
+        ), kode_tema
+
+
 def test_kios_selalu_kisi_walau_tema_sorotan(qtbot, auth, antrian_siap):
     """
     Sorotan dan Split menuntut tinggi yang tidak dimiliki separuh layar
@@ -1588,7 +1936,7 @@ def test_kios_selalu_kisi_walau_tema_sorotan(qtbot, auth, antrian_siap):
 def test_tidak_ada_warna_delapan_digit_di_seluruh_tema(qtbot, auth, antrian_siap, terbitkan):
     """
     Qt tidak mendukung #RRGGBBAA dan membacanya sebagai warna lain — sumber
-    warna kuning yang tidak pernah diminta. Diperiksa untuk kelima tema,
+    warna kuning yang tidak pernah diminta. Diperiksa untuk seluruh tema,
     bukan hanya tema bawaan.
     """
     import re
@@ -1603,7 +1951,7 @@ def test_tidak_ada_warna_delapan_digit_di_seluruh_tema(qtbot, auth, antrian_siap
     auth.logout()
     auth.login("display", TEST_PASSWORD)
 
-    for kode_tema in ("gelap", "terang", "sorotan", "split", "led"):
+    for kode_tema in TEMA_SEMUA:
         halaman = DisplayPage(
             QueueService(auth),
             SettingsService(auth),
@@ -2387,3 +2735,51 @@ def test_panel_tidak_melewati_tepi_bawah_layar(qtbot, auth, antrian_siap, terbit
         halaman._tinggi_kisi_tersedia() - halaman._tinggi_judul_kolom() - jarak
     )
     assert butuh <= tersedia
+
+
+def test_panel_bento_jendela_sedang_tidak_terpotong(
+    qtbot, auth, antrian_siap, terbitkan
+):
+    """
+    Pratinjau di jendela admin, bukan televisi 1080p.
+
+    Tema Bento menumpuk dua baris kartu bahkan dengan tiga loket. Panel
+    menunggu yang dipaksa separuh tinggi mendorong baris nomor terakhir
+    keluar bingkai, dan padding 14px menindih sudut membulat 20px sehingga
+    tepi bawahnya tampak terpotong lurus.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    from app.ui.display.display_page import RADIUS_PANEL_TUNGGU, DisplayPage
+
+    terbitkan("A", 4)
+    terbitkan("B", 2)
+    terbitkan("C", 2)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        tema="bento",
+    )
+    qtbot.addWidget(halaman)
+    halaman.resize(1100, 720)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    for _ in range(4):
+        QApplication.processEvents()
+        halaman.layout().activate()
+        QApplication.processEvents()
+    halaman._sesuaikan_daftar()
+
+    margin = halaman.susunan.contentsMargins()
+    assert halaman.panel_berikutnya.geometry().bottom() <= (
+        halaman.height() - margin.bottom()
+    )
+    dalam = halaman.susunan_berikutnya.contentsMargins()
+    assert dalam.bottom() >= RADIUS_PANEL_TUNGGU
+    assert halaman.label_berikutnya
+    bawah_kartu = max(label.geometry().bottom() for label in halaman.label_berikutnya)
+    assert bawah_kartu <= halaman.panel_berikutnya.height() - dalam.bottom()

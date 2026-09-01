@@ -34,7 +34,7 @@ BAWAAN: dict[str, str] = {
     "kiosk.welcome_text": "",
     "kiosk.welcome_file": "",
     "kiosk.welcome_slide_seconds": "10",
-    "display.theme": "gelap",
+    "display.theme": "kaca",
     "display.title": "ANTRIAN PELAYANAN CRO",
     "display.info": "",
     "display.next_count": "3",
@@ -91,6 +91,15 @@ class Pengaturan:
     #: dikira pengubahnya. Nilainya tetap sah dan tetap divalidasi — yang
     #: hilang hanya kotak isiannya.
     tampil: bool = True
+    #: Satuan angka, ditulis DI DALAM kotak isiannya: "3 detik", bukan
+    #: "Jeda pergantian halaman (detik)" pada namanya. Satuan yang menempel
+    #: pada angkanya terbaca bersama angka itu — pada namanya, ia terbaca
+    #: beberapa detik sebelumnya lalu terlupakan.
+    satuan: str = ""
+    #: Tulisan pengganti untuk nilai TERKECIL, ketika nilai itu berarti
+    #: sesuatu dan bukan sekadar nol. "Otomatis" jauh lebih jelas daripada
+    #: angka 0 yang artinya harus dicari dulu di keterangannya.
+    nilai_khusus: str = ""
 
 
 #: Seluruh pengaturan yang dikenali aplikasi.
@@ -130,12 +139,13 @@ SKEMA: tuple[Pengaturan, ...] = (
         # Agar keduanya tidak diam-diam berbeda, ada test yang membandingkan
         # daftar ini dengan tema yang benar-benar ada.
         pilihan=(
-            ("gelap", "Kartu Gelap (bawaan)"),
-            ("terang", "Terang Minimal"),
-            ("modern", "Modern Cerah"),
+            ("kaca", "Kaca Malam (bawaan)"),
+            ("bento", "Bento Terang"),
+            ("led", "Papan LED"),
+            ("fokus", "Fokus Nomor"),
             ("sorotan", "Sorotan"),
             ("split", "Split Informasi"),
-            ("led", "Papan LED"),
+            ("kontras", "Kontras Tinggi"),
         ),
         kelompok="Layar Antrian",
     ),
@@ -163,6 +173,8 @@ SKEMA: tuple[Pengaturan, ...] = (
         ANGKA,
         minimum=0,
         maksimum=10,
+        satuan="nomor",
+        nilai_khusus="Tidak ditampilkan",
         kelompok="Layar Antrian",
     ),
     Pengaturan(
@@ -175,11 +187,12 @@ SKEMA: tuple[Pengaturan, ...] = (
         ANGKA,
         minimum=1,
         maksimum=12,
+        satuan="baris",
         kelompok="Layar Antrian",
     ),
     Pengaturan(
         "display.list_font_size",
-        "Ukuran huruf nomor menunggu (piksel)",
+        "Ukuran huruf nomor menunggu",
         "Isi 0 agar menyesuaikan sendiri dengan tinggi papan — itu yang "
         "disarankan. Angka lain diperlakukan sebagai batas ATAS: papan "
         "tetap memperkecilnya bila barisnya tidak muat, karena nomor yang "
@@ -187,11 +200,13 @@ SKEMA: tuple[Pengaturan, ...] = (
         ANGKA,
         minimum=0,
         maksimum=96,
+        satuan="px",
+        nilai_khusus="Otomatis",
         kelompok="Layar Antrian",
     ),
     Pengaturan(
         "display.rotate_seconds",
-        "Jeda pergantian halaman (detik)",
+        "Jeda pergantian halaman",
         "Lama satu halaman daftar menunggu tampil sebelum berganti sendiri. "
         "Isi 0 bila halaman tidak boleh berpindah sendiri. Pengunjung "
         "membutuhkan waktu untuk mencari nomornya sendiri dari seberang "
@@ -199,16 +214,19 @@ SKEMA: tuple[Pengaturan, ...] = (
         ANGKA,
         minimum=0,
         maksimum=60,
+        satuan="detik",
+        nilai_khusus="Tidak berpindah sendiri",
         kelompok="Layar Antrian",
     ),
     Pengaturan(
         "display.number_font_scale",
-        "Ukuran huruf nomor antrian (%)",
+        "Ukuran huruf nomor antrian",
         "Membesarkan atau mengecilkan khusus nomor antrian di layar, tanpa "
         "mengubah ukuran tulisan lain. 100 adalah ukuran bawaan.",
         ANGKA,
         minimum=50,
         maksimum=200,
+        satuan="%",
         kelompok="Layar Antrian",
     ),
     Pengaturan(
@@ -261,17 +279,20 @@ SKEMA: tuple[Pengaturan, ...] = (
         ANGKA,
         minimum=1,
         maksimum=10,
+        satuan="kali",
         kelompok="Antrian",
     ),
     Pengaturan(
         "kiosk.cooldown_seconds",
-        "Jeda ambil nomor di kios (detik)",
+        "Jeda ambil nomor di kios",
         "Menahan satu orang menekan tombol berulang kali dan memenuhi antrian "
         "dengan nomor kosong. Tidak berlaku bagi petugas pendaftaran, yang "
         "melayani rombongan datang bersamaan.",
         ANGKA,
         minimum=0,
         maksimum=300,
+        satuan="detik",
+        nilai_khusus="Tanpa jeda",
         kelompok="Antrian",
     ),
     Pengaturan(
@@ -309,12 +330,13 @@ SKEMA: tuple[Pengaturan, ...] = (
     ),
     Pengaturan(
         "kiosk.welcome_slide_seconds",
-        "Lama tampil tiap gambar (detik)",
+        "Lama tampil tiap gambar",
         "Hanya untuk gambar di folder media. Video diputar sampai selesai "
         "lalu ganti ke berkas berikutnya. Satu gambar saja tampil terus.",
         ANGKA,
         minimum=3,
         maksimum=60,
+        satuan="detik",
         kelompok="Antrian",
     ),
     Pengaturan(
@@ -327,10 +349,11 @@ SKEMA: tuple[Pengaturan, ...] = (
     Pengaturan(
         "dashboard.refresh_seconds",
         "Jeda penyegaran ringkasan",
-        "Dalam detik. Semakin kecil semakin sering database dibaca.",
+        "Semakin kecil semakin sering database dibaca.",
         ANGKA,
         minimum=5,
         maksimum=3600,
+        satuan="detik",
         kelompok="Ringkasan Harian",
     ),
     Pengaturan(
@@ -353,12 +376,14 @@ SKEMA: tuple[Pengaturan, ...] = (
     ),
     Pengaturan(
         "backup.retention_days",
-        "Lama backup disimpan (hari)",
+        "Lama backup disimpan",
         "Backup yang lebih tua akan dihapus otomatis. Nilai 0 mematikan "
         "penghapusan otomatis.",
         ANGKA,
         minimum=0,
         maksimum=3650,
+        satuan="hari",
+        nilai_khusus="Tidak dihapus otomatis",
         kelompok="Backup",
     ),
 )

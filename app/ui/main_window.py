@@ -289,7 +289,7 @@ class MainWindow(QMainWindow):
             _Menu(
                 "Pengaturan",
                 Permission.CONFIG_MANAGE,
-                lambda: SettingsPage(self.settings_service),
+                lambda: SettingsPage(self.settings_service, self.master_service),
             ),
             _Menu(
                 "Backup & Audit",

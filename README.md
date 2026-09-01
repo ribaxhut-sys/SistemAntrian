@@ -175,9 +175,35 @@ sendiri, dan judul panelnya menyebut halaman ke berapa dari berapa — tanpa
 itu, pengunjung yang belum melihat nomornya akan mengira nomornya hilang
 lalu bertanya ke loket.
 
+**Tujuh tampilan, satu isi.** Bentuk papan dipilih admin lewat
+`display.theme`. Yang berbeda hanya tata letak dan warnanya — seluruh loket
+dan seluruh antrian menunggu tetap tampil pada ketujuhnya, karena papan yang
+menyembunyikan sebagian antrian mengirim orang bertanya ke loket.
+
+| `display.theme` | Bentuk | Dipilih ketika |
+|---|---|---|
+| `kaca` *(bawaan)* | Kartu kaca tembus pandang di atas gradien malam | Ruang tunggu berlampu redup |
+| `bento` | Kisi tak simetris; loket yang memanggil menempati sel besar | Lobi terang, dan loket tidak sama sibuknya |
+| `led` | Baris hitam berangka kuning seperti papan keberangkatan | Dibaca dari jarak sangat jauh, atau layar memanjang |
+| `fokus` | Satu nomor raksasa; loket lain menjadi pita di bawahnya | Kantor dengan sedikit loket |
+| `sorotan` | Panel putih besar berisi panggilan terbaru | Ruangan ramai, panggilan mudah terlewat |
+| `split` | Panel pengumuman di kiri, kolom loket di kanan | Layar yang merangkap papan pengumuman (`display.info`) |
+| `kontras` | Putih–hitam dan satu kuning penanda, tanpa gradien | Pengunjung lanjut usia, atau ruangan yang silau |
+
+Nama tema lama (`gelap`, `terang`, `modern`) tetap dikenali dan dipetakan ke
+penggantinya, sehingga pembaruan tidak mengembalikan papan yang sudah
+disetel ke tampilan bawaan.
+
+**Kartu loket mengecil sendiri saat loketnya banyak.** Lima loket bertumpuk
+dua baris menuntut tinggi dua kali lipat, dan yang mengalah selalu daftar
+menunggu di bawahnya. Karena itu huruf kartu ikut mengecil mengikuti
+banyaknya baris, dan panel daftar menunggu dipatok pada jatahnya — sekitar
+separuh papan — supaya keduanya tidak saling menghabiskan.
+
 | Pengaturan | Bawaan | Arti |
 |---|---|---|
-| `display.list_rows` | 5 | Baris per kolom (1–12). Dua kolom per layanan, jadi 5 berarti 10 nomor per layanan |
+| `display.theme` | `kaca` | Bentuk papan; tujuh pilihan di tabel atas |
+| `display.list_rows` | 5 | Baris per kolom (1–12). Dua kolom per layanan, jadi 5 berarti 10 nomor per layanan (satu kolom pada tema `sorotan` dan `split`, yang panelnya sempit) |
 | `display.list_font_size` | 0 | Ukuran huruf nomor; **0 = menyesuaikan sendiri** dengan tinggi papan |
 | `display.rotate_seconds` | 3 | Jeda pergantian halaman; **0 = tidak berpindah sendiri** |
 | `display.next_count` | 3 | Hanya untuk papan kecil di dalam anjungan |
@@ -398,6 +424,59 @@ sengaja hanya berjalan saat Enter/Cari ditekan, dan penyegaran otomatis
 tidak boleh mendahului petugas yang belum selesai mengetik kata kuncinya.
 Baris yang sedang dibaca juga tidak melompat sendiri — dipertahankan
 selama lembarnya masih ada di hasil yang baru.
+
+### Panel informasi anjungan
+
+Paruh atas anjungan berisi satu panel yang bergantian isinya, dan seluruh
+berkasnya hidup **di mesin anjungan, bukan di database**. Pengaturan
+bersama hanya menyimpan jenis tampilan sambutan; gambar dan videonya
+disalin ke folder di sebelah aplikasi pada mesin itu sendiri.
+
+| Keadaan | Isi panel | Berapa lama |
+|---|---|---|
+| Menganggur | Sambutan: teks, atau isi `media/kiosk` berputar bergiliran | terus-menerus |
+| A/B/C disentuh | Media layanan itu, atau **Info Anjungan** berupa teks bila tidak ada berkasnya | sampai YA/BATAL, maksimal 15 detik |
+| Nomor terbit | Kartu nomor: nomor besar, jenis layanan, sisa antrian, arahan | sampai tombol hidup lagi |
+
+**Media per jenis layanan** dipasang dari **Pengaturan → Media Anjungan per
+Jenis Layanan** (atau dari dialog Ubah Jenis Layanan), dan tersimpan di
+`media/kiosk/layanan/<kode-layanan>/`. Foldernya dinamai menurut *kode*,
+bukan prefix: prefix masih boleh diubah selama layanannya belum dipakai
+antrian, sedangkan kode dikunci sejak dibuat.
+
+Beberapa hal yang sengaja dibuat begitu:
+
+- **Satu berkas per layanan, bukan playlist.** Panelnya hanya tampil belasan
+  detik; sebuah putaran tidak akan sempat berjalan, dan akan bertabrakan
+  dengan mesin putar sambutan.
+- **Video diulang terus sampai pengunjung menekan YA atau BATAL.** Karena
+  itu klip pendek 5–10 detik justru paling baik: yang datang di tengah tetap
+  melihat pesannya utuh dalam beberapa detik. Usahakan frame awal dan
+  akhirnya mirip, supaya sambungan tiap putaran tidak berkedip. Layar
+  konfirmasi tetap menutup sendiri setelah 15 detik — mengulang tidak
+  memperpanjang apa pun.
+- **Selalu tanpa suara.** Suara panel akan bertabrakan dengan pengumuman
+  nomor.
+- **Media mengalahkan Info Anjungan** bila keduanya diisi. Panelnya kecil dan
+  nama layanan sudah tampil besar di panel konfirmasi di bawahnya.
+- **Setelah nomor terbit, panel TIDAK menyambung klip sambutan yang tadi
+  terpotong**, melainkan lanjut ke item berikutnya. Orang yang menontonnya
+  sudah pergi membawa nomornya; yang berdiri berikutnya adalah orang baru.
+- **`media/kiosk/layanan/` tidak ikut diputar sebagai sambutan** — putaran
+  sambutan hanya membaca berkas, bukan folder.
+
+**Kartu nomor sengaja dibuat sebesar itu.** Kegagalan mencetak tidak pernah
+membatalkan antrian, sehingga saat printer kehabisan kertas layar inilah
+satu-satunya catatan nomor yang dipegang pengunjung — cukup besar untuk
+difoto dengan ponsel dari jarak berdiri. Arahannya ikut berubah menurut
+keadaan cetak: `none` berarti "silakan tunggu", cetak berhasil berarti
+"ambil tiket Anda", dan cetak gagal menyuruh pengunjung memfoto atau
+mencatat nomornya. Kalimat yang sama dipakai kartu dan panel bawah, dan
+baris sisa antrian memakai penyusun yang sama dengan struk tiket.
+
+Kartu bertahan setidaknya sampai tombol A/B/C hidup lagi
+(`kiosk.cooldown_seconds`), supaya tidak ada saat layar tampak siap dipakai
+padahal tombolnya masih mati.
 
 ---
 
@@ -810,7 +889,11 @@ app/
   utils/         format tampilan berbahasa Indonesia
 ```
 
-**Pengaturan** diubah `ADMIN` lewat menu **Pengaturan**:
+**Pengaturan** diubah `ADMIN` lewat menu **Pengaturan**. Layarnya membagi
+pengaturan menurut kelompok di kolom kiri, dengan kotak cari di atasnya
+(Ctrl+F) dan bilah Simpan di bawah yang hanya menyala bila ada yang
+berubah. Baris yang belum disimpan ditandai; Batalkan Perubahan meminta
+konfirmasi dulu.
 
 | Kunci | Bawaan | Kegunaan |
 |---|---|---|

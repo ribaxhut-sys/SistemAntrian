@@ -261,6 +261,79 @@ class AuthService:
         logger.info("Sesi layar antrian dimulai untuk cabang %s", cabang)
         return sesi
 
+    def mulai_sesi_pengembang(self) -> AuthSession:
+        """Masuk sebagai administrator tanpa nama dan sandi, hanya dari source."""
+        return self._mulai_sesi_uji(UserRole.ADMIN)
+
+    def mulai_sesi_petugas(self) -> AuthSession:
+        """Masuk sebagai petugas CRO tanpa nama dan sandi, hanya dari source."""
+        return self._mulai_sesi_uji(UserRole.CRO)
+
+    def _mulai_sesi_uji(self, peran: UserRole) -> AuthSession:
+        """
+        Pintasan uji tampilan: jangan minta nama/sandi, dan jangan paksa
+        ganti sandi bawaan. Pada .exe ditolak, karena komputer petugas
+        tidak boleh terbuka tanpa kunci.
+        """
+        from app.core.config import lewati_login_pengembang
+        from app.core.seed import DEFAULT_ADMIN_USERNAME
+
+        if not lewati_login_pengembang():
+            raise BusinessRuleError(
+                "Pintasan masuk pengembang hanya untuk uji dari source."
+            )
+
+        with session_scope() as session:
+            repo = UserRepository(session)
+            user = None
+            if peran is UserRole.ADMIN:
+                user = repo.get_by_username(DEFAULT_ADMIN_USERNAME)
+            if user is None:
+                kandidat = [
+                    u
+                    for u in repo.list_by_role(peran)
+                    if u.status is RecordStatus.ACTIVE
+                ]
+                terikat = [u for u in kandidat if u.default_counter_id is not None]
+                user = (terikat or kandidat or [None])[0]
+            if user is None or user.status is not RecordStatus.ACTIVE:
+                if peran is UserRole.ADMIN:
+                    raise NotFoundError(
+                        "Akun administrator belum ada. Jalankan aplikasi sekali "
+                        "terlebih dahulu agar data awal terbentuk."
+                    )
+                raise NotFoundError(
+                    "Akun petugas CRO belum ada. Buat akun petugas di Data Master "
+                    "sebelum membuka layar petugas."
+                )
+
+            user.last_login_at = clock.now()
+            audit_service.record(
+                session,
+                AuditAction.LOGIN,
+                user_id=user.id,
+                entity_type="app_user",
+                entity_id=user.id,
+                role=user.role.value,
+                alasan="pintasan pengembang tanpa sandi",
+            )
+            self._session = AuthSession(
+                user_id=user.id,
+                username=user.username,
+                full_name=user.full_name,
+                role=user.role,
+                branch_id=user.branch_id,
+                login_at=clock.now(),
+                must_change_password=False,
+                default_counter_id=user.default_counter_id,
+            )
+
+        logger.warning(
+            "Masuk sebagai %s tanpa sandi (pintasan pengembang)",
+            self._session.username,
+        )
+        return self._session
+
     @staticmethod
     def _cabang_pertama() -> int:
         """

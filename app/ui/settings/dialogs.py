@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPlainTextEdit,
     QVBoxLayout,
@@ -17,6 +21,13 @@ from PySide6.QtWidgets import (
 from app.core.security import MIN_PASSWORD_LENGTH
 from app.models import UserRole
 from app.ui.common import judul, keterangan, label_error, tombol
+from app.ui.kiosk.sambutan import (
+    FILTER_BERKAS_ANJUNGAN,
+    folder_media_layanan,
+    hapus_media_layanan,
+    media_layanan,
+    salin_ke_media_layanan,
+)
 
 #: Nama peran dalam bahasa yang dipakai sehari-hari di kantor.
 LABEL_PERAN: dict[UserRole, str] = {
@@ -26,6 +37,88 @@ LABEL_PERAN: dict[UserRole, str] = {
     UserRole.CRO: "Petugas CRO",
     UserRole.DISPLAY: "Layar Antrian",
 }
+
+
+class PemilihMediaLayanan(QWidget):
+    """
+    Berkas gambar/video yang tampil di anjungan saat layanan ini disentuh.
+
+    Berkasnya hidup di mesin anjungan, bukan di database — aturan yang
+    sama dengan media sambutan — jadi tidak ada yang perlu ikut disimpan
+    bersama form ini. Karena itu tombolnya bekerja SEKETIKA, tidak
+    menunggu Simpan, dan penjelasannya mengatakan begitu.
+
+    `ringkas` untuk tempat yang memasang beberapa widget ini berjajar —
+    layar Pengaturan memasang satu untuk setiap jenis layanan. Di sana
+    penjelasan yang sama terulang tiga kali dan berhenti dibaca pada
+    kalinya yang kedua, jadi penjelasannya ditulis sekali di atas
+    kelompoknya dan yang di sini hanya menyebut letak foldernya.
+    """
+
+    def __init__(
+        self, code: str, parent: QWidget | None = None, *, ringkas: bool = False
+    ) -> None:
+        super().__init__(parent)
+        self.code = code
+        self.ringkas = ringkas
+
+        susunan = QVBoxLayout(self)
+        susunan.setContentsMargins(0, 0, 0, 0)
+        susunan.setSpacing(6)
+
+        baris = QHBoxLayout()
+        baris.setSpacing(8)
+        self.label_berkas = QLabel()
+        self.label_berkas.setWordWrap(True)
+        baris.addWidget(self.label_berkas, stretch=1)
+
+        self.btn_pilih = tombol("Pilih berkas…")
+        self.btn_pilih.clicked.connect(self._pilih)
+        baris.addWidget(self.btn_pilih)
+
+        self.btn_hapus = tombol("Hapus")
+        self.btn_hapus.clicked.connect(self._hapus)
+        baris.addWidget(self.btn_hapus)
+        susunan.addLayout(baris)
+
+        folder = folder_media_layanan(code)
+        panjang = (
+            "Berkas langsung dipasang tanpa menunggu Simpan, dan menggantikan "
+            "berkas sebelumnya. Video diulang terus sampai pengunjung menekan "
+            "YA atau BATAL, jadi klip pendek 5-10 detik justru paling baik — "
+            "usahakan frame awal dan akhirnya mirip supaya sambungannya tidak "
+            "berkedip. Suara tidak diputar."
+        )
+        self.keterangan = keterangan(
+            ("" if ringkas else panjang)
+            + (f" Folder: {folder}" if folder is not None else "")
+        )
+        self.keterangan.setWordWrap(True)
+        susunan.addWidget(self.keterangan)
+
+        self._perbarui()
+
+    def _perbarui(self) -> None:
+        berkas = media_layanan(self.code)
+        self.label_berkas.setText(
+            berkas.name if berkas is not None else "Belum ada berkas — memakai Info Anjungan."
+        )
+        self.btn_hapus.setEnabled(berkas is not None)
+
+    def _pilih(self) -> None:
+        folder = folder_media_layanan(self.code)
+        awal = str(folder) if folder is not None and folder.is_dir() else ""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Pilih gambar atau video layanan", awal, FILTER_BERKAS_ANJUNGAN
+        )
+        if not path:
+            return
+        salin_ke_media_layanan(self.code, Path(path))
+        self._perbarui()
+
+    def _hapus(self) -> None:
+        hapus_media_layanan(self.code)
+        self._perbarui()
 
 
 class _DialogIsian(QDialog):
@@ -197,6 +290,26 @@ class CategoryDialog(_DialogIsian):
         )
         self.input_info.setMaximumHeight(90)
         self.form.addRow("Info Anjungan", self.input_info)
+
+        # Media mengalahkan Info Anjungan bila keduanya diisi: panel
+        # anjungan kecil, dan nama layanan sudah tampil besar di panel
+        # konfirmasi di bawahnya, jadi menumpuk gambar dan tulisan hanya
+        # membuat dua-duanya sulit dibaca.
+        #
+        # Hanya tersedia saat mengubah. Foldernya dinamai menurut kode
+        # layanan, dan kode itu belum ada sampai jenis layanannya
+        # tersimpan.
+        if ubah:
+            self.media = PemilihMediaLayanan(category.code)
+            self.form.addRow("Media Anjungan", self.media)
+        else:
+            self.media = None
+            self.form.addRow(
+                "Media Anjungan",
+                keterangan(
+                    "Dapat dipasang setelah jenis layanan ini disimpan."
+                ),
+            )
 
         if prefix_terkunci:
             self.form.addRow(

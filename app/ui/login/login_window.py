@@ -29,6 +29,9 @@ class LoginWindow(QDialog):
     Kesalahan kredensial ditampilkan sebaris di dalam form, bukan sebagai
     kotak dialog. Petugas yang salah ketik cukup mengetik ulang tanpa
     harus menutup dialog terlebih dahulu.
+
+    Menutup jendela ini — lewat tombol "Kembali", tombol silang, maupun
+    Esc — mengembalikan ke layar pilihan mode, bukan menutup aplikasi.
     """
 
     def __init__(self, auth: AuthService, parent: QWidget | None = None) -> None:
@@ -83,9 +86,12 @@ class LoginWindow(QDialog):
         self.tombol_masuk.clicked.connect(self.coba_masuk)
         susunan.addWidget(self.tombol_masuk)
 
-        self.tombol_keluar = tombol("Keluar")
-        self.tombol_keluar.clicked.connect(self.reject)
-        susunan.addWidget(self.tombol_keluar)
+        # "Kembali", bukan "Keluar": tombol ini memundurkan satu layar ke
+        # pilihan mode, tidak menutup aplikasi. Petugas yang salah memilih
+        # layar tidak perlu membuka ulang aplikasi hanya untuk membetulkannya.
+        self.tombol_kembali = tombol("Kembali")
+        self.tombol_kembali.clicked.connect(self.reject)
+        susunan.addWidget(self.tombol_kembali)
 
         # Enter pada isian, bukan tombol default dialog. Bila keduanya
         # aktif, Qt menjalankan login dua kali: yang kedua melihat isian
