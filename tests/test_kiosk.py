@@ -507,6 +507,29 @@ def test_petunjuk_tidak_menyuruh_memilih_saat_layanannya_satu(bikin_halaman_kios
     )
 
 
+def test_pesan_kosong_saat_tidak_ada_jenis_layanan(halaman_kios):
+    """
+    Jalur yang jarang terjadi tetapi harus tetap sehat.
+
+    Aturan service menjaga selalu ada satu jenis layanan aktif, sehingga
+    layar ini nyaris tidak pernah terlihat — dan justru karena itu
+    kesalahannya bisa lama tidak ketahuan. Ia sempat melempar NameError,
+    dan yang menemukannya bukan test melainkan pewaktu penyegaran yang
+    kebetulan berdetak setelah databasenya dibongkar.
+    """
+    from PySide6.QtWidgets import QLabel
+
+    halaman_kios.kategori = []
+    halaman_kios._susun_tombol()
+
+    teks = [
+        label.text()
+        for label in halaman_kios.halaman_pilihan.findChildren(QLabel)
+    ]
+    assert "Belum ada jenis layanan yang dibuka." in teks
+    assert halaman_kios.tombol_layanan == []
+
+
 def test_kartu_berubah_warna_saat_ditekan(halaman_kios):
     """
     Layar sentuh resistif tidak terasa ditekan.
@@ -520,6 +543,146 @@ def test_kartu_berubah_warna_saat_ditekan(halaman_kios):
     assert DISPLAY_KIOS_TOMBOL_TEKAN != DISPLAY_KIOS_TOMBOL
     gaya = halaman_kios.tombol_layanan[0].styleSheet()
     assert f"QPushButton:pressed {{ background: {DISPLAY_KIOS_TOMBOL_TEKAN}" in gaya
+
+
+# ---------------------------------------------------------------------
+# Daftar layanan menyusul perubahan admin
+# ---------------------------------------------------------------------
+
+@pytest.fixture
+def ubah_sebagai_admin(auth, master_service):
+    """
+    Jalankan perubahan data master, lalu kembali ke sesi kios.
+
+    Anjungan berjalan tanpa login; sesinya harus utuh kembali sesudahnya,
+    persis seperti keadaan sungguhan ketika admin mengubah data dari
+    komputer lain.
+    """
+    from tests.conftest import TEST_PASSWORD
+
+    def ubah(aksi):
+        auth.logout()
+        auth.login("admin", TEST_PASSWORD)
+        try:
+            return aksi(master_service)
+        finally:
+            auth.logout()
+            auth.mulai_sesi_kios()
+
+    return ubah
+
+
+def test_kartu_menyusul_jenis_layanan_baru(halaman_kios, ubah_sebagai_admin):
+    """
+    Anjungan berdiri tanpa penjaga; tidak ada yang menekan F5 di sana.
+
+    Sebelum ini, jenis layanan yang baru ditambah admin tidak pernah
+    sampai ke layar anjungan sampai aplikasinya ditutup dan dibuka lagi.
+    """
+    ubah_sebagai_admin(
+        lambda master: master.create_category(
+            code="LAYANAN-D", name="Legalisir Surat", prefix="D"
+        )
+    )
+
+    halaman_kios._periksa_perubahan_layanan()
+
+    assert [k.prefix for k in halaman_kios.kategori] == ["A", "B", "C", "D"]
+    assert len(halaman_kios.tombol_layanan) == 4
+
+
+def test_kartu_menyusul_layanan_yang_dinonaktifkan(halaman_kios, ubah_sebagai_admin):
+    kategori = halaman_kios.kategori[0]
+    ubah_sebagai_admin(
+        lambda master: master.set_category_status(kategori.id, False)
+    )
+
+    halaman_kios._periksa_perubahan_layanan()
+
+    assert [k.prefix for k in halaman_kios.kategori] == ["B", "C"]
+
+
+def test_kartu_menyusul_urutan_yang_digeser(halaman_kios, ubah_sebagai_admin):
+    """Urutan kartu di anjungan adalah urutan yang diatur di Data Master."""
+    kategori = halaman_kios.kategori[0]
+    ubah_sebagai_admin(
+        lambda master: master.pindahkan_category(kategori.id, naik=False)
+    )
+
+    halaman_kios._periksa_perubahan_layanan()
+
+    assert [k.prefix for k in halaman_kios.kategori] == ["B", "A", "C"]
+
+
+def test_kartu_tidak_disusun_ulang_bila_tidak_ada_yang_berubah(halaman_kios):
+    """
+    Tombol yang sama tidak boleh dibangun ulang tiap dua puluh detik.
+
+    Membangun ulang menghapus tombol yang lama; bila itu terjadi tepat
+    ketika jari pengunjung sedang menyentuhnya, sentuhannya hilang.
+    """
+    sebelum = list(halaman_kios.tombol_layanan)
+
+    halaman_kios._periksa_perubahan_layanan()
+
+    assert halaman_kios.tombol_layanan == sebelum
+
+
+def test_kartu_tidak_disusun_ulang_saat_menunggu_konfirmasi(
+    halaman_kios, ubah_sebagai_admin
+):
+    """
+    Menyusun ulang kartu saat layar konfirmasi terbuka akan membatalkan
+    pilihan pengunjung tanpa ia mengerti mengapa.
+    """
+    halaman_kios._pilih_layanan(halaman_kios.kategori[0])
+    ubah_sebagai_admin(
+        lambda master: master.create_category(
+            code="LAYANAN-D", name="Legalisir Surat", prefix="D"
+        )
+    )
+
+    halaman_kios._periksa_perubahan_layanan()
+
+    assert len(halaman_kios.tombol_layanan) == 3
+    assert halaman_kios._menunggu_konfirmasi
+
+
+def test_kartu_tidak_disusun_ulang_saat_kartu_nomor_tampil(
+    halaman_kios, ubah_sebagai_admin
+):
+    """Layar yang sedang dibaca orang tidak boleh direbut."""
+    halaman_kios.ambil_nomor(halaman_kios.kategori[0].id)
+    ubah_sebagai_admin(
+        lambda master: master.create_category(
+            code="LAYANAN-D", name="Legalisir Surat", prefix="D"
+        )
+    )
+
+    halaman_kios._periksa_perubahan_layanan()
+
+    assert len(halaman_kios.tombol_layanan) == 3
+
+
+def test_kartu_baru_ikut_mati_selama_jeda(halaman_kios, ubah_sebagai_admin):
+    """
+    Tombol yang baru dibangun selalu lahir hidup.
+
+    Tanpa penyesuaian ulang, kartu yang muncul tepat di tengah jeda bisa
+    disentuh padahal jedanya belum habis.
+    """
+    halaman_kios.ambil_nomor(halaman_kios.kategori[0].id)
+    halaman_kios._penghapus_hasil.stop()  # hasil sudah lewat, jeda masih jalan
+    ubah_sebagai_admin(
+        lambda master: master.create_category(
+            code="LAYANAN-D", name="Legalisir Surat", prefix="D"
+        )
+    )
+
+    halaman_kios._periksa_perubahan_layanan()
+
+    assert len(halaman_kios.tombol_layanan) == 4
+    assert all(not btn.isEnabled() for btn in halaman_kios.tombol_layanan)
 
 
 def test_papan_kios_tetap_kompak_di_layar_penuh(qtbot, halaman_kios):

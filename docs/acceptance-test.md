@@ -54,17 +54,25 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | C2 | Tambah satu jenis layanan baru | Muncul di layar penerbitan nomor | |
 | C3 | Nonaktifkan satu jenis layanan | Tidak lagi dapat menerbitkan nomor untuk layanan itu | |
 | C4 | Tambah satu loket | Muncul di pilihan loket panel pelayanan | |
+| C5 | Pilih satu jenis layanan lalu tekan **Turun** | Barisnya bertukar tempat; barisnya tetap tersorot | |
+| C6 | Buka anjungan setelah C5 | Urutan kartu A/B/C mengikuti urutan tabel | |
+| C7 | Batasi SEMUA loket ke satu jenis layanan saja | Muncul kotak peringatan, lalu pita kuning yang menyebut layanan yang tidak dilayani | |
+| C8 | Buka tab **Jenis Layanan** setelah C7 | Pita kuning yang sama ikut tampil di sana | |
+| C9 | Kembalikan satu loket ke "Semua" | Pita kuning hilang di kedua tab | |
 
 ## C2. Pengaturan
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| C5 | Buka menu **Pengaturan** sebagai ADMIN | Seluruh pengaturan tampil terkelompok | |
+| C5 | Buka menu **Pengaturan** sebagai ADMIN | Daftar kelompok di kiri; tiap kelompok halaman sendiri, bukan satu gulungan panjang | |
+| C5b | Ketik `backup` di kotak cari | Hanya kelompok Backup yang terlihat; jumlah hasilnya tertulis di daftar kiri | |
+| C5c | Ubah satu angka, jangan simpan | Barisnya ditandai; tombol Simpan menyala; tertulis ada pengaturan belum disimpan | |
 | C6 | Ubah judul layar antrian, tekan Simpan | Tersimpan; layar antrian memakai judul baru | |
-| C7 | Ubah beberapa pengaturan lalu tekan "Batalkan Perubahan" | Kembali ke nilai tersimpan, tidak ada yang berubah | |
+| C7 | Ubah beberapa pengaturan lalu tekan "Batalkan Perubahan" | Konfirmasi muncul; setelah Ya, kembali ke nilai tersimpan | |
 | C8 | Tekan Simpan tanpa mengubah apa pun | Dinyatakan tidak ada yang berubah; audit log tidak bertambah | |
 | C9 | Coba isi jeda penyegaran dengan 1 | Kotak angka menahannya di batas minimum | |
 | C10 | Periksa tab Jejak Aktivitas | Perubahan tercatat sebagai `CHANGE_CONFIGURATION` | |
+| C11 | Buka kelompok **Media Anjungan** | Ada pemilih berkas untuk setiap jenis layanan aktif | |
 
 ## D. Penerbitan nomor
 
@@ -188,6 +196,12 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | L11 | Setel `ANTRIAN_SUARA=1` di anjungan, buka ulang, panggil nomor | Anjungan ikut bersuara — pemasangan satu-mesin tetap bisa | |
 | L12 | Setel `ANTRIAN_PRINTER=none` di satu komputer loket, terbitkan nomor dari sana | Loket itu tidak mencetak; anjungan tetap mencetak | |
 | L13 | Setel `ANTRIAN_SUARA=yaa` (salah ketik) di televisi | Diperlakukan seperti tidak diisi; panggilan TETAP bersuara | |
+| L14 | Aktifkan hanya satu jenis layanan, buka anjungan | Satu kartu besar di tengah; petunjuknya berbunyi "Sentuh tombol di bawah", bukan menyuruh memilih | |
+| L15 | Aktifkan empat jenis layanan | Kartu tersusun 2 atas + 2 bawah, bukan 3+1 | |
+| L16 | Aktifkan lima jenis layanan | Tersusun 3 atas + 2 bawah; dua kartu bawah lebih lebar; tidak ada yang terpotong atau bertumpuk | |
+| L17 | Sentuh dan tahan satu kartu | Warnanya menggelap selama ditahan | |
+| L18 | Dari komputer admin, tambah satu jenis layanan; biarkan anjungan menyala | Kartunya menyusul sendiri dalam ±20 detik, tanpa anjungan dibuka ulang | |
+| L19 | Ulangi L18 saat pengunjung sedang di layar konfirmasi | Layar konfirmasi TIDAK terganggu; kartu baru muncul setelah layarnya kembali menganggur | |
 
 ## M. Layar antrian televisi (tanpa login)
 
@@ -207,12 +221,14 @@ Dijalankan di komputer televisi ruang tunggu, terpisah dari anjungan.
 | M10 | Berdiri di ujung ruang tunggu saat halaman berganti | Masih sempat membaca satu halaman penuh sebelum berganti | |
 | M11 | Sisakan antrian lebih sedikit dari satu halaman | Halaman berhenti berganti; tidak ada kedipan | |
 | M12 | Panggil nomor sampai halaman terakhir habis saat sedang tampil | Layar kembali ke halaman 1, tidak menjadi kosong | |
-| M13 | Ganti tema ke Sorotan dan Split | Daftar menunggu tetap ada, nomornya tidak berdempetan | |
+| M13 | Ganti tema satu per satu ke ketujuh pilihan | Semuanya terbuka; seluruh loket tampil; judul papan utuh dan daftar menunggu tetap ada di setiap tema | |
+| M13b | Pasang lima loket, lalu buka tema Kaca, Bento, dan Papan LED | Kartu loket mengecil sendiri; daftar menunggu tetap mendapat sekitar separuh papan | |
+| M13c | Buka tema Bento, lalu panggil nomor dari loket lain | Sel besar berpindah ke loket yang barusan memanggil, nomornya tetap yang terbesar di layar | |
 | M14 | Terbitkan nomor pada dua jenis layanan berbeda | Daftar bawah terbagi sebanyak jenis layanan; tiap kolom berjudul nama layanannya | |
 | M15 | Biarkan satu jenis layanan tanpa antrian | Kolomnya tetap ada, berisi "—"; lebar papan tidak berubah-ubah | |
 | M16 | Nonaktifkan satu jenis layanan yang masih ada yang menunggu | Kolomnya tetap tampil sampai nomor terakhirnya dipanggil | |
 | M17 | Perhatikan nomor pada daftar bawah | Angka utuh — tidak ada yang terpotong atas atau bawahnya | |
-| M18 | Isi 10 nomor pada satu layanan | Tampil 2 kolom x 5 baris di dalam kolom layanan itu | |
+| M18 | Isi 10 nomor pada satu layanan | Tampil 2 kolom x 5 baris di dalam kolom layanan itu; pada tema Sorotan dan Split satu kolom saja, karena panelnya sempit | |
 | M19 | Ubah **Baris nomor per kolom** menjadi 3, buka ulang layar | Tiga baris; hurufnya membesar mengikuti ruang yang lowong | |
 | M20 | Isi **Ukuran huruf nomor menunggu** dengan 90, buka ulang | Huruf tetap diperkecil agar muat; tidak ada yang terpotong | |
 

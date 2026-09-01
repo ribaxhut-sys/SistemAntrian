@@ -54,6 +54,7 @@ from app.ui.style import (
     KIOS_PIL,
     KIOS_SUKSES,
     KIOS_SUKSES_TEKAN,
+    TEXT_MUTED,
 )
 
 logger = get_logger("ui.kiosk")
@@ -95,6 +96,19 @@ JEDA_KONFIRMASI = 15000
 
 #: Selang pembaruan hitung mundur jeda pengambilan nomor.
 SELANG_HITUNG_MS = 500
+
+#: Selang pemeriksaan perubahan daftar jenis layanan, dalam milidetik.
+#:
+#: Anjungan berdiri tanpa penjaga dan tidak ada yang menekan F5 di sana.
+#: Tanpa pemeriksaan ini, jenis layanan yang baru ditambah, diganti nama,
+#: digeser urutannya, atau dinonaktifkan admin tidak pernah sampai ke layar
+#: anjungan sampai aplikasinya ditutup dan dibuka lagi — dan yang menutup
+#: aplikasi di mesin itu tidak ada.
+#:
+#: Sengaja TIDAK ikut pewaktu hitung mundur yang berdetak tiap setengah
+#: detik: yang ini menambah satu pembacaan database, dan daftar jenis
+#: layanan berubah beberapa kali setahun, bukan beberapa kali semenit.
+SELANG_PERIKSA_LAYANAN_MS = 20000
 
 #: Tinggi minimum panel ambil nomor. Tanpa ini, papan antrian merebut
 #: seluruh tinggi jendela biasa dan nama layanan di bawah A/B/C terpotong.
@@ -245,6 +259,10 @@ class KioskPage(QWidget):
         self._penghitung = QTimer(self)
         self._penghitung.timeout.connect(self._perbarui_jeda)
         self._penghitung.start(SELANG_HITUNG_MS)
+
+        self._pemeriksa_layanan = QTimer(self)
+        self._pemeriksa_layanan.timeout.connect(self._periksa_perubahan_layanan)
+        self._pemeriksa_layanan.start(SELANG_PERIKSA_LAYANAN_MS)
 
     # -----------------------------------------------------------------
     # Tampilan
@@ -489,6 +507,56 @@ class KioskPage(QWidget):
 
         self.kategori = data or []
         self._susun_tombol()
+        self._perbarui_jeda()
+
+    def _sidik_layanan(self, kategori) -> tuple:
+        """
+        Sidik daftar layanan: yang menentukan tampilan kartu, itu saja.
+
+        `info_text` tidak ikut. Isinya hanya dibaca ketika layanannya
+        disentuh — dan memang dibaca ulang setiap kali disentuh — sehingga
+        perubahannya tidak perlu menyusun ulang kartu apa pun.
+        """
+        return tuple(
+            (baris.id, baris.name, baris.prefix, baris.display_order)
+            for baris in kategori
+        )
+
+    def _periksa_perubahan_layanan(self) -> None:
+        """
+        Susun ulang kartu bila admin mengubah daftar jenis layanan.
+
+        Hanya ketika layarnya sedang menganggur. Menyusun ulang kartu tepat
+        saat pengunjung berada di layar konfirmasi akan membatalkan
+        pilihannya tanpa ia mengerti mengapa, dan menyusunnya ulang saat
+        kartu nomor sedang tampil merebut layar yang sedang dibaca orang.
+        Perubahan daftar layanan tidak pernah mendesak; menunggu satu
+        putaran lagi selalu boleh.
+        """
+        if self._menunggu_konfirmasi or self._penghapus_hasil.isActive():
+            return
+
+        try:
+            kategori = self.master.list_categories(only_active=True) or []
+        except Exception:  # noqa: BLE001 - layar publik tidak boleh mati di sini
+            logger.exception(
+                "Daftar jenis layanan tidak terbaca; kartu anjungan dibiarkan"
+            )
+            return
+
+        if self._sidik_layanan(kategori) == self._sidik_layanan(self.kategori):
+            return
+
+        logger.info(
+            "Daftar jenis layanan berubah (%d -> %d); kartu anjungan disusun ulang",
+            len(self.kategori),
+            len(kategori),
+        )
+        self.kategori = kategori
+        self._susun_tombol()
+        # Tombol yang baru dibangun selalu lahir hidup. Tanpa baris ini,
+        # kartu yang muncul tepat di tengah jeda pengambilan nomor bisa
+        # disentuh padahal jedanya belum habis.
         self._perbarui_jeda()
 
     def _susun_tombol(self) -> None:
