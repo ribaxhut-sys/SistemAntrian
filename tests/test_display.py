@@ -2874,3 +2874,98 @@ def test_panel_bento_jendela_sedang_tidak_terpotong(
     assert halaman.label_berikutnya
     bawah_kartu = max(label.geometry().bottom() for label in halaman.label_berikutnya)
     assert bawah_kartu <= halaman.panel_berikutnya.height() - dalam.bottom()
+
+
+# ---------------------------------------------------------------------
+# Pergantian halaman berpudar
+# ---------------------------------------------------------------------
+
+def _siapkan_papan_tampil(qtbot, halaman, terbitkan, auth, jumlah: int = 7):
+    """Isi papan, tampilkan jendelanya, lalu muat datanya sekali."""
+    terbitkan("A", jumlah)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman.resize(1280, 720)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    halaman.muat_ulang()
+    return halaman
+
+
+def test_pergantian_halaman_memudarkan_kartu_nomor(
+    qtbot, layar_berhalaman, terbitkan, auth
+):
+    """Halaman yang berganti begitu saja terbaca sebagai papan berkedip."""
+    papan = _siapkan_papan_tampil(qtbot, layar_berhalaman, terbitkan, auth)
+    assert papan.jumlah_halaman > 1
+
+    papan.putar_halaman()
+
+    assert papan._halaman == 1
+    assert papan._animasi_halaman is not None
+    # Animasi memasang nilai awalnya seketika saat start().
+    assert papan.efek_berikutnya.opacity() < 1.0
+
+
+def test_pudar_selesai_pada_nomor_yang_terbaca_penuh(
+    qtbot, layar_berhalaman, terbitkan, auth
+):
+    """
+    Kegagalan terburuk animasi ini adalah daftar yang tidak pernah kembali
+    terlihat. Dijalankan dengan event loop sungguhan sampai selesai.
+    """
+    papan = _siapkan_papan_tampil(qtbot, layar_berhalaman, terbitkan, auth)
+
+    papan.putar_halaman()
+
+    qtbot.waitUntil(lambda: papan.efek_berikutnya.opacity() == 1.0, timeout=3000)
+
+
+def test_penyegaran_data_tidak_ikut_memudarkan(
+    qtbot, layar_berhalaman, terbitkan, auth
+):
+    """
+    Papan digambar ulang setiap dua detik, jauh lebih sering daripada
+    halamannya berganti. Memudarkan di sana membuatnya berkedip
+    terus-menerus walau tidak ada satu pun yang berubah.
+    """
+    papan = _siapkan_papan_tampil(qtbot, layar_berhalaman, terbitkan, auth)
+
+    papan.muat_ulang()
+
+    assert papan._animasi_halaman is None
+    assert papan.efek_berikutnya.opacity() == 1.0
+
+
+def test_papan_yang_belum_tampil_tidak_ditinggal_pudar(
+    layar_berhalaman, terbitkan, auth
+):
+    """
+    Nilai awal nol yang animasinya tidak pernah berjalan meninggalkan
+    daftar menunggu yang tidak terlihat sama sekali.
+    """
+    terbitkan("A", 7)
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    layar_berhalaman.muat_ulang()
+
+    layar_berhalaman.putar_halaman()
+
+    assert layar_berhalaman._animasi_halaman is None
+    assert layar_berhalaman.efek_berikutnya.opacity() == 1.0
+
+
+def test_menutup_layar_mengembalikan_panel_ke_utuh(
+    qtbot, layar_berhalaman, terbitkan, auth
+):
+    """
+    `stop()` tidak memancarkan `finished`, sehingga animasi yang dipotong
+    di tengah akan meninggalkan daftar separuh pudar untuk selamanya.
+    """
+    papan = _siapkan_papan_tampil(qtbot, layar_berhalaman, terbitkan, auth)
+    papan.putar_halaman()
+
+    papan.hentikan()
+
+    assert papan._animasi_halaman is None
+    assert papan.efek_berikutnya.opacity() == 1.0

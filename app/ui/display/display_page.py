@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
+    QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -48,6 +49,17 @@ SELANG_SEGAR_MS = 2_000
 #: berarti memilih antara jam yang melompat dua detik sekali atau membebani
 #: database sekali per detik.
 SELANG_JAM_MS = 1_000
+
+#: Lama pudar-masuk kartu nomor ketika halaman daftar menunggu berganti.
+#:
+#: Hanya satu arah, tanpa pudar-keluar. Halaman berganti setiap beberapa
+#: detik; menunggu halaman lama memudar dahulu berarti panel kosong pada
+#: sebagian besar waktu tayang setiap halaman, dan yang tersisa untuk
+#: dibaca justru berkurang.
+#:
+#: Cukup panjang untuk terbaca sebagai pergantian, cukup pendek untuk
+#: selesai jauh sebelum penyegaran data dua detik sekali menyentuhnya.
+DURASI_PUTAR_HALAMAN_MS = 280
 
 #: Lama satu arah transisi pudar saat panel informasi papan kios berganti
 #: isi — baik karena pengunjung menyentuh sebuah layanan maupun karena
@@ -1004,6 +1016,10 @@ class DisplayPage(QWidget):
         #: mengembalikannya ke halaman satu terus-menerus, dan rotasi tidak
         #: akan pernah sempat terlihat.
         self._halaman = 0
+        #: Animasi pudar-masuk halaman yang sedang berjalan, bila ada.
+        #: Wajib ada SEBELUM panel dibangun: `_bangun_panel_berikutnya`
+        #: menghentikannya setiap kali panelnya dibuat ulang.
+        self._animasi_halaman: QPropertyAnimation | None = None
         self._menunggu: list = []
         self._layanan: list = []
         self._total_menunggu = 0
@@ -1200,8 +1216,21 @@ class DisplayPage(QWidget):
         # Kisi, bukan satu baris: daftar menunggu televisi memuat sepuluh
         # nomor atau lebih sekaligus, dan sepuluh nomor sebaris menjadi
         # terlalu kecil untuk dibaca dari seberang ruangan.
-        self.baris_berikutnya = QGridLayout()
-        self.susunan_berikutnya.addLayout(self.baris_berikutnya, stretch=1)
+        #
+        # Kisinya dibungkus satu wadah supaya efek pudar punya tempat
+        # bergantung. Dipasang pada panel, efeknya ikut memudarkan latar
+        # kartu putihnya dan yang terlihat adalah lubang berkedip pada
+        # papan, bukan nomor yang berganti.
+        self.wadah_berikutnya = QWidget(self.panel_berikutnya)
+        self.baris_berikutnya = QGridLayout(self.wadah_berikutnya)
+        self.baris_berikutnya.setContentsMargins(0, 0, 0, 0)
+        self.efek_berikutnya = QGraphicsOpacityEffect(self.wadah_berikutnya)
+        self.wadah_berikutnya.setGraphicsEffect(self.efek_berikutnya)
+        # Panel dibangun ulang setiap tema berganti, dan animasi yang masih
+        # menunjuk efek milik panel lama akan menyentuh objek yang sudah
+        # dibuang.
+        self._hentikan_animasi_halaman()
+        self.susunan_berikutnya.addWidget(self.wadah_berikutnya, stretch=1)
         return self.panel_berikutnya
 
     def _bangun_kolom_loket(self, *, mendatar: bool = False) -> QVBoxLayout | QHBoxLayout:
@@ -2037,6 +2066,53 @@ class DisplayPage(QWidget):
             return
         self._halaman = (self._halaman + 1) % self.jumlah_halaman
         self._gambar_halaman()
+        self._pudarkan_masuk_halaman()
+
+    def _pudarkan_masuk_halaman(self) -> None:
+        """
+        Pudarkan masuk kartu nomor halaman yang baru saja digambar.
+
+        Dipanggil HANYA dari `putar_halaman`, bukan dari `_gambar_halaman`.
+        Panel digambar ulang setiap penyegaran data — dua detik sekali —
+        dan memudarkannya di sana membuat papan berkedip terus-menerus
+        walau tidak ada satu pun yang berubah.
+
+        Papan yang belum pernah tampil dilewati. Nilai awal 0 yang tidak
+        pernah dijalankan animasinya meninggalkan daftar menunggu yang
+        tidak terlihat sama sekali.
+        """
+        self._hentikan_animasi_halaman()
+        if not self.isVisible():
+            return
+
+        self.efek_berikutnya.setOpacity(0.0)
+        self._animasi_halaman = QPropertyAnimation(
+            self.efek_berikutnya, b"opacity", self
+        )
+        self._animasi_halaman.setDuration(DURASI_PUTAR_HALAMAN_MS)
+        self._animasi_halaman.setStartValue(0.0)
+        self._animasi_halaman.setEndValue(1.0)
+        # Cepat di awal lalu melambat: nomornya sudah terbaca utuh jauh
+        # sebelum animasinya selesai, dan yang tersisa hanya kesan bahwa
+        # halaman baru saja berganti.
+        self._animasi_halaman.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animasi_halaman.start()
+
+    def _hentikan_animasi_halaman(self) -> None:
+        """
+        Hentikan pudar yang sedang berjalan dan kembalikan panel ke utuh.
+
+        Opacity dikembalikan ke satu, bukan dibiarkan pada nilai terakhir:
+        `stop()` tidak memancarkan `finished`, sehingga animasi yang
+        dipotong di tengah akan meninggalkan daftar menunggu separuh pudar
+        untuk selamanya.
+        """
+        if self._animasi_halaman is not None:
+            self._animasi_halaman.stop()
+            self._animasi_halaman = None
+        efek = getattr(self, "efek_berikutnya", None)
+        if efek is not None:
+            efek.setOpacity(1.0)
 
     def _gambar_halaman(self) -> None:
         """Tulis halaman yang sedang aktif beserta keterangannya."""
@@ -2298,5 +2374,8 @@ class DisplayPage(QWidget):
         self.pewaktu.stop()
         self.pewaktu_jam.stop()
         self.pewaktu_halaman.stop()
+        # Animasi yang masih berjalan akan menyentuh efek milik panel yang
+        # sebentar lagi dibuang bersama jendelanya.
+        self._hentikan_animasi_halaman()
         if self.panel_info_kios is not None:
             self.panel_info_kios.hentikan()
