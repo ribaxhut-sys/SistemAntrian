@@ -194,6 +194,44 @@ class MasterDataService:
             )
             return [_as_category(c) for c in rows]
 
+    def layanan_tanpa_loket(self, branch_id: int | None = None) -> list[CategoryInfo]:
+        """
+        Jenis layanan aktif yang tidak dilayani loket aktif mana pun.
+
+        Keadaan ini tidak ditolak oleh aturan mana pun, dan justru itulah
+        bahayanya: anjungan tetap menerbitkan nomornya, pengunjung tetap
+        duduk menunggu, dan tidak ada satu loket pun yang bisa memanggilnya.
+        Tidak ada yang akan menyadarinya sampai ada orang yang menunggu
+        terlalu lama lalu bertanya ke petugas.
+
+        Loket yang daftar layanannya kosong melayani SEMUA jenis layanan
+        (lihat `counter_category`), sehingga satu saja loket aktif yang
+        dibiarkan "Semua" membuat daftar ini pasti kosong.
+
+        Loket yang sedang istirahat tetap dihitung melayani: istirahat itu
+        sementara dan diakhiri sendiri oleh petugasnya, bukan keadaan yang
+        perlu diperingatkan kepada admin.
+        """
+        sesi = self.auth.require_session()
+        with session_scope() as session:
+            cabang = branch_id or sesi.branch_id
+            loket = CounterRepository(session).list_for_branch(
+                cabang, only_active=True
+            )
+            if any(not baris.categories for baris in loket):
+                return []
+
+            dilayani = {
+                kategori.id for baris in loket for kategori in baris.categories
+            }
+            return [
+                _as_category(kategori)
+                for kategori in ServiceCategoryRepository(session).list_for_branch(
+                    cabang, only_active=True
+                )
+                if kategori.id not in dilayani
+            ]
+
     def get_counter(self, counter_id: int) -> CounterInfo:
         self.auth.require_session()
         with session_scope() as session:
@@ -520,6 +558,70 @@ class MasterDataService:
                 nama=nama,
             )
             return _as_category(category)
+
+    def pindahkan_category(self, category_id: int, *, naik: bool) -> list[CategoryInfo]:
+        """
+        Geser satu jenis layanan satu langkah pada urutan tampil.
+
+        Urutan inilah yang dipakai anjungan untuk menyusun kartu A/B/C dan
+        layar petugas untuk menyusun pilihannya. Tanpa cara mengubahnya,
+        jenis layanan yang ditambahkan belakangan selamanya jadi kartu
+        terakhir — walau justru itu yang paling sering disentuh.
+
+        Seluruh baris dinomori ulang 1..N lebih dahulu, bukan hanya dua
+        baris yang bertukar. Data lama boleh memiliki `display_order`
+        kembar atau berlubang, dan pada nilai yang kembar tukar-menukar
+        tidak mengubah urutan apa pun — tombolnya seakan tidak berfungsi.
+
+        Jenis layanan NONAKTIF ikut menempati urutan. Ia memang tidak
+        tampil di anjungan, tetapi tempatnya harus tetap terjaga supaya
+        urutannya kembali seperti semula begitu diaktifkan lagi.
+        """
+        sesi = self.auth.require_permission(Permission.MASTER_MANAGE)
+
+        with session_scope() as session:
+            repo = ServiceCategoryRepository(session)
+            category = repo.get_by_id(category_id)
+            if category is None:
+                raise NotFoundError("Jenis layanan tidak ditemukan.")
+
+            urutan = repo.list_for_branch(category.branch_id)
+            for posisi, baris in enumerate(urutan, start=1):
+                baris.display_order = posisi
+
+            indeks = next(
+                i for i, baris in enumerate(urutan) if baris.id == category_id
+            )
+            tetangga = indeks - 1 if naik else indeks + 1
+            if not 0 <= tetangga < len(urutan):
+                raise BusinessRuleError(
+                    f"{category.name} sudah berada di urutan "
+                    f"{'teratas' if naik else 'terbawah'}."
+                )
+
+            urutan[indeks].display_order, urutan[tetangga].display_order = (
+                urutan[tetangga].display_order,
+                urutan[indeks].display_order,
+            )
+
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="service_category",
+                entity_id=category.id,
+                tindakan="pindah urutan",
+                urutan_baru=urutan[indeks].display_order,
+            )
+            logger.info(
+                "Jenis layanan %s dipindah ke urutan %s",
+                category.code,
+                urutan[indeks].display_order,
+            )
+            return [
+                _as_category(baris)
+                for baris in sorted(urutan, key=lambda b: b.display_order)
+            ]
 
     def set_category_status(self, category_id: int, active: bool) -> CategoryInfo:
         """

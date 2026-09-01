@@ -620,6 +620,115 @@ def test_muat_ulang_menampilkan_data_terbaru(halaman_master, admin_auth):
     assert halaman_master.tab_loket.tabel.rowCount() == 4
 
 
+def test_pita_peringatan_tersembunyi_saat_semua_layanan_terlayani(halaman_master):
+    for tab in (halaman_master.tab_loket, halaman_master.tab_layanan):
+        assert not tab.peringatan.isVisibleTo(tab)
+
+
+def _batasi_semua_loket(admin_auth, prefix: str = "A") -> None:
+    """Buat keadaan "ada layanan yang tidak dilayani loket mana pun"."""
+    master = MasterDataService(admin_auth)
+    kategori = next(k for k in master.list_categories() if k.prefix == prefix)
+    for loket in master.list_counters():
+        master.set_counter_categories(loket.id, [kategori.id])
+
+
+def test_pita_peringatan_menyebut_layanan_tanpa_loket(halaman_master, admin_auth):
+    """
+    Keadaan ini tidak ditolak aturan mana pun dan tidak terlihat di mana
+    pun kecuali di sini: nomornya tetap terbit, dan tidak ada yang bisa
+    memanggilnya.
+    """
+    _batasi_semua_loket(admin_auth)
+    halaman_master.muat_ulang()
+
+    pita = halaman_master.tab_loket.peringatan
+    assert pita.isVisibleTo(halaman_master.tab_loket)
+    assert "Pengaduan" in pita.text()
+    assert "Informasi" in pita.text()
+    assert "Konsultasi" not in pita.text()
+
+
+def test_pita_peringatan_juga_tampil_di_tab_jenis_layanan(halaman_master, admin_auth):
+    """Keadaannya lahir dari hubungan dua tab; keduanya harus mengabarkan."""
+    _batasi_semua_loket(admin_auth)
+    halaman_master.muat_ulang()
+
+    tab = halaman_master.tab_layanan
+    assert tab.peringatan.isVisibleTo(tab)
+    assert "Pengaduan" in tab.peringatan.text()
+
+
+def test_pita_peringatan_hilang_setelah_loket_melayani_lagi(
+    halaman_master, admin_auth
+):
+    _batasi_semua_loket(admin_auth)
+    halaman_master.muat_ulang()
+
+    master = MasterDataService(admin_auth)
+    master.set_counter_categories(master.list_counters()[0].id, [])
+    halaman_master.muat_ulang()
+
+    tab = halaman_master.tab_loket
+    assert not tab.peringatan.isVisibleTo(tab)
+    assert tab.peringatan.text() == ""
+
+
+def test_berpindah_tab_menyegarkan_peringatan(halaman_master, admin_auth):
+    """
+    Tab Jenis Layanan dibuka sebelum pembatasan dibuat, jadi pitanya masih
+    kosong sampai tabnya sendiri dimuat ulang.
+    """
+    _batasi_semua_loket(admin_auth)
+    tab_layanan = halaman_master.tab_layanan
+    assert not tab_layanan.peringatan.isVisibleTo(tab_layanan)
+
+    halaman_master.tab.setCurrentWidget(tab_layanan)
+
+    assert tab_layanan.peringatan.isVisibleTo(tab_layanan)
+
+
+def test_tombol_naik_mati_pada_baris_teratas(halaman_master):
+    tab = halaman_master.tab_layanan
+    tab.tabel.setCurrentCell(0, 0)
+
+    assert not tab.tombol_naik.isEnabled()
+    assert tab.tombol_turun.isEnabled()
+
+
+def test_tombol_turun_mati_pada_baris_terbawah(halaman_master):
+    tab = halaman_master.tab_layanan
+    tab.tabel.setCurrentCell(tab.tabel.rowCount() - 1, 0)
+
+    assert tab.tombol_naik.isEnabled()
+    assert not tab.tombol_turun.isEnabled()
+
+
+def test_menggeser_jenis_layanan_mengubah_urutan_tabel(halaman_master):
+    """Urutan baris di sini adalah urutan tombol di anjungan."""
+    tab = halaman_master.tab_layanan
+    tab.tabel.setCurrentCell(0, 0)
+
+    tab.pindahkan(naik=False)
+
+    assert [tab.data[b].prefix for b in range(len(tab.data))] == ["B", "A", "C"]
+
+
+def test_pilihan_ikut_berpindah_setelah_digeser(halaman_master):
+    """
+    Tanpa ini tombolnya hanya bisa ditekan sekali: tabel disusun ulang,
+    pilihannya hilang, dan admin harus mengklik barisnya lagi untuk setiap
+    satu langkah.
+    """
+    tab = halaman_master.tab_layanan
+    tab.tabel.setCurrentCell(0, 0)
+    layanan = tab.data[0]
+
+    tab.pindahkan(naik=False)
+
+    assert tab.baris_terpilih() == 1
+    assert tab.id_terpilih() == layanan.id
+
 
 def test_identitas_kantor_terisi(halaman_master):
     assert halaman_master.tab_kantor.label_kode.text() == "PUSAT"

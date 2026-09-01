@@ -387,6 +387,163 @@ def test_selain_admin_tidak_dapat_mengatur_layanan_loket(auth, master_service):
 
 
 # ---------------------------------------------------------------------
+# Layanan tanpa loket
+# ---------------------------------------------------------------------
+
+def test_semua_layanan_terlayani_saat_ada_loket_tanpa_batasan(master_service):
+    """Satu loket yang dibiarkan "Semua" sudah cukup menutup seluruhnya."""
+    kategori = master_service.list_categories()
+    loket = master_service.list_counters()
+    master_service.set_counter_categories(loket[0].id, [kategori[0].id])
+
+    assert master_service.layanan_tanpa_loket() == []
+
+
+def test_layanan_tanpa_loket_disebutkan(master_service):
+    """
+    Keadaan ini sah tersimpan tetapi keliru: anjungan tetap menerbitkan
+    nomornya dan tidak ada loket yang bisa memanggilnya.
+    """
+    kategori = master_service.list_categories()
+    for loket in master_service.list_counters():
+        master_service.set_counter_categories(loket.id, [kategori[0].id])
+
+    yatim = master_service.layanan_tanpa_loket()
+
+    assert [k.prefix for k in yatim] == ["B", "C"]
+
+
+def test_loket_nonaktif_tidak_dihitung_melayani(master_service):
+    kategori = master_service.list_categories()
+    loket = master_service.list_counters()
+    master_service.set_counter_categories(loket[0].id, [kategori[1].id])
+    for lain in loket[1:]:
+        master_service.set_counter_categories(lain.id, [kategori[0].id])
+    master_service.set_counter_status(loket[0].id, False)
+
+    assert [k.prefix for k in master_service.layanan_tanpa_loket()] == ["B", "C"]
+
+
+def test_layanan_nonaktif_tidak_dianggap_yatim(master_service):
+    """Layanan yang sudah dimatikan tidak menerbitkan nomor apa pun."""
+    kategori = master_service.list_categories()
+    for loket in master_service.list_counters():
+        master_service.set_counter_categories(loket.id, [kategori[0].id])
+    master_service.set_category_status(kategori[1].id, False)
+
+    assert [k.prefix for k in master_service.layanan_tanpa_loket()] == ["C"]
+
+
+def test_loket_istirahat_tetap_dihitung_melayani(master_service):
+    """
+    Istirahat itu sementara dan diakhiri sendiri oleh petugasnya.
+
+    Bila istirahat ikut dihitung, peringatan "tanpa loket" akan menyala
+    setiap jam makan siang lalu berhenti dibaca.
+    """
+    from app.core.database import session_scope
+    from app.models import Counter
+
+    kategori = master_service.list_categories()
+    loket = master_service.list_counters()
+    for baris in loket:
+        master_service.set_counter_categories(baris.id, [kategori[0].id])
+    master_service.set_counter_categories(loket[0].id, [kategori[1].id])
+
+    with session_scope() as session:
+        session.get(Counter, loket[0].id).on_break = True
+
+    assert [k.prefix for k in master_service.layanan_tanpa_loket()] == ["C"]
+
+
+def test_petugas_biasa_boleh_membaca_layanan_tanpa_loket(auth, master_service):
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+    assert MasterDataService(auth).layanan_tanpa_loket() == []
+
+
+# ---------------------------------------------------------------------
+# Urutan tampil jenis layanan
+# ---------------------------------------------------------------------
+
+def test_jenis_layanan_dapat_digeser_turun(master_service):
+    """Urutan ini yang menyusun tombol di anjungan."""
+    kategori = master_service.list_categories()
+
+    hasil = master_service.pindahkan_category(kategori[0].id, naik=False)
+
+    assert [k.prefix for k in hasil] == ["B", "A", "C"]
+    assert [k.prefix for k in master_service.list_categories()] == ["B", "A", "C"]
+
+
+def test_jenis_layanan_dapat_digeser_naik(master_service):
+    kategori = master_service.list_categories()
+
+    hasil = master_service.pindahkan_category(kategori[2].id, naik=True)
+
+    assert [k.prefix for k in hasil] == ["A", "C", "B"]
+
+
+def test_jenis_layanan_teratas_tidak_dapat_naik(master_service):
+    kategori = master_service.list_categories()
+
+    with pytest.raises(BusinessRuleError):
+        master_service.pindahkan_category(kategori[0].id, naik=True)
+
+
+def test_jenis_layanan_terbawah_tidak_dapat_turun(master_service):
+    kategori = master_service.list_categories()
+
+    with pytest.raises(BusinessRuleError):
+        master_service.pindahkan_category(kategori[-1].id, naik=False)
+
+
+def test_urutan_kembar_dinomori_ulang_sebelum_ditukar(master_service):
+    """
+    Pada display_order yang kembar, tukar-menukar tidak mengubah apa pun.
+
+    Data lama boleh punya urutan kembar atau berlubang; tanpa penomoran
+    ulang, tombol Naik/Turun akan tampak tidak berfungsi.
+    """
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import ServiceCategory
+
+    with session_scope() as session:
+        session.execute(sa.update(ServiceCategory).values(display_order=0))
+
+    kategori = master_service.list_categories()
+    hasil = master_service.pindahkan_category(kategori[0].id, naik=False)
+
+    assert [k.prefix for k in hasil] == ["B", "A", "C"]
+    assert [k.display_order for k in hasil] == [1, 2, 3]
+
+
+def test_jenis_layanan_nonaktif_tetap_menempati_urutan(master_service):
+    """
+    Tempatnya harus terjaga supaya urutannya kembali seperti semula
+    begitu jenis layanan itu diaktifkan lagi.
+    """
+    kategori = master_service.list_categories()
+    master_service.set_category_status(kategori[1].id, False)
+
+    hasil = master_service.pindahkan_category(kategori[2].id, naik=True)
+
+    assert [k.prefix for k in hasil] == ["A", "C", "B"]
+
+
+def test_selain_admin_tidak_dapat_memindah_urutan(auth, master_service):
+    kategori = master_service.list_categories()
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+    with pytest.raises(AuthorizationError):
+        MasterDataService(auth).pindahkan_category(kategori[0].id, naik=False)
+
+
+# ---------------------------------------------------------------------
 # Nonaktifkan loket yang sedang melayani
 # ---------------------------------------------------------------------
 

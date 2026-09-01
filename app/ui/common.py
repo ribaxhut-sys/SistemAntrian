@@ -65,6 +65,25 @@ def tampilkan_info(parent: QWidget | None, pesan: str, judul: str = "Berhasil") 
     kotak.exec()
 
 
+def tampilkan_peringatan(
+    parent: QWidget | None, pesan: str, judul: str = "Perhatian"
+) -> None:
+    """
+    Kabar yang perlu dibaca, tetapi bukan kegagalan.
+
+    Dibedakan dari `tampilkan_info` karena ikonnya: tindakan yang berhasil
+    disimpan namun meninggalkan keadaan yang keliru — loket yang baru
+    dibatasi sehingga satu jenis layanan tidak dilayani siapa pun — tidak
+    boleh tampil dengan ikon yang sama seperti "berhasil".
+    """
+    kotak = QMessageBox(parent)
+    kotak.setIcon(QMessageBox.Icon.Warning)
+    kotak.setWindowTitle(judul)
+    kotak.setText(pesan)
+    kotak.setStandardButtons(QMessageBox.StandardButton.Ok)
+    kotak.exec()
+
+
 def konfirmasi(parent: QWidget | None, pertanyaan: str, judul: str = "Konfirmasi") -> bool:
     """
     Minta persetujuan untuk tindakan yang tidak sepele.

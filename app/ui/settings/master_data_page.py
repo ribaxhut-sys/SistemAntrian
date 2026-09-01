@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QLineEdit,
     QTableWidget,
     QTableWidgetItem,
@@ -25,6 +26,7 @@ from app.ui.common import (
     keterangan,
     konfirmasi,
     tampilkan_info,
+    tampilkan_peringatan,
     tombol,
 )
 from app.ui.settings.dialogs import (
@@ -60,6 +62,15 @@ class _TabelTab(QWidget):
         if self.penjelasan:
             susunan.addWidget(keterangan(self.penjelasan))
 
+        #: Pita peringatan, tersembunyi selama tidak ada yang perlu
+        #: dikatakan. Disediakan sejak awal supaya tab yang memakainya
+        #: tidak perlu menyusun ulang tata letaknya saat pertama muncul.
+        self.peringatan = QLabel()
+        self.peringatan.setObjectName("peringatanData")
+        self.peringatan.setWordWrap(True)
+        self.peringatan.setVisible(False)
+        susunan.addWidget(self.peringatan)
+
         self.baris_aksi = QHBoxLayout()
         self.baris_aksi.setSpacing(8)
         susunan.addLayout(self.baris_aksi)
@@ -93,6 +104,11 @@ class _TabelTab(QWidget):
     def selesai_menyusun_aksi(self) -> None:
         self.baris_aksi.addStretch()
 
+    def setel_peringatan(self, teks: str) -> None:
+        """Tampilkan pita peringatan, atau sembunyikan bila teksnya kosong."""
+        self.peringatan.setText(teks)
+        self.peringatan.setVisible(bool(teks))
+
     def _perbarui_tombol(self) -> None:
         ada = self.baris_terpilih() is not None
         for btn in self._tombol_perlu_pilihan:
@@ -117,8 +133,69 @@ class _TabelTab(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, data_id)
             self.tabel.setItem(baris, kolom, item)
 
+    def pilih_id(self, data_id: int) -> None:
+        """Sorot kembali baris dengan id ini setelah tabel disusun ulang."""
+        for baris in range(self.tabel.rowCount()):
+            item = self.tabel.item(baris, 0)
+            if item is not None and item.data(Qt.ItemDataRole.UserRole) == data_id:
+                self.tabel.setCurrentCell(baris, 0)
+                return
+
     def muat_ulang(self) -> None:  # pragma: no cover - diisi turunannya
         raise NotImplementedError
+
+
+def _perbarui_peringatan_layanan(
+    tab: _TabelTab, master: MasterDataService
+) -> list:
+    """
+    Segarkan pita "layanan tanpa loket", dan kembalikan daftarnya.
+
+    Peringatan yang sama dipasang di tab Loket DAN tab Jenis Layanan.
+    Keadaannya lahir dari hubungan keduanya, jadi admin yang sedang
+    membuka salah satunya harus dapat melihatnya tanpa perlu menebak
+    bahwa jawabannya ada di tab sebelah.
+    """
+    berhasil, yatim = jalankan_aman(tab, master.layanan_tanpa_loket)
+    yatim = yatim if berhasil else []
+    if yatim:
+        nama = ", ".join(kategori.name for kategori in yatim)
+        tab.setel_peringatan(
+            f"Tidak dilayani loket mana pun: {nama}. Nomornya masih bisa "
+            "diambil di anjungan, tetapi tidak akan ada loket yang bisa "
+            "memanggilnya."
+        )
+    else:
+        tab.setel_peringatan("")
+    return yatim
+
+
+def _laporkan_cakupan_baru(tab: _TabelTab, sebelum: list, sesudah: list) -> None:
+    """
+    Beri tahu bila tindakan barusan meninggalkan layanan tanpa loket.
+
+    Pita di atas tabel sudah mengabarkannya, tetapi pita itu menetap dan
+    karenanya mudah terbaca sebagai bagian tetap dari halaman. Keadaan yang
+    baru saja DIBUAT oleh tindakan admin perlu satu kotak yang harus
+    ditutup — di situlah hubungan sebab-akibatnya masih terasa.
+
+    Yang dilaporkan hanya yang bertambah. Layanan yang sudah tanpa loket
+    sejak sebelum tindakan ini bukan akibat dari tindakan ini, dan
+    menyebutkannya lagi setiap kali admin menyimpan apa pun akan membuat
+    kotak ini cepat ditutup tanpa dibaca.
+    """
+    lama = {kategori.id for kategori in sebelum}
+    baru = [kategori for kategori in sesudah if kategori.id not in lama]
+    if not baru:
+        return
+    nama = ", ".join(kategori.name for kategori in baru)
+    tampilkan_peringatan(
+        tab,
+        f"Tersimpan, tetapi kini tidak ada loket yang melayani {nama}.\n\n"
+        "Pengunjung masih bisa mengambil nomornya di anjungan dan tidak akan "
+        "ada yang bisa memanggilnya. Tambahkan jenis layanan itu ke salah "
+        "satu loket, atau nonaktifkan layanannya.",
+    )
 
 
 class CounterTab(_TabelTab):
@@ -147,6 +224,8 @@ class CounterTab(_TabelTab):
 
         self.data: list = []
         self.kategori: list = []
+        #: Jenis layanan aktif yang tidak dilayani loket aktif mana pun.
+        self.yatim: list = []
         self.muat_ulang()
 
     def muat_ulang(self) -> None:
@@ -172,6 +251,7 @@ class CounterTab(_TabelTab):
                 [loket.code, loket.name, layanan, badge_status(loket.is_active)],
                 loket.id,
             )
+        self.yatim = _perbarui_peringatan_layanan(self, self.master)
         self._perbarui_tombol()
 
     def atur_layanan(self) -> None:
@@ -183,12 +263,14 @@ class CounterTab(_TabelTab):
         dialog = CounterCategoryDialog(self, counter=loket, categories=self.kategori)
         if dialog.exec() != CounterCategoryDialog.DialogCode.Accepted:
             return
+        sebelum = self.yatim
         berhasil, _ = jalankan_aman(
             self,
             lambda: self.master.set_counter_categories(loket.id, dialog.terpilih),
         )
         if berhasil:
             self.muat_ulang()
+            _laporkan_cakupan_baru(self, sebelum, self.yatim)
 
     def _perbarui_tombol(self) -> None:
         super()._perbarui_tombol()
@@ -236,11 +318,13 @@ class CounterTab(_TabelTab):
         ):
             return
 
+        sebelum = self.yatim
         berhasil, _ = jalankan_aman(
             self, lambda: self.master.set_counter_status(loket.id, aktifkan)
         )
         if berhasil:
             self.muat_ulang()
+            _laporkan_cakupan_baru(self, sebelum, self.yatim)
 
 
 class CategoryTab(_TabelTab):
@@ -249,7 +333,9 @@ class CategoryTab(_TabelTab):
     kolom = ("Kode", "Nama Layanan", "Prefix", "Contoh Nomor", "Status")
     penjelasan = (
         "Prefix menentukan nomor antrian tiap jenis layanan. Prefix wajib "
-        "berbeda antar layanan agar nomor tidak bertabrakan."
+        "berbeda antar layanan agar nomor tidak bertabrakan. Urutan baris di "
+        "bawah ini adalah urutan tombol di anjungan; ubah dengan Naik dan "
+        "Turun."
     )
 
     def __init__(self, master: MasterDataService, parent: QWidget | None = None) -> None:
@@ -258,6 +344,12 @@ class CategoryTab(_TabelTab):
 
         self.tambah_aksi("Tambah Jenis Layanan", self.tambah, variant="primary")
         self.tambah_aksi("Ubah", self.ubah, perlu_pilihan=True)
+        self.tombol_naik = self.tambah_aksi(
+            "Naik", lambda: self.pindahkan(naik=True), perlu_pilihan=True
+        )
+        self.tombol_turun = self.tambah_aksi(
+            "Turun", lambda: self.pindahkan(naik=False), perlu_pilihan=True
+        )
         self.tombol_status = self.tambah_aksi(
             "Nonaktifkan", self.ganti_status, perlu_pilihan=True
         )
@@ -265,6 +357,8 @@ class CategoryTab(_TabelTab):
         self.selesai_menyusun_aksi()
 
         self.data: list = []
+        #: Jenis layanan aktif yang tidak dilayani loket aktif mana pun.
+        self.yatim: list = []
         self.muat_ulang()
 
     def muat_ulang(self) -> None:
@@ -286,6 +380,7 @@ class CategoryTab(_TabelTab):
                 ],
                 layanan.id,
             )
+        self.yatim = _perbarui_peringatan_layanan(self, self.master)
         self._perbarui_tombol()
 
     def _perbarui_tombol(self) -> None:
@@ -294,6 +389,34 @@ class CategoryTab(_TabelTab):
         if baris is not None and baris < len(self.data):
             aktif = self.data[baris].is_active
             self.tombol_status.setText("Nonaktifkan" if aktif else "Aktifkan")
+        # Baris teratas tidak bisa naik dan baris terbawah tidak bisa
+        # turun. Dimatikan di sini, bukan dijawab dengan pesan kesalahan
+        # sesudah ditekan: batas urutan terlihat sendiri di layar, jadi
+        # tombolnya tidak perlu berpura-pura masih bisa dipakai.
+        self.tombol_naik.setEnabled(baris is not None and baris > 0)
+        self.tombol_turun.setEnabled(
+            baris is not None and baris < self.tabel.rowCount() - 1
+        )
+
+    def pindahkan(self, *, naik: bool) -> None:
+        """
+        Geser jenis layanan terpilih satu langkah, lalu sorot kembali.
+
+        Tanpa penyorotan ulang, tombolnya hanya bisa ditekan sekali:
+        tabel disusun ulang, pilihannya hilang, dan admin harus mengklik
+        barisnya lagi untuk setiap satu langkah.
+        """
+        baris = self.baris_terpilih()
+        if baris is None:
+            return
+        layanan = self.data[baris]
+
+        berhasil, _ = jalankan_aman(
+            self, lambda: self.master.pindahkan_category(layanan.id, naik=naik)
+        )
+        if berhasil:
+            self.muat_ulang()
+            self.pilih_id(layanan.id)
 
     def tambah(self) -> None:
         dialog = CategoryDialog(self)
@@ -399,11 +522,13 @@ class CategoryTab(_TabelTab):
         ):
             return
 
+        sebelum = self.yatim
         berhasil, _ = jalankan_aman(
             self, lambda: self.master.set_category_status(layanan.id, aktifkan)
         )
         if berhasil:
             self.muat_ulang()
+            _laporkan_cakupan_baru(self, sebelum, self.yatim)
 
 
 class UserTab(_TabelTab):
@@ -666,6 +791,21 @@ class MasterDataPage(QWidget):
         self.tab.addTab(self.tab_kantor, "Identitas Kantor")
 
         susunan.addWidget(self.tab)
+
+        self.tab.currentChanged.connect(self._tab_berpindah)
+
+    def _tab_berpindah(self, indeks: int) -> None:
+        """
+        Segarkan tab yang baru ditampilkan.
+
+        Tab Loket dan tab Jenis Layanan memandang keadaan yang sama dari
+        dua sisi: membatasi loket di satu tab mengubah peringatan "layanan
+        tanpa loket" di tab sebelah. Tanpa penyegaran ini, admin yang
+        berpindah tab menemukan peringatan yang sudah tidak benar lagi.
+        """
+        widget = self.tab.widget(indeks)
+        if widget is not None:
+            widget.muat_ulang()
 
     def muat_ulang(self) -> None:
         for tab in (self.tab_loket, self.tab_layanan, self.tab_akun, self.tab_kantor):
