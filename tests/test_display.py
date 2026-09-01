@@ -2395,14 +2395,15 @@ def test_total_per_layanan_tetap_utuh_walau_dipotong(display_queue, terbitkan, a
     assert kolom_a.total == 5
 
 
-def test_layanan_nonaktif_tetap_tampil_selama_masih_ada_yang_menunggu(
+def test_kolom_layanan_mengikuti_pengaturan_yang_aktif(
     display_queue, terbitkan, auth, antrian_siap, master_service
 ):
     """
-    Dinonaktifkan di tengah hari tidak membatalkan nomor yang sudah terbit.
+    Layar memakai daftar layanan yang sama dengan anjungan.
 
-    Orangnya masih duduk di ruangan itu; menghilangkan kolomnya berarti
-    nomor mereka lenyap dari papan tanpa pernah dipanggil.
+    Layanan yang ditutup hilang dari kedua-duanya. Dua daftar yang
+    bersumber pada aturan berbeda akan berselisih — anjungan satu kartu,
+    layar dua kolom — tanpa ada yang tahu mana yang benar.
     """
     terbitkan("B", 1)
     auth.logout()
@@ -2411,10 +2412,12 @@ def test_layanan_nonaktif_tetap_tampil_selama_masih_ada_yang_menunggu(
 
     auth.logout()
     auth.login("display", TEST_PASSWORD)
-    layanan = display_queue.display_state(3, jumlah_per_layanan=10).layanan
+    keadaan = display_queue.display_state(3, jumlah_per_layanan=10)
 
-    assert [l.category_prefix for l in layanan] == ["A", "B", "C"]
-    assert [q.queue_number for q in layanan[1].menunggu] == ["B-001"]
+    assert [l.category_prefix for l in keadaan.layanan] == ["A", "C"]
+    # Orangnya tetap terhitung. Papan menyebutnya "dan N lainnya", bukan
+    # berpura-pura ruang tunggu sudah kosong.
+    assert keadaan.total_menunggu == 1
 
 
 def test_layanan_nonaktif_yang_kosong_tidak_lagi_mendapat_kolom(
@@ -2464,6 +2467,94 @@ def test_terlalu_banyak_layanan_kembali_ke_daftar_gabungan(
 
     assert halaman.berkolom_layanan is False
     assert _nomor_tampil(halaman) == ["A-001", "A-002"]
+
+
+def _sisakan_satu_layanan(auth, master_service, antrian_siap, sisa: str = "A") -> None:
+    """Nonaktifkan semua jenis layanan kecuali satu, sebagai admin."""
+    sebelumnya = auth.current_session
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    for prefix, id_kategori in antrian_siap["kategori"].items():
+        if prefix != sisa:
+            master_service.set_category_status(id_kategori, False)
+    auth.logout()
+    if sebelumnya is not None:
+        auth.login(sebelumnya.username, TEST_PASSWORD)
+
+
+def _papan_tv(qtbot, auth):
+    """Layar televisi dengan pengaturan bawaan, sudah dimuat sekali."""
+    from app.ui.display.display_page import DisplayPage
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth), SettingsService(auth), NullSoundPlayer(), otomatis=False
+    )
+    qtbot.addWidget(halaman)
+    halaman.muat_ulang()
+    return halaman
+
+
+def test_satu_layanan_kembali_ke_daftar_gabungan(
+    qtbot, auth, antrian_siap, terbitkan, master_service
+):
+    """
+    Satu kolom tidak membedakan apa pun dari satu kolom.
+
+    Judul kolom ada supaya pengunjung tahu kolom mana yang miliknya. Bila
+    layanannya hanya satu, judul itu tinggal mengulang huruf depan setiap
+    nomor di bawahnya sambil memakan tinggi panel.
+    """
+    _sisakan_satu_layanan(auth, master_service, antrian_siap)
+    terbitkan("A", 2)
+    halaman = _papan_tv(qtbot, auth)
+
+    assert len(halaman._layanan) == 1
+    assert halaman.berkolom_layanan is False
+    # Baris nol milik nomor, bukan judul: daftar gabungan tidak berjudul.
+    assert halaman.baris_berikutnya.itemAtPosition(0, 0).widget().text() == "A-001"
+    assert _nomor_tampil(halaman) == ["A-001", "A-002"]
+
+
+def test_satu_layanan_memakai_seluruh_lebar_kisi(
+    qtbot, auth, antrian_siap, terbitkan, master_service
+):
+    """
+    Halaman diiris menurut kisi yang benar-benar dipakai menggambar.
+
+    Lima baris kali lima kolom memuat dua puluh lima nomor sekaligus.
+    Diiris menurut `KOLOM_PER_LAYANAN` yang lebih sempit, papan menerima
+    sepuluh, berhalaman tiga kali, dan menyisakan tiga baris kosong di
+    bawah setiap halamannya.
+    """
+    from app.ui.display.display_page import KOLOM_DAFTAR
+
+    _sisakan_satu_layanan(auth, master_service, antrian_siap)
+    terbitkan("A", 25)
+    halaman = _papan_tv(qtbot, auth)
+
+    assert halaman.baris_daftar == 5
+    assert halaman.muat_per_halaman == 5 * KOLOM_DAFTAR
+    assert halaman.jumlah_halaman == 1
+    assert len(_nomor_tampil(halaman)) == 25
+
+
+def test_dua_layanan_tetap_berkolom(
+    qtbot, auth, antrian_siap, terbitkan, master_service
+):
+    """Batas bawah yang baru berhenti di satu, bukan memakan dua."""
+    _sisakan_satu_layanan(auth, master_service, antrian_siap, sisa="A")
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    master_service.set_category_status(antrian_siap["kategori"]["B"], True)
+    auth.logout()
+
+    terbitkan("A", 1)
+    halaman = _papan_tv(qtbot, auth)
+
+    assert len(halaman._layanan) == 2
+    assert halaman.berkolom_layanan is True
 
 
 def test_kolom_layanan_yang_hilang_tidak_meninggalkan_lubang(

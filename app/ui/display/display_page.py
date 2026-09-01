@@ -989,10 +989,15 @@ class DisplayPage(QWidget):
         self.jeda_putar_ms = (
             max(0, settings.get_int("display.rotate_seconds", 3)) * 1000
         )
+        #: Persediaan daftar gabungan. Diambil dari `KOLOM_DAFTAR`, kolom
+        #: kisi yang benar-benar dipakai daftar itu: dihitung dari
+        #: `KOLOM_PER_LAYANAN` yang lebih sempit, kantor berlayanan satu
+        #: hanya menerima dua halaman dan sisanya disebut "dan N lainnya"
+        #: padahal papan sanggup memutar lima.
         self.jumlah_berikutnya = (
             settings.get_int("display.next_count", 3)
             if kompak
-            else self.baris_diminta * KOLOM_PER_LAYANAN * MAKS_HALAMAN
+            else self.baris_diminta * KOLOM_DAFTAR * MAKS_HALAMAN
         )
         #: Halaman daftar menunggu yang sedang tampil. Milik widget, BUKAN
         #: dihitung ulang dari data: penyegaran dua detik sekali akan
@@ -1967,8 +1972,15 @@ class DisplayPage(QWidget):
         berkolom — tempatnya hanya sederet nomor — dan kantor dengan jenis
         layanan lebih banyak daripada `MAKS_KOLOM_LAYANAN` kembali ke
         daftar gabungan, yang pada lebar sesempit itu justru lebih terbaca.
+
+        Kantor berlayanan SATU juga memakai daftar gabungan. Kolom ada
+        supaya pengunjung tahu kolom mana yang miliknya; bila layanannya
+        hanya satu tidak ada yang perlu dibedakan, dan yang tersisa dari
+        kolom itu hanya biayanya — satu judul yang mengulang huruf depan
+        setiap nomor di bawahnya, dan dua kolom nomor yang meregang
+        selebar panel padahal daftar gabungan memakai lima.
         """
-        return not self.kompak and 0 < len(self._layanan) <= MAKS_KOLOM_LAYANAN
+        return not self.kompak and 2 <= len(self._layanan) <= MAKS_KOLOM_LAYANAN
 
     @property
     def baris_daftar(self) -> int:
@@ -1985,8 +1997,17 @@ class DisplayPage(QWidget):
 
     @property
     def muat_per_halaman(self) -> int:
-        """Nomor yang tampil per jenis layanan dalam satu halaman."""
-        return self.baris_daftar * self.kolom_per_layanan
+        """
+        Nomor yang tampil dalam satu halaman, per jenis layanan bila berkolom.
+
+        Kolomnya WAJIB diambil dari cara papan sedang menggambar. Daftar
+        gabungan menyusun kisinya dari `kolom_daftar`, dan mengiriskan
+        halaman menurut `kolom_per_layanan` yang lebih sempit membuatnya
+        menerima sepuluh nomor untuk kisi yang sanggup dua puluh lima —
+        papan berhalaman sambil menyisakan tiga baris kosong di bawahnya.
+        """
+        kolom = self.kolom_per_layanan if self.berkolom_layanan else self.kolom_daftar
+        return self.baris_daftar * kolom
 
     @property
     def jumlah_halaman(self) -> int:

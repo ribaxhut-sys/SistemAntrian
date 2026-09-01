@@ -569,20 +569,26 @@ class QueueService:
         berubah beberapa detik sekali, dan pengunjung yang sedang membaca
         kehilangan tempat matanya.
 
-        Jenis layanan NONAKTIF ikut ditampilkan selama masih ada yang
-        menunggu padanya. Dinonaktifkan di tengah hari tidak membatalkan
-        nomor yang sudah terbit, dan orangnya masih duduk di ruangan itu —
-        menghilangkan kolomnya berarti nomor mereka lenyap dari papan.
+        Kolomnya mengikuti pengaturan layanan yang AKTIF, sama persis
+        dengan kartu di anjungan. Satu layanan di anjungan berarti satu
+        layanan di layar; dua daftar yang bersumber pada aturan berbeda
+        akan berselisih tanpa ada yang tahu mana yang benar.
+
+        Nomor pada layanan yang ditutup di tengah hari karena itu tidak
+        lagi mendapat kolom. Orangnya tetap terhitung pada
+        `total_menunggu`, sehingga papan masih menyebut mereka sebagai
+        "dan N lainnya" — dan pemanggilannya sendiri tidak terpengaruh
+        sama sekali.
         """
         per_kategori: dict[int, list[Queue]] = {}
         for antrian in menunggu:
             per_kategori.setdefault(antrian.category_id, []).append(antrian)
 
         hasil: list[DisplayServiceQueue] = []
-        for kategori in ServiceCategoryRepository(session).list_for_branch(branch_id):
+        for kategori in ServiceCategoryRepository(session).list_for_branch(
+            branch_id, only_active=True
+        ):
             antre = per_kategori.get(kategori.id, [])
-            if kategori.status is not RecordStatus.ACTIVE and not antre:
-                continue
             hasil.append(
                 DisplayServiceQueue(
                     category_id=kategori.id,
