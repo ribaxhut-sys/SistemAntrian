@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session, selectinload
@@ -25,6 +25,13 @@ STATUS_SIBUK = (QueueStatus.CALLED, QueueStatus.SERVING, QueueStatus.PAUSED)
 
 #: Status yang berarti antrian masih akan dilayani.
 STATUS_BELUM_SELESAI = (QueueStatus.WAITING, *STATUS_SIBUK)
+
+#: Saat sebuah nomor dianggap hangus, pada tanggalnya sendiri.
+#:
+#: Bukan waktu sapuannya dijalankan. Nomor kemarin hangus kemarin, dan
+#: menuliskan waktu hari ini membuat `rata_rata_durasi` menghitung lama
+#: pelayanan berhari-hari untuk nomor yang loketnya sudah pulang.
+AKHIR_HARI = time(23, 59, 59)
 
 
 @dataclass(frozen=True)
@@ -289,6 +296,51 @@ class QueueRepository:
             .order_by(Queue.queue_date, Queue.created_at)
         )
         return list(self.session.scalars(self._dengan_relasi(stmt)))
+
+    def batalkan_sisa_sebelum(
+        self, tanggal: date, *, branch_id: int | None = None
+    ) -> list[tuple[int, date, int]]:
+        """
+        Batalkan antrian belum selesai dari tanggal-tanggal SEBELUM `tanggal`.
+
+        Mengembalikan `(branch_id, queue_date, jumlah)` untuk setiap hari
+        yang benar-benar tersapu. `branch_id` None menyapu seluruh cabang —
+        sapuan ini berjalan saat aplikasi mulai, sebelum ada yang masuk,
+        sehingga belum ada cabang yang dapat dijadikan batas.
+
+        Ditulis sebagai UPDATE per hari, bukan baris demi baris lewat ORM,
+        karena dua alasan. `completed_at` harus mengikuti tanggal barisnya
+        sendiri (lihat `AKHIR_HARI`), sehingga satu UPDATE untuk semua hari
+        tidak mungkin. Dan `rowcount` UPDATE menghitung baris yang SUNGGUH
+        berubah: bila lima komputer loket menyala berbarengan dan sama-sama
+        menyapu, hanya yang pertama menerima angka bukan nol, sehingga
+        auditnya tidak tercatat lima kali untuk pekerjaan yang sama.
+        """
+        dasar = [Queue.queue_date < tanggal, Queue.status.in_(STATUS_BELUM_SELESAI)]
+        if branch_id is not None:
+            dasar.append(Queue.branch_id == branch_id)
+
+        kelompok = self.session.execute(
+            sa.select(Queue.branch_id, Queue.queue_date).where(*dasar).distinct()
+        ).all()
+
+        hasil: list[tuple[int, date, int]] = []
+        for cabang, hari in kelompok:
+            jumlah = self.session.execute(
+                sa.update(Queue)
+                .where(
+                    Queue.branch_id == cabang,
+                    Queue.queue_date == hari,
+                    Queue.status.in_(STATUS_BELUM_SELESAI),
+                )
+                .values(
+                    status=QueueStatus.CANCELLED,
+                    completed_at=datetime.combine(hari, AKHIR_HARI),
+                )
+            ).rowcount
+            if jumlah:
+                hasil.append((cabang, hari, jumlah))
+        return hasil
 
     def hitung_per_status(self, branch_id: int, tanggal: date) -> dict[QueueStatus, int]:
         """Jumlah antrian per status untuk satu hari."""

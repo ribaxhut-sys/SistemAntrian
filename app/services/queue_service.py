@@ -869,6 +869,51 @@ class QueueService:
             selesai=True,
         )
 
+    def hanguskan_hari_lalu(self) -> int:
+        """
+        Hanguskan seluruh nomor sisa hari-hari SEBELUM hari ini.
+
+        Pergantian hari mengakhiri antrian, sama seperti ia mengembalikan
+        penomoran ke 1 dan membuka kembali pendaftaran yang ditutup sore
+        kemarin (lihat `pendaftaran_dibuka`). Sebelum ini, satu-satunya
+        yang mengubah statusnya adalah Tutup Hari yang harus ditekan orang;
+        bila tidak ada yang menekan, laporan tanggal itu selamanya menyebut
+        ada N orang menunggu di kantor yang sudah tutup.
+
+        Hari INI tidak disentuh. Mesin tidak pernah tahu kapan loket
+        sungguh-sungguh berhenti bekerja — itu sebabnya Tutup Hari tetap
+        manual, dan alasannya sudah ditulis di `tutup_hari()`.
+
+        Tidak menuntut hak akses apa pun, dan auditnya tidak beratas nama
+        siapa-siapa. Sapuan ini berjalan saat aplikasi mulai, sebelum ada
+        yang masuk; mencatatnya atas nama petugas yang kebetulan login
+        pertama pagi itu akan menuduhkan kepadanya pekerjaan yang tidak
+        pernah ia lakukan.
+
+        Auditnya memakai EXPIRE_QUEUE, bukan CLOSE_DAY: `buka_kembali_hari()`
+        mencari CLOSE_DAY terakhir untuk dipulihkan, dan mengembalikan nomor
+        kemarin menjadi WAITING hari ini tidak pernah benar.
+        """
+        with session_scope() as session:
+            tersapu = QueueRepository(session).batalkan_sisa_sebelum(clock.today())
+            jumlah = 0
+            for branch_id, hari, banyak in tersapu:
+                jumlah += banyak
+                audit_service.record(
+                    session,
+                    AuditAction.EXPIRE_QUEUE,
+                    user_id=None,
+                    entity_type="queue",
+                    entity_id=None,
+                    jumlah=banyak,
+                    branch_id=branch_id,
+                    tanggal=str(hari),
+                )
+                logger.info(
+                    "Nomor antrian %s hangus: %d nomor dibatalkan", hari, banyak
+                )
+            return jumlah
+
     def ringkasan_tutup_hari(self) -> dict[QueueStatus, int]:
         """
         Jumlah antrian yang masih akan dibatalkan bila Tutup Hari dijalankan.

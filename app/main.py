@@ -38,6 +38,13 @@ from app.core.seed import seed_initial_data
 
 logger = get_logger("main")
 
+#: Selang pemeriksaan pergantian tanggal, dalam milidetik.
+#:
+#: Semenit sekali. Yang dikerjakan hanya membandingkan dua tanggal di
+#: memori — database baru disentuh pada satu pemeriksaan dalam sehari,
+#: yaitu yang pertama sesudah tengah malam.
+SELANG_PERIKSA_HARI_MS = 60_000
+
 
 def siapkan_database() -> dict[str, int]:
     """Jalankan migration dan isi data master awal."""
@@ -59,6 +66,71 @@ def backup_harian() -> None:
 
     hasil = BackupService(get_auth_service()).backup_otomatis_bila_perlu()
     logger.info("Backup otomatis: %s", hasil.pesan)
+
+
+def hanguskan_antrian_hari_lalu() -> int:
+    """
+    Hanguskan nomor sisa hari-hari sebelumnya, dan kembalikan jumlahnya.
+
+    Pergantian hari sudah mengakhiri antrian di mata pengunjung: seluruh
+    layar dan daftar loket disaring `queue_date == hari ini`, sehingga
+    nomor kemarin tidak pernah tampil maupun terpanggil. Yang belum ikut
+    berakhir hanyalah statusnya di basis data.
+
+    Kegagalannya tidak pernah menghentikan aplikasi, sama seperti backup
+    harian di atas: laporan yang keliru satu hari jauh lebih ringan
+    akibatnya daripada loket yang tidak bisa melayani sama sekali.
+    """
+    from app.services.auth_service import get_auth_service
+    from app.services.queue_service import QueueService
+
+    try:
+        jumlah = QueueService(get_auth_service()).hanguskan_hari_lalu()
+    except Exception:
+        logger.exception("Sapuan nomor antrian hari lalu gagal")
+        return 0
+    if jumlah:
+        logger.info("Nomor antrian hari lalu hangus: %d nomor", jumlah)
+    return jumlah
+
+
+class PenyapuHarian:
+    """
+    Menjalankan sapuan begitu tanggal berganti, tanpa aplikasi dibuka ulang.
+
+    Sapuan saat aplikasi mulai saja tidak cukup di sini: anjungan dan layar
+    ruang tunggu dipasang untuk menyala terus dan pulih sendiri setelah
+    mati listrik, sehingga keduanya bisa berhari-hari tidak pernah dimulai
+    ulang — dan justru dua mesin itulah yang paling lama menyala.
+
+    Yang dibandingkan tanggal, bukan hitungan mundur menuju tengah malam.
+    Komputer yang tertidur atau jamnya dikoreksi membuat hitungan mundur
+    meleset tanpa ketahuan, sedangkan tanggal yang berbeda tetap berbeda
+    walau pemeriksaannya terlambat setengah jam.
+    """
+
+    def __init__(self, hari_awal=None) -> None:
+        from app.core import clock
+
+        #: Tanggal yang sapuannya sudah dianggap selesai. Diisi hari ini,
+        #: bukan kosong: sapuan awal di `main()` sudah menanganinya, dan
+        #: mengulangnya sedetik kemudian hanya menambah satu query.
+        self.hari = hari_awal or clock.today()
+
+    def periksa(self) -> int:
+        """Sapu bila tanggal sudah berganti. Kembalikan jumlah yang hangus."""
+        from app.core import clock
+
+        hari = clock.today()
+        if hari == self.hari:
+            return 0
+        logger.info("Tanggal berganti: %s -> %s", self.hari, hari)
+        # Tanggalnya dicatat SEBELUM menyapu. Bila sapuannya gagal —
+        # database sedang tidak terjangkau tengah malam — pemeriksaan
+        # semenit lagi tidak boleh mencobanya berulang-ulang sepanjang
+        # hari; sapuan berikutnya toh berjalan saat aplikasi dibuka lagi.
+        self.hari = hari
+        return hanguskan_antrian_hari_lalu()
 
 
 def _laporkan_kegagalan_database(config, *, berjendela: bool) -> None:
@@ -123,6 +195,7 @@ def _jalankan_ui(*, mode_awal: str | None = None) -> int:
     sehingga satu tekan Esc yang tidak sengaja membuat loket berhenti
     melayani.
     """
+    from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication, QDialog
 
     from app.services.auth_service import get_auth_service
@@ -140,6 +213,14 @@ def _jalankan_ui(*, mode_awal: str | None = None) -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setStyleSheet(STYLESHEET)
+
+    # Diinduk pada `app`, bukan pada jendela: jendela dibuka dan ditutup
+    # berkali-kali oleh loop di bawah — setiap logout membuat yang baru —
+    # sedangkan pergantian hari harus tetap terpantau di antaranya.
+    penyapu = PenyapuHarian()
+    pewaktu_hari = QTimer(app)
+    pewaktu_hari.timeout.connect(penyapu.periksa)
+    pewaktu_hari.start(SELANG_PERIKSA_HARI_MS)
 
     auth = get_auth_service()
     #: Argumen baris perintah hanya berlaku pada peluncuran pertama. Setelah
@@ -246,6 +327,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         dibuat = siapkan_database()
         backup_harian()
+        # SESUDAH backup: bila sapuan ini ternyata keliru, keadaan sebelum
+        # disapu masih tersimpan pada backup pagi ini.
+        hanguskan_antrian_hari_lalu()
     except Exception:
         # Traceback hanya masuk log, tidak pernah ditampilkan ke petugas.
         logger.exception("Inisialisasi database gagal")

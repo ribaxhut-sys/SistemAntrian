@@ -793,6 +793,144 @@ def test_batas_mengikuti_pengaturan_yang_diubah(
 
 
 # ---------------------------------------------------------------------
+# Nomor hangus saat tanggal berganti
+# ---------------------------------------------------------------------
+
+def _terbitkan_pada(antrian_siap, hari, prefix: str = "A"):
+    """Terbitkan satu nomor pada tanggal tertentu, langsung lewat repository."""
+    from app.repositories.queue_repository import terbitkan_nomor
+
+    return terbitkan_nomor(
+        branch_id=antrian_siap["branch_id"],
+        category_id=antrian_siap["kategori"][prefix],
+        prefix=prefix,
+        tanggal=hari,
+    )
+
+
+def _kemarin():
+    from datetime import timedelta
+
+    from app.core import clock
+
+    return clock.today() - timedelta(days=1)
+
+
+def _status(queue_id: int):
+    from app.core.database import session_scope
+    from app.models import Queue
+
+    with session_scope() as s:
+        antrian = s.get(Queue, queue_id)
+        return antrian.status, antrian.completed_at
+
+
+def test_nomor_hari_lalu_hangus(antrian_siap, auth):
+    """
+    Pergantian hari mengakhiri antrian, tanpa menunggu ada yang menekan
+    tombol Tutup Hari.
+    """
+    kemarin = _kemarin()
+    sisa = _terbitkan_pada(antrian_siap, kemarin)
+
+    jumlah = QueueService(auth).hanguskan_hari_lalu()
+
+    status, selesai_pada = _status(sisa.queue_id)
+    assert jumlah == 1
+    assert status is QueueStatus.CANCELLED
+    # Hangus pada tanggalnya sendiri, bukan pada saat sapuannya berjalan:
+    # `rata_rata_durasi` menghitung dari kolom ini.
+    assert selesai_pada.date() == kemarin
+
+
+def test_nomor_hari_ini_tidak_ikut_hangus(antrian_siap, terbitkan, auth):
+    """Mesin tidak pernah tahu kapan loket sungguh berhenti bekerja."""
+    hari_ini = terbitkan("A", 1)[0]
+
+    jumlah = QueueService(auth).hanguskan_hari_lalu()
+
+    status, _ = _status(hari_ini.id)
+    assert jumlah == 0
+    assert status is QueueStatus.WAITING
+
+
+def test_nomor_hari_lalu_yang_sudah_selesai_tidak_tersentuh(antrian_siap, auth):
+    """Riwayat pelayanan yang sungguh terjadi tidak boleh ikut berubah."""
+    from app.core.database import session_scope
+    from app.models import Queue
+
+    kemarin = _kemarin()
+    selesai = _terbitkan_pada(antrian_siap, kemarin)
+    with session_scope() as s:
+        s.get(Queue, selesai.queue_id).status = QueueStatus.COMPLETED
+
+    jumlah = QueueService(auth).hanguskan_hari_lalu()
+
+    status, _ = _status(selesai.queue_id)
+    assert jumlah == 0
+    assert status is QueueStatus.COMPLETED
+
+
+def test_hangus_tidak_menuntut_login(antrian_siap, auth):
+    """
+    Sapuan berjalan saat aplikasi mulai, sebelum ada yang masuk.
+
+    Menuntut hak akses berarti sapuan ini tidak pernah berjalan sama
+    sekali di komputer anjungan, yang memang tidak pernah login.
+    """
+    _terbitkan_pada(antrian_siap, _kemarin())
+    auth.logout()
+
+    assert QueueService(auth).hanguskan_hari_lalu() == 1
+
+
+def test_sapuan_kedua_tidak_mencatat_audit_lagi(antrian_siap, auth):
+    """
+    Lima komputer loket menyala berbarengan menyapu daftar yang sama.
+
+    Hanya yang pertama benar-benar mengubah baris; sisanya tidak boleh
+    meninggalkan audit untuk pekerjaan yang tidak mereka lakukan.
+    """
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import AuditAction, AuditLog
+
+    _terbitkan_pada(antrian_siap, _kemarin())
+    antrian = QueueService(auth)
+
+    assert antrian.hanguskan_hari_lalu() == 1
+    assert antrian.hanguskan_hari_lalu() == 0
+
+    with session_scope() as s:
+        jumlah = s.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLog)
+            .where(AuditLog.action == AuditAction.EXPIRE_QUEUE.value)
+        )
+    assert jumlah == 1
+
+
+def test_hangus_tidak_dapat_dipulihkan_buka_kembali_hari(antrian_siap, auth):
+    """
+    "Buka Kembali" ada untuk tombol Tutup Hari yang tertekan tidak sengaja.
+
+    Sapuan otomatis tidak pernah tertekan tidak sengaja, dan mengembalikan
+    nomor kemarin menjadi menunggu hari ini tidak pernah benar.
+    """
+    sisa = _terbitkan_pada(antrian_siap, _kemarin())
+    QueueService(auth).hanguskan_hari_lalu()
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    admin_queue = QueueService(auth)
+
+    assert admin_queue.ringkasan_buka_kembali_hari() == 0
+    assert admin_queue.buka_kembali_hari() == 0
+    assert _status(sisa.queue_id)[0] is QueueStatus.CANCELLED
+
+
+# ---------------------------------------------------------------------
 # Jenis layanan yang dilayani sebuah loket
 # ---------------------------------------------------------------------
 

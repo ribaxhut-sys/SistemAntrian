@@ -82,6 +82,10 @@ class AuditAction(str, Enum):
     CANCEL_QUEUE = "CANCEL_QUEUE"
     CLOSE_DAY = "CLOSE_DAY"
     REOPEN_DAY = "REOPEN_DAY"
+    #: Sapuan otomatis nomor sisa hari-hari sebelumnya. Sengaja BUKAN
+    #: CLOSE_DAY: `buka_kembali_hari()` memulihkan Tutup Hari terakhir, dan
+    #: memulihkan nomor kemarin ke hari ini tidak pernah benar.
+    EXPIRE_QUEUE = "EXPIRE_QUEUE"
     SUBMIT_SURVEY = "SUBMIT_SURVEY"
     SAVE_NOTE = "SAVE_NOTE"
     DELETE_NOTE = "DELETE_NOTE"
