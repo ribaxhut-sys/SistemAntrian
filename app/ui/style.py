@@ -105,16 +105,27 @@ KIOS_SUKSES_TEKAN = "#047857"
 
 #: Pil petunjuk di bawah judul panel: latar, tulisan.
 #:
-#: Satu baris yang sama menjawab empat keadaan yang sangat berbeda —
-#: mengajak, menyuruh menunggu, mengabarkan nomor terbit, dan melaporkan
-#: kegagalan. Warna pil membuat keadaannya terbaca sebelum kalimatnya
-#: sempat dibaca; pengunjung yang menunggu sepuluh detik tidak menyangka
-#: mesinnya rusak bila baris itu terlihat sedang menghitung, bukan diam.
+#: Satu baris yang sama menjawab lima keadaan yang sangat berbeda —
+#: mengajak, menyuruh menunggu, mengabarkan nomor terbit, melaporkan
+#: tiket yang gagal dicetak, dan melaporkan kegagalan. Warna pil membuat
+#: keadaannya terbaca sebelum kalimatnya sempat dibaca; pengunjung yang
+#: menunggu sepuluh detik tidak menyangka mesinnya rusak bila baris itu
+#: terlihat sedang menghitung, bukan diam.
+#:
+#: Dua keadaan hasil cetak sengaja PEKAT, bukan pastel seperti yang lain.
+#: Keduanya muncul tepat ketika nomor sudah terbit dan pengunjung hanya
+#: memandang layar sekejap sebelum berbalik, jadi keduanya harus terbaca
+#: sebagai warna, bukan sebagai tulisan yang perlu dieja lebih dulu.
+#:
+#: "gagal" kuning, bukan merah: nomornya tetap sah — `_cetak()` tidak
+#: pernah menggagalkan pengambilan nomor — dan merah membuat pengunjung
+#: mengira nomornya batal lalu mengambil satu lagi.
 KIOS_PIL = {
     "ajak": ("#E2E8F0", "#475569"),
     "konfirmasi": ("#E0E7FF", "#3730A3"),
     "tunggu": ("#FEF3C7", "#92400E"),
-    "hasil": ("#D1FAE5", "#065F46"),
+    "hasil": ("#10B981", "#04231A"),
+    "gagal": ("#F59E0B", "#1F1300"),
     "salah": ("#FEE2E2", "#991B1B"),
 }
 

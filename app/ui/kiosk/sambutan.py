@@ -475,7 +475,7 @@ class PanelSambutanKios(QFrame):
 
     def _bangun_halaman_kartu(self) -> QWidget:
         """
-        Kartu nomor yang baru terbit: nomor, layanan, sisa antrian, arahan.
+        Kartu nomor yang baru terbit: nomor, layanan, sisa antrian.
 
         Nomornya dibuat sebesar mungkin dengan sengaja. `_cetak()` di
         KioskPage tidak pernah menggagalkan pengambilan nomor — printer
@@ -483,8 +483,20 @@ class PanelSambutanKios(QFrame):
         saat itu layar inilah SATU-SATUNYA catatan nomor yang dipegang
         pengunjung. Cukup besar untuk difoto dengan ponsel dari jarak
         berdiri, bukan sekadar terbaca.
+
+        Kalimat arahannya TIDAK ada di sini. Kartu ini yang difoto, dan
+        yang perlu terbawa dalam foto hanyalah nomornya; apa yang harus
+        dilakukan pengunjung dikatakan sekali saja, oleh pil petunjuk di
+        panel bawah yang berada tepat di depan tangannya.
+
+        Kartunya berlatar sendiri (`kartuKios`), bukan menumpang latar
+        panel. Warna latar dan warna tulisannya lalu boleh diambil dari
+        pasangan `kartu`/`nomor` milik tema — satu-satunya pasangan yang
+        sudah dijamin terbaca di ketujuh tema, karena itulah pasangan yang
+        dipakai kartu loket di papan.
         """
-        halaman = QWidget()
+        halaman = QFrame()
+        halaman.setObjectName("kartuKios")
         isi = QVBoxLayout(halaman)
         isi.setContentsMargins(12, 4, 12, 4)
         isi.setSpacing(2)
@@ -493,7 +505,6 @@ class PanelSambutanKios(QFrame):
         self.label_kartu_nomor = QLabel("")
         self.label_kartu_layanan = QLabel("")
         self.label_kartu_sisa = QLabel("")
-        self.label_kartu_arahan = QLabel("")
 
         isi.addStretch(1)
         for label in (
@@ -501,13 +512,13 @@ class PanelSambutanKios(QFrame):
             self.label_kartu_nomor,
             self.label_kartu_layanan,
             self.label_kartu_sisa,
-            self.label_kartu_arahan,
         ):
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setWordWrap(True)
             label.setMinimumSize(1, 1)
             isi.addWidget(label)
         isi.addStretch(1)
+        self.kartu_kios = halaman
         return halaman
 
     # -----------------------------------------------------------------
@@ -601,9 +612,7 @@ class PanelSambutanKios(QFrame):
         )
         self._animasi.start()
 
-    def tampilkan_kartu(
-        self, *, nomor: str, layanan: str, sisa: str, arahan: str
-    ) -> None:
+    def tampilkan_kartu(self, *, nomor: str, layanan: str, sisa: str) -> None:
         """
         Ganti isi panel dengan kartu nomor yang baru terbit.
 
@@ -627,8 +636,6 @@ class PanelSambutanKios(QFrame):
         self.label_kartu_layanan.setText(layanan)
         self.label_kartu_sisa.setText(sisa)
         self.label_kartu_sisa.setVisible(bool(sisa))
-        self.label_kartu_arahan.setText(arahan)
-        self.label_kartu_arahan.setVisible(bool(arahan))
 
         self._tampilkan_halaman(HALAMAN_KARTU)
         self._pulihkan_bayangan()
@@ -737,6 +744,17 @@ class PanelSambutanKios(QFrame):
             label = getattr(self, f"label_kartu_{nama}", None)
             if label is not None:
                 label.setStyleSheet(stylesheet)
+
+    def ganti_latar_kartu(self, stylesheet: str) -> None:
+        """
+        Latar kartu nomor, dikirim papan bersama warna tulisannya.
+
+        Terpisah dari `ganti_gaya_kartu` karena yang dilukis bukan label
+        melainkan bingkainya, dan keduanya harus datang dari tema yang
+        sama: warna tulisan tanpa latarnya adalah persis cara nomor
+        pernah menjadi hitam di atas papan hitam.
+        """
+        self.kartu_kios.setStyleSheet(stylesheet)
 
     def showEvent(self, event) -> None:  # noqa: N802 - nama API Qt
         super().showEvent(event)

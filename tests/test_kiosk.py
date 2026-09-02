@@ -705,9 +705,10 @@ def test_papan_kios_juga_memiliki_jam(halaman_kios):
 
 
 def test_mengambil_nomor_menampilkan_hasil_besar(halaman_kios, antrian_siap):
+    """Nomornya di kartu papan, tempat satu-satunya ia tampil besar."""
     halaman_kios.ambil_nomor(antrian_siap["kategori"]["A"])
 
-    assert "A-001" in halaman_kios.label_ajakan.text()
+    assert halaman_kios.papan.panel_info_kios.label_kartu_nomor.text() == "A-001"
 
 
 def test_tombol_mati_selama_jeda_dan_menyebutkan_alasannya(halaman_kios, antrian_siap):
@@ -730,7 +731,7 @@ def test_pengambilan_kedua_tidak_membuka_dialog(halaman_kios, antrian_siap):
     halaman_kios.ambil_nomor(antrian_siap["kategori"]["A"])
     halaman_kios.ambil_nomor(antrian_siap["kategori"]["A"])
 
-    assert "A-001" in halaman_kios.label_ajakan.text()
+    assert halaman_kios.papan.panel_info_kios.label_kartu_nomor.text() == "A-001"
     assert "tunggu" in halaman_kios.label_petunjuk.text().lower()
 
 
@@ -764,7 +765,7 @@ def test_gagal_cetak_tidak_membatalkan_nomor_di_kios(qtbot, kios, antrian_siap, 
 
     halaman.ambil_nomor(antrian_siap["kategori"]["A"])
 
-    assert "A-001" in halaman.label_ajakan.text()
+    assert halaman.papan.panel_info_kios.label_kartu_nomor.text() == "A-001"
     with session_scope() as session:
         tersimpan = session.scalar(sa.select(Queue))
     assert tersimpan is not None
@@ -1265,14 +1266,48 @@ def test_kartu_nomor_menghitung_antrian_di_depannya(
     assert panel.label_kartu_sisa.text() == "Sisa antrian: 2"
 
 
-def test_kartu_nomor_dan_panel_bawah_memakai_kalimat_yang_sama(
-    halaman_kios, antrian_siap
-):
-    """Dua tempat yang menjawab pertanyaan sama tidak boleh berbeda bunyi."""
+def test_hasil_tidak_menyebut_satu_keterangan_dua_kali(halaman_kios, antrian_siap):
+    """
+    Satu layar, dua panel yang saling berhadapan. Nomor, jenis layanan,
+    dan kalimat arahan pernah tercetak di keduanya sekaligus — dan
+    keterangan yang diulang membuat pengunjung membacanya dua kali untuk
+    memastikan keduanya memang sama, bukan dua hal yang berbeda.
+    """
+    from app.ui.kiosk.kiosk_page import ARAHAN_CETAK, CETAK_TANPA_PRINTER
+
     halaman_kios.ambil_nomor(antrian_siap["kategori"]["A"])
 
     panel = halaman_kios.papan.panel_info_kios
-    assert panel.label_kartu_arahan.text() == halaman_kios.label_petunjuk.text()
+    judul = halaman_kios.label_ajakan.text()
+    petunjuk = halaman_kios.label_petunjuk.text()
+
+    # Nomornya hanya di kartu papan: itu yang difoto.
+    assert panel.label_kartu_nomor.text() == "A-001"
+    assert "A-001" not in judul
+    assert "A-001" not in petunjuk
+    # Arahannya hanya di pil petunjuk: itu yang dibaca sambil berdiri.
+    assert petunjuk == ARAHAN_CETAK[CETAK_TANPA_PRINTER]
+    assert not hasattr(panel, "label_kartu_arahan")
+    # Judul panel bawah mengabarkan hal yang tidak dikatakan keduanya.
+    assert judul == "NOMOR ANDA SUDAH TERBIT"
+
+
+def test_pil_petunjuk_menguning_saat_tiket_gagal_dicetak(halaman_kios, antrian_siap):
+    """
+    Warnanya yang terbaca lebih dulu, sebelum kalimatnya sempat dieja.
+    Kuning, bukan merah: nomornya tetap sah, dan merah membuat pengunjung
+    mengira nomornya batal lalu mengambil satu lagi.
+    """
+    from app.ui.kiosk.kiosk_page import CETAK_GAGAL
+    from app.ui.style import KIOS_PIL
+
+    halaman_kios._cetak = lambda nomor: CETAK_GAGAL
+    halaman_kios.ambil_nomor(antrian_siap["kategori"]["A"])
+
+    latar, tulisan = KIOS_PIL["gagal"]
+    gaya = halaman_kios.label_petunjuk.styleSheet()
+    assert latar in gaya and tulisan in gaya
+    assert KIOS_PIL["hasil"][0] not in gaya
 
 
 def test_arahan_menyuruh_mencatat_nomor_saat_cetak_gagal(
@@ -1305,10 +1340,10 @@ def test_arahan_menyuruh_mencatat_nomor_saat_cetak_gagal(
 
     halaman.ambil_nomor(antrian_siap["kategori"]["A"])
 
-    panel = halaman.papan.panel_info_kios
-    assert panel.label_kartu_arahan.text() == ARAHAN_CETAK[CETAK_GAGAL]
+    assert halaman.label_petunjuk.text() == ARAHAN_CETAK[CETAK_GAGAL]
     # Nomornya tetap tampil besar: justru inilah saat layar paling perlu
     # dibaca, karena tidak ada kertas yang membawanya pulang.
+    panel = halaman.papan.panel_info_kios
     assert panel.label_kartu_nomor.text() == "A-001"
     halaman.papan.hentikan()
 

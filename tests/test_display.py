@@ -1469,6 +1469,78 @@ def test_setiap_tema_dapat_dibuka_dan_menampilkan_loket(
     ]
 
 
+def _luminans(warna: str) -> float:
+    """Luminans relatif WCAG dari sebuah "#RRGGBB"."""
+    r, g, b = (int(warna[i : i + 2], 16) / 255 for i in (1, 3, 5))
+
+    def kanal(c: float) -> float:
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * kanal(r) + 0.7152 * kanal(g) + 0.0722 * kanal(b)
+
+
+def _kontras(depan: str, belakang: str) -> float:
+    a, b = _luminans(depan), _luminans(belakang)
+    terang, gelap = max(a, b), min(a, b)
+    return (terang + 0.05) / (gelap + 0.05)
+
+
+@pytest.mark.parametrize("kode", sorted(PALET))
+def test_kartu_nomor_kios_terbaca_di_setiap_tema(
+    qtbot, admin_auth, auth, antrian_siap, kode
+):
+    """
+    Nomor yang baru terbit tidak boleh menghilang di tema mana pun.
+
+    Pernah hilang sungguhan: kartu ini menumpang latar `panel` sambil
+    memakai warna tulisan `nomor` yang dirancang untuk `kartu`. Di tema
+    Split keduanya berlawanan — kartunya putih, panelnya tembus ke papan
+    yang nyaris hitam — sehingga nomornya tampil hitam di atas hitam,
+    tepat pada keadaan yang membuatnya paling penting: tiket gagal
+    dicetak, dan layar inilah satu-satunya catatan yang tersisa.
+
+    Karena itu yang diperiksa bukan sekadar "warnanya cerah", melainkan
+    bahwa latar dan tulisannya berasal dari SATU pasangan — pasangan yang
+    dipakai kartu loket, dan yang karenanya sudah terbukti terbaca.
+    """
+    from app.ui.display.display_page import DisplayPage
+
+    SettingsService(admin_auth).set("display.theme", kode)
+
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+    halaman = DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        kompak=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.tampilkan_kartu_kios(nomor="B-002", layanan="Pengaduan", sisa="Sisa: 1")
+
+    palet = halaman.palet
+    panel = halaman.panel_info_kios
+    latar_kartu = panel.kartu_kios.styleSheet()
+
+    assert palet.kartu in latar_kartu
+    assert f"color: {palet.nomor};" in panel.label_kartu_nomor.styleSheet()
+    for label in (
+        panel.label_kartu_layanan,
+        panel.label_kartu_judul,
+        panel.label_kartu_sisa,
+    ):
+        assert f"color: {palet.nama};" in label.styleSheet()
+
+    # Warna kaca (rgba) tidak bisa dihitung tanpa tahu apa yang ada di
+    # baliknya; sisanya pekat dan wajib lolos ambang WCAG.
+    if palet.kartu.startswith("#"):
+        assert _kontras(palet.nomor, palet.kartu) >= 4.5, kode
+        assert _kontras(palet.nama, palet.kartu) >= 3.0, kode
+
+    halaman.hentikan()
+
+
 def test_tema_dibaca_dari_pengaturan_bila_tidak_ditentukan(qtbot, auth, antrian_siap):
     from app.ui.display.display_page import DisplayPage
 

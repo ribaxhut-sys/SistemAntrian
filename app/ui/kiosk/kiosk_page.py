@@ -72,9 +72,10 @@ CETAK_GAGAL = "gagal"
 
 #: Arahan yang menyertai nomor, satu kalimat per keadaan cetak.
 #:
-#: Disusun di satu tempat lalu dipakai kartu nomor DAN label petunjuk di
-#: panel bawah: dua tempat yang menjawab pertanyaan yang sama tidak boleh
-#: menyebut kalimat yang berbeda.
+#: Tampil di SATU tempat: pil petunjuk di panel bawah, yang berada tepat
+#: di depan tangan pengunjung dan di sebelah printernya. Kartu nomor di
+#: papan atas sengaja tidak ikut menyebutkannya — kartu itu yang difoto,
+#: dan yang perlu terbawa dalam foto hanya nomornya.
 #:
 #: Kalimat "gagal" adalah alasan terkuat kartu nomor dibuat sebesar itu.
 #: `_cetak()` sengaja tidak pernah menggagalkan pengambilan nomor, jadi
@@ -986,18 +987,33 @@ class KioskPage(QWidget):
             return "none"
 
     def _tampilkan_hasil(self, nomor: QueueInfo, hasil_cetak: str) -> None:
+        """
+        Satu keterangan, satu tempat.
+
+        Layar ini punya dua panel yang saling berhadapan, dan sebelumnya
+        keduanya menyebut nomor, jenis layanan, dan kalimat arahan yang
+        sama persis — tiga fakta yang dicetak dua kali di satu layar.
+        Sekarang tiap fakta punya satu rumah:
+
+        * kartu papan di atas menyimpan nomornya, besar dan bisa difoto;
+        * judul panel bawah mengabarkan keadaan yang tidak dikatakan
+          bagian mana pun: nomornya sudah sah;
+        * pil petunjuk mengatakan apa yang harus dilakukan sekarang.
+        """
         arahan = ARAHAN_CETAK.get(hasil_cetak, ARAHAN_CETAK[CETAK_TANPA_PRINTER])
-        self.label_ajakan.setText(f"NOMOR ANDA:  {nomor.queue_number}")
+        self.label_ajakan.setText("NOMOR ANDA SUDAH TERBIT")
         self._gaya_ajakan(sukses=True)
-        self._set_petunjuk(arahan, "hasil")
-        # Kartu nomor di panel papan. Nomornya sengaja diulang di dua
-        # tempat — itu satu-satunya hal yang layak diulang — sedangkan
-        # kalimat arahannya berasal dari sumber yang sama persis.
+        # Pil kuning bila kertasnya tidak keluar. Warnanya yang terbaca
+        # lebih dulu, sebelum kalimatnya sempat dieja — dan yang membuat
+        # pengunjung menoleh ke kartu nomor di atas alih-alih berdiri
+        # menunggu tiket di depan printer yang diam.
+        self._set_petunjuk(
+            arahan, "gagal" if hasil_cetak == CETAK_GAGAL else "hasil"
+        )
         self.papan.tampilkan_kartu_kios(
             nomor=nomor.queue_number,
             layanan=nomor.category_name,
             sisa=baris_sisa_antrian(self._sisa_antrian(nomor)),
-            arahan=arahan,
         )
         self._penghapus_hasil.start(self._lama_hasil_ms())
 

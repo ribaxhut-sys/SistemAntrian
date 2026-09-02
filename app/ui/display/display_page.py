@@ -260,7 +260,6 @@ UKURAN_TV: dict[str, int] = {
     "kios_kartu_nomor": 150,
     "kios_kartu_layanan": 34,
     "kios_kartu_sisa": 24,
-    "kios_kartu_arahan": 22,
 }
 
 #: Ukuran huruf papan di dalam kios. Layar kios dibaca dari jarak satu
@@ -297,7 +296,6 @@ UKURAN_KIOS: dict[str, int] = {
     "kios_kartu_nomor": 112,
     "kios_kartu_layanan": 26,
     "kios_kartu_sisa": 18,
-    "kios_kartu_arahan": 16,
 }
 
 #: Tinggi layar tempat UKURAN_TV berlaku apa adanya. Di atasnya huruf
@@ -1325,15 +1323,11 @@ class DisplayPage(QWidget):
             return
         self.panel_info_kios.tampilkan_info(teks, berkas=berkas)
 
-    def tampilkan_kartu_kios(
-        self, *, nomor: str, layanan: str, sisa: str, arahan: str
-    ) -> None:
+    def tampilkan_kartu_kios(self, *, nomor: str, layanan: str, sisa: str) -> None:
         """Ganti isi panel dengan kartu nomor yang baru terbit."""
         if self.panel_info_kios is None:
             return
-        self.panel_info_kios.tampilkan_kartu(
-            nomor=nomor, layanan=layanan, sisa=sisa, arahan=arahan
-        )
+        self.panel_info_kios.tampilkan_kartu(nomor=nomor, layanan=layanan, sisa=sisa)
 
     def _bangun_sorotan(self) -> None:
         self.susunan.addLayout(self._bangun_kepala())
@@ -1650,10 +1644,32 @@ class DisplayPage(QWidget):
                 f"color: {p.panel_judul}; background: transparent;"
                 f" font-size: {self.px('kios_info')}px; font-weight: 700;"
             )
+            # Kartu nomor berdiri di atas latarnya sendiri, jadi warnanya
+            # diambil dari pasangan kartu loket — `kartu` dengan `nomor`,
+            # `nama`, dan `layanan` — bukan dari warna panel.
+            #
+            # Ini bukan selera. `panel_judul` dan `nomor` berasal dari dua
+            # bidang yang berbeda: tema Split menulis nomor `#0B1220` untuk
+            # kartu loketnya yang putih, sedangkan panelnya tembus ke latar
+            # papan yang nyaris hitam. Kartu kios yang menumpang latar
+            # panel sambil memakai warna kartu menghasilkan hitam di atas
+            # hitam — nomor yang tidak terbaca justru pada satu-satunya
+            # keadaan yang membuatnya penting, yaitu saat tiketnya gagal
+            # dicetak dan layar ini satu-satunya catatan yang tersisa.
+            self.panel_info_kios.ganti_latar_kartu(
+                f"QFrame#kartuKios {{ background: {p.kartu};"
+                f" border: {p.tebal_tepi + 1}px solid {p.tepi_unggulan};"
+                f" border-radius: {max(12, p.radius - 8)}px; }}"
+            )
             self.panel_info_kios.ganti_gaya_kartu(
                 {
+                    # `nama`, bukan `layanan`. Warna tersier tema Bento
+                    # (#9CA3AF di atas kartu putih) hanya 2,5:1 — cukup
+                    # untuk keterangan kecil di kartu loket yang dibaca
+                    # dari duduk, tidak cukup untuk kartu yang dipandang
+                    # sekejap sambil berdiri lalu difoto.
                     "judul": (
-                        f"color: {p.panel_judul}; background: transparent;"
+                        f"color: {p.nama}; background: transparent;"
                         f" font-size: {self.px('kios_kartu_judul')}px;"
                         " font-weight: 700; letter-spacing: 3px;"
                     ),
@@ -1668,13 +1684,8 @@ class DisplayPage(QWidget):
                         " font-weight: 700;"
                     ),
                     "sisa": (
-                        f"color: {p.panel_judul}; background: transparent;"
+                        f"color: {p.nama}; background: transparent;"
                         f" font-size: {self.px('kios_kartu_sisa')}px;"
-                        " font-weight: 600;"
-                    ),
-                    "arahan": (
-                        f"color: {p.panel_judul}; background: transparent;"
-                        f" font-size: {self.px('kios_kartu_arahan')}px;"
                         " font-weight: 600;"
                     ),
                 }
