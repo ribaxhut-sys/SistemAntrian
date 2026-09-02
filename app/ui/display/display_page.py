@@ -50,16 +50,24 @@ SELANG_SEGAR_MS = 2_000
 #: database sekali per detik.
 SELANG_JAM_MS = 1_000
 
-#: Lama pudar-masuk kartu nomor ketika halaman daftar menunggu berganti.
+#: Lama pudar-keluar dan pudar-masuk kartu nomor ketika halaman daftar
+#: menunggu berganti.
 #:
-#: Hanya satu arah, tanpa pudar-keluar. Halaman berganti setiap beberapa
-#: detik; menunggu halaman lama memudar dahulu berarti panel kosong pada
-#: sebagian besar waktu tayang setiap halaman, dan yang tersisa untuk
-#: dibaca justru berkurang.
+#: Keduanya bersama-sama tetap di bawah satu detik, jauh lebih pendek
+#: daripada jeda putar terpendek yang dapat diatur admin. Transisi yang
+#: belum selesai ketika halaman berikutnya sudah harus tampil akan
+#: dipotong di tengah, dan yang terlihat adalah nomor yang berkedip.
 #:
-#: Cukup panjang untuk terbaca sebagai pergantian, cukup pendek untuk
-#: selesai jauh sebelum penyegaran data dua detik sekali menyentuhnya.
-DURASI_PUTAR_HALAMAN_MS = 280
+#: Pudar-masuk sengaja lebih panjang daripada pudar-keluar. Yang keluar
+#: sudah selesai dibaca dan hanya perlu menyingkir; yang masuk baru mulai
+#: dibaca, dan datang terlalu cepat membuatnya terasa menyentak.
+DURASI_PUDAR_KELUAR_MS = 240
+DURASI_PUDAR_MASUK_MS = 340
+
+#: Arah pudar yang sedang berjalan. Kosong berarti panel sedang diam dan
+#: utuh — keadaan papan selama hampir seluruh waktunya.
+PUDAR_KELUAR = "keluar"
+PUDAR_MASUK = "masuk"
 
 #: Lama satu arah transisi pudar saat panel informasi papan kios berganti
 #: isi — baik karena pengunjung menyentuh sebuah layanan maupun karena
@@ -1016,10 +1024,12 @@ class DisplayPage(QWidget):
         #: mengembalikannya ke halaman satu terus-menerus, dan rotasi tidak
         #: akan pernah sempat terlihat.
         self._halaman = 0
-        #: Animasi pudar-masuk halaman yang sedang berjalan, bila ada.
+        #: Animasi pudar halaman, dipakai berulang seumur hidup papan.
         #: Wajib ada SEBELUM panel dibangun: `_bangun_panel_berikutnya`
         #: menghentikannya setiap kali panelnya dibuat ulang.
         self._animasi_halaman: QPropertyAnimation | None = None
+        #: Arah pudar yang sedang berjalan; lihat PUDAR_KELUAR/PUDAR_MASUK.
+        self._fase_pudar = ""
         self._menunggu: list = []
         self._layanan: list = []
         self._total_menunggu = 0
@@ -2056,47 +2066,92 @@ class DisplayPage(QWidget):
 
     def putar_halaman(self) -> None:
         """
-        Pindah ke halaman berikutnya daftar menunggu.
+        Pindah ke halaman berikutnya daftar menunggu, berpudar.
 
         Diam bila hanya ada satu halaman. Halaman yang "berpindah" ke
         dirinya sendiri terbaca sebagai layar berkedip yang rusak, bukan
         sebagai daftar yang berputar.
+
+        Nomornya dipudarkan KELUAR dahulu, baru ditukar, baru dipudarkan
+        MASUK. Menukar isi lebih dahulu lalu memudarkan yang baru saja
+        berarti nomor lama lenyap seketika — mata menangkapnya sebagai
+        kedipan, dan pudar sesudahnya tidak lagi menutupi apa pun.
+
+        Papan yang belum pernah tampil menukar isinya seketika: animasi
+        yang tidak pernah dijalankan akan meninggalkan opacity pada nilai
+        awalnya, dan daftar menunggu tidak terlihat sama sekali.
         """
         if self.jumlah_halaman <= 1:
             return
-        self._halaman = (self._halaman + 1) % self.jumlah_halaman
-        self._gambar_halaman()
-        self._pudarkan_masuk_halaman()
-
-    def _pudarkan_masuk_halaman(self) -> None:
-        """
-        Pudarkan masuk kartu nomor halaman yang baru saja digambar.
-
-        Dipanggil HANYA dari `putar_halaman`, bukan dari `_gambar_halaman`.
-        Panel digambar ulang setiap penyegaran data — dua detik sekali —
-        dan memudarkannya di sana membuat papan berkedip terus-menerus
-        walau tidak ada satu pun yang berubah.
-
-        Papan yang belum pernah tampil dilewati. Nilai awal 0 yang tidak
-        pernah dijalankan animasinya meninggalkan daftar menunggu yang
-        tidak terlihat sama sekali.
-        """
-        self._hentikan_animasi_halaman()
         if not self.isVisible():
+            self._ganti_halaman()
             return
 
-        self.efek_berikutnya.setOpacity(0.0)
-        self._animasi_halaman = QPropertyAnimation(
-            self.efek_berikutnya, b"opacity", self
-        )
-        self._animasi_halaman.setDuration(DURASI_PUTAR_HALAMAN_MS)
-        self._animasi_halaman.setStartValue(0.0)
-        self._animasi_halaman.setEndValue(1.0)
-        # Cepat di awal lalu melambat: nomornya sudah terbaca utuh jauh
-        # sebelum animasinya selesai, dan yang tersisa hanya kesan bahwa
-        # halaman baru saja berganti.
-        self._animasi_halaman.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._animasi_halaman.start()
+        self._hentikan_animasi_halaman()
+        self._fase_pudar = PUDAR_KELUAR
+        self._mulai_pudar(1.0, 0.0, DURASI_PUDAR_KELUAR_MS)
+
+    def _setelah_pudar(self) -> None:
+        """
+        Sambungan antara kedua arah pudar.
+
+        Hanya pudar-keluar yang punya kelanjutan. Pudar-masuk berakhir
+        dengan panel utuh, dan itu memang keadaan diamnya.
+        """
+        if self._fase_pudar != PUDAR_KELUAR:
+            self._fase_pudar = ""
+            return
+        # Ditukar selagi tak terlihat: inilah satu-satunya saat isi boleh
+        # berganti tanpa ada yang menangkapnya sebagai kedipan.
+        self._ganti_halaman()
+        self._fase_pudar = PUDAR_MASUK
+        self._mulai_pudar(0.0, 1.0, DURASI_PUDAR_MASUK_MS)
+
+    def _ganti_halaman(self) -> None:
+        """Maju satu halaman dan gambar isinya."""
+        self._halaman = (self._halaman + 1) % self.jumlah_halaman
+        self._gambar_halaman()
+
+    def _mulai_pudar(self, dari: float, ke: float, durasi: int) -> None:
+        """
+        Jalankan satu arah pudar pada kartu nomor.
+
+        Nilai awal dipasang pada efeknya SEBELUM animasi berjalan. Qt baru
+        menerapkan nilai awal pada detak pertama, dan satu bingkai berisi
+        nomor lama pada opacity penuh sudah cukup untuk terlihat sebagai
+        kedipan tepat di tengah transisi.
+
+        Lengkung InOutCubic untuk kedua arah: berangkat pelan dan berhenti
+        pelan, sehingga sambungan antara pudar-keluar dan pudar-masuk tidak
+        terasa sebagai dua gerakan yang ditempelkan.
+        """
+        self.efek_berikutnya.setOpacity(dari)
+        animasi = self._animasi()
+        animasi.setDuration(durasi)
+        animasi.setStartValue(dari)
+        animasi.setEndValue(ke)
+        animasi.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        animasi.start()
+
+    def _animasi(self) -> QPropertyAnimation:
+        """
+        Satu objek animasi untuk seumur hidup papan, dipakai berulang-ulang.
+
+        Papan berputar berhari-hari tanpa dibuka ulang: pada jeda tiga
+        detik, animasi yang dibuat baru setiap pergantian meninggalkan ribuan
+        objek per hari yang tidak pernah dibuang karena semuanya berinduk
+        pada papan.
+
+        Sasarannya dipasang ulang setiap kali dipakai. Panel dibangun ulang
+        setiap tema berganti, dan efek yang dituju animasi ini ikut berganti
+        bersamanya.
+        """
+        if self._animasi_halaman is None:
+            self._animasi_halaman = QPropertyAnimation(self)
+            self._animasi_halaman.setPropertyName(b"opacity")
+            self._animasi_halaman.finished.connect(self._setelah_pudar)
+        self._animasi_halaman.setTargetObject(self.efek_berikutnya)
+        return self._animasi_halaman
 
     def _hentikan_animasi_halaman(self) -> None:
         """
@@ -2104,12 +2159,12 @@ class DisplayPage(QWidget):
 
         Opacity dikembalikan ke satu, bukan dibiarkan pada nilai terakhir:
         `stop()` tidak memancarkan `finished`, sehingga animasi yang
-        dipotong di tengah akan meninggalkan daftar menunggu separuh pudar
-        untuk selamanya.
+        dipotong di tengah pudar-keluar akan meninggalkan daftar menunggu
+        separuh pudar — atau hilang sama sekali — untuk selamanya.
         """
+        self._fase_pudar = ""
         if self._animasi_halaman is not None:
             self._animasi_halaman.stop()
-            self._animasi_halaman = None
         efek = getattr(self, "efek_berikutnya", None)
         if efek is not None:
             efek.setOpacity(1.0)

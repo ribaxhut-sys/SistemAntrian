@@ -2892,33 +2892,45 @@ def _siapkan_papan_tampil(qtbot, halaman, terbitkan, auth, jumlah: int = 7):
     return halaman
 
 
-def test_pergantian_halaman_memudarkan_kartu_nomor(
+def test_halaman_ditukar_hanya_sesudah_pudar_keluar(
     qtbot, layar_berhalaman, terbitkan, auth
 ):
-    """Halaman yang berganti begitu saja terbaca sebagai papan berkedip."""
+    """
+    Menukar isi lebih dahulu berarti nomor lama lenyap seketika, dan pudar
+    sesudahnya tidak lagi menutupi apa pun.
+    """
+    from app.ui.display.display_page import PUDAR_KELUAR
+
     papan = _siapkan_papan_tampil(qtbot, layar_berhalaman, terbitkan, auth)
     assert papan.jumlah_halaman > 1
+    nomor_lama = _nomor_tampil(papan)
 
     papan.putar_halaman()
 
-    assert papan._halaman == 1
-    assert papan._animasi_halaman is not None
-    # Animasi memasang nilai awalnya seketika saat start().
-    assert papan.efek_berikutnya.opacity() < 1.0
+    assert papan._fase_pudar == PUDAR_KELUAR
+    # Masih halaman yang sama, dan masih nomor yang sama: yang berjalan
+    # baru pudarnya.
+    assert papan._halaman == 0
+    assert _nomor_tampil(papan) == nomor_lama
 
 
-def test_pudar_selesai_pada_nomor_yang_terbaca_penuh(
+def test_pudar_berakhir_pada_halaman_baru_yang_terbaca_penuh(
     qtbot, layar_berhalaman, terbitkan, auth
 ):
     """
     Kegagalan terburuk animasi ini adalah daftar yang tidak pernah kembali
-    terlihat. Dijalankan dengan event loop sungguhan sampai selesai.
+    terlihat. Dijalankan dengan event loop sungguhan sampai kedua arah
+    pudarnya selesai.
     """
     papan = _siapkan_papan_tampil(qtbot, layar_berhalaman, terbitkan, auth)
+    nomor_lama = _nomor_tampil(papan)
 
     papan.putar_halaman()
+    qtbot.waitUntil(lambda: papan._fase_pudar == "", timeout=5000)
 
-    qtbot.waitUntil(lambda: papan.efek_berikutnya.opacity() == 1.0, timeout=3000)
+    assert papan._halaman == 1
+    assert _nomor_tampil(papan) != nomor_lama
+    assert papan.efek_berikutnya.opacity() == 1.0
 
 
 def test_penyegaran_data_tidak_ikut_memudarkan(
@@ -2933,16 +2945,16 @@ def test_penyegaran_data_tidak_ikut_memudarkan(
 
     papan.muat_ulang()
 
-    assert papan._animasi_halaman is None
+    assert papan._fase_pudar == ""
     assert papan.efek_berikutnya.opacity() == 1.0
 
 
-def test_papan_yang_belum_tampil_tidak_ditinggal_pudar(
+def test_papan_yang_belum_tampil_menukar_halaman_seketika(
     layar_berhalaman, terbitkan, auth
 ):
     """
-    Nilai awal nol yang animasinya tidak pernah berjalan meninggalkan
-    daftar menunggu yang tidak terlihat sama sekali.
+    Animasi yang tidak pernah dijalankan meninggalkan opacity pada nilai
+    awalnya, dan daftar menunggu tidak terlihat sama sekali.
     """
     terbitkan("A", 7)
     auth.logout()
@@ -2951,7 +2963,8 @@ def test_papan_yang_belum_tampil_tidak_ditinggal_pudar(
 
     layar_berhalaman.putar_halaman()
 
-    assert layar_berhalaman._animasi_halaman is None
+    assert layar_berhalaman._halaman == 1
+    assert layar_berhalaman._fase_pudar == ""
     assert layar_berhalaman.efek_berikutnya.opacity() == 1.0
 
 
@@ -2959,13 +2972,32 @@ def test_menutup_layar_mengembalikan_panel_ke_utuh(
     qtbot, layar_berhalaman, terbitkan, auth
 ):
     """
-    `stop()` tidak memancarkan `finished`, sehingga animasi yang dipotong
-    di tengah akan meninggalkan daftar separuh pudar untuk selamanya.
+    `stop()` tidak memancarkan `finished`, sehingga pudar-keluar yang
+    dipotong di tengah akan meninggalkan daftar yang hilang sama sekali.
     """
     papan = _siapkan_papan_tampil(qtbot, layar_berhalaman, terbitkan, auth)
     papan.putar_halaman()
 
     papan.hentikan()
 
-    assert papan._animasi_halaman is None
+    assert papan._fase_pudar == ""
     assert papan.efek_berikutnya.opacity() == 1.0
+
+
+def test_animasi_dipakai_ulang_tidak_menumpuk(
+    qtbot, layar_berhalaman, terbitkan, auth
+):
+    """
+    Papan berputar berhari-hari tanpa dibuka ulang. Animasi yang dibuat
+    baru setiap pergantian meninggalkan ribuan objek per hari yang tidak
+    pernah dibuang karena semuanya berinduk pada papan.
+    """
+    papan = _siapkan_papan_tampil(qtbot, layar_berhalaman, terbitkan, auth)
+
+    papan.putar_halaman()
+    pertama = papan._animasi_halaman
+    qtbot.waitUntil(lambda: papan._fase_pudar == "", timeout=5000)
+    papan.putar_halaman()
+    qtbot.waitUntil(lambda: papan._fase_pudar == "", timeout=5000)
+
+    assert papan._animasi_halaman is pertama
