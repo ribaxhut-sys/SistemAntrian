@@ -114,10 +114,25 @@ SELANG_PERIKSA_LAYANAN_MS = 20000
 #: Tinggi minimum panel ambil nomor. Tanpa ini, papan antrian merebut
 #: seluruh tinggi jendela biasa dan nama layanan di bawah A/B/C terpotong.
 TINGGI_PANEL_AMBIL_MIN = 268
+#: Nilai "tanpa batas" milik Qt (QWIDGETSIZE_MAX), untuk melepas batas
+#: tinggi panel ambil nomor kembali.
+TINGGI_TAK_TERBATAS = (1 << 24) - 1
+#: Perbandingan lebar:tinggi panel informasi bila pengaturannya tak
+#: terbaca atau berisi angka yang tidak masuk akal.
+RASIO_INFO_BAWAAN = 3.0
+#: Batas kewarasan `kiosk.info_ratio`. Di luar ini panelnya bukan lagi
+#: bidang yang bisa diisi gambar: 1,0 berarti bujur sangkar setinggi
+#: lebar layar, 8,0 berarti pita setipis judul.
+RASIO_INFO_MIN = 1.0
+RASIO_INFO_MAKS = 8.0
 TINGGI_TOMBOL_MIN = 120
-#: Banyaknya kolom terbanyak. Lebih dari ini tiap kartu terlalu sempit
-#: untuk disentuh dengan jari, bukan dengan mouse.
-KOLOM_MAKS = 3
+#: Batas atas banyaknya kolom, berapa pun lebar layarnya. Kartu yang
+#: terlalu banyak berjajar membuat pengunjung memindai, bukan memilih.
+#: Batas yang SUNGGUHAN dihitung dari lebar panel — lihat `_kolom_maks`.
+KOLOM_MAKS = 6
+#: Banyaknya kolom yang dipakai bila lebar panel belum diketahui, dan
+#: batas atas kisi pada layar sempit.
+KOLOM_BAWAAN = 3
 
 #: Tinggi maksimum tombol pilih layanan. Tanpa batas atas, kebijakan
 #: Expanding membuatnya memakai seluruh sisa panel ambil nomor pada
@@ -183,23 +198,32 @@ SISI_KOTAK_KONFIRMASI = 112
 TINGGI_TOMBOL_KONFIRMASI_MIN = 220
 
 
-def baris_kisi(jumlah: int) -> list[int]:
+def baris_kisi(jumlah: int, kolom_maks: int = KOLOM_BAWAAN) -> list[int]:
     """
     Banyaknya kartu pada tiap baris.
 
-    Barisnya diisi serata mungkin, bukan tiga-tiga sampai habis. Empat
-    layanan yang disusun 3+1 meninggalkan satu kartu sendirian di bawah —
-    terbaca sebagai kartu yang berbeda derajat, padahal semua jenis
-    layanan setara. Baris yang lebih panjang ditaruh di ATAS, karena
-    itulah yang pertama dibaca.
+    Barisnya diisi serata mungkin, bukan sekolom-sekolom sampai habis.
+    Empat layanan yang disusun 3+1 meninggalkan satu kartu sendirian di
+    bawah — terbaca sebagai kartu yang berbeda derajat, padahal semua
+    jenis layanan setara. Baris yang lebih panjang ditaruh di ATAS,
+    karena itulah yang pertama dibaca.
+
+    Pada `kolom_maks` tiga:
 
         1 -> [1]      4 -> [2, 2]     7 -> [3, 2, 2]
         2 -> [2]      5 -> [3, 2]     8 -> [3, 3, 2]
         3 -> [3]      6 -> [3, 3]     9 -> [3, 3, 3]
+
+    `kolom_maks` datang dari lebar panel yang sesungguhnya, bukan angka
+    tetap: baris kedua mahal sekarang. Tinggi panel informasi dikunci,
+    jadi baris tambahan tidak lagi dibayar oleh papan di atasnya
+    melainkan oleh tinggi kartunya sendiri — empat layanan yang dipaksa
+    2+2 di layar selebar 1920 menghasilkan kartu 552x72, dan kartu
+    sepipih itu bukan lagi tombol.
     """
     if jumlah <= 0:
         return []
-    baris = -(-jumlah // KOLOM_MAKS)  # pembulatan ke atas
+    baris = -(-jumlah // max(1, kolom_maks))  # pembulatan ke atas
     dasar, sisa = divmod(jumlah, baris)
     return [dasar + (1 if urutan < sisa else 0) for urutan in range(baris)]
 
@@ -240,6 +264,13 @@ class KioskPage(QWidget):
         #: True selama layar konfirmasi tampil, supaya penyegaran jeda
         #: tidak menimpa petunjuknya dan tidak mengembalikan ke kisi pilihan.
         self._menunggu_konfirmasi = False
+        #: Banyaknya kolom yang dipakai kisi kartu saat ini. Dibandingkan
+        #: dengan `_kolom_maks()` setiap kali panel berubah lebar.
+        self._kolom_terpakai = KOLOM_BAWAAN
+        #: Perbandingan panel informasi, dibaca ulang bersama daftar
+        #: layanan supaya admin tidak perlu menutup anjungan untuk
+        #: mengubahnya — tidak ada yang menutup aplikasi di mesin itu.
+        self._rasio_info = RASIO_INFO_BAWAAN
         #: Kategori yang sedang menunggu konfirmasi pengunjung.
         self._kategori_terpilih = None
 
@@ -291,7 +322,7 @@ class KioskPage(QWidget):
         self.papan.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored
         )
-        susunan.addWidget(self.papan, stretch=3)
+        susunan.addWidget(self.papan, stretch=2)
 
         # Latar kios mengikuti tema papan. Yang terlihat hanyalah sela
         # tipis di sekeliling papan, tetapi sela berwarna biru di bawah
@@ -301,7 +332,15 @@ class KioskPage(QWidget):
         )
 
         self.panel_ambil = self._bangun_panel_ambil()
-        susunan.addWidget(self.panel_ambil, stretch=2)
+        # Dua banding satu, dan panel bawah dibatasi tingginya oleh
+        # `_batasi_tinggi_panel`. Perbandingan saja tidak cukup: pada
+        # layar anjungan yang berdiri tegak (1080x1920) jatah 40% berarti
+        # 768 piksel untuk panel yang isinya hanya menuntut sekitar 414 —
+        # kartu layanan sudah mentok di batas atasnya jauh sebelum itu —
+        # sehingga sisanya menjadi bidang putih kosong, sementara panel
+        # informasi di atasnya yang justru dipandang dari jauh harus
+        # mengalah.
+        susunan.addWidget(self.panel_ambil, stretch=1)
 
     def _bangun_panel_ambil(self) -> QWidget:
         panel = QFrame()
@@ -496,8 +535,9 @@ class KioskPage(QWidget):
     # -----------------------------------------------------------------
 
     def muat_ulang(self) -> None:
-        """Segarkan papan nomor dan daftar jenis layanan."""
+        """Segarkan papan nomor, bentuk panel informasi, dan jenis layanan."""
         self.papan.muat_ulang()
+        self._rasio_info = self._baca_rasio_info()
 
         try:
             self.pendaftaran_dibuka = self.queue.pendaftaran_dibuka()
@@ -509,6 +549,32 @@ class KioskPage(QWidget):
         self.kategori = data or []
         self._susun_tombol()
         self._perbarui_jeda()
+
+    def _baca_rasio_info(self) -> float:
+        """
+        Perbandingan panel informasi dari pengaturan, atau nilai bawaan.
+
+        Angka rusak diperlakukan seperti tidak ada. Nilai di database
+        boleh berasal dari versi lama atau suntingan langsung, dan layar
+        publik tidak boleh gagal terbuka karenanya.
+        """
+        try:
+            rasio = float(self.settings.get("kiosk.info_ratio"))
+        except Exception:  # noqa: BLE001 - layar publik tidak boleh mati di sini
+            logger.warning(
+                "Perbandingan panel informasi tidak terbaca; memakai %s",
+                RASIO_INFO_BAWAAN,
+                exc_info=True,
+            )
+            return RASIO_INFO_BAWAAN
+        if not RASIO_INFO_MIN <= rasio <= RASIO_INFO_MAKS:
+            logger.warning(
+                "Perbandingan panel informasi %s di luar batas; memakai %s",
+                rasio,
+                RASIO_INFO_BAWAAN,
+            )
+            return RASIO_INFO_BAWAAN
+        return rasio
 
     def _sidik_layanan(self, kategori) -> tuple:
         """
@@ -545,6 +611,14 @@ class KioskPage(QWidget):
             )
             return
 
+        rasio = self._baca_rasio_info()
+        if rasio != self._rasio_info:
+            logger.info(
+                "Bentuk panel informasi berubah (%s -> %s)", self._rasio_info, rasio
+            )
+            self._rasio_info = rasio
+            self._sesuaikan_ukuran_tombol()
+
         if self._sidik_layanan(kategori) == self._sidik_layanan(self.kategori):
             return
 
@@ -559,6 +633,22 @@ class KioskPage(QWidget):
         # kartu yang muncul tepat di tengah jeda pengambilan nomor bisa
         # disentuh padahal jedanya belum habis.
         self._perbarui_jeda()
+
+    def _kolom_maks(self) -> int:
+        """
+        Banyaknya kolom yang muat berjajar pada lebar panel sekarang.
+
+        Sebanyak yang muat selama tiap kartu masih selebar
+        `LEBAR_TOMBOL_MIN` — batas lebar yang sudah dipakai perhitungan
+        ukuran kartu, jadi kisi ini tidak pernah menjanjikan kolom yang
+        kemudian menyempit di bawah ukuran sentuh.
+        """
+        lebar_area = self.halaman_pilihan.width() - 2 * MARGIN_KISI
+        if lebar_area <= 0:
+            # Belum pernah ditata; jangan menebak dari angka yang belum ada.
+            return KOLOM_BAWAAN
+        muat = (lebar_area + CELAH_TOMBOL) // (LEBAR_TOMBOL_MIN + CELAH_TOMBOL)
+        return max(1, min(KOLOM_MAKS, muat))
 
     def _susun_tombol(self) -> None:
         while self.kisi.count():
@@ -576,6 +666,12 @@ class KioskPage(QWidget):
         self.tombol_layanan = []
 
         if not self.kategori:
+            # Tanpa kartu, tidak ada yang bisa dihitung; panelnya kembali
+            # bebas seperti sebelum tinggi tetap ini ada. setFixedHeight
+            # menulis batas bawah DAN batas atas sekaligus, jadi keduanya
+            # yang harus dilepas.
+            self.panel_ambil.setMinimumHeight(TINGGI_PANEL_AMBIL_MIN)
+            self.panel_ambil.setMaximumHeight(TINGGI_TAK_TERBATAS)
             kosong = QLabel("Belum ada jenis layanan yang dibuka.")
             kosong.setAlignment(Qt.AlignmentFlag.AlignCenter)
             kosong.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 20px;")
@@ -591,7 +687,8 @@ class KioskPage(QWidget):
         # `_sesuaikan_ukuran_tombol`.
         self.kisi.addStretch(1)
         awal = 0
-        for banyak in baris_kisi(len(self.kategori)):
+        self._kolom_terpakai = self._kolom_maks()
+        for banyak in baris_kisi(len(self.kategori), self._kolom_terpakai):
             baris = QHBoxLayout()
             baris.setSpacing(CELAH_TOMBOL)
             baris.addStretch(1)
@@ -675,7 +772,7 @@ class KioskPage(QWidget):
         if not self.tombol_layanan:
             return
 
-        pola = baris_kisi(len(self.tombol_layanan))
+        pola = baris_kisi(len(self.tombol_layanan), self._kolom_terpakai)
         n_kolom, n_baris = max(pola), len(pola)
         lebar_area = self.halaman_pilihan.width() - 2 * MARGIN_KISI
         tinggi_area = self.halaman_pilihan.height() - 2 * MARGIN_KISI
@@ -691,6 +788,14 @@ class KioskPage(QWidget):
             lebar = min(lebar_maks, max(LEBAR_TOMBOL_MIN, lebar))
             tinggi = round(lebar * RASIO_TINGGI_TOMBOL)
             tinggi = min(tinggi_maks, max(TINGGI_TOMBOL_MIN, tinggi))
+            # Tinggi kisi diambil dari yang BARU saja dipasang, bukan dari
+            # `halaman_pilihan` yang masih memegang ukuran lama. Geometri
+            # Qt baru menyusul pada putaran tata letak berikutnya, dan
+            # menunggu putaran itu berarti satu gambar pertama dengan
+            # kartu yang terpotong tepi bawahnya.
+            tinggi_isi = self._setel_tinggi_panel(n_baris, tinggi_maks)
+            if tinggi_isi > 0:
+                tinggi_area = tinggi_isi - 2 * MARGIN_KISI
             tinggi_baris = (tinggi_area - CELAH_TOMBOL * (n_baris - 1)) // n_baris
             if tinggi_baris > 0:
                 # Jatah barisnya ditaati apa adanya, TANPA batas bawah.
@@ -721,10 +826,91 @@ class KioskPage(QWidget):
             awal += banyak
         self.kisi.activate()
 
+    def _setel_tinggi_panel(self, n_baris: int, tinggi_kartu_maks: int) -> int:
+        """
+        Tinggi panel bawah = sisa, sesudah panel informasi dapat bentuknya.
+
+        Arahnya sengaja dibalik dari yang wajar. Dahulu panel bawah
+        mengambil setinggi yang dituntut kartunya dan papan menerima
+        sisanya, sehingga menambah satu jenis layanan saja sudah mengubah
+        bentuk panel informasi — pada 1920x1080, dari 1864x615 menjadi
+        1864x372 begitu layanannya empat. Gambar dan video sambutan
+        dipasang sekali untuk bertahun-tahun, dan bidang yang berubah
+        bentuk membuat semuanya salah bingkai.
+
+        Sekarang panel informasilah yang dikunci pada perbandingan
+        `kiosk.info_ratio`, dan kartu A/B/C yang mengalah.
+
+        Dua jepitan menjaganya:
+
+        * ke bawah `TINGGI_PANEL_AMBIL_MIN` — bentuk panel tidak pernah
+          sepadan menghabiskan ruang tombolnya;
+        * ke atas ruang yang MASIH BISA dipakai panel bawah, yaitu kisi
+          kartu pada tinggi terbesarnya. Kartu punya batas tinggi, jadi
+          pada layar tegak panelnya kenyang jauh sebelum jatahnya habis,
+          dan sisanya hanya akan jadi bidang putih kosong. Layar setinggi
+          itu tidak akan mencapai perbandingan yang diminta, dan memang
+          tidak seharusnya: memaksakannya berarti membuang ratusan piksel
+          papan demi bentuk yang tidak ada yang meminta.
+
+          Yang dipakai batas TERBESAR kartu, bukan tinggi kartu sekarang.
+          Enam layanan berjajar menghasilkan kartu yang sempit — dan
+          karena tingginya mengikuti lebarnya, juga pendek — sehingga
+          batas yang dihitung dari tinggi sekarang akan ikut mengerut dan
+          menggeser bentuk panel informasi ke 2,64:1. Persis pergeseran
+          yang seluruh perhitungan ini ada untuk mencegahnya.
+
+        Setiap angka yang masuk ke perhitungan ini WAJIB tidak bergantung
+        pada tinggi panel yang sedang dihitungnya. Itu bukan kerapian,
+        melainkan syarat: metode ini dipanggil ulang oleh tata letak yang
+        dipicunya sendiri. Percobaan pertama memakai `sizeHint()` panel
+        sebagai lantai — dan sizeHint itu ikut berubah mengikuti tinggi
+        kartu, yang ikut berubah mengikuti tinggi panel — sehingga
+        panelnya berayun 268, 499, 268, 499 tanpa pernah diam.
+
+        Yang dipakai karena itu hanya lebar (tidak pernah berubah oleh
+        tinggi), tinggi jendela, dan dua selisih yang tetap: tinggi
+        kepala papan, dan tinggi judul beserta pil di panel bawah.
+
+        Kembaliannya tinggi yang tersisa bagi kisi kartu — nol bila belum
+        ada yang bisa dihitung. Pemanggilnya butuh angka itu SEKARANG:
+        geometri Qt baru menyusul pada putaran tata letak berikutnya.
+        """
+        panel_info = self.papan.panel_info_kios
+        if panel_info is None or panel_info.width() <= 0:
+            return 0
+        # Judul dan pil petunjuk di panel bawah; kepala dan tepi di papan.
+        # Keduanya selisih dua tinggi yang bergerak bersama, jadi keduanya
+        # tetap berapa pun tinggi yang nanti dipasang.
+        sisa_bawah = self.panel_ambil.height() - self.halaman_pilihan.height()
+        kepala = self.papan.height() - panel_info.height()
+        if sisa_bawah <= 0 or kepala <= 0:
+            # Tata letak belum pernah dihitung; angkanya belum berarti.
+            return 0
+
+        terpakai = (
+            sisa_bawah
+            + n_baris * tinggi_kartu_maks
+            + (n_baris - 1) * CELAH_TOMBOL
+            + 2 * MARGIN_KISI
+        )
+        diinginkan = round(panel_info.width() / self._rasio_info)
+        target = self.height() - kepala - diinginkan
+        tinggi = max(TINGGI_PANEL_AMBIL_MIN, min(target, terpakai))
+        self.panel_ambil.setFixedHeight(tinggi)
+        return tinggi - sisa_bawah
+
     def eventFilter(self, obj, event) -> bool:  # noqa: N802 - nama API Qt
         if event.type() == QEvent.Type.Resize:
             if obj is self.halaman_pilihan:
-                self._sesuaikan_ukuran_tombol()
+                # Lebar yang berubah boleh mengubah banyaknya kolom, dan
+                # itu berarti kisinya harus dibangun ulang, bukan sekadar
+                # kartunya diukur ulang. Dijaga oleh perbandingan supaya
+                # resize biasa tidak membongkar kartu yang sudah benar.
+                if self._kolom_maks() != self._kolom_terpakai:
+                    self._susun_tombol()
+                else:
+                    self._sesuaikan_ukuran_tombol()
             elif obj in self.tombol_layanan:
                 self._warnai_tulisan_tombol(obj, aktif=obj.isEnabled())
         return super().eventFilter(obj, event)

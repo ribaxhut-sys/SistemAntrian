@@ -304,6 +304,56 @@ def test_nama_layanan_tetap_tampil_pada_layar_penuh(qtbot, halaman_kios):
         assert label.height() >= label.heightForWidth(label.width())
 
 
+def test_panel_ambil_tidak_menyimpan_ruang_yang_tidak_dipakainya(qtbot, halaman_kios):
+    """
+    Anjungan sering dipasang berdiri tegak (1080x1920).
+
+    Kartu layanan punya batas atas, jatah tinggi dari perbandingan tata
+    letak tidak. Tanpa batas, panel bawah menerima ratusan piksel yang
+    berakhir sebagai bidang putih kosong di bawah kartu — dan yang
+    membayarnya panel informasi di atasnya, satu-satunya bagian layar
+    yang dipandang dari jauh.
+    """
+    from PySide6.QtWidgets import QFrame as _QFrame
+
+    from app.ui.kiosk.kiosk_page import TINGGI_PANEL_AMBIL_MIN
+
+    halaman_kios.resize(1080, 1920)
+    halaman_kios.show()
+    qtbot.waitExposed(halaman_kios)
+
+    panel = halaman_kios.findChild(_QFrame, "panelAmbil")
+
+    # Panel tidak pernah menerima lebih daripada yang dimintanya sendiri.
+    # Inilah yang gagal sebelum ada batas: jatah 40% dari layar setinggi
+    # 1920 berarti 768 piksel untuk panel yang meminta 414.
+    diminta = max(TINGGI_PANEL_AMBIL_MIN, panel.sizeHint().height())
+    assert panel.height() <= diminta, (panel.height(), diminta)
+
+    # Dan sisanya benar-benar jatuh ke papan, bukan menguap.
+    assert halaman_kios.papan.height() > panel.height() * 2
+
+
+def test_kartu_layanan_tetap_lapang_setelah_panel_dibatasi(qtbot, halaman_kios):
+    """
+    Batas tinggi panel tidak boleh dibayar oleh kartu yang disentuh.
+
+    Pada layar tegak, ruang yang dilepas panel memang ruang yang menganggur:
+    kartunya sudah mentok pada tinggi yang diminta lebarnya sendiri.
+    """
+    from app.ui.kiosk.kiosk_page import RASIO_TINGGI_TOMBOL, TINGGI_TOMBOL_MAKS
+
+    halaman_kios.resize(1080, 1920)
+    halaman_kios.show()
+    qtbot.waitExposed(halaman_kios)
+
+    for btn in halaman_kios.tombol_layanan:
+        diminta = min(
+            TINGGI_TOMBOL_MAKS, round(btn.width() * RASIO_TINGGI_TOMBOL)
+        )
+        assert btn.height() == diminta, (btn.width(), btn.height())
+
+
 def test_tombol_layanan_proporsional_pada_layar_penuh(qtbot, halaman_kios):
     """
     Tiga tombol A/B/C tidak boleh meregang jadi batang pipih selebar panel.
@@ -379,6 +429,8 @@ def bikin_halaman_kios(qtbot, auth, master_service):
     from app.services.queue_service import QueueService
     from app.services.settings_service import SettingsService
     from app.services.sound_service import NullSoundPlayer
+    from PySide6.QtWidgets import QApplication
+
     from app.ui.kiosk.kiosk_page import KioskPage
 
     def bikin(jumlah: int, lebar: int = 1366, tinggi: int = 768):
@@ -406,6 +458,10 @@ def bikin_halaman_kios(qtbot, auth, master_service):
         halaman.show()
         qtbot.waitExposed(halaman)
         halaman._sesuaikan_ukuran_tombol()
+        # Tinggi panel bawah dipasang lewat setFixedHeight, dan geometri
+        # barunya baru berlaku pada putaran tata letak berikutnya. Tanpa
+        # ini, yang terbaca test masih ukuran sebelum penyesuaian.
+        QApplication.processEvents()
         return halaman
 
     return bikin
@@ -445,42 +501,149 @@ def test_kartu_tidak_saling_menindih(bikin_halaman_kios, jumlah):
             assert not satu.intersects(lain)
 
 
-def test_lima_layanan_tersusun_tiga_di_atas_dua_di_bawah(bikin_halaman_kios):
-    halaman = bikin_halaman_kios(5)
-
-    per_baris: dict[int, list] = {}
+def _per_baris(halaman) -> list[int]:
+    """Banyaknya kartu pada tiap baris, urut dari atas."""
+    baris: dict[int, list] = {}
     for btn in halaman.tombol_layanan:
-        per_baris.setdefault(btn.y(), []).append(btn)
+        baris.setdefault(btn.y(), []).append(btn)
+    return [len(isi) for _, isi in sorted(baris.items())]
 
-    assert sorted(len(isi) for isi in per_baris.values()) == [2, 3]
+
+@pytest.mark.parametrize("jumlah", [4, 5])
+def test_kartu_tetap_sebaris_selama_lebarnya_muat(bikin_halaman_kios, jumlah):
+    """
+    Baris kedua mahal sejak tinggi panel informasi dikunci.
+
+    Dahulu empat layanan selalu disusun 2+2. Sekarang baris tambahan
+    tidak lagi dibayar oleh papan di atasnya melainkan oleh tinggi
+    kartunya sendiri — 2+2 pada layar 1920 menghasilkan kartu 552x72,
+    dan kartu sepipih itu bukan lagi tombol. Selama lebarnya muat,
+    kartunya berjajar.
+    """
+    halaman = bikin_halaman_kios(jumlah)
+
+    assert _per_baris(halaman) == [jumlah]
+    ukuran = {(btn.width(), btn.height()) for btn in halaman.tombol_layanan}
+    assert len(ukuran) == 1
+
+
+def test_kartu_turun_ke_baris_kedua_saat_lebarnya_tidak_muat(bikin_halaman_kios):
+    """
+    Batas kolomnya lebar panel, bukan angka tetap.
+
+    Tujuh kartu tidak muat berjajar pada layar 1366 tanpa menyempit di
+    bawah ukuran sentuh, jadi barisnya dibagi — dan dibagi serata
+    mungkin, 4+3, bukan 5+2.
+    """
+    halaman = bikin_halaman_kios(7)
+
+    assert _per_baris(halaman) == [4, 3]
 
 
 def test_kartu_baris_terakhir_dilebarkan_secukupnya(bikin_halaman_kios):
     """
-    Dua kartu terakhir mengisi barisnya, tetapi tidak sampai jauh lebih
+    Kartu baris terakhir mengisi barisnya, tetapi tidak sampai jauh lebih
     besar daripada kartu di atasnya — ukuran yang berbeda terbaca sebagai
     derajat yang berbeda.
     """
     from app.ui.kiosk.kiosk_page import PEMBESAR_BARIS_AKHIR
 
-    halaman = bikin_halaman_kios(5)
-    atas, bawah = halaman.tombol_layanan[:3], halaman.tombol_layanan[3:]
+    halaman = bikin_halaman_kios(7)
+    atas, bawah = halaman.tombol_layanan[:4], halaman.tombol_layanan[4:]
 
     assert bawah[0].width() > atas[0].width()
     assert bawah[0].width() <= round(atas[0].width() * PEMBESAR_BARIS_AKHIR)
     assert bawah[0].height() == atas[0].height()
 
 
-def test_empat_layanan_dua_baris_dua_kolom(bikin_halaman_kios):
-    halaman = bikin_halaman_kios(4)
+@pytest.mark.parametrize("jumlah", [1, 2, 3, 4, 5, 6, 7])
+def test_bentuk_panel_informasi_tidak_ikut_jumlah_layanan(bikin_halaman_kios, jumlah):
+    """
+    Inilah alasan seluruh perhitungan tinggi panel dibalik arahnya.
 
-    per_baris: dict[int, list] = {}
-    for btn in halaman.tombol_layanan:
-        per_baris.setdefault(btn.y(), []).append(btn)
+    Gambar dan video sambutan dipasang sekali untuk bertahun-tahun, dan
+    dahulu menambah satu jenis layanan saja sudah mengubah bentuk
+    bidangnya — pada 1920x1080, dari 1864x615 menjadi 1864x372 begitu
+    layanannya empat. Semua media yang sudah dipasang jadi salah bingkai
+    tanpa ada yang menyentuh berkasnya.
+    """
+    from app.ui.kiosk.kiosk_page import RASIO_INFO_BAWAAN
 
-    assert sorted(len(isi) for isi in per_baris.values()) == [2, 2]
-    ukuran = {(btn.width(), btn.height()) for btn in halaman.tombol_layanan}
-    assert len(ukuran) == 1
+    halaman = bikin_halaman_kios(jumlah, lebar=1920, tinggi=1080)
+    media = halaman.papan.panel_info_kios.tumpukan
+
+    rasio = media.width() / media.height()
+    # Satu piksel pembulatan pada tinggi bidang selebar itu sudah
+    # menggeser rasionya beberapa perseratus; yang dijaga bentuknya,
+    # bukan angka yang sama persis.
+    assert abs(rasio - RASIO_INFO_BAWAAN) < 0.05, (media.width(), media.height())
+
+
+def test_bentuk_panel_informasi_mengikuti_pengaturan(qtbot, auth, antrian_siap):
+    """
+    Bentuknya keputusan admin, bukan akibat sampingan tata letak.
+
+    Yang diuji arahnya, bukan angkanya. Perbandingan yang diminta diambil
+    sedekat yang disanggupi layarnya: panel berhenti memendek begitu
+    kartu layanan mentok pada tinggi terbesarnya, karena sisanya hanya
+    akan menjadi bidang kosong di bawah kartu. Pada 1920x1080 dengan tiga
+    layanan, yang benar-benar bisa dicapai hanya 2,6:1 sampai 3,4:1.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    from app.services.master_data_service import MasterDataService
+    from app.services.queue_service import QueueService
+    from app.services.settings_service import SettingsService
+    from app.services.sound_service import NullSoundPlayer
+    from app.ui.kiosk.kiosk_page import KioskPage
+    from tests.conftest import TEST_PASSWORD
+
+    def tinggi_media(rasio: str) -> int:
+        auth.logout()
+        auth.login("admin", TEST_PASSWORD)
+        SettingsService(auth).set("kiosk.info_ratio", rasio)
+
+        auth.logout()
+        auth.mulai_sesi_kios()
+        halaman = KioskPage(
+            QueueService(auth),
+            MasterDataService(auth),
+            SettingsService(auth),
+            NullSoundPlayer(),
+        )
+        qtbot.addWidget(halaman)
+        halaman.papan.hentikan()
+        halaman._penghitung.stop()
+        halaman.resize(1920, 1080)
+        halaman.show()
+        qtbot.waitExposed(halaman)
+        halaman._sesuaikan_ukuran_tombol()
+        QApplication.processEvents()
+        tinggi = halaman.papan.panel_info_kios.tumpukan.height()
+        halaman.papan.hentikan()
+        auth.logout()
+        return tinggi
+
+    tinggi_25 = tinggi_media("2.5")
+    tinggi_35 = tinggi_media("3.5")
+
+    assert tinggi_25 > tinggi_35
+
+
+def test_panel_informasi_tidak_memaksakan_bentuk_di_layar_tegak(bikin_halaman_kios):
+    """
+    Layar tegak tidak sanggup 3:1, dan tidak seharusnya memaksakannya.
+
+    Kartu punya batas tinggi, jadi panel bawah kenyang jauh sebelum
+    jatahnya habis. Memaksakan bentuknya berarti membuang ratusan piksel
+    papan menjadi bidang putih kosong di bawah kartu — persis pemborosan
+    yang batas atas ini ada untuk mencegahnya.
+    """
+    halaman = bikin_halaman_kios(3, lebar=1280, tinggi=1800)
+    media = halaman.papan.panel_info_kios.tumpukan
+
+    assert media.width() / media.height() < 2.0
+    assert halaman.papan.height() > halaman.panel_ambil.height() * 2
 
 
 def test_kartu_melebar_saat_layanannya_sedikit(bikin_halaman_kios):

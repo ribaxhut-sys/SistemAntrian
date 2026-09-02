@@ -34,6 +34,7 @@ BAWAAN: dict[str, str] = {
     "kiosk.welcome_text": "",
     "kiosk.welcome_file": "",
     "kiosk.welcome_slide_seconds": "10",
+    "kiosk.info_ratio": "3",
     "display.theme": "kaca",
     "display.title": "ANTRIAN PELAYANAN CRO",
     "display.info": "",
@@ -337,6 +338,28 @@ SKEMA: tuple[Pengaturan, ...] = (
         minimum=3,
         maksimum=60,
         satuan="detik",
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.info_ratio",
+        "Bentuk panel informasi anjungan",
+        "Perbandingan lebar dan tinggi panel besar di atas tombol A/B/C. "
+        "Gambar atau video sambutan yang perbandingannya sama akan memenuhi "
+        "panel tanpa bidang kosong di tepinya. Ditetapkan di sini supaya "
+        "bentuknya TIDAK ikut berubah ketika jenis layanan bertambah — yang "
+        "mengalah kartu A/B/C, bukan panelnya. "
+        "Diambil sedekat yang disanggupi layarnya. Panel tidak akan "
+        "memendek melewati ukuran terbesar kartu layanan (sisanya hanya "
+        "akan jadi bidang kosong di bawah kartu), dan tidak akan meninggi "
+        "sampai kartunya kehabisan tempat. Pada layar 1920x1080 dengan "
+        "tiga layanan, yang benar-benar bisa dicapai berkisar 2,6:1 "
+        "sampai 3,4:1.",
+        PILIHAN,
+        pilihan=(
+            ("2.5", "2,5 : 1 — panel setinggi mungkin"),
+            ("3", "3 : 1 (disarankan)"),
+            ("3.5", "3,5 : 1 — kartu layanan selapang mungkin"),
+        ),
         kelompok="Antrian",
     ),
     Pengaturan(
