@@ -462,34 +462,92 @@ QTabBar::tab:selected {{
     font-weight: 700;
 }}
 
-QListWidget#navigasi {{
-    background: #0F1F3D;
-    border: none;
-    outline: none;
-    color: #C7D2E5;
+QFrame#panelHeader {{
+    background: {SURFACE};
+    border-bottom: 1px solid {BORDER};
 }}
 
-QListWidget#navigasi::item {{
-    padding: 14px 18px;
-    border: none;
-    border-left: 3px solid transparent;
+QLabel#judulMerek {{
+    font-size: {FONT_SIZE_LARGE}px;
+    font-weight: 700;
 }}
 
-QListWidget#navigasi::item:selected {{
+QLabel#tandaMerek {{
     background: {PRIMARY};
-    border-left: 3px solid #93C5FD;
+    color: white;
+    border-radius: 8px;
+    font-size: {FONT_SIZE_SMALL}px;
+    font-weight: 800;
+}}
+
+/* Menu kerja: deretan pil di kepala, bukan daftar gelap di kiri.
+   Latar track membedakannya dari tombol aksi di kanan kepala, dan
+   pil terpilih berwarna penuh supaya terbaca sekilas tanpa membaca
+   ulang seluruh baris. */
+QFrame#navigasi {{
+    background: {SURFACE_ALT};
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+}}
+
+QPushButton#navPil {{
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 7px 14px;
+    min-height: 20px;
+    color: {TEXT_MUTED};
+    font-weight: 600;
+}}
+
+QPushButton#navPil:hover:!checked {{
+    background: {SURFACE};
+    border: none;
+    color: {TEXT};
+}}
+
+QPushButton#navPil:checked {{
+    background: {PRIMARY};
+    border: none;
     color: white;
     font-weight: 700;
 }}
 
-QListWidget#navigasi::item:hover:!selected {{
-    background: #1B2E52;
+QPushButton#navPil:checked:hover {{
+    background: {PRIMARY_DARK};
+    border: none;
     color: white;
 }}
 
-QFrame#panelHeader {{
+QFrame#chipPengguna {{
+    background: {SURFACE_ALT};
+    border: 1px solid {BORDER};
+    border-radius: 20px;
+}}
+
+QLabel#inisialPengguna {{
+    background: {PRIMARY_SOFT};
+    color: {PRIMARY_DARK};
+    border-radius: 14px;
+    font-size: {FONT_SIZE_SMALL}px;
+    font-weight: 800;
+}}
+
+QLabel#namaPengguna {{
+    color: {TEXT};
+    font-weight: 600;
+}}
+
+QPushButton#tombolKepala {{
+    padding: 7px 14px;
+    min-height: 20px;
+}}
+
+QStatusBar {{
     background: {SURFACE};
-    border-bottom: 1px solid {BORDER};
+    border-top: 1px solid {BORDER};
+    color: {TEXT_MUTED};
+    font-size: {FONT_SIZE_SMALL}px;
 }}
 
 /* Pita peringatan di atas tabel data master. Bukan pesan kegagalan —
@@ -507,10 +565,9 @@ QLabel#peringatanData {{
 
 /* ----- Layar Pengaturan -------------------------------------------- */
 
-/* Daftar kelompok di kiri layar Pengaturan. Sengaja TIDAK segelap
-   navigasi utama aplikasi: dua bidang gelap bertingkat membuat keduanya
-   tampak sederajat, padahal yang satu berpindah layar dan yang satu lagi
-   hanya berpindah bagian di dalam satu layar. */
+/* Daftar kelompok di kiri layar Pengaturan. Sengaja lebih tenang
+   daripada pil navigasi utama: yang satu berpindah layar, yang satu
+   lagi hanya berpindah bagian di dalam satu layar. */
 QWidget#panelRailPengaturan {{
     background: {SURFACE};
     border: 1px solid {BORDER};

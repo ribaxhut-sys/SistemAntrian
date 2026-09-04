@@ -254,16 +254,17 @@ setiap kali status berubah — itulah yang menentukan bentuk kisi tombolnya.
 |---|---|
 | Terbitkan Nomor | `1`–`9` memilih jenis layanan |
 | Pelayanan | `F2` panggil berikutnya · `F3` panggil ulang · `F4` mulai melayani · `F8` selesai |
+| Layar kerja | `Ctrl+1`–`Ctrl+9` berpindah menu sesuai urutan pil di bilah atas |
 | Semua layar | `F5` muat ulang · `F11` layar penuh · `Ctrl+Q` keluar |
 
-**Menu per peran:**
+**Menu per peran.** Pada layar kerja, menu menempel sebagai pil di bilah atas — bukan kolom kiri — supaya panel pelayanan mendapat lebar penuh. Anjungan dan televisi tidak menampilkan menu.
 
 | Peran | Menu |
 |---|---|
 | `REGISTRATION` | Terbitkan Nomor |
-| `CRO` | Pelayanan · Survey Kepuasan · Pengaduan & Catatan |
-| `SUPERVISOR` | Pengaduan & Catatan · Ringkasan Harian · Hasil Survey |
-| `ADMIN` | Data Master · Pengaturan · Backup & Audit |
+| `CRO` | Pelayanan · Survey Kepuasan · Pengaduan |
+| `SUPERVISOR` | Pengaduan · Ringkasan Harian · Hasil Survey |
+| `ADMIN` | Pengaduan · Data Master · Pengaturan · Backup · Tutup Hari |
 | `DISPLAY` | Layar Antrian |
 | `KIOSK` | Anjungan Ambil Nomor (papan nomor + ambil nomor, tanpa login) |
 
@@ -314,7 +315,7 @@ arti bagi yang membacanya.
 | Cara | Kapan |
 |---|---|
 | Otomatis | Satu kali setiap hari saat aplikasi dibuka, bila `backup.auto_enabled` aktif |
-| Manual | Kapan saja oleh `ADMIN` lewat menu **Backup & Audit** |
+| Manual | Kapan saja oleh `ADMIN` lewat menu **Backup** |
 
 Backup memakai *Online Backup API* bawaan SQLite, bukan penyalinan file
 biasa. Aplikasi berjalan dalam mode WAL sehingga sebagian transaksi terbaru
@@ -408,7 +409,7 @@ Aturan yang menjaganya:
   dapat menghilangkan tulisannya membuat catatan itu tidak berguna sebagai
   bukti. Penghapusan tercatat di audit log.
 - **Tidak ada pembersihan otomatis.** Lembar disimpan sampai ada yang
-  menghapusnya lewat menu **Pengaduan & Catatan**.
+  menghapusnya lewat menu **Pengaduan**.
 
 Seluruh petugas CRO dan supervisor dapat mencari lembar lama menurut nama,
 nomor pelanggan, isi pengaduan, catatan, atau nomor antrian — pengunjung
@@ -786,7 +787,7 @@ Sebelum diserahkan ke pengguna, kerjakan daftar periksa pada
 
 ## Memulihkan Database dari Backup
 
-1. Masuk sebagai `ADMIN`, buka menu **Backup & Audit**.
+1. Masuk sebagai `ADMIN`, buka menu **Backup**.
 2. Pilih berkas backup pada daftar, tekan **Pulihkan**.
 3. Konfirmasi dua kali.
 4. **Tutup dan buka kembali aplikasi.**
@@ -918,6 +919,6 @@ tidak masuk akal. UI dapat dilewati, service tidak, sehingga keduanya wajib
 bersandar pada keterangan yang sama.
 
 **Audit log** mencatat setiap tindakan yang mengubah data, beserta pelaku
-dan waktunya, dan dapat dibaca `ADMIN` lewat menu **Backup & Audit**.
+dan waktunya, dan dapat dibaca `ADMIN` lewat menu **Backup**.
 Kata sandi, hash kata sandi, dan token tidak pernah masuk audit log —
 disaring sebelum disimpan, bukan sekadar tidak dikirim.

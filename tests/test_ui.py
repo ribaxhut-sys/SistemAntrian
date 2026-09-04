@@ -423,6 +423,7 @@ def test_pintasan_keluar_dan_layar_penuh_terpasang_di_kios(qtbot, auth):
     assert "F11" in kunci
     assert "F5" in kunci
     assert "Esc" in kunci
+    assert "Ctrl+1" not in kunci
 
 
 def test_esc_hanya_keluar_dari_layar_penuh(qtbot, auth):
@@ -468,6 +469,16 @@ def test_petugas_tetap_melihat_bilah_atas(qtbot, admin_auth):
     assert jendela.navigasi.parent() is not None
 
 
+def test_navigasi_di_kepala_bukan_sidebar(qtbot, admin_auth):
+    """Menu kerja menempel di kepala jendela, bukan kolom kiri."""
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+
+    kepala = jendela.findChild(QFrame, "panelHeader")
+    assert jendela.navigasi.parent() is kepala
+    assert jendela.navigasi.parent() is not jendela.halaman.parent()
+
+
 def test_supervisor_melihat_ringkasan(qtbot, auth):
     auth.login("supervisor", TEST_PASSWORD)
     jendela = MainWindow(auth)
@@ -491,6 +502,41 @@ def test_berpindah_menu_mengganti_halaman(qtbot, admin_auth):
 
     jendela.navigasi.setCurrentRow(1)
     assert jendela.halaman.currentIndex() == 1
+
+
+def test_klik_pil_navigasi_mengganti_halaman(qtbot, admin_auth):
+    """Jalur klik pada pil harus sama dengan setCurrentRow yang dipakai tes lain."""
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+
+    pil = jendela.navigasi.findChildren(QPushButton, "navPil")
+    assert len(pil) >= 2
+    qtbot.mouseClick(pil[1], Qt.MouseButton.LeftButton)
+    assert jendela.halaman.currentIndex() == 1
+    assert jendela.navigasi.currentRow() == 1
+
+
+def test_ctrl_angka_mengganti_menu(qtbot, admin_auth):
+    """Petugas loket jarang menyentuh mouse; Ctrl+angka berpindah menu."""
+    from PySide6.QtGui import QKeySequence, QShortcut
+
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+
+    kunci = {
+        pintasan.key().toString(QKeySequence.SequenceFormat.PortableText): pintasan
+        for pintasan in jendela.findChildren(QShortcut)
+    }
+    assert "Ctrl+1" in kunci
+    assert "Ctrl+2" in kunci
+
+    kunci["Ctrl+2"].activated.emit()
+    assert jendela.navigasi.currentRow() == 1
+    assert jendela.halaman.currentIndex() == 1
+
+    kunci["Ctrl+1"].activated.emit()
+    assert jendela.navigasi.currentRow() == 0
+    assert jendela.halaman.currentIndex() == 0
 
 
 def test_peran_tanpa_menu_dinyatakan_terus_terang(qtbot, auth, users):
@@ -1015,10 +1061,10 @@ def test_menu_petugas_cro_dan_pendaftaran_tidak_tumpang_tindih(qtbot, auth, antr
     jendela = MainWindow(auth)
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-    # "Pengaduan & Catatan" BUKAN pekerjaan yang sama dengan "Pelayanan":
+    # "Pengaduan" BUKAN pekerjaan yang sama dengan "Pelayanan":
     # panel pelayanan menulis lembar untuk nomor yang sedang di depan meja,
     # layar ini mencari lembar milik hari-hari sebelumnya.
-    assert menu == ["Pelayanan", "Survey Kepuasan", "Pengaduan & Catatan"]
+    assert menu == ["Pelayanan", "Survey Kepuasan", "Pengaduan"]
 
     auth.logout()
     auth.login("registration", TEST_PASSWORD)
@@ -1652,7 +1698,7 @@ def test_menu_backup_hanya_untuk_admin(qtbot, auth, antrian_siap):
         jendela = MainWindow(auth)
         qtbot.addWidget(jendela)
         menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-        assert "Backup & Audit" not in menu
+        assert "Backup" not in menu
 
 
 def test_ringkasan_harian_menampilkan_angka(qtbot, auth, antrian_siap, terbitkan):
@@ -1768,7 +1814,7 @@ def test_menu_hasil_survey_hanya_untuk_supervisor(qtbot, auth, antrian_siap):
     jendela = MainWindow(auth)
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-    assert menu == ["Pengaduan & Catatan", "Ringkasan Harian", "Hasil Survey"]
+    assert menu == ["Pengaduan", "Ringkasan Harian", "Hasil Survey"]
 
     for peran in ("cro", "admin", "registration"):
         auth.logout()
@@ -1789,10 +1835,10 @@ def test_supervisor_hanya_memantau(qtbot, auth, antrian_siap):
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
 
-    # "Pengaduan & Catatan" ikut ada, dan itu tetap memantau: supervisor
+    # "Pengaduan" ikut ada, dan itu tetap memantau: supervisor
     # boleh MEMBACA lembar pengaduan, tidak boleh menulis maupun
     # menghapusnya — menulis milik CRO, menghapus milik ADMIN.
-    assert menu == ["Pengaduan & Catatan", "Ringkasan Harian", "Hasil Survey"]
+    assert menu == ["Pengaduan", "Ringkasan Harian", "Hasil Survey"]
 
 
 def test_tombol_minta_survey_aktif_setelah_pelayanan_selesai(

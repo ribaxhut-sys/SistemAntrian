@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
-    QListWidget,
     QMainWindow,
+    QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -66,6 +68,90 @@ class _Menu:
     hanya_kios: bool = False
 
 
+def _inisial(nama: str) -> str:
+    """Dua huruf dari nama petugas, untuk tanda di chip identitas."""
+    bagian = [p for p in nama.split() if p]
+    if not bagian:
+        return "?"
+    if len(bagian) == 1:
+        return bagian[0][:2].upper()
+    return f"{bagian[0][0]}{bagian[-1][0]}".upper()
+
+
+class _ButirNavigasi:
+    """Cerminan QListWidgetItem yang cukup untuk tes: hanya `.text()`."""
+
+    def __init__(self, teks: str) -> None:
+        self._teks = teks
+
+    def text(self) -> str:
+        return self._teks
+
+
+class BilahNavigasi(QFrame):
+    """
+    Menu kerja sebagai deretan pil, bukan daftar vertikal.
+
+    API-nya sengaja meniru QListWidget yang dulu dipakai di kolom kiri
+    (`addItem`, `count`, `item`, `currentRow`, `setCurrentRow`, sinyal
+    `currentRowChanged`) supaya tes hak akses tidak perlu diubah. Yang
+    berubah hanya letak dan wujudnya.
+    """
+
+    currentRowChanged = Signal(int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("navigasi")
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+
+        self._tombol: list[QPushButton] = []
+        self._baris = -1
+        self._grup = QButtonGroup(self)
+        self._grup.setExclusive(True)
+        self._grup.idClicked.connect(self.setCurrentRow)
+
+        self._susunan = QHBoxLayout(self)
+        self._susunan.setContentsMargins(4, 4, 4, 4)
+        self._susunan.setSpacing(2)
+
+    def addItem(self, teks: str) -> None:
+        tombol_menu = QPushButton(teks)
+        tombol_menu.setObjectName("navPil")
+        tombol_menu.setCheckable(True)
+        tombol_menu.setAutoDefault(False)
+        tombol_menu.setDefault(False)
+        tombol_menu.setCursor(Qt.CursorShape.PointingHandCursor)
+        tombol_menu.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+
+        indeks = len(self._tombol)
+        self._grup.addButton(tombol_menu, indeks)
+        self._tombol.append(tombol_menu)
+        self._susunan.addWidget(tombol_menu)
+        if indeks < 9:
+            tombol_menu.setToolTip(f"{teks}  ·  Ctrl+{indeks + 1}")
+
+    def count(self) -> int:
+        return len(self._tombol)
+
+    def item(self, baris: int) -> _ButirNavigasi | None:
+        if 0 <= baris < len(self._tombol):
+            return _ButirNavigasi(self._tombol[baris].text())
+        return None
+
+    def currentRow(self) -> int:
+        return self._baris
+
+    def setCurrentRow(self, baris: int) -> None:
+        if baris < 0 or baris >= len(self._tombol):
+            return
+        if baris == self._baris:
+            return
+        self._baris = baris
+        self._tombol[baris].setChecked(True)
+        self.currentRowChanged.emit(baris)
+
+
 class PlaceholderPage(QWidget):
     """
     Halaman untuk fitur yang belum dibangun.
@@ -86,11 +172,16 @@ class PlaceholderPage(QWidget):
 
 class MainWindow(QMainWindow):
     """
-    Kerangka aplikasi: kepala, navigasi kiri, dan isi halaman.
+    Kerangka aplikasi: kepala dengan menu pil, dan isi halaman penuh lebar.
 
     Menu disusun berdasarkan hak akses sesi yang sedang berjalan. Petugas
     tidak melihat menu yang memang bukan urusannya. Penegakan sebenarnya
     tetap di service layer; menu ini hanya mengurangi kebingungan.
+
+    Navigasi menempel di kepala, bukan di kolom kiri: panel pelayanan
+    disusun dua kolom dan butuh lebar, sedangkan petugas CRO hanya punya
+    tiga menu — tidak cukup alasan untuk menyisihkan 220 piksel sepanjang
+    tinggi jendela.
     """
 
     def __init__(self, auth: AuthService, parent: QWidget | None = None) -> None:
@@ -160,9 +251,9 @@ class MainWindow(QMainWindow):
         else:
             self.setWindowTitle(f"{APP_NAME} — {sesi.full_name}")
         # Panel pelayanan disusun dua kolom: kartu antrian beserta tombolnya
-        # di kiri, daftar tunggu di kanan. Pada 1100 px kolom kanan terdesak
-        # sampai nama layanan terpotong menjadi "Kons…". 1280 x 720 masih
-        # muat utuh pada layar 1366 x 768 yang paling sempit di kantor.
+        # di kiri, daftar tunggu di kanan. Menu di kepala (bukan kolom kiri)
+        # menyisakan lebar penuh untuk keduanya. 1280 x 720 masih muat utuh
+        # pada layar 1366 x 768 yang paling sempit di kantor.
         self.resize(1280, 720)
 
         self._bangun_tampilan()
@@ -176,6 +267,13 @@ class MainWindow(QMainWindow):
         susunan_utama.setContentsMargins(0, 0, 0, 0)
         susunan_utama.setSpacing(0)
 
+        # Widget navigasi tetap dibuat walau tidak ditampilkan, supaya
+        # penyusunan menu berjalan seperti biasa dan pemeriksaan hak akses
+        # tetap melewati jalur yang sama. Pada mode kios ia tidak dipasang
+        # ke kepala, sehingga parent()-nya tetap None.
+        self.navigasi = BilahNavigasi()
+        self.navigasi.currentRowChanged.connect(self._ganti_halaman)
+
         # Pada mode kios, bilah atas tidak dibangun sama sekali. Isinya —
         # nama petugas, tombol Ganti Kata Sandi, dan tombol Keluar — bukan
         # konsumsi pengunjung, dan tombol Keluar yang terlihat di layar
@@ -183,25 +281,8 @@ class MainWindow(QMainWindow):
         if not self.mode_kios:
             susunan_utama.addWidget(self._bangun_kepala())
 
-        isi = QWidget()
-        susunan_isi = QHBoxLayout(isi)
-        susunan_isi.setContentsMargins(0, 0, 0, 0)
-        susunan_isi.setSpacing(0)
-
-        # Widget navigasi tetap dibuat walau tidak ditampilkan, supaya
-        # penyusunan menu berjalan seperti biasa dan pemeriksaan hak akses
-        # tetap melewati jalur yang sama.
-        self.navigasi = QListWidget()
-        self.navigasi.setObjectName("navigasi")
-        self.navigasi.setFixedWidth(220)
-        self.navigasi.currentRowChanged.connect(self._ganti_halaman)
-        if not self.mode_kios:
-            susunan_isi.addWidget(self.navigasi)
-
         self.halaman = QStackedWidget()
-        susunan_isi.addWidget(self.halaman, stretch=1)
-
-        susunan_utama.addWidget(isi, stretch=1)
+        susunan_utama.addWidget(self.halaman, stretch=1)
         self.setCentralWidget(pusat)
 
         self._susun_menu()
@@ -215,30 +296,59 @@ class MainWindow(QMainWindow):
     def _bangun_kepala(self) -> QWidget:
         kepala = QFrame()
         kepala.setObjectName("panelHeader")
-        kepala.setFixedHeight(64)
 
         susunan = QHBoxLayout(kepala)
-        susunan.setContentsMargins(20, 10, 20, 10)
+        susunan.setContentsMargins(16, 10, 16, 10)
         susunan.setSpacing(12)
 
         sesi = self.auth.require_session()
 
+        merek = QFrame()
+        merek.setObjectName("klasterMerek")
+        susunan_merek = QHBoxLayout(merek)
+        susunan_merek.setContentsMargins(0, 0, 0, 0)
+        susunan_merek.setSpacing(10)
+
+        tanda = QLabel("SA")
+        tanda.setObjectName("tandaMerek")
+        tanda.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tanda.setFixedSize(32, 32)
+        susunan_merek.addWidget(tanda)
+
         nama = QLabel(APP_NAME)
-        nama.setProperty("heading", "true")
-        susunan.addWidget(nama)
+        nama.setObjectName("judulMerek")
+        susunan_merek.addWidget(nama)
+        susunan.addWidget(merek)
+
+        susunan.addWidget(self.navigasi)
         susunan.addStretch()
+
+        chip = QFrame()
+        chip.setObjectName("chipPengguna")
+        susunan_chip = QHBoxLayout(chip)
+        susunan_chip.setContentsMargins(6, 4, 12, 4)
+        susunan_chip.setSpacing(8)
+
+        inisial = QLabel(_inisial(sesi.full_name))
+        inisial.setObjectName("inisialPengguna")
+        inisial.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        inisial.setFixedSize(28, 28)
+        susunan_chip.addWidget(inisial)
 
         identitas = QLabel(
             f"{sesi.full_name}  ·  {LABEL_PERAN.get(sesi.role, sesi.role.value)}"
         )
-        identitas.setProperty("muted", "true")
-        susunan.addWidget(identitas)
+        identitas.setObjectName("namaPengguna")
+        susunan_chip.addWidget(identitas)
+        susunan.addWidget(chip)
 
         ganti = tombol("Ganti Kata Sandi")
+        ganti.setObjectName("tombolKepala")
         ganti.clicked.connect(self.ganti_kata_sandi)
         susunan.addWidget(ganti)
 
         keluar = tombol("Keluar", variant="danger")
+        keluar.setObjectName("tombolKepala")
         keluar.clicked.connect(self.keluar)
         susunan.addWidget(keluar)
 
@@ -277,7 +387,7 @@ class MainWindow(QMainWindow):
             # orang ini sebelumnya" — dan yang kedua ditanyakan justru
             # ketika nomornya sudah lewat berhari-hari.
             _Menu(
-                "Pengaduan & Catatan",
+                "Pengaduan",
                 Permission.NOTE_VIEW,
                 lambda: NotePage(self.note_service, self.auth),
             ),
@@ -292,7 +402,7 @@ class MainWindow(QMainWindow):
                 lambda: SettingsPage(self.settings_service, self.master_service),
             ),
             _Menu(
-                "Backup & Audit",
+                "Backup",
                 Permission.BACKUP_MANAGE,
                 lambda: BackupPage(self.backup_service),
             ),
@@ -367,6 +477,7 @@ class MainWindow(QMainWindow):
         if not self.menu_aktif:
             # Terjadi bila perannya tidak punya satu pun halaman, misalnya
             # akun yang masih diwajibkan mengganti kata sandi.
+            self.navigasi.hide()
             self.halaman.addWidget(
                 PlaceholderPage(
                     "Tidak ada menu tersedia",
@@ -388,6 +499,17 @@ class MainWindow(QMainWindow):
         # Esc hanya menurunkan layar penuh, tidak menutup aplikasi. Menutup
         # lewat Esc di komputer publik terlalu mudah tertekan tanpa sengaja.
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self.keluar_layar_penuh)
+
+        # Ganti menu tanpa mouse. Angka tanpa Ctrl sudah dipakai menerbitkan
+        # nomor di meja pendaftaran (1–9), jadi yang di kepala wajib Ctrl.
+        # Mesin publik tidak mendapatkannya: menunya tersembunyi, dan
+        # menekan Ctrl+1 di anjungan tidak boleh memindahkan apa pun.
+        if not self.mode_kios:
+            for indeks in range(min(9, len(self.menu_aktif))):
+                pintasan = QShortcut(QKeySequence(f"Ctrl+{indeks + 1}"), self)
+                pintasan.activated.connect(
+                    lambda baris=indeks: self.navigasi.setCurrentRow(baris)
+                )
 
     # -----------------------------------------------------------------
 

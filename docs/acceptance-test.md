@@ -131,7 +131,7 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| H1 | Masuk sebagai SUPERVISOR | Hanya menu Ringkasan Harian yang tersedia | |
+| H1 | Masuk sebagai SUPERVISOR | Menu Pengaduan, Ringkasan Harian, dan Hasil Survey; tidak ada tombol mengubah antrian | |
 | H2 | Cocokkan angka per status dengan kenyataan di loket | Sama persis | |
 | H3 | Periksa rata-rata menunggu dan pelayanan | Terisi wajar; `—` bila memang belum ada datanya | |
 | H4 | Periksa ringkasan kepuasan | Rata-rata dan sebaran nilai sesuai survey yang masuk | |
@@ -142,7 +142,7 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| I1 | Masuk sebagai ADMIN, buka "Backup & Audit" | Folder backup tertulis di layar | |
+| I1 | Masuk sebagai ADMIN, buka menu **Backup** | Folder backup tertulis di layar | |
 | I2 | Tekan "Backup Sekarang" | Berkas `queue-YYYYMMDD-HHMMSS.db` muncul di daftar dan di folder | |
 | I3 | Tutup lalu buka aplikasi keesokan harinya | Backup otomatis harian terbentuk sendiri | |
 | I4 | Buka aplikasi dua kali dalam satu hari | Backup otomatis hanya dibuat sekali | |
@@ -158,7 +158,8 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| J1 | Masuk sebagai CRO | Tidak ada menu Data Master maupun Backup | |
+| J1 | Masuk sebagai CRO | Menu Pelayanan, Survey Kepuasan, Pengaduan sebagai pil di bilah atas — bukan kolom kiri; tidak ada Data Master maupun Backup | |
+| J1b | Tekan `Ctrl+2`, lalu `Ctrl+1` | Berpindah ke Survey Kepuasan, lalu kembali ke Pelayanan | |
 | J2 | Masuk sebagai SUPERVISOR | Tidak dapat memanggil atau menyelesaikan antrian | |
 | J3 | Masuk sebagai ADMIN | Tidak dapat memanggil maupun menerbitkan antrian | |
 | J4 | Masuk sebagai DISPLAY | Hanya layar antrian; tidak ada fungsi lain sama sekali | |
@@ -263,7 +264,7 @@ Jalankan seluruhnya, termasuk yang tampak sepele.
 | N10 | Selesaikan pelayanan, panggil nomor berikutnya | **Data Pelapor kosong** dan kedua kotak kosong — bukan isian nomor sebelumnya | |
 | N11 | Panggil ulang nomor yang lembarnya sudah terisi | Data Pelapor dan kedua kotak terisi kembali seperti terakhir disimpan | |
 | N11b | Terbitkan beberapa nomor lagi hingga ada yang menunggu lebih dari 10 menit, lihat judul tab | Judul menyebut jumlah menunggu dan "N lama" | |
-| N12 | Buka menu **Pengaduan & Catatan** | Daftar lembar muncul, terbaru di atas | |
+| N12 | Buka menu **Pengaduan** | Daftar lembar muncul, terbaru di atas; judul halaman tetap Pengaduan & Catatan | |
 | N13 | Cari dengan nama pelapor | Hanya lembar milik nama itu yang tampil | |
 | N14 | Cari dengan nomor pelanggan, lalu dengan sepenggal isi pengaduan | Keduanya menemukan lembar yang benar | |
 | N15 | Centang **Hanya pengaduan** | Lembar yang hanya berisi catatan petugas hilang dari daftar | |
