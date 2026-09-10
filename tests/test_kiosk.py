@@ -240,7 +240,7 @@ def test_halaman_kios_membuat_tombol_jenis_layanan(halaman_kios):
 
 
 def test_tulisan_tombol_layanan_berwarna_terang(halaman_kios):
-    """Huruf A/B/C harus putih di atas tombol teal, bukan gelap dari stylesheet global."""
+    """Nama layanan harus putih di atas tombol teal, bukan gelap dari stylesheet global."""
     from PySide6.QtWidgets import QLabel
 
     from app.ui.style import DISPLAY_KIOS_TOMBOL_TEKS
@@ -248,9 +248,8 @@ def test_tulisan_tombol_layanan_berwarna_terang(halaman_kios):
     for btn in halaman_kios.tombol_layanan:
         prefix = btn.findChild(QLabel, "prefixLayanan")
         nama = btn.findChild(QLabel, "namaLayanan")
-        assert prefix is not None
+        assert prefix is None
         assert nama is not None
-        assert DISPLAY_KIOS_TOMBOL_TEKS in prefix.styleSheet()
         assert DISPLAY_KIOS_TOMBOL_TEKS in nama.styleSheet()
 
 
@@ -339,7 +338,10 @@ def test_kartu_layanan_tetap_lapang_setelah_panel_dibatasi(qtbot, halaman_kios):
     Batas tinggi panel tidak boleh dibayar oleh kartu yang disentuh.
 
     Pada layar tegak, ruang yang dilepas panel memang ruang yang menganggur:
-    kartunya sudah mentok pada tinggi yang diminta lebarnya sendiri.
+    kartunya sudah mentok pada tinggi yang diminta lebarnya sendiri. Sisa
+    jatah baris yang masih ada sesudah itu dipakai kartunya MEMANJANG,
+    tidak dibiarkan menganggur — yang dijaga di sini batas bawahnya, yaitu
+    bahwa kartu tidak pernah lebih pendek daripada permintaan lebarnya.
     """
     from app.ui.kiosk.kiosk_page import RASIO_TINGGI_TOMBOL, TINGGI_TOMBOL_MAKS
 
@@ -351,7 +353,10 @@ def test_kartu_layanan_tetap_lapang_setelah_panel_dibatasi(qtbot, halaman_kios):
         diminta = min(
             TINGGI_TOMBOL_MAKS, round(btn.width() * RASIO_TINGGI_TOMBOL)
         )
-        assert btn.height() == diminta, (btn.width(), btn.height())
+        # Batas atasnya sisi kartu sendiri: kartu yang lebih tinggi
+        # daripada lebarnya terbaca sebagai pilar, bukan sebagai tombol.
+        batas = min(TINGGI_TOMBOL_MAKS, btn.width())
+        assert diminta <= btn.height() <= batas, (btn.width(), btn.height())
 
 
 def test_tombol_layanan_proporsional_pada_layar_penuh(qtbot, halaman_kios):
@@ -705,7 +710,7 @@ def test_kartu_berubah_warna_saat_ditekan(halaman_kios):
 
     assert DISPLAY_KIOS_TOMBOL_TEKAN != DISPLAY_KIOS_TOMBOL
     gaya = halaman_kios.tombol_layanan[0].styleSheet()
-    assert f"QPushButton:pressed {{ background: {DISPLAY_KIOS_TOMBOL_TEKAN}" in gaya
+    assert f":pressed {{ background: {DISPLAY_KIOS_TOMBOL_TEKAN}" in gaya
 
 
 # ---------------------------------------------------------------------

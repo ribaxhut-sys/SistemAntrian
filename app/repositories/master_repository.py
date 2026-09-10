@@ -136,6 +136,84 @@ class ServiceCategoryRepository:
         )
         return (tertinggi or 0) + 1
 
+    def has_active_children(self, category_id: int) -> bool:
+        """
+        True bila jenis layanan ini punya anak yang masih aktif.
+
+        Inilah yang membuatnya menjadi KELOMPOK: di anjungan ia membuka
+        daftar anaknya alih-alih menerbitkan nomor. Anak yang dinonaktifkan
+        tidak dihitung — kelompok yang seluruh anaknya dimatikan akan
+        menjadi jenis layanan biasa lagi, bukan kartu yang membuka daftar
+        kosong di depan pengunjung.
+        """
+        return (
+            self.session.scalar(
+                sa.select(sa.func.count())
+                .select_from(ServiceCategory)
+                .where(
+                    ServiceCategory.parent_id == category_id,
+                    ServiceCategory.status == RecordStatus.ACTIVE,
+                )
+            )
+            or 0
+        ) > 0
+
+    def children_of(self, category_id: int) -> list[ServiceCategory]:
+        """Anak langsung, aktif maupun tidak, menurut urutan tampilnya."""
+        return list(
+            self.session.scalars(
+                sa.select(ServiceCategory)
+                .where(ServiceCategory.parent_id == category_id)
+                .order_by(ServiceCategory.display_order, ServiceCategory.prefix)
+            )
+        )
+
+    def siblings_of(
+        self, branch_id: int, parent_id: int | None
+    ) -> list[ServiceCategory]:
+        """
+        Seluruh jenis layanan yang berbagi induk yang sama.
+
+        Inilah kelompok tempat urutan tampil berlaku: menggeser PBB ke
+        atas hanya berarti sesuatu di antara sesama anak Konsultasi, tidak
+        di antara seluruh jenis layanan se-cabang.
+        """
+        return list(
+            self.session.scalars(
+                sa.select(ServiceCategory)
+                .where(
+                    ServiceCategory.branch_id == branch_id,
+                    ServiceCategory.parent_id.is_(None)
+                    if parent_id is None
+                    else ServiceCategory.parent_id == parent_id,
+                )
+                .order_by(ServiceCategory.display_order, ServiceCategory.prefix)
+            )
+        )
+
+    def has_children(self, category_id: int) -> bool:
+        """True bila ada anak, termasuk yang sedang nonaktif."""
+        return (
+            self.session.scalar(
+                sa.select(sa.func.count())
+                .select_from(ServiceCategory)
+                .where(ServiceCategory.parent_id == category_id)
+            )
+            or 0
+        ) > 0
+
+    def next_display_order_dalam(self, branch_id: int, parent_id: int | None) -> int:
+        """Urutan berikutnya DI ANTARA SAUDARA, bukan di seluruh cabang."""
+        tertinggi = self.session.scalar(
+            sa.select(sa.func.max(ServiceCategory.display_order)).where(
+                ServiceCategory.branch_id == branch_id,
+                ServiceCategory.parent_id.is_(None)
+                if parent_id is None
+                else ServiceCategory.parent_id == parent_id,
+            )
+        )
+        return (tertinggi or 0) + 1
+
     def has_queues(self, category_id: int) -> bool:
         """True bila jenis layanan ini sudah pernah dipakai antrian."""
         return (

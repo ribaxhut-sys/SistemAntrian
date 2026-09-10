@@ -89,6 +89,21 @@ DISPLAY_KIOS_TOMBOL_TEKAN = "#134E4A"
 DISPLAY_KIOS_TOMBOL_TEKS = "#FFFFFF"
 DISPLAY_KIOS_TOMBOL_MATI = "#E2E8F0"
 DISPLAY_KIOS_TOMBOL_MATI_TEKS = "#64748B"
+#: Kartu KELOMPOK di anjungan — Konsultasi, PBJT. Warnanya sengaja
+#: berbeda dari kartu layanan biasa: menyentuhnya tidak menerbitkan nomor
+#: apa pun, hanya membuka daftar isinya. Perbedaan itu tidak dapat
+#: disampaikan lewat tulisan pada layar yang dibaca sambil berdiri.
+DISPLAY_KIOS_KELOMPOK = "#155E75"
+DISPLAY_KIOS_KELOMPOK_HOVER = "#164E63"
+DISPLAY_KIOS_KELOMPOK_TEKAN = "#083344"
+#: Kartu KEMBALI. Abu, bukan berwarna: ia bukan salah satu pilihan
+#: layanan, dan tidak boleh ikut memperebutkan perhatian dengan kartu
+#: yang benar-benar menerbitkan nomor. Tulisannya merah supaya kentara
+#: sebagai jalan pulang, bukan sebagai jenis layanan.
+DISPLAY_KIOS_KEMBALI = "#CBD5E1"
+DISPLAY_KIOS_KEMBALI_HOVER = "#B6C2D2"
+DISPLAY_KIOS_KEMBALI_TEKAN = "#94A3B8"
+DISPLAY_KIOS_KEMBALI_TEKS = "#DC2626"
 DISPLAY_KARTU_KOSONG = "#E2E8F0"
 DISPLAY_NOMOR_KOSONG = "#64748B"
 

@@ -231,8 +231,18 @@ class CounterCategoryDialog(_DialogIsian):
 
         terpilih = set(counter.category_ids)
         for kategori in categories:
-            kotak = QCheckBox(f"{kategori.name} ({kategori.prefix})")
+            # Jorok mengikuti tingkatnya, sama seperti tabel jenis layanan:
+            # "Restoran" sendirian tidak memberi tahu bahwa ia berada di
+            # bawah PBJT, di bawah Konsultasi.
+            jorok = "    " * getattr(kategori, "level", 0)
+            kotak = QCheckBox(f"{jorok}{kategori.name} ({kategori.prefix})")
             kotak.setChecked(kategori.id in terpilih)
+            if getattr(kategori, "punya_anak", False):
+                # Kelompok tidak pernah menerbitkan nomor, jadi mencentangnya
+                # tidak pernah mengubah antrian mana pun yang dapat dipanggil
+                # loket ini. Tetap ditampilkan supaya centang lama yang
+                # tersimpan tidak lenyap diam-diam saat dialog disimpan.
+                kotak.setText(f"{kotak.text()} — kelompok, tanpa nomor")
             if not kategori.is_active:
                 # Jenis layanan nonaktif tetap ditampilkan supaya loket
                 # khusus tidak kehilangan pengaturannya saat layanannya
@@ -252,7 +262,20 @@ class CounterCategoryDialog(_DialogIsian):
 class CategoryDialog(_DialogIsian):
     """Tambah atau ubah jenis layanan."""
 
-    def __init__(self, parent: QWidget | None = None, *, category=None, prefix_terkunci: bool = False) -> None:
+    #: Sebanyak tingkat yang dapat dicapai menu anjungan. Sama dengan
+    #: TINGKAT_MAKS di master_data_service, yang menegakkannya sungguhan;
+    #: di sini hanya dipakai untuk tidak menawarkan induk yang pasti
+    #: ditolak, supaya admin tidak menabrak pesan kesalahan tanpa perlu.
+    TINGKAT_MAKS = 3
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        category=None,
+        prefix_terkunci: bool = False,
+        semua: list | None = None,
+    ) -> None:
         self.category = category
         ubah = category is not None
         super().__init__(
@@ -271,6 +294,26 @@ class CategoryDialog(_DialogIsian):
         self.input_nama = QLineEdit(category.name if ubah else "")
         self.input_nama.setPlaceholderText("mis. Pengembalian")
         self.form.addRow("Nama Layanan", self.input_nama)
+
+        self.pilih_induk = QComboBox()
+        self.pilih_induk.addItem("— Menu utama anjungan —", None)
+        for pilihan in self._calon_induk(semua or [], category):
+            self.pilih_induk.addItem(
+                "    " * pilihan.level + pilihan.name, pilihan.id
+            )
+        if ubah and category.parent_id is not None:
+            posisi = self.pilih_induk.findData(category.parent_id)
+            if posisi >= 0:
+                self.pilih_induk.setCurrentIndex(posisi)
+        self.form.addRow("Induk", self.pilih_induk)
+        self.form.addRow(
+            "",
+            keterangan(
+                "Jenis layanan yang menaungi jenis layanan lain berubah "
+                "menjadi KELOMPOK: di anjungan ia membuka daftar isinya dan "
+                "berhenti menerbitkan nomor sendiri."
+            ),
+        )
 
         self.input_prefix = QLineEdit(category.prefix if ubah else "")
         self.input_prefix.setPlaceholderText("A")
@@ -327,6 +370,36 @@ class CategoryDialog(_DialogIsian):
         self.contoh.setText(
             f"Contoh nomor antrian: {bersih}-001" if bersih else "Contoh nomor antrian: —"
         )
+
+    def _calon_induk(self, semua: list, category) -> list:
+        """
+        Jenis layanan yang boleh dipilih sebagai induk.
+
+        Yang dibuang tiga macam: dirinya sendiri, seluruh KETURUNANNYA —
+        memindahkan Konsultasi ke bawah PBJT akan membuat menu berputar
+        tanpa ujung — dan yang sudah berada di tingkat terdalam, karena
+        anaknya tidak akan punya tempat lagi di layar.
+        """
+        buang: set[int] = set()
+        if category is not None:
+            buang.add(category.id)
+            berubah = True
+            while berubah:
+                berubah = False
+                for baris in semua:
+                    if baris.parent_id in buang and baris.id not in buang:
+                        buang.add(baris.id)
+                        berubah = True
+
+        return [
+            baris
+            for baris in semua
+            if baris.id not in buang and baris.level < self.TINGKAT_MAKS - 1
+        ]
+
+    @property
+    def induk_id(self) -> int | None:
+        return self.pilih_induk.currentData()
 
     @property
     def kode(self) -> str:

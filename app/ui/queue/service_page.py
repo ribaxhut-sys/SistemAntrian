@@ -570,7 +570,8 @@ class ServicePage(QWidget):
         membuat petugas menabrak pesan kesalahan tanpa sebab yang terlihat.
         """
         berhasil, data = jalankan_aman(
-            self, lambda: self.master.list_categories(only_active=True)
+            self,
+            lambda: self.master.list_categories(only_active=True, only_leaf=True),
         )
         if not berhasil:
             return

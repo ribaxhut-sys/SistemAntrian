@@ -291,12 +291,24 @@ class QueueService:
             self._pastikan_jeda_kios()
 
         with session_scope() as session:
-            kategori = ServiceCategoryRepository(session).get_by_id(category_id)
+            repo_kategori = ServiceCategoryRepository(session)
+            kategori = repo_kategori.get_by_id(category_id)
             if kategori is None:
                 raise NotFoundError("Jenis layanan tidak ditemukan.")
             if kategori.status is not RecordStatus.ACTIVE:
                 raise BusinessRuleError(
                     f"Jenis layanan {kategori.name!r} sedang tidak aktif."
+                )
+            # KELOMPOK hanya membuka daftar isinya di anjungan; nomornya
+            # terbit atas nama salah satu anaknya. Ditolak di sini, bukan
+            # hanya disembunyikan di layar: anjungan menyimpan daftar
+            # jenis layanan di memori dan bisa saja masih memegang daftar
+            # lama beberapa detik sesudah admin menambahkan anak pertama
+            # ke sebuah jenis layanan.
+            if repo_kategori.has_active_children(category_id):
+                raise BusinessRuleError(
+                    f"{kategori.name!r} adalah kelompok layanan. Pilih salah "
+                    "satu layanan di dalamnya untuk mengambil nomor."
                 )
             prefix = kategori.prefix
             branch_id = kategori.branch_id

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QRect, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -255,6 +255,10 @@ class MainWindow(QMainWindow):
         # menyisakan lebar penuh untuk keduanya. 1280 x 720 masih muat utuh
         # pada layar 1366 x 768 yang paling sempit di kantor.
         self.resize(1280, 720)
+        #: Geometri jendela biasa, untuk F11. Anjungan dibuka langsung
+        #: fullscreen; tanpa ini, restore Qt memakai ukuran bawaan kecil
+        #: dan kartu layanan dihitung ulang jadi pita.
+        self._geometri_normal = QRect(self.geometry())
 
         self._bangun_tampilan()
         self._pasang_pintasan()
@@ -521,6 +525,7 @@ class MainWindow(QMainWindow):
         bingkai jendela dan tanpa tombol tutup yang menggoda untuk ditekan.
         """
         if self.mode_kios:
+            self._geometri_normal = QRect(self.geometry())
             self.showFullScreen()
         else:
             self.show()
@@ -528,7 +533,10 @@ class MainWindow(QMainWindow):
     def ganti_layar_penuh(self) -> None:
         if self.isFullScreen():
             self.showNormal()
+            if self._geometri_normal is not None and self._geometri_normal.isValid():
+                self.setGeometry(self._geometri_normal)
         else:
+            self._geometri_normal = QRect(self.geometry())
             self.showFullScreen()
 
     def keluar_layar_penuh(self) -> None:

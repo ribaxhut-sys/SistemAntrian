@@ -83,6 +83,25 @@ class CounterInfo:
         return not self.category_ids
 
 
+class _TakDiubah:
+    """
+    Penanda "argumen ini tidak disebut sama sekali".
+
+    Diperlukan karena None sudah punya arti tersendiri pada `parent_id`:
+    pindahkan ke tingkat teratas. Tanpa penanda terpisah, memanggil
+    update_category tanpa menyebut induk akan mencabut jenis layanan dari
+    kelompoknya — dan seluruh pemanggil lama melakukan tepat itu.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - hanya untuk penelusuran
+        return "TAK_DIUBAH"
+
+
+TAK_DIUBAH = _TakDiubah()
+
+
 @dataclass(frozen=True)
 class CategoryInfo:
     id: int
@@ -94,6 +113,15 @@ class CategoryInfo:
     status: RecordStatus
     #: Ditampilkan di panel informasi anjungan begitu layanan ini disentuh.
     info_text: str = ""
+    #: Kelompok induknya; None berarti berdiri di tingkat teratas anjungan.
+    parent_id: int | None = None
+    #: True bila ada jenis layanan lain di bawahnya. Yang punya anak
+    #: menjadi KELOMPOK: di anjungan ia membuka daftar anaknya dan tidak
+    #: menerbitkan nomor sendiri.
+    punya_anak: bool = False
+    #: Kedalaman dari tingkat teratas: 0 untuk induk, 1 untuk anaknya.
+    #: Dipakai layar admin untuk menjorokkan barisnya.
+    level: int = 0
 
     @property
     def is_active(self) -> bool:
@@ -101,6 +129,11 @@ class CategoryInfo:
 
     @property
     def contoh_nomor(self) -> str:
+        # Kelompok tidak pernah menerbitkan nomor, dan menampilkan
+        # "PJ-001" di sebelahnya hanya menjanjikan nomor yang tidak akan
+        # pernah ada.
+        if self.punya_anak:
+            return "—"
         return f"{self.prefix}-001"
 
 
@@ -120,7 +153,9 @@ def _as_counter(row: Counter) -> CounterInfo:
     )
 
 
-def _as_category(row: ServiceCategory) -> CategoryInfo:
+def _as_category(
+    row: ServiceCategory, *, punya_anak: bool = False, level: int = 0
+) -> CategoryInfo:
     return CategoryInfo(
         row.id,
         row.branch_id,
@@ -130,7 +165,48 @@ def _as_category(row: ServiceCategory) -> CategoryInfo:
         row.display_order,
         row.status,
         row.info_text,
+        row.parent_id,
+        punya_anak,
+        level,
     )
+
+
+def _susun_hierarki(rows: list[ServiceCategory]) -> list[CategoryInfo]:
+    """
+    Urutkan jenis layanan induk-lalu-anak, dan tandai mana yang kelompok.
+
+    Hasilnya tetap satu daftar datar — pemanggilnya sudah terbiasa dengan
+    bentuk itu — tetapi urutannya kini menelusuri pohon: setiap induk
+    langsung diikuti anak-anaknya. Layar admin cukup menjorokkan baris
+    menurut `level` untuk memperlihatkan susunannya.
+
+    "Punya anak" dihitung dari BARIS YANG DISARING INI, bukan dari seluruh
+    tabel. Saat anjungan meminta yang aktif saja, kelompok yang seluruh
+    anaknya dinonaktifkan otomatis kembali menjadi jenis layanan biasa dan
+    menerbitkan nomornya sendiri — jauh lebih baik daripada kartu yang
+    membuka daftar kosong di depan pengunjung yang sedang berdiri.
+
+    Anak yang induknya tidak ikut tersaring (induk nonaktif, anaknya
+    aktif) naik ke tingkat teratas, bukan hilang. Jenis layanan yang masih
+    aktif harus selalu dapat dicapai.
+    """
+    ada = {row.id for row in rows}
+    anak_dari: dict[int | None, list[ServiceCategory]] = {}
+    for row in rows:
+        induk = row.parent_id if row.parent_id in ada else None
+        anak_dari.setdefault(induk, []).append(row)
+
+    hasil: list[CategoryInfo] = []
+
+    def telusuri(induk: int | None, level: int) -> None:
+        for row in anak_dari.get(induk, []):
+            hasil.append(
+                _as_category(row, punya_anak=bool(anak_dari.get(row.id)), level=level)
+            )
+            telusuri(row.id, level + 1)
+
+    telusuri(None, 0)
+    return hasil
 
 
 def _bersihkan(nilai: str | None) -> str:
@@ -150,6 +226,94 @@ def _kode(nilai: str | None, label: str) -> str:
     if len(hasil) > 20:
         raise ValidationError(f"{label} maksimal 20 karakter.")
     return hasil
+
+
+#: Kedalaman menu anjungan yang masih masuk akal untuk pengunjung yang
+#: berdiri: tingkat teratas, satu kelompok, dan satu sub-kelompok.
+#: Contohnya Konsultasi > PBJT > Restoran. Lebih dalam dari itu dan
+#: pengunjung tersesat sebelum sampai ke nomornya.
+TINGKAT_MAKS = 3
+
+
+def _kedalaman_induk(repo: ServiceCategoryRepository, category) -> int:
+    """
+    Tingkat sebuah jenis layanan; 0 bila ia berdiri di tingkat teratas.
+
+    Ditelusuri ke atas dengan batas langkah, bukan while polos: satu baris
+    data yang rusak dan menunjuk dirinya sendiri sebagai induk tidak boleh
+    membuat aplikasi menggantung selamanya.
+    """
+    tingkat = 0
+    kini = category
+    for _ in range(TINGKAT_MAKS + 1):
+        if kini.parent_id is None:
+            return tingkat
+        kini = repo.get_by_id(kini.parent_id)
+        if kini is None:
+            return tingkat
+        tingkat += 1
+    return tingkat
+
+
+def _kedalaman_anak(repo: ServiceCategoryRepository, category_id: int) -> int:
+    """Tinggi sub-pohon; 1 bila jenis layanan ini belum punya anak."""
+    anak = repo.children_of(category_id)
+    if not anak:
+        return 1
+    return 1 + max(_kedalaman_anak(repo, baris.id) for baris in anak)
+
+
+def _keturunan(repo: ServiceCategoryRepository, category_id: int) -> set[int]:
+    """Seluruh id di bawah jenis layanan ini, sedalam apa pun."""
+    hasil: set[int] = set()
+    for baris in repo.children_of(category_id):
+        hasil.add(baris.id)
+        hasil |= _keturunan(repo, baris.id)
+    return hasil
+
+
+def _periksa_induk(
+    repo: ServiceCategoryRepository,
+    *,
+    parent_id: int | None,
+    branch_id: int,
+    category=None,
+):
+    """
+    Pastikan sebuah kelompok boleh menjadi induk, lalu kembalikan barisnya.
+
+    Menolak lebih awal, di satu tempat, karena akibat dari induk yang salah
+    tidak terlihat di layar admin: menu anjungan-lah yang kemudian menjadi
+    terlalu dalam, melingkar, atau menghilang.
+    """
+    if parent_id is None:
+        return None
+
+    induk = repo.get_by_id(parent_id)
+    if induk is None:
+        raise ValidationError("Kelompok induk tidak ditemukan.")
+    if induk.branch_id != branch_id:
+        raise ValidationError("Kelompok induk berada di cabang yang berbeda.")
+
+    if category is not None:
+        if induk.id == category.id:
+            raise ValidationError(
+                f"{category.name} tidak dapat menjadi induk bagi dirinya sendiri."
+            )
+        if induk.id in _keturunan(repo, category.id):
+            raise ValidationError(
+                f"{induk.name} berada DI BAWAH {category.name}. Memindahkannya "
+                "ke sana akan membuat menu anjungan berputar tanpa ujung."
+            )
+
+    tingkat_induk = _kedalaman_induk(repo, induk)
+    tinggi = _kedalaman_anak(repo, category.id) if category is not None else 1
+    if tingkat_induk + 1 + tinggi > TINGKAT_MAKS:
+        raise ValidationError(
+            f"Menu anjungan paling dalam {TINGKAT_MAKS} tingkat. "
+            f"{induk.name} sudah berada di tingkat {tingkat_induk + 1}."
+        )
+    return induk
 
 
 class MasterDataService:
@@ -185,14 +349,32 @@ class MasterDataService:
             return [_as_counter(c) for c in rows]
 
     def list_categories(
-        self, branch_id: int | None = None, *, only_active: bool = False
+        self,
+        branch_id: int | None = None,
+        *,
+        only_active: bool = False,
+        only_leaf: bool = False,
     ) -> list[CategoryInfo]:
+        """
+        Daftar jenis layanan, tersusun induk-lalu-anak.
+
+        `only_leaf` membuang KELOMPOK dari hasil dan menyisakan yang
+        benar-benar dapat menerbitkan nomor. Dipakai layar yang meminta
+        satu jenis layanan sekaligus — pendaftaran oleh petugas, penyaring
+        panggilan di loket, pemetaan layanan per loket — karena di sana
+        "Konsultasi" sudah tidak berarti apa-apa lagi: yang ada hanyalah
+        PBB, PKB, dan seterusnya. Anjungan justru meminta SELURUHNYA,
+        sebab kelompoknya-lah yang dipakai menyusun menu bertingkat.
+        """
         sesi = self.auth.require_session()
         with session_scope() as session:
             rows = ServiceCategoryRepository(session).list_for_branch(
                 branch_id or sesi.branch_id, only_active=only_active
             )
-            return [_as_category(c) for c in rows]
+            hasil = _susun_hierarki(rows)
+            if only_leaf:
+                hasil = [k for k in hasil if not k.punya_anak]
+            return hasil
 
     def layanan_tanpa_loket(self, branch_id: int | None = None) -> list[CategoryInfo]:
         """
@@ -224,12 +406,17 @@ class MasterDataService:
             dilayani = {
                 kategori.id for baris in loket for kategori in baris.categories
             }
+            # KELOMPOK sengaja dilewati. Ia tidak pernah menerbitkan nomor,
+            # jadi tidak ada antrian miliknya yang bisa terlantar — dan
+            # memperingatkan admin tentangnya hanya akan mengubur
+            # peringatan yang sungguh-sungguh berbahaya.
+            repo = ServiceCategoryRepository(session)
             return [
-                _as_category(kategori)
-                for kategori in ServiceCategoryRepository(session).list_for_branch(
-                    cabang, only_active=True
+                kategori
+                for kategori in _susun_hierarki(
+                    repo.list_for_branch(cabang, only_active=True)
                 )
-                if kategori.id not in dilayani
+                if kategori.id not in dilayani and not kategori.punya_anak
             ]
 
     def get_counter(self, counter_id: int) -> CounterInfo:
@@ -243,10 +430,11 @@ class MasterDataService:
     def get_category(self, category_id: int) -> CategoryInfo:
         self.auth.require_session()
         with session_scope() as session:
-            row = ServiceCategoryRepository(session).get_by_id(category_id)
+            repo = ServiceCategoryRepository(session)
+            row = repo.get_by_id(category_id)
             if row is None:
                 raise NotFoundError("Jenis layanan tidak ditemukan.")
-            return _as_category(row)
+            return _as_category(row, punya_anak=repo.has_children(category_id))
 
     # =================================================================
     # Cabang
@@ -452,6 +640,7 @@ class MasterDataService:
         prefix: str,
         branch_id: int | None = None,
         info_text: str = "",
+        parent_id: int | None = None,
     ) -> int:
         sesi = self.auth.require_permission(Permission.MASTER_MANAGE)
         kode = _kode(code, "Kode jenis layanan")
@@ -476,13 +665,21 @@ class MasterDataService:
                     "Nomor antrian akan bertabrakan bila prefix sama."
                 )
 
+            _periksa_induk(repo, parent_id=parent_id, branch_id=cabang)
+
             category = repo.add(
                 ServiceCategory(
                     branch_id=cabang,
+                    parent_id=parent_id,
                     code=kode,
                     name=nama,
                     prefix=awalan,
-                    display_order=repo.next_display_order(cabang),
+                    # Urutan dihitung di antara SAUDARA. Memakai nomor
+                    # tertinggi se-cabang membuat anak pertama sebuah
+                    # kelompok lahir dengan urutan 12 sementara saudara
+                    # berikutnya 13 — benar secara relatif, tetapi angkanya
+                    # tidak berarti apa-apa dan membingungkan saat dibaca.
+                    display_order=repo.next_display_order_dalam(cabang, parent_id),
                     status=RecordStatus.ACTIVE,
                     info_text=_bersihkan(info_text),
                 )
@@ -507,6 +704,7 @@ class MasterDataService:
         name: str,
         prefix: str | None = None,
         info_text: str = "",
+        parent_id: int | None | _TakDiubah = TAK_DIUBAH,
     ) -> CategoryInfo:
         """
         Ubah jenis layanan.
@@ -514,6 +712,12 @@ class MasterDataService:
         Prefix hanya boleh diubah selama belum ada antrian yang memakainya.
         Setelah terpakai, mengubah prefix akan membuat nomor lama seperti
         A-023 tidak lagi cocok dengan jenis layanannya.
+
+        `parent_id` memakai penanda TAK_DIUBAH, bukan None, sebagai nilai
+        bawaan: None adalah nilai yang SAH — artinya "pindahkan ke tingkat
+        teratas" — sehingga pemanggil lama yang tidak menyebut induk sama
+        sekali tidak boleh diam-diam mencabut jenis layanan dari
+        kelompoknya.
         """
         sesi = self.auth.require_permission(Permission.MASTER_MANAGE)
         nama = _wajib(name, "Nama jenis layanan")
@@ -526,6 +730,18 @@ class MasterDataService:
 
             category.name = nama
             category.info_text = _bersihkan(info_text)
+
+            if parent_id is not TAK_DIUBAH and parent_id != category.parent_id:
+                _periksa_induk(
+                    repo,
+                    parent_id=parent_id,
+                    branch_id=category.branch_id,
+                    category=category,
+                )
+                category.parent_id = parent_id
+                category.display_order = repo.next_display_order_dalam(
+                    category.branch_id, parent_id
+                )
 
             if prefix is not None:
                 awalan = _wajib(prefix, "Prefix").upper()
@@ -557,7 +773,7 @@ class MasterDataService:
                 tindakan="ubah",
                 nama=nama,
             )
-            return _as_category(category)
+            return _as_category(category, punya_anak=repo.has_children(category.id))
 
     def pindahkan_category(self, category_id: int, *, naik: bool) -> list[CategoryInfo]:
         """
@@ -576,6 +792,12 @@ class MasterDataService:
         Jenis layanan NONAKTIF ikut menempati urutan. Ia memang tidak
         tampil di anjungan, tetapi tempatnya harus tetap terjaga supaya
         urutannya kembali seperti semula begitu diaktifkan lagi.
+
+        Yang bergeser hanyalah kedudukan DI ANTARA SAUDARA SEKELOMPOK.
+        PBB tidak pernah bisa naik melewati Konsultasi menjadi kartu di
+        tingkat teratas: pindah kelompok adalah perbuatan lain, dilakukan
+        lewat kolom Induk pada dialog ubah, dan tidak boleh terjadi tanpa
+        sengaja hanya karena tombol Naik ditekan sekali terlalu banyak.
         """
         sesi = self.auth.require_permission(Permission.MASTER_MANAGE)
 
@@ -585,7 +807,7 @@ class MasterDataService:
             if category is None:
                 raise NotFoundError("Jenis layanan tidak ditemukan.")
 
-            urutan = repo.list_for_branch(category.branch_id)
+            urutan = repo.siblings_of(category.branch_id, category.parent_id)
             for posisi, baris in enumerate(urutan, start=1):
                 baris.display_order = posisi
 
@@ -618,17 +840,29 @@ class MasterDataService:
                 category.code,
                 urutan[indeks].display_order,
             )
-            return [
-                _as_category(baris)
-                for baris in sorted(urutan, key=lambda b: b.display_order)
-            ]
+            # Yang dikembalikan tetap SELURUH cabang dalam susunan
+            # pohonnya, bukan sekadar saudara yang barusan bertukar:
+            # layar admin menampilkan seluruh daftar dan harus melihat
+            # hasilnya utuh.
+            session.flush()
+            return _susun_hierarki(repo.list_for_branch(category.branch_id))
 
     def set_category_status(self, category_id: int, active: bool) -> CategoryInfo:
         """
-        Aktifkan atau nonaktifkan jenis layanan.
+        Aktifkan atau nonaktifkan jenis layanan, BESERTA SELURUH ANAKNYA.
 
         Jenis layanan terakhir yang aktif tidak boleh dinonaktifkan; tanpa
         itu, tidak ada nomor antrian yang bisa diterbitkan sama sekali.
+        Yang dihitung adalah yang benar-benar dapat menerbitkan nomor —
+        kelompok tidak ikut, sebab kelompok hanya membuka daftar.
+
+        Anak ikut berubah karena tidak ada tafsir lain yang masuk akal.
+        Menonaktifkan "Konsultasi" sementara PBB, PKB, dan PAT dibiarkan
+        aktif akan membuat ketiganya naik menjadi kartu tingkat teratas di
+        anjungan — persis kebalikan dari yang diminta admin. Menyalakannya
+        kembali juga harus mengembalikan anaknya: kelompok yang seluruh
+        anaknya mati berubah peran menjadi jenis layanan biasa dan mulai
+        menerbitkan nomornya sendiri lagi.
         """
         sesi = self.auth.require_permission(Permission.MASTER_MANAGE)
 
@@ -638,17 +872,32 @@ class MasterDataService:
             if category is None:
                 raise NotFoundError("Jenis layanan tidak ditemukan.")
 
-            if (
-                not active
-                and category.status is RecordStatus.ACTIVE
-                and repo.count_active(category.branch_id) <= 1
-            ):
-                raise BusinessRuleError(
-                    "Jenis layanan ini satu-satunya yang masih aktif. "
-                    "Aktifkan jenis layanan lain terlebih dahulu."
-                )
+            ikut = _keturunan(repo, category.id)
 
-            category.status = RecordStatus.ACTIVE if active else RecordStatus.INACTIVE
+            if not active and category.status is RecordStatus.ACTIVE:
+                tersisa = [
+                    baris
+                    for baris in _susun_hierarki(
+                        repo.list_for_branch(category.branch_id, only_active=True)
+                    )
+                    if not baris.punya_anak
+                    and baris.id != category.id
+                    and baris.id not in ikut
+                ]
+                if not tersisa:
+                    raise BusinessRuleError(
+                        "Tidak ada jenis layanan lain yang masih dapat "
+                        "menerbitkan nomor. Aktifkan jenis layanan lain "
+                        "terlebih dahulu."
+                    )
+
+            status = RecordStatus.ACTIVE if active else RecordStatus.INACTIVE
+            category.status = status
+            for anak_id in ikut:
+                anak = repo.get_by_id(anak_id)
+                if anak is not None:
+                    anak.status = status
+
             audit_service.record(
                 session,
                 AuditAction.CHANGE_CONFIGURATION,
@@ -656,13 +905,15 @@ class MasterDataService:
                 entity_type="service_category",
                 entity_id=category.id,
                 tindakan="aktifkan" if active else "nonaktifkan",
+                anak_ikut=len(ikut),
             )
             logger.info(
-                "Jenis layanan %s %s",
+                "Jenis layanan %s %s bersama %d anaknya",
                 category.code,
                 "diaktifkan" if active else "dinonaktifkan",
+                len(ikut),
             )
-            return _as_category(category)
+            return _as_category(category, punya_anak=bool(ikut))
 
     def delete_category(self, category_id: int) -> None:
         """
@@ -687,6 +938,17 @@ class MasterDataService:
             category = repo.get_by_id(category_id)
             if category is None:
                 raise NotFoundError("Jenis layanan tidak ditemukan.")
+
+            if repo.has_children(category.id):
+                # RESTRICT pada parent_id memang akan menolaknya juga,
+                # tetapi yang sampai ke layar admin hanya pesan database
+                # yang tidak menjelaskan apa pun. Yang perlu diketahui
+                # admin adalah bahwa anaknya harus dipindahkan atau
+                # dihapus lebih dahulu.
+                raise BusinessRuleError(
+                    f"{category.name!r} masih menaungi jenis layanan lain. "
+                    "Pindahkan atau hapus isinya terlebih dahulu."
+                )
 
             if (
                 category.status is RecordStatus.ACTIVE

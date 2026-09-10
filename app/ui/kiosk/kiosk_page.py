@@ -17,7 +17,7 @@ service layer dan oleh hak user PostgreSQL mesin itu di database.
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontMetrics
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPalette
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
@@ -40,6 +40,13 @@ from app.ui.common import pesan_untuk_user, tombol
 from app.ui.display.display_page import DisplayPage
 from app.ui.kiosk.sambutan import media_layanan
 from app.ui.style import (
+    DISPLAY_KIOS_KELOMPOK,
+    DISPLAY_KIOS_KELOMPOK_HOVER,
+    DISPLAY_KIOS_KELOMPOK_TEKAN,
+    DISPLAY_KIOS_KEMBALI,
+    DISPLAY_KIOS_KEMBALI_HOVER,
+    DISPLAY_KIOS_KEMBALI_TEKAN,
+    DISPLAY_KIOS_KEMBALI_TEKS,
     DISPLAY_KIOS_TOMBOL,
     DISPLAY_KIOS_TOMBOL_HOVER,
     DISPLAY_KIOS_TOMBOL_MATI,
@@ -88,6 +95,34 @@ ARAHAN_CETAK = {
         "Tiket gagal dicetak. Foto atau catat nomor Anda, lalu tunggu dipanggil."
     ),
 }
+
+#: Lama menu kelompok dibiarkan terbuka tanpa disentuh sebelum anjungan
+#: kembali sendiri ke menu utama, dalam milidetik.
+#:
+#: Pengunjung yang membuka Konsultasi lalu berbalik pergi — karena
+#: dipanggil temannya, karena salah mesin, karena apa pun — tidak boleh
+#: meninggalkan anjungan tersangkut di dalam menu untuk orang berikutnya.
+#: Orang berikutnya itu tidak tahu ia sedang berada di dalam kelompok, dan
+#: akan mencari layanan yang memang tidak ada di daftar yang ia lihat.
+#:
+#: Lebih panjang daripada JEDA_KONFIRMASI: di sini pengunjung sedang
+#: MEMBACA daftar dan memilih, bukan menjawab satu pertanyaan ya/tidak.
+JEDA_PULANG = 25000
+
+#: Tanda pada kartu yang membuka submenu. Bukan prefix tiket (A/B/C) —
+#: huruf itu hanya menjanjikan nomor. Tanda ini berdiri di samping nama,
+#: seperti logo "masuk ke dalam".
+TANDA_KELOMPOK = ">"
+#: Tanda pada tombol KEMBALI (cadangan tersembunyi; kartu kisi memakai teks).
+TANDA_KEMBALI = "‹"
+
+#: Ukuran wadah kosong di baris pil. Tombol KEMBALI yang terlihat adalah
+#: kartu di dalam kisi, seukuran kartu submenu. Wadah ini hanya menjaga
+#: pil petunjuk tetap di tengah: widget yang disembunyikan berhenti
+#: memakai tempat, jadi tanpa cadangan lebar tetap, pil bergeser setiap
+#: kali pengunjung masuk atau keluar kelompok.
+TINGGI_TOMBOL_KEMBALI = 36
+LEBAR_TOMBOL_KEMBALI = 220
 
 #: Lama layar konfirmasi menunggu sebelum otomatis batal, dalam milidetik.
 #: Kios tidak berpenjaga: pengunjung yang berbalik pergi tanpa menekan
@@ -163,6 +198,10 @@ PEMBESAR_KARTU = {1: 1.35, 2: 1.15}
 #: berbeda, padahal semua layanan setara.
 PEMBESAR_BARIS_AKHIR = 1.4
 CELAH_TOMBOL = 50
+#: Celah tegak di dalam kelompok berbaris dua. Celah 50 px milik menu
+#: utama memakan hampir satu kartu utuh begitu lima anak harus 3+2 di
+#: panel yang tingginya tidak boleh merampas papan informasi.
+CELAH_BARIS_KELOMPOK = 16
 MARGIN_KISI = 16
 #: Sudut atas panel ambil nomor. Cukup besar untuk terbaca sebagai lembar
 #: yang diletakkan di atas papan, cukup kecil untuk tidak memakan sudut
@@ -273,6 +312,38 @@ class KioskPage(QWidget):
         self._rasio_info = RASIO_INFO_BAWAAN
         #: Kategori yang sedang menunggu konfirmasi pengunjung.
         self._kategori_terpilih = None
+        #: Kelompok yang sedang terbuka, dari luar ke dalam. Kosong berarti
+        #: pengunjung berada di menu utama. Disimpan sebagai daftar
+        #: kategori, bukan satu id, supaya Konsultasi > PBJT dapat ditutup
+        #: selangkah demi selangkah seperti pengunjung membukanya.
+        self._jalur: list = []
+        #: Kartu yang sedang terpasang di kisi, TERMASUK kartu kelompok.
+        #: `tombol_layanan` hanya memuat yang benar-benar menerbitkan
+        #: nomor, sebab hanya itu yang ikut dimatikan selama jeda
+        #: pengambilan nomor. Tombol kembali tidak ada di keduanya: ia
+        #: berdiri di baris pil, dan tidak pernah ikut dimatikan —
+        #: menutup jalan pulang selama jeda akan mengurung pengunjung di
+        #: dalam menu.
+        self.kartu_kisi: list = []
+        #: True selama `_sesuaikan_ukuran_tombol` sedang berjalan.
+        #: `_setel_tinggi_panel` memanggil `setFixedHeight`, dan itu
+        #: memicu Resize pada kisi yang memanggil metode ini lagi. Tanpa
+        #: pengunci, putaran dalam dan luar menulis ukuran yang berbeda ke
+        #: kartu yang sama, lalu kotak huruf mengikuti yang salah.
+        self._sedang_menyesuaikan = False
+        self._sedang_menyusun = False
+        #: Ukuran kartu menu utama yang sudah dilihat pengunjung. Navigasi
+        #: ke dalam kelompok mengubah geometri sesaat; tanpa kunci ini
+        #: perhitungan ulang memakai angka yang sedang kacau dan ketiga
+        #: kartu pulang dalam keadaan pipih.
+        self._ukuran_kartu_menu: tuple[int, int] | None = None
+        self._tinggi_panel_menu: int | None = None
+        self._tinggi_jendela_kunci: int | None = None
+        self._lebar_halaman_kunci: int | None = None
+        #: Ukuran kartu yang sudah dihitung untuk setiap ukuran jendela.
+        #: F11 penuh → restore → penuh harus mengembalikan kartu yang sama,
+        #: bukan menghitung ulang dari tata letak yang sedang berubah.
+        self._kunci_per_jendela: dict[tuple[int, int], tuple[int, int, int]] = {}
 
         # Timer dimiliki widget ini, bukan QTimer.singleShot yang statis.
         # singleShot tetap menyala setelah halamannya dihapus lalu menyentuh
@@ -284,6 +355,19 @@ class KioskPage(QWidget):
         self._pembatal_konfirmasi = QTimer(self)
         self._pembatal_konfirmasi.setSingleShot(True)
         self._pembatal_konfirmasi.timeout.connect(self._batal_konfirmasi)
+
+        self._pemulang = QTimer(self)
+        self._pemulang.setSingleShot(True)
+        self._pemulang.timeout.connect(self._pulang)
+
+        #: Satu kali setelah jendela selesai diubah ukurannya (F11).
+        #: Tanpa ini, setiap langkah tata letak fullscreen/restore menghitung
+        #: kartu dari kisi yang sedang mengerut, dan hurufnya tertinggal
+        #: di ukuran yang salah.
+        self._penyesuai_jendela = QTimer(self)
+        self._penyesuai_jendela.setSingleShot(True)
+        self._penyesuai_jendela.setInterval(0)
+        self._penyesuai_jendela.timeout.connect(self._sesuaikan_setelah_ubah_jendela)
 
         self._bangun_tampilan()
         self.muat_ulang()
@@ -374,6 +458,20 @@ class KioskPage(QWidget):
         # yang menggantung. Pil itu perlu selebar isinya saja, sehingga
         # labelnya diapit dua pegas alih-alih diregangkan selebar panel.
         baris_petunjuk = QHBoxLayout()
+        baris_petunjuk.setSpacing(16)
+        # Tombol kembali berdiri di ujung KIRI baris ini, dan tempatnya
+        # dipesan sepanjang layar kios menyala — juga di menu utama, di
+        # mana tombolnya sendiri tidak ada.
+        #
+        # Dua hal ikut terjaga oleh pemesanan itu. Pertama, tinggi baris
+        # pil tidak berubah saat pengunjung masuk ke dalam kelompok,
+        # sehingga jatah tinggi kisi di bawahnya — dan karena itu tinggi
+        # kartunya — tetap sama di setiap tingkat. Kedua, wadah selebar
+        # sama di ujung kanan membuat pil tetap berada di TENGAH panel,
+        # sejajar dengan judul di atasnya; tanpa itu pil bergeser separuh
+        # lebar tombol setiap kali tombolnya muncul.
+        self.wadah_kembali = self._bangun_wadah_kembali()
+        baris_petunjuk.addWidget(self.wadah_kembali)
         baris_petunjuk.addStretch(1)
         self.label_petunjuk = QLabel()
         self.label_petunjuk.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -382,15 +480,30 @@ class KioskPage(QWidget):
         self._set_petunjuk("Sentuh jenis layanan yang Anda butuhkan", "ajak")
         baris_petunjuk.addWidget(self.label_petunjuk)
         baris_petunjuk.addStretch(1)
+        penyeimbang = QWidget()
+        penyeimbang.setFixedSize(LEBAR_TOMBOL_KEMBALI, TINGGI_TOMBOL_KEMBALI)
+        penyeimbang.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        baris_petunjuk.addWidget(penyeimbang)
         susunan.addLayout(baris_petunjuk)
 
         # Kisi pilihan dan layar konfirmasi bertukar tempat lewat satu
         # tumpukan, bukan disembunyikan/dimunculkan satu per satu: dengan
         # tumpukan, hanya satu yang pernah menerima sentuhan pada satu saat.
         self.tumpukan = QStackedWidget()
+        # Expanding: jatah stretch tidak boleh ikut sizeHint halaman yang
+        # mengerut saat kartu dibongkar. Tanpa ini, kisi kehilangan tinggi
+        # setiap kali menu berganti, dan kartu baru lahir sebagai pil pipih.
+        self.tumpukan.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         susunan.addWidget(self.tumpukan, stretch=1)
 
         self.halaman_pilihan = QWidget()
+        self.halaman_pilihan.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self.halaman_pilihan.installEventFilter(self)
         self.kisi = QVBoxLayout(self.halaman_pilihan)
         self.kisi.setSpacing(CELAH_TOMBOL)
@@ -455,6 +568,7 @@ class KioskPage(QWidget):
         btn_batal = tombol("BATAL, PILIH LAGI")
         btn_batal.setMinimumHeight(TINGGI_TOMBOL_KONFIRMASI_MIN)
         btn_batal.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_batal.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         btn_batal.setStyleSheet(
             f"QPushButton {{ color: {DISPLAY_KIOS_TOMBOL_MATI_TEKS};"
             " background: #FFFFFF; border: 3px solid #94A3B8;"
@@ -462,6 +576,7 @@ class KioskPage(QWidget):
             " font-size: 32px; font-weight: 700; }}"
             "QPushButton:hover { background: #F1F5F9; border: 3px solid #64748B; }"
             "QPushButton:pressed { background: #E2E8F0; }"
+            "QPushButton:focus { border: 3px solid #94A3B8; outline: none; }"
         )
         btn_batal.clicked.connect(self._batal_konfirmasi)
         _bayangan(btn_batal, 18, 6, 35)
@@ -470,12 +585,15 @@ class KioskPage(QWidget):
         btn_konfirmasi = tombol("YA, AMBIL NOMOR")
         btn_konfirmasi.setMinimumHeight(TINGGI_TOMBOL_KONFIRMASI_MIN)
         btn_konfirmasi.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_konfirmasi.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         btn_konfirmasi.setStyleSheet(
             f"QPushButton {{ color: white; background: {KIOS_SUKSES};"
             f" border: none; border-radius: {RADIUS_KARTU}px;"
             " font-size: 36px; font-weight: 800; }}"
             f"QPushButton:hover {{ background: {KIOS_SUKSES_TEKAN}; }}"
             "QPushButton:pressed { background: #065F46; }"
+            f"QPushButton:focus {{ background: {KIOS_SUKSES}; border: none;"
+            " outline: none; }"
         )
         btn_konfirmasi.clicked.connect(self._konfirmasi_ambil)
         _bayangan(btn_konfirmasi, 28, 10, 95)
@@ -547,6 +665,7 @@ class KioskPage(QWidget):
             return
 
         self.kategori = data or []
+        self._pangkas_jalur()
         self._susun_tombol()
         self._perbarui_jeda()
 
@@ -585,7 +704,14 @@ class KioskPage(QWidget):
         perubahannya tidak perlu menyusun ulang kartu apa pun.
         """
         return tuple(
-            (baris.id, baris.name, baris.prefix, baris.display_order)
+            (
+                baris.id,
+                baris.name,
+                baris.prefix,
+                baris.display_order,
+                baris.parent_id,
+                baris.punya_anak,
+            )
             for baris in kategori
         )
 
@@ -628,29 +754,158 @@ class KioskPage(QWidget):
             len(kategori),
         )
         self.kategori = kategori
+        self._pangkas_jalur()
         self._susun_tombol()
         # Tombol yang baru dibangun selalu lahir hidup. Tanpa baris ini,
         # kartu yang muncul tepat di tengah jeda pengambilan nomor bisa
         # disentuh padahal jedanya belum habis.
         self._perbarui_jeda()
 
+    # -----------------------------------------------------------------
+    # Menu bertingkat
+    # -----------------------------------------------------------------
+
+    def _anak_dari(self, induk_id: int | None) -> list:
+        """Jenis layanan yang berdiri langsung di bawah `induk_id`."""
+        ada = {baris.id for baris in self.kategori}
+        return [
+            baris
+            for baris in self.kategori
+            # Anak yang induknya tidak ikut terbaca — induknya baru saja
+            # dinonaktifkan, misalnya — naik ke menu utama, bukan hilang.
+            # Jenis layanan aktif harus selalu dapat dicapai dari layar.
+            if (baris.parent_id if baris.parent_id in ada else None) == induk_id
+        ]
+
+    def _daftar_tampil(self) -> list:
+        """Isi menu yang sedang dibuka pengunjung."""
+        induk = self._jalur[-1].id if self._jalur else None
+        return self._anak_dari(induk)
+
+    def _pangkas_jalur(self) -> None:
+        """
+        Buang langkah jalur yang jenis layanannya sudah tidak ada lagi.
+
+        Admin dapat menonaktifkan atau menghapus sebuah kelompok tepat
+        ketika ada pengunjung berdiri di dalamnya. Tanpa pemangkasan,
+        `_daftar_tampil()` akan mencari anak dari id yang sudah lenyap dan
+        memberi daftar kosong — layar yang benar-benar kosong, tanpa satu
+        kartu pun dan tanpa jalan keluar.
+
+        Yang dipakai adalah baris TERBARU dengan id yang sama, bukan baris
+        lama yang dipegang jalur: namanya mungkin baru saja diubah admin,
+        dan remah jejak harus menyebut nama yang sekarang.
+        """
+        terbaru = {baris.id: baris for baris in self.kategori}
+        jalur: list = []
+        for langkah in self._jalur:
+            baris = terbaru.get(langkah.id)
+            if baris is None or not baris.punya_anak:
+                break
+            jalur.append(baris)
+        if len(jalur) != len(self._jalur):
+            logger.info(
+                "Jalur menu anjungan dipangkas dari %d ke %d tingkat",
+                len(self._jalur),
+                len(jalur),
+            )
+        self._jalur = jalur
+        if not self._jalur:
+            self._pemulang.stop()
+
+    def _remah(self) -> str:
+        """Jalur yang sedang terbuka, untuk pil petunjuk."""
+        return " › ".join(langkah.name for langkah in self._jalur)
+
+    def _buka_kelompok(self, layanan) -> None:
+        """Masuk ke dalam sebuah kelompok, dan susun ulang kartunya."""
+        self._jalur.append(layanan)
+        logger.info("Anjungan membuka kelompok %s", layanan.code)
+        self._susun_tombol()
+        self._perbarui_jeda()
+        self._pemulang.start(JEDA_PULANG)
+        # Panel papan ikut menampilkan info kelompoknya. Kelompok pun boleh
+        # punya keterangan — "Siapkan SPPT dan KTP" pada Konsultasi berlaku
+        # bagi seluruh isinya — dan pengunjung membacanya justru pada saat
+        # ia sedang memilih di dalamnya.
+        self.papan.tampilkan_info_kios(
+            layanan.info_text, berkas=media_layanan(layanan.code)
+        )
+        # Video layanan (Konsultasi 1920×540) merampas tinggi papan
+        # sesudah kisi selesai disusun. Tanpa putaran berikutnya, kartu
+        # dihitung ulang dari kisi yang sedang mengerut — pil pipih.
+        self._jadwalkan_sesuaikan()
+
+    def _kembali(self) -> None:
+        """Naik satu tingkat."""
+        if not self._jalur:
+            return
+        self._jalur.pop()
+        self._susun_tombol()
+        self._perbarui_jeda()
+        if self._jalur:
+            self._pemulang.start(JEDA_PULANG)
+            self.papan.tampilkan_info_kios(
+                self._jalur[-1].info_text, berkas=media_layanan(self._jalur[-1].code)
+            )
+        else:
+            self._pemulang.stop()
+            self.papan.tampilkan_info_kios(None)
+        self._jadwalkan_sesuaikan()
+
+    def _pulang(self) -> None:
+        """Kembali ke menu utama, sejauh apa pun pengunjung sudah masuk."""
+        self._pemulang.stop()
+        if not self._jalur:
+            return
+        logger.info("Menu anjungan kembali sendiri ke menu utama")
+        self._jalur = []
+        self._susun_tombol()
+        self._perbarui_jeda()
+        # Panel papan TIDAK disentuh selama kartu nomor masih tampil di
+        # sana. Membebaskannya di sini akan menghapus nomor yang baru
+        # terbit dari layar, tepat ketika pemiliknya sedang membacanya
+        # atau memfotonya. Yang membebaskannya nanti `_bersihkan_hasil`.
+        if not self._penghapus_hasil.isActive():
+            self.papan.tampilkan_info_kios(None)
+        self._jadwalkan_sesuaikan()
+
     def _kolom_maks(self) -> int:
         """
         Banyaknya kolom yang muat berjajar pada lebar panel sekarang.
 
-        Sebanyak yang muat selama tiap kartu masih selebar
-        `LEBAR_TOMBOL_MIN` — batas lebar yang sudah dipakai perhitungan
-        ukuran kartu, jadi kisi ini tidak pernah menjanjikan kolom yang
-        kemudian menyempit di bawah ukuran sentuh.
+        Di menu utama: sebanyak yang muat selama tiap kartu masih selebar
+        `LEBAR_TOMBOL_MIN` — lima layanan tingkat teratas tetap satu
+        baris, karena dua baris di sini memendekkan kartu jadi pita.
+
+        Di dalam kelompok selalu tiga kolom, sama dengan menu utama.
+        Acuan 480 px membuat jendela biasa hanya "muat" dua kolom, lalu
+        enam kartu menjadi 3×2 setinggi 23 px — pil pipih di tengah panel.
         """
         lebar_area = self.halaman_pilihan.width() - 2 * MARGIN_KISI
         if lebar_area <= 0:
             # Belum pernah ditata; jangan menebak dari angka yang belum ada.
             return KOLOM_BAWAAN
+        if self._jalur:
+            # Selalu tiga kolom, sama dengan menu utama. Acuan 480 px
+            # membuat jendela 1280 hanya "muat" dua kolom, lalu enam kartu
+            # menjadi 3×2 setinggi 23 px — pil pipih di tengah panel.
+            return KOLOM_BAWAAN
         muat = (lebar_area + CELAH_TOMBOL) // (LEBAR_TOMBOL_MIN + CELAH_TOMBOL)
         return max(1, min(KOLOM_MAKS, muat))
 
     def _susun_tombol(self) -> None:
+        if self._sedang_menyusun:
+            return
+        self._sedang_menyusun = True
+        try:
+            self._isi_kisi_tombol()
+        finally:
+            self._sedang_menyusun = False
+
+    def _isi_kisi_tombol(self) -> None:
+        # Lepas rujukan ke kartu KEMBALI di kisi sebelum kartunya dihapus.
+        self._pasang_cadangan_kembali()
         while self.kisi.count():
             butir = self.kisi.takeAt(0)
             widget = butir.widget()
@@ -664,8 +919,11 @@ class KioskPage(QWidget):
                     if isi is not None:
                         isi.deleteLater()
         self.tombol_layanan = []
+        self.kartu_kisi = []
 
-        if not self.kategori:
+        tampil = self._daftar_tampil()
+
+        if not tampil and not self._jalur:
             # Tanpa kartu, tidak ada yang bisa dihitung; panelnya kembali
             # bebas seperti sebelum tinggi tetap ini ada. setFixedHeight
             # menulis batas bawah DAN batas atas sekaligus, jadi keduanya
@@ -685,16 +943,26 @@ class KioskPage(QWidget):
         # justru baris kartu paling bawah — tepat bagian yang harus
         # disentuh. Yang mengalah adalah tinggi kartunya, di
         # `_sesuaikan_ukuran_tombol`.
+        kartu: list = list(tampil)
+        tombol_kisi = [self._bangun_tombol_layanan(layanan) for layanan in kartu]
+        for layanan, btn in zip(kartu, tombol_kisi):
+            if not layanan.punya_anak:
+                self.tombol_layanan.append(btn)
+            self.kartu_kisi.append(btn)
+        if self._jalur:
+            tombol_kisi.append(self._bangun_kartu_kembali())
+            self.kartu_kisi.append(self.tombol_kembali)
+
+        self._kolom_terpakai = self._kolom_maks()
+        pola = baris_kisi(len(tombol_kisi), self._kolom_terpakai)
+        self.kisi.setSpacing(self._celah_baris(len(pola)))
         self.kisi.addStretch(1)
         awal = 0
-        self._kolom_terpakai = self._kolom_maks()
-        for banyak in baris_kisi(len(self.kategori), self._kolom_terpakai):
+        for banyak in pola:
             baris = QHBoxLayout()
             baris.setSpacing(CELAH_TOMBOL)
             baris.addStretch(1)
-            for layanan in self.kategori[awal : awal + banyak]:
-                btn = self._bangun_tombol_layanan(layanan)
-                self.tombol_layanan.append(btn)
+            for btn in tombol_kisi[awal : awal + banyak]:
                 baris.addWidget(btn)
             baris.addStretch(1)
             self.kisi.addLayout(baris)
@@ -702,19 +970,61 @@ class KioskPage(QWidget):
         self.kisi.addStretch(1)
         self._sesuaikan_ukuran_tombol()
 
-    def _bangun_tombol_layanan(self, layanan):
-        btn = tombol("", variant="primary")
+    def _bangun_kartu(
+        self,
+        *,
+        tanda: str,
+        nama_teks: str,
+        latar: str,
+        latar_hover: str,
+        latar_tekan: str,
+        warna_teks: str = DISPLAY_KIOS_TOMBOL_TEKS,
+        latar_kotak: str = KIOS_KOTAK_HURUF,
+        hanya_nama: bool = False,
+        punya_submenu: bool = False,
+        object_name: str = "kartuKios",
+    ):
+        """
+        Kartu sentuh anjungan: layanan, kelompok, dan kembali sekaligus.
+
+        Ketiganya berbagi satu bentuk karena ketiganya disentuh dengan cara
+        yang sama, dan hanya warnanya yang membedakan apa yang terjadi
+        sesudahnya. Warna tulisan ikut dititipkan ke kartunya sendiri —
+        `_warnai_tulisan_tombol` menyusun ulang huruf setiap kali kartunya
+        berubah ukuran, dan tanpa titipan itu ia akan memutihkan kembali
+        tulisan kartu kembali yang berlatar abu muda.
+        """
+        # Tanpa variant="primary": selector global
+        # QPushButton[variant="primary"]:hover lebih spesifik daripada
+        # stylesheet kartu, dan setelah sentuhan pertama kartu toska
+        # anjungan berubah jadi tombol biru berbingkai milik layar admin.
+        btn = tombol("")
+        btn.setObjectName(object_name)
+        # Anjungan disentuh, bukan di-Tab. Fokus keyboard membuat Qt
+        # menyerahkan sorotan native ke kartu yang baru lahir begitu
+        # tombol KEMBALI disembunyikan di tengah klik — dan kartu itu
+        # tampak "berubah" tanpa pengunjung menyentuhnya.
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         btn.setMinimumSize(LEBAR_TOMBOL_MIN, TINGGI_TOMBOL_MIN)
         btn.setMaximumSize(LEBAR_TOMBOL_MAKS, TINGGI_TOMBOL_MAKS)
         btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        btn.setProperty("warnaTeksKartu", warna_teks)
+        btn.setProperty("latarKartu", latar)
+        btn.setProperty("latarHoverKartu", latar_hover)
+        btn.setProperty("latarTekanKartu", latar_tekan)
+        btn.setProperty("latarKotakKartu", latar_kotak)
+        btn.setProperty("hanyaNamaKartu", hanya_nama)
+        btn.setProperty("punyaSubmenuKartu", punya_submenu)
+        btn.setProperty("radiusKartu", RADIUS_KARTU)
         btn.setStyleSheet(
-            f"QPushButton {{ color: {DISPLAY_KIOS_TOMBOL_TEKS};"
-            f" background: {DISPLAY_KIOS_TOMBOL};"
-            f" border: none; border-radius: {RADIUS_KARTU}px; }}"
-            f"QPushButton:hover {{ background: {DISPLAY_KIOS_TOMBOL_HOVER}; }}"
-            f"QPushButton:pressed {{ background: {DISPLAY_KIOS_TOMBOL_TEKAN}; }}"
-            f"QPushButton:disabled {{ background: {DISPLAY_KIOS_TOMBOL_MATI};"
-            f" color: {DISPLAY_KIOS_TOMBOL_MATI_TEKS}; }}"
+            self._stylesheet_kartu(
+                object_name,
+                warna_teks=warna_teks,
+                latar=latar,
+                latar_hover=latar_hover,
+                latar_tekan=latar_tekan,
+                radius=RADIUS_KARTU,
+            )
         )
         _bayangan(btn, 26, 8, 60)
 
@@ -727,17 +1037,13 @@ class KioskPage(QWidget):
         )
         isi.setSpacing(CELAH_ISI_TOMBOL)
 
-        prefix = QLabel(layanan.prefix)
-        prefix.setObjectName("prefixLayanan")
-        prefix.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        prefix.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
-        )
-        prefix.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         isi.addStretch(1)
-        isi.addWidget(prefix, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        nama = QLabel(layanan.name)
+        baris_nama = QHBoxLayout()
+        baris_nama.setSpacing(12)
+        baris_nama.addStretch(1)
+
+        nama = QLabel(nama_teks)
         nama.setObjectName("namaLayanan")
         nama.setAlignment(Qt.AlignmentFlag.AlignCenter)
         nama.setWordWrap(True)
@@ -745,13 +1051,159 @@ class KioskPage(QWidget):
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
         )
         nama.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        isi.addWidget(nama)
+        baris_nama.addWidget(nama)
+
+        if punya_submenu:
+            # Logo ">", bukan kotak huruf A/B/C. Hanya kartu yang benar-
+            # benar membuka daftar di dalamnya yang memakainya.
+            tanda_l = QLabel(tanda or TANDA_KELOMPOK)
+            tanda_l.setObjectName("tandaSubmenu")
+            tanda_l.setAlignment(
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+            )
+            tanda_l.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+            )
+            baris_nama.addWidget(tanda_l)
+
+        baris_nama.addStretch(1)
+        isi.addLayout(baris_nama)
         isi.addStretch(1)
 
         self._warnai_tulisan_tombol(btn, aktif=True)
         btn.installEventFilter(self)
+        return btn
+
+    @staticmethod
+    def _stylesheet_kartu(
+        object_name: str,
+        *,
+        warna_teks: str,
+        latar: str,
+        latar_hover: str,
+        latar_tekan: str,
+        radius: int,
+    ) -> str:
+        """
+        Gaya kartu, termasuk warna label di dalamnya.
+
+        Stylesheet global `QWidget { color }` mengalahkan `color` pada
+        QPushButton. Tanpa selector `QLabel`, tulisan KEMBALI kembali
+        gelap di atas latar abu — persis yang terlihat di anjungan.
+        """
+        return (
+            f"QPushButton#{object_name} {{ color: {warna_teks};"
+            f" background: {latar};"
+            f" border: none; border-radius: {radius}px; }}"
+            f"QPushButton#{object_name} QLabel {{ color: {warna_teks}; }}"
+            f"QPushButton#{object_name}:hover {{ background: {latar_hover}; }}"
+            f"QPushButton#{object_name}:pressed {{ background: {latar_tekan}; }}"
+            f"QPushButton#{object_name}:focus {{ background: {latar};"
+            " border: none; outline: none; }"
+            f"QPushButton#{object_name}:disabled {{ background: {DISPLAY_KIOS_TOMBOL_MATI};"
+            f" color: {DISPLAY_KIOS_TOMBOL_MATI_TEKS}; }}"
+            f"QPushButton#{object_name}:disabled QLabel {{"
+            f" color: {DISPLAY_KIOS_TOMBOL_MATI_TEKS}; }}"
+        )
+
+    @staticmethod
+    def _radius_kartu(tinggi: int) -> int:
+        """Sudut mengikuti tinggi, supaya kartu pendek bukan kapsul pipih."""
+        return min(RADIUS_KARTU, max(8, tinggi * 22 // 100))
+
+    def _bangun_tombol_layanan(self, layanan):
+        """
+        Satu kartu jenis layanan — atau kartu kelompok, bila ia punya isi.
+
+        Prefix tiket (A, B, PB) tidak dipajang di kartu: pengunjung
+        membacanya sebagai nomor yang akan diterima, dan yang perlu
+        dipilih adalah NAMA layanannya. Kartu kelompok mendapat tanda ">"
+        di samping nama, supaya kentara bahwa sentuhan membuka daftar,
+        bukan menerbitkan nomor.
+        """
+        kelompok = layanan.punya_anak
+        btn = self._bangun_kartu(
+            tanda=TANDA_KELOMPOK if kelompok else "",
+            nama_teks=layanan.name,
+            latar=DISPLAY_KIOS_KELOMPOK if kelompok else DISPLAY_KIOS_TOMBOL,
+            latar_hover=(
+                DISPLAY_KIOS_KELOMPOK_HOVER if kelompok else DISPLAY_KIOS_TOMBOL_HOVER
+            ),
+            latar_tekan=(
+                DISPLAY_KIOS_KELOMPOK_TEKAN if kelompok else DISPLAY_KIOS_TOMBOL_TEKAN
+            ),
+            hanya_nama=True,
+            punya_submenu=kelompok,
+        )
         btn.clicked.connect(lambda _, layanan=layanan: self._pilih_layanan(layanan))
         return btn
+
+    def _bangun_kartu_kembali(self):
+        """Kartu KEMBALI seukuran submenu, abu, supaya tidak tertukar sebagai layanan."""
+        btn = self._bangun_kartu(
+            tanda="",
+            nama_teks="KEMBALI",
+            latar=DISPLAY_KIOS_KEMBALI,
+            latar_hover=DISPLAY_KIOS_KEMBALI_HOVER,
+            latar_tekan=DISPLAY_KIOS_KEMBALI_TEKAN,
+            warna_teks=DISPLAY_KIOS_KEMBALI_TEKS,
+            hanya_nama=True,
+            object_name="tombolKembaliKios",
+        )
+        btn.clicked.connect(lambda _: self._kembali())
+        self.tombol_kembali = btn
+        tampak = not self._menunggu_konfirmasi
+        btn.setVisible(tampak)
+        return btn
+
+    def _pasang_cadangan_kembali(self) -> None:
+        """Jangan memegang kartu KEMBALI yang akan dihapus bersama kisi."""
+        if (
+            getattr(self, "_tombol_kembali_cadangan", None) is not None
+            and self.tombol_kembali is not self._tombol_kembali_cadangan
+        ):
+            self.tombol_kembali = self._tombol_kembali_cadangan
+        if getattr(self, "_tombol_kembali_cadangan", None) is not None:
+            self._tombol_kembali_cadangan.setVisible(False)
+
+    def _bangun_wadah_kembali(self) -> QWidget:
+        """
+        Cadangan lebar di ujung kiri baris pil, supaya pil tetap di tengah.
+
+        Tombol KEMBALI yang disentuh pengunjung adalah kartu di kisi.
+        Wadah ini kosong: ia hanya memesan tempat selebar yang sama di
+        kanan dan kiri pil.
+        """
+        wadah = QWidget()
+        wadah.setFixedSize(LEBAR_TOMBOL_KEMBALI, TINGGI_TOMBOL_KEMBALI)
+        self._tombol_kembali_cadangan = tombol(f"{TANDA_KEMBALI}  KEMBALI")
+        self._tombol_kembali_cadangan.setObjectName("tombolKembaliKios")
+        self._tombol_kembali_cadangan.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._tombol_kembali_cadangan.setVisible(False)
+        self._tombol_kembali_cadangan.setParent(self)
+        self.tombol_kembali = self._tombol_kembali_cadangan
+        return wadah
+
+    def _perbarui_tombol_kembali(self) -> None:
+        """
+        Tombol kembali hanya ada saat memang ada yang bisa ditinggalkan.
+
+        Layar konfirmasi ikut menyembunyikannya. Kartu kembali berdiri di
+        kisi halaman pilihan; saat tumpukan menampilkan konfirmasi, kartu
+        itu tidak kelihatan, tetapi tetap disembunyikan supaya tes dan
+        klik sisa tidak mengenai tombol yang sudah tidak berlaku.
+        """
+        tampak = bool(self._jalur) and not self._menunggu_konfirmasi
+        if self.tombol_kembali is self._tombol_kembali_cadangan:
+            self.tombol_kembali.setVisible(False)
+            return
+        if not tampak:
+            self.tombol_kembali.setDown(False)
+            self.tombol_kembali.clearFocus()
+            self.tombol_kembali.setAttribute(
+                Qt.WidgetAttribute.WA_UnderMouse, False
+            )
+        self.tombol_kembali.setVisible(tampak)
 
     def _sesuaikan_ukuran_tombol(self) -> None:
         """
@@ -764,67 +1216,351 @@ class KioskPage(QWidget):
         kantor berlayanan satu atau dua tidak menyisakan separuh panel
         kosong di kiri dan kanan kartunya.
 
+        Tingginya mengikuti lebar, tetapi tidak pernah menyerahkan jatah
+        baris yang sudah dipesan: kartu yang berjajar lebih banyak di
+        dalam kelompok menyempit lebarnya saja, tidak ikut memendek.
+
         Baris terakhir yang tidak penuh — 3+2 pada lima layanan — kartunya
         dilebarkan sampai barisnya sama panjang dengan baris di atasnya.
         Dua kartu seukuran kartu di baris atas menyisakan lubang di kanan
         dan kiri, dan lubang itu terbaca sebagai ada yang hilang.
         """
-        if not self.tombol_layanan:
+        if not self.kartu_kisi or self._sedang_menyesuaikan:
+            return
+        self._sedang_menyesuaikan = True
+        try:
+            self._pasang_ukuran_tombol()
+        finally:
+            self._sedang_menyesuaikan = False
+
+    def _jadwalkan_sesuaikan(self) -> None:
+        """Pasang ulang ukuran kunci setelah video selesai merampas tata letak."""
+        QTimer.singleShot(0, self._sesuaikan_ukuran_tombol)
+
+    def _kunci_masih_berlaku(self) -> bool:
+        """
+        Kunci ukuran hanya batal jika jendela benar-benar berubah.
+
+        Selisih 1–2 piksel, atau kisi yang sempat mengerut karena video,
+        bukan alasan menghitung ulang. Ambang 80 px: itu baru setara
+        pengunjung mengubah ukuran jendela, bukan ganti menu.
+        """
+        if self._ukuran_kartu_menu is None:
+            return False
+        lebar_sekarang = self.halaman_pilihan.width()
+        if (
+            self._lebar_halaman_kunci is not None
+            and lebar_sekarang > 400
+            and abs(lebar_sekarang - self._lebar_halaman_kunci) > 80
+        ):
+            return False
+        if (
+            self._tinggi_jendela_kunci is not None
+            and self.height() > 400
+            and abs(self.height() - self._tinggi_jendela_kunci) > 80
+        ):
+            return False
+        return True
+
+    def _reset_kunci_ukuran(self) -> None:
+        self._ukuran_kartu_menu = None
+        self._tinggi_panel_menu = None
+        self._tinggi_jendela_kunci = None
+        self._lebar_halaman_kunci = None
+
+    def _kunci_jendela(self) -> tuple[int, int]:
+        """Ukuran jendela dibulatkan, supaya 1919×1079 masih sama dengan 1920×1080."""
+        return (self.width() // 8 * 8, self.height() // 8 * 8)
+
+    def _pulihkan_kunci_jendela(self) -> bool:
+        """Pakai ukuran kartu yang pernah dihitung untuk jendela sebesar ini."""
+        simpan = self._kunci_per_jendela.get(self._kunci_jendela())
+        if simpan is None:
+            return False
+        lebar, tinggi, panel = simpan
+        self._ukuran_kartu_menu = (lebar, tinggi)
+        self._tinggi_panel_menu = panel
+        self._tinggi_jendela_kunci = self.height()
+        self._lebar_halaman_kunci = self.halaman_pilihan.width()
+        return True
+
+    def _geometri_siap(self) -> bool:
+        """Jangan menghitung kartu dari jendela yang sedang transisi F11."""
+        return (
+            self.isVisible()
+            and self.width() >= 400
+            and self.height() >= 400
+            and self.halaman_pilihan.width() >= 400
+        )
+
+    def _sesuaikan_setelah_ubah_jendela(self) -> None:
+        """Hitung kartu sekali, sesudah putaran tata letak F11 selesai."""
+        if self._sedang_menyusun or self._sedang_menyesuaikan:
+            self._penyesuai_jendela.start()
+            return
+        if not self.kartu_kisi or not self._geometri_siap():
+            return
+        if self._kolom_maks() != self._kolom_terpakai:
+            if not self._jalur:
+                self._reset_kunci_ukuran()
+            self._susun_tombol()
+            return
+        if not self._kunci_masih_berlaku():
+            if not self._pulihkan_kunci_jendela():
+                self._reset_kunci_ukuran()
+        self._sesuaikan_ukuran_tombol()
+
+    def _pasang_ukuran_tombol(self) -> None:
+        pola = baris_kisi(len(self.kartu_kisi), self._kolom_terpakai)
+        n_kolom, n_baris = max(pola), len(pola)
+
+        if self._ukuran_kartu_menu is not None and not self._kunci_masih_berlaku():
+            if self._geometri_siap() and not self._pulihkan_kunci_jendela():
+                self._reset_kunci_ukuran()
+
+        if self._ukuran_kartu_menu is None and self._geometri_siap():
+            self._pulihkan_kunci_jendela()
+
+        # Setelah pengunjung melihat menu utama, ukuran itu dikunci.
+        # Menghitung ulang dari geometri sesaat (kisi kosong, video
+        # Konsultasi 1920×540, setFixedHeight) menghasilkan pil pipih.
+        #
+        # Submenu tetap memakai jalur kelompok meski kunci menu ditolak
+        # (jendela 720p: tinggi kartu sudah ≤ 120). Tanpa itu lima anak
+        # dihitung sebagai dua baris menu utama: celah 50 px, kartu
+        # ~26 px, pil di tengah panel.
+        if self._jalur:
+            if self._ukuran_kartu_menu is not None:
+                lebar, tinggi = self._ukuran_kartu_menu
+            else:
+                if not self._geometri_siap():
+                    return
+                lebar = self._lebar_kartu_kolom(n_kolom)
+                if lebar <= 0:
+                    return
+                tinggi = min(
+                    TINGGI_TOMBOL_MAKS,
+                    max(1, round(lebar * RASIO_TINGGI_TOMBOL)),
+                )
+            self._pasang_ukuran_kelompok(pola, n_kolom, n_baris, lebar, tinggi)
             return
 
-        pola = baris_kisi(len(self.tombol_layanan), self._kolom_terpakai)
-        n_kolom, n_baris = max(pola), len(pola)
+        if self._ukuran_kartu_menu is not None:
+            lebar, tinggi = self._ukuran_kartu_menu
+            if self._tinggi_panel_menu:
+                self.panel_ambil.setFixedHeight(self._tinggi_panel_menu)
+            self._pasang_ukuran_tetap(pola, n_kolom, lebar, tinggi)
+            return
+
+        if not self._geometri_siap():
+            return
+
         lebar_area = self.halaman_pilihan.width() - 2 * MARGIN_KISI
         tinggi_area = self.halaman_pilihan.height() - 2 * MARGIN_KISI
 
-        if lebar_area <= 0 or tinggi_area <= 0:
-            lebar, tinggi = LEBAR_TOMBOL_MIN, TINGGI_TOMBOL_MIN
-        else:
-            pembesar = PEMBESAR_KARTU.get(n_kolom, 1.0)
-            lebar_maks = round(LEBAR_TOMBOL_MAKS * pembesar)
-            tinggi_maks = round(TINGGI_TOMBOL_MAKS * pembesar)
+        if lebar_area <= 0:
+            return
 
-            lebar = (lebar_area - CELAH_TOMBOL * (n_kolom - 1)) // n_kolom
-            lebar = min(lebar_maks, max(LEBAR_TOMBOL_MIN, lebar))
-            tinggi = round(lebar * RASIO_TINGGI_TOMBOL)
-            tinggi = min(tinggi_maks, max(TINGGI_TOMBOL_MIN, tinggi))
-            # Tinggi kisi diambil dari yang BARU saja dipasang, bukan dari
-            # `halaman_pilihan` yang masih memegang ukuran lama. Geometri
-            # Qt baru menyusul pada putaran tata letak berikutnya, dan
-            # menunggu putaran itu berarti satu gambar pertama dengan
-            # kartu yang terpotong tepi bawahnya.
-            tinggi_isi = self._setel_tinggi_panel(n_baris, tinggi_maks)
-            if tinggi_isi > 0:
-                tinggi_area = tinggi_isi - 2 * MARGIN_KISI
-            tinggi_baris = (tinggi_area - CELAH_TOMBOL * (n_baris - 1)) // n_baris
+        pembesar = PEMBESAR_KARTU.get(n_kolom, 1.0)
+        lebar_maks = round(LEBAR_TOMBOL_MAKS * pembesar)
+        tinggi_maks = round(TINGGI_TOMBOL_MAKS * pembesar)
+
+        lebar = (lebar_area - CELAH_TOMBOL * (n_kolom - 1)) // n_kolom
+        lebar = min(lebar_maks, max(LEBAR_TOMBOL_MIN, lebar))
+        tinggi = round(lebar * RASIO_TINGGI_TOMBOL)
+        tinggi = min(tinggi_maks, max(TINGGI_TOMBOL_MIN, tinggi))
+        # Tinggi kisi diambil dari yang BARU saja dipasang, bukan dari
+        # `halaman_pilihan` yang masih memegang ukuran lama. Geometri
+        # Qt baru menyusul pada putaran tata letak berikutnya, dan
+        # menunggu putaran itu berarti satu gambar pertama dengan
+        # kartu yang terpotong tepi bawahnya.
+        tinggi_isi = self._setel_tinggi_panel(n_baris, tinggi_maks)
+        if tinggi_isi > 0:
+            tinggi_area = tinggi_isi - 2 * MARGIN_KISI
+        elif tinggi_area <= 0:
+            return
+        tinggi_baris = (tinggi_area - CELAH_TOMBOL * (n_baris - 1)) // n_baris
+        if tinggi_baris > 0:
+            # Kartu yang menyempit karena kolomnya banyak boleh
+            # MEMANJANG mengisi jatah barisnya.
+            #
+            # Tinggi kartu memang mengikuti lebarnya, tetapi ruang
+            # tegak yang dipesan `_setel_tinggi_panel` dihitung dari
+            # tinggi kartu TERBESAR. Enam kartu berjajar di dalam
+            # sebuah kelompok karena itu menyisakan puluhan piksel
+            # jatah baris yang tidak dipakai siapa-siapa — dan
+            # kartunya menyusut pada KEDUA sisi sekaligus, tampak
+            # kerdil di bawah papan yang lapang, padahal yang benar
+            # menyempit hanyalah lebarnya. Menu utama tidak berubah
+            # olehnya: kartunya sudah setinggi jatah barisnya.
+            #
+            # Batas atasnya tiga, dan ketiganya wajib ditaati: jatah
+            # baris, batas tinggi kartu, dan LEBAR kartu itu sendiri
+            # — kartu yang lebih tinggi daripada lebarnya terbaca
+            # sebagai pilar, bukan sebagai tombol.
+            tinggi = max(tinggi, min(tinggi_baris, tinggi_maks, lebar))
+            # Jatah barisnya ditaati apa adanya, TANPA batas bawah.
+            # Batas bawah apa pun di sini akan membuat baris-baris
+            # kartu saling menindih begitu panel tidak cukup tinggi —
+            # dan kartu yang tertindih kehilangan nama layanannya.
+            # Kartu yang sedikit terlalu pendek masih bisa disentuh;
+            # kartu yang tertimbun kartu lain tidak.
+            tinggi = min(tinggi, tinggi_baris)
+
+        self._pasang_ukuran_tetap(pola, n_kolom, lebar, tinggi)
+        if not self._jalur:
+            self._kunci_ukuran_menu(lebar, tinggi)
+
+    def _celah_baris(self, n_baris: int) -> int:
+        """Celah tegak: rapat di dalam kelompok berbaris dua, 50 px di menu utama."""
+        if self._jalur and n_baris > 1:
+            return CELAH_BARIS_KELOMPOK
+        return CELAH_TOMBOL
+
+    def _lebar_kartu_kolom(self, n_kolom: int) -> int:
+        """Lebar kartu untuk n kolom pada halaman pilihan sekarang."""
+        lebar_area = self.halaman_pilihan.width() - 2 * MARGIN_KISI
+        if lebar_area <= 0 or n_kolom <= 0:
+            return 0
+        pembesar = PEMBESAR_KARTU.get(n_kolom, 1.0)
+        lebar_maks = round(LEBAR_TOMBOL_MAKS * pembesar)
+        lebar = (lebar_area - CELAH_TOMBOL * (n_kolom - 1)) // n_kolom
+        return min(lebar_maks, max(LEBAR_TOMBOL_MIN, lebar))
+
+    def _pasang_ukuran_kelompok(
+        self,
+        pola: list[int],
+        n_kolom: int,
+        n_baris: int,
+        lebar: int,
+        tinggi: int,
+    ) -> None:
+        """
+        Kartu kelompok menyesuaikan tinggi di panel bawah yang sudah dikunci.
+
+        Lebar mengikuti menu utama (tiga kolom 480, bukan lima kolom 324).
+        Tingginya mengisi kisi yang tersisa — bukan tebakan chrome yang
+        sering lebih besar daripada judul+pil sungguhan, lalu menyisakan
+        pil di tengah bidang kosong.
+        """
+        if self._tinggi_panel_menu:
+            self.panel_ambil.setFixedHeight(self._tinggi_panel_menu)
+        celah = self._celah_baris(n_baris)
+        self.kisi.setSpacing(celah)
+
+        # Dua putaran: putaran pertama bisa mengukur kisi yang masih
+        # mengerut; yang kedua memakai tinggi yang sudah dialokasikan
+        # panel. Video 80 px tidak ikut dihitung — ukuran kartu yang
+        # sudah terlihat pengunjung dipertahankan.
+        for _ in range(2):
+            susunan = self.panel_ambil.layout()
+            if susunan is not None:
+                susunan.activate()
+            tinggi_area = self._tinggi_area_kelompok()
+            if tinggi_area is None:
+                return
+            tinggi_baris = (tinggi_area - celah * (n_baris - 1)) // n_baris
             if tinggi_baris > 0:
-                # Jatah barisnya ditaati apa adanya, TANPA batas bawah.
-                # Batas bawah apa pun di sini akan membuat baris-baris
-                # kartu saling menindih begitu panel tidak cukup tinggi —
-                # dan kartu yang tertindih kehilangan nama layanannya.
-                # Kartu yang sedikit terlalu pendek masih bisa disentuh;
-                # kartu yang tertimbun kartu lain tidak.
-                tinggi = min(tinggi, tinggi_baris)
+                tinggi = min(tinggi_baris, TINGGI_TOMBOL_MAKS, lebar)
+            self._pasang_ukuran_tetap(pola, n_kolom, lebar, tinggi)
 
+    def _tinggi_area_kelompok(self) -> int | None:
+        """
+        Tinggi yang boleh dipakai kartu di dalam kisi.
+
+        `None` = kisi sedang mengerut (video, bongkar kartu); jangan
+        menulis ukuran baru. Nol = belum ada angka yang berarti.
+        """
+        tinggi_halaman = self.halaman_pilihan.height()
+        if 0 < tinggi_halaman <= 80:
+            return None
+        if tinggi_halaman > 80:
+            return max(0, tinggi_halaman - 2 * MARGIN_KISI)
+        chrome = self._tinggi_chrome_ambil()
+        tinggi_panel = self._tinggi_panel_menu or self.panel_ambil.height()
+        return max(0, tinggi_panel - chrome - 2 * MARGIN_KISI)
+
+    def _pasang_gaya_ukuran(self, btn, lebar: int, tinggi: int) -> None:
+        """Ukuran tetap, sudut, dan huruf — selalu dari tinggi sungguhan."""
+        if btn.width() != lebar or btn.height() != tinggi:
+            btn.setFixedSize(lebar, tinggi)
+        radius = self._radius_kartu(tinggi)
+        if btn.property("radiusKartu") != radius:
+            btn.setProperty("radiusKartu", radius)
+            btn.setStyleSheet(
+                self._stylesheet_kartu(
+                    btn.objectName(),
+                    warna_teks=(
+                        btn.property("warnaTeksKartu") or DISPLAY_KIOS_TOMBOL_TEKS
+                    ),
+                    latar=btn.property("latarKartu") or DISPLAY_KIOS_TOMBOL,
+                    latar_hover=(
+                        btn.property("latarHoverKartu") or DISPLAY_KIOS_TOMBOL_HOVER
+                    ),
+                    latar_tekan=(
+                        btn.property("latarTekanKartu") or DISPLAY_KIOS_TOMBOL_TEKAN
+                    ),
+                    radius=radius,
+                )
+            )
+
+    def _pasang_ukuran_tetap(
+        self, pola: list[int], n_kolom: int, lebar: int, tinggi: int
+    ) -> None:
         lebar_penuh = n_kolom * lebar + (n_kolom - 1) * CELAH_TOMBOL
         awal = 0
         for banyak in pola:
             lebar_baris = lebar
             if banyak < n_kolom:
                 lebar_rata = (lebar_penuh - CELAH_TOMBOL * (banyak - 1)) // banyak
-                # Melebar secukupnya, dan tidak pernah menyempit. Pada
-                # jendela yang pendek kartunya sudah terjepit tinggi;
-                # menyempitkannya lagi di baris yang tidak penuh membuat
-                # kartu di situ tampak lebih kecil daripada kartu di
-                # atasnya, bukan lebih rapi.
                 lebar_baris = max(
                     lebar, min(lebar_rata, round(lebar * PEMBESAR_BARIS_AKHIR))
                 )
-            for btn in self.tombol_layanan[awal : awal + banyak]:
-                if btn.width() != lebar_baris or btn.height() != tinggi:
-                    btn.setFixedSize(lebar_baris, tinggi)
+            for btn in self.kartu_kisi[awal : awal + banyak]:
+                self._pasang_gaya_ukuran(btn, lebar_baris, tinggi)
             awal += banyak
         self.kisi.activate()
+        for btn in self.kartu_kisi:
+            self._warnai_tulisan_tombol(btn, aktif=btn.isEnabled())
+
+    def _kunci_ukuran_menu(self, lebar: int, tinggi: int) -> None:
+        """Simpan ukuran menu utama yang layak, jangan pernah mengecilkannya."""
+        # 180×120 adalah hasil darurat saat kisi masih kosong — bukan
+        # ukuran yang pernah dilihat pengunjung. Menguncinya membuat ketiga
+        # kartu menu utama tetap pil setelah KEMBALI.
+        if tinggi <= TINGGI_TOMBOL_MIN or lebar <= LEBAR_TOMBOL_MIN:
+            return
+        if not self.isVisible():
+            return
+        now = (lebar, tinggi)
+        if self._ukuran_kartu_menu is None:
+            self._ukuran_kartu_menu = now
+            self._tinggi_panel_menu = self.panel_ambil.height()
+            self._tinggi_jendela_kunci = self.height()
+            self._lebar_halaman_kunci = self.halaman_pilihan.width()
+            self._catat_kunci_jendela()
+            return
+        w0, h0 = self._ukuran_kartu_menu
+        if lebar >= w0 and tinggi >= h0:
+            self._ukuran_kartu_menu = now
+            self._tinggi_panel_menu = self.panel_ambil.height()
+            self._tinggi_jendela_kunci = self.height()
+            self._lebar_halaman_kunci = self.halaman_pilihan.width()
+            self._catat_kunci_jendela()
+
+    def _catat_kunci_jendela(self) -> None:
+        """Ingat ukuran ini untuk F11 kembali ke jendela sebesar ini."""
+        if self._ukuran_kartu_menu is None:
+            return
+        kunci = self._kunci_jendela()
+        if kunci in self._kunci_per_jendela:
+            return
+        lebar, tinggi = self._ukuran_kartu_menu
+        self._kunci_per_jendela[kunci] = (
+            lebar,
+            tinggi,
+            self.panel_ambil.height(),
+        )
 
     def _setel_tinggi_panel(self, n_baris: int, tinggi_kartu_maks: int) -> int:
         """
@@ -879,10 +1615,12 @@ class KioskPage(QWidget):
         panel_info = self.papan.panel_info_kios
         if panel_info is None or panel_info.width() <= 0:
             return 0
-        # Judul dan pil petunjuk di panel bawah; kepala dan tepi di papan.
-        # Keduanya selisih dua tinggi yang bergerak bersama, jadi keduanya
-        # tetap berapa pun tinggi yang nanti dipasang.
-        sisa_bawah = self.panel_ambil.height() - self.halaman_pilihan.height()
+        # Chrome panel bawah dihitung dari judul dan pil, BUKAN dari
+        # `panel.height() - halaman_pilihan.height()`. Saat kartu dibongkar
+        # kisi mengerut, selisih itu membengkak, dan kartu yang baru dipasang
+        # mewarisi tinggi yang salah — pil pipih di tengah panel yang masih
+        # lapang. Itulah yang terlihat setelah masuk Konsultasi lalu pulang.
+        sisa_bawah = self._tinggi_chrome_ambil()
         kepala = self.papan.height() - panel_info.height()
         if sisa_bawah <= 0 or kepala <= 0:
             # Tata letak belum pernah dihitung; angkanya belum berarti.
@@ -898,20 +1636,65 @@ class KioskPage(QWidget):
         target = self.height() - kepala - diinginkan
         tinggi = max(TINGGI_PANEL_AMBIL_MIN, min(target, terpakai))
         self.panel_ambil.setFixedHeight(tinggi)
-        return tinggi - sisa_bawah
+        return max(0, tinggi - sisa_bawah)
+
+    def _tinggi_chrome_ambil(self) -> int:
+        """
+        Tinggi panel bawah di luar kisi: bingkai, judul, pil, margin.
+
+        Angkanya tidak bergantung pada isi kisi, jadi tidak berubah ketika
+        pengunjung masuk atau keluar kelompok.
+        """
+        susunan = self.panel_ambil.layout()
+        if susunan is None:
+            return 0
+        tepi = susunan.contentsMargins()
+        tinggi_judul = (
+            self.label_ajakan.height() or self.label_ajakan.sizeHint().height()
+        )
+        tinggi_pil = max(
+            self.wadah_kembali.height(),
+            self.label_petunjuk.height()
+            or self.label_petunjuk.sizeHint().height(),
+            TINGGI_TOMBOL_KEMBALI,
+        )
+        bingkai = max(
+            0,
+            self.panel_ambil.height() - self.panel_ambil.contentsRect().height(),
+        )
+        return (
+            bingkai
+            + tepi.top()
+            + tinggi_judul
+            + susunan.spacing()
+            + tinggi_pil
+            + susunan.spacing()
+            + tepi.bottom()
+        )
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802 - nama API Qt
         if event.type() == QEvent.Type.Resize:
             if obj is self.halaman_pilihan:
-                # Lebar yang berubah boleh mengubah banyaknya kolom, dan
-                # itu berarti kisinya harus dibangun ulang, bukan sekadar
-                # kartunya diukur ulang. Dijaga oleh perbandingan supaya
-                # resize biasa tidak membongkar kartu yang sudah benar.
+                if self._sedang_menyusun or self._sedang_menyesuaikan:
+                    return super().eventFilter(obj, event)
+                # F11 mengirim beberapa Resize. Yang sesaat (jendela < 400)
+                # diabaikan; yang siap dihitung sekarang, lalu sekali lagi
+                # sesudah putaran tata letak terakhir.
+                self._penyesuai_jendela.start()
+                if not self._geometri_siap():
+                    return super().eventFilter(obj, event)
                 if self._kolom_maks() != self._kolom_terpakai:
+                    if not self._jalur:
+                        self._reset_kunci_ukuran()
                     self._susun_tombol()
                 else:
+                    if not self._kunci_masih_berlaku():
+                        self._reset_kunci_ukuran()
                     self._sesuaikan_ukuran_tombol()
-            elif obj in self.tombol_layanan:
+            elif obj in self.kartu_kisi:
+                # Kartu submenu di jendela 720p sering lebih pendek dari
+                # TINGGI_TOMBOL_MIN. Melewati pewarnaan di sini membuat
+                # tulisan KEMBALI kehilangan merahnya.
                 self._warnai_tulisan_tombol(obj, aktif=obj.isEnabled())
         return super().eventFilter(obj, event)
 
@@ -934,62 +1717,66 @@ class KioskPage(QWidget):
         kartu yang lebih tinggi, dan huruf layanan bertumpuk dengan nama
         layanan di bawahnya.
         """
-        warna = DISPLAY_KIOS_TOMBOL_TEKS if aktif else DISPLAY_KIOS_TOMBOL_MATI_TEKS
-        latar_kotak = KIOS_KOTAK_HURUF if aktif else KIOS_KOTAK_HURUF_MATI
+        # Warna tulisan dititipkan pada kartunya sendiri, sebab kartu
+        # layanan dan kartu kelompok tidak sewarna.
+        if aktif:
+            warna = btn.property("warnaTeksKartu") or DISPLAY_KIOS_TOMBOL_TEKS
+            latar_kotak = btn.property("latarKotakKartu") or KIOS_KOTAK_HURUF
+        else:
+            warna = DISPLAY_KIOS_TOMBOL_MATI_TEKS
+            latar_kotak = KIOS_KOTAK_HURUF_MATI
         tinggi_kartu = max(1, btn.height())
         padding = 2 * MARGIN_ISI_TOMBOL
         lebar_tersedia = max(1, btn.width() - padding)
         tinggi_isi = max(1, btn.height() - padding - CELAH_ISI_TOMBOL)
-        # Huruf layanan mendapat porsi lebih tinggi daripada nama layanan
-        # di bawahnya. Angka di bawah adalah BATAS ATAS metrik huruf, bukan
-        # jatah layout: sisa tinggi dipakai stretch supaya keduanya tetap
-        # di tengah kartu.
-        tinggi_prefix = round(tinggi_isi * 0.52)
-        tinggi_nama = round(tinggi_isi * 0.30)
-
-        # Huruf layanan duduk di dalam kotak bujur sangkar tembus pandang,
-        # seperti kotak ikon di layar pembuka. Kotak itu yang memberi
-        # hurufnya tempat yang tetap: tanpa kotak, "A" dan "M" tampak
-        # bergeser naik-turun dari kartu ke kartu karena tinggi hurufnya
-        # sendiri berbeda.
-        prefix = btn.findChild(QLabel, "prefixLayanan")
-        if prefix is not None:
-            # Tanpa batas bawah: kotak yang dipaksa berukuran tetap akan
-            # lebih besar daripada kartunya sendiri begitu kartunya
-            # terjepit, lalu tergambar melimpah keluar tepi kartu.
-            sisi = max(1, min(tinggi_prefix, lebar_tersedia))
-            ukuran = self._pas_ukuran(
-                prefix.text(),
-                max(14, round(sisi * BAGIAN_KOTAK_HURUF)),
-                sisi - 8,
-                sisi - 6,
-                800,
-            )
-            prefix.setFixedSize(sisi, sisi)
-            prefix.setStyleSheet(
-                f"color: {warna}; background: {latar_kotak};"
-                f" border-radius: {round(sisi * 0.28)}px;"
-                f" font-size: {ukuran}px; font-weight: 800;"
-            )
+        hanya_nama = bool(btn.property("hanyaNamaKartu"))
+        tinggi_nama = round(tinggi_isi * (0.72 if hanya_nama else 0.30))
 
         nama = btn.findChild(QLabel, "namaLayanan")
         if nama is not None:
+            if hanya_nama:
+                mula = max(18, round(tinggi_kartu * 0.38))
+                berat = 800
+            else:
+                mula = max(14, round(tinggi_kartu * 0.15))
+                berat = 700
+            tanda = btn.findChild(QLabel, "tandaSubmenu")
+            lebar_nama = lebar_tersedia
+            if tanda is not None:
+                # Sisakan tempat untuk logo ">" di kanan nama.
+                lebar_nama = max(1, round(lebar_tersedia * 0.78))
             ukuran = self._pas_ukuran(
                 nama.text(),
-                max(14, round(tinggi_kartu * 0.15)),
-                lebar_tersedia,
+                mula,
+                lebar_nama,
                 max(1, tinggi_nama),
-                700,
+                berat,
             )
+            # Selector QLabel#... mengalahkan `QWidget { color }` global.
             nama.setStyleSheet(
-                f"color: {warna}; background: transparent;"
-                f" font-size: {ukuran}px; font-weight: 700;"
+                f"QLabel#namaLayanan {{ color: {warna}; background: transparent;"
+                f" font-size: {ukuran}px; font-weight: {berat}; }}"
             )
+            pal = nama.palette()
+            pal.setColor(QPalette.ColorRole.WindowText, QColor(warna))
+            pal.setColor(QPalette.ColorRole.Text, QColor(warna))
+            nama.setPalette(pal)
             font = QFont(self.font())
-            font.setWeight(QFont.Weight(700))
+            font.setWeight(QFont.Weight(berat))
             font.setPixelSize(ukuran)
             nama.setMinimumHeight(QFontMetrics(font).height())
             nama.updateGeometry()
+
+            if tanda is not None:
+                ukuran_tanda = max(14, round(ukuran * 0.85))
+                tanda.setStyleSheet(
+                    f"QLabel#tandaSubmenu {{ color: {warna}; background: transparent;"
+                    f" font-size: {ukuran_tanda}px; font-weight: 800; }}"
+                )
+                font_t = QFont(self.font())
+                font_t.setWeight(QFont.Weight(800))
+                font_t.setPixelSize(ukuran_tanda)
+                tanda.setMinimumHeight(QFontMetrics(font_t).height())
 
     def _pas_ukuran(
         self, teks: str, mula: int, lebar_tersedia: int, tinggi_tersedia: int, berat: int
@@ -1029,11 +1816,25 @@ class KioskPage(QWidget):
         Menerbitkan nomor sekaligus mencetaknya di satu sentuhan tidak
         memberi pengunjung kesempatan membatalkan salah pilih: begitu
         tersentuh, nomornya sudah sah dan tiketnya sudah keluar.
+
+        KELOMPOK tidak pernah sampai ke layar konfirmasi: ia tidak punya
+        nomor untuk dikonfirmasi, dan yang dibuka adalah daftar isinya.
         """
+        if layanan.punya_anak:
+            self._buka_kelompok(layanan)
+            return
+
+        # Pengunjung baru saja menyentuh sesuatu; hitungan pulang otomatis
+        # dimulai lagi dari nol. Yang sedang membaca layar konfirmasi tidak
+        # boleh dipulangkan ke menu utama di tengah-tengah membacanya.
+        if self._jalur:
+            self._pemulang.start(JEDA_PULANG)
+
         self._kategori_terpilih = layanan
         self.label_konfirmasi_kode.setText(layanan.prefix)
         self.label_konfirmasi_layanan.setText(layanan.name)
         self._menunggu_konfirmasi = True
+        self._perbarui_tombol_kembali()
         self._set_petunjuk("Pastikan pilihan Anda sudah benar", "konfirmasi")
         self.tumpukan.setCurrentWidget(self.halaman_konfirmasi)
         self._pembatal_konfirmasi.start(JEDA_KONFIRMASI)
@@ -1053,8 +1854,19 @@ class KioskPage(QWidget):
         self._pembatal_konfirmasi.stop()
         self._menunggu_konfirmasi = False
         self._kategori_terpilih = None
+        self._perbarui_tombol_kembali()
         self.tumpukan.setCurrentWidget(self.halaman_pilihan)
-        self.papan.tampilkan_info_kios(None)
+        if self._jalur:
+            # Kembali ke daftar kelompok yang tadi dibuka, bukan ke menu
+            # utama: pengunjung yang membatalkan biasanya hendak memilih
+            # yang di sebelahnya. Panel papan ikut menampilkan kembali info
+            # kelompoknya, sebab itulah yang tampil sebelum ia menyentuh.
+            self._pemulang.start(JEDA_PULANG)
+            self.papan.tampilkan_info_kios(
+                self._jalur[-1].info_text, berkas=media_layanan(self._jalur[-1].code)
+            )
+        else:
+            self.papan.tampilkan_info_kios(None)
         self._perbarui_jeda()
 
     def _konfirmasi_ambil(self) -> None:
@@ -1068,6 +1880,11 @@ class KioskPage(QWidget):
         kedipan. Jalur gagalnya diurus `ambil_nomor()`.
         """
         self._pembatal_konfirmasi.stop()
+        # Hitungan pulang otomatis berhenti di sini dan diserahkan kepada
+        # `_bersihkan_hasil`: sejak nomor terbit, yang menentukan kapan
+        # layar dikembalikan adalah lamanya kartu nomor tampil, bukan lagi
+        # lamanya menu dibiarkan terbuka.
+        self._pemulang.stop()
         self._menunggu_konfirmasi = False
         layanan = self._kategori_terpilih
         self._kategori_terpilih = None
@@ -1082,6 +1899,10 @@ class KioskPage(QWidget):
         try:
             nomor = self.queue.create_queue(category_id)
         except Exception as exc:  # noqa: BLE001 - dialog modal menyangkut layar publik
+            # Pulang lebih dahulu, sebelum pesan kegagalannya dipasang:
+            # `_pulang()` memanggil `_perbarui_jeda()`, dan penyegaran itu
+            # akan menimpa pil kesalahan dengan kalimat ajakan biasa.
+            self._pulang()
             self._tampilkan_kesalahan(exc)
             self._kunci_tombol()
             # Nomornya tidak jadi terbit, jadi kartu nomor tidak akan
@@ -1094,6 +1915,19 @@ class KioskPage(QWidget):
         self._tahan_petunjuk = False
         hasil_cetak = self._cetak(nomor)
         self._tampilkan_hasil(nomor, hasil_cetak)
+        # Kisi pulang ke menu utama SEKARANG, tidak menunggu kartu nomor
+        # hilang sepuluh detik kemudian. Pemilik nomor sudah selesai
+        # memilih, dan sepanjang sepuluh detik itu orang berikutnya sudah
+        # berdiri di depan menu yang bukan menu utama — mencari layanan
+        # pada daftar yang tidak memuatnya, tanpa tahu bahwa ia sedang
+        # berada di dalam sebuah kelompok.
+        #
+        # Letaknya WAJIB sesudah `_tampilkan_hasil`: pewaktu
+        # `_penghapus_hasil` sudah menyala di sana, sehingga `_pulang()`
+        # tidak menyentuh papan yang sedang memegang kartu nomor. Ditaruh
+        # sebelumnya, papan dibebaskan ke sambutan dan sambutan itu
+        # menyembul sekejap sebelum kartu nomor muncul.
+        self._pulang()
         self.papan.muat_ulang()
         self._perbarui_jeda()
 
@@ -1241,6 +2075,11 @@ class KioskPage(QWidget):
     def _bersihkan_hasil(self) -> None:
         self.label_ajakan.setText("AMBIL NOMOR ANTRIAN ANDA")
         self._gaya_ajakan(sukses=False)
+        # Kisinya sudah dipulangkan `ambil_nomor()` begitu nomornya terbit.
+        # Yang ini tinggal jaring pengaman bagi jalur yang tidak lewat
+        # sana, dan tidak berbiaya: `_pulang()` langsung berhenti begitu
+        # jalurnya memang sudah kosong.
+        self._pulang()
         # Satu-satunya tempat panel dibebaskan setelah nomor terbit.
         self.papan.tampilkan_info_kios(None)
         self._perbarui_jeda()
@@ -1288,9 +2127,15 @@ class KioskPage(QWidget):
             # perlu dipilih. Pada kantor berlayanan tunggal tidak ada
             # pilihan apa pun, dan kalimat itu justru membuat pengunjung
             # mencari tombol lain yang tidak ada.
-            self._set_petunjuk(
-                "Sentuh tombol di bawah untuk mengambil nomor"
-                if len(self.kategori) == 1
-                else "Sentuh jenis layanan yang Anda butuhkan",
-                "ajak",
-            )
+            #
+            # Di dalam kelompok, yang disebut pilnya adalah JALUR yang
+            # sedang terbuka. Kartu KEMBALI saja tidak cukup menjelaskan
+            # dari mana pengunjung akan kembali, dan daftar yang tampak
+            # tanpa keterangan terbaca sebagai seluruh layanan kantor ini.
+            if self._jalur:
+                teks = f"{self._remah()} — pilih layanan, atau sentuh KEMBALI"
+            elif len(self._daftar_tampil()) == 1:
+                teks = "Sentuh tombol di bawah untuk mengambil nomor"
+            else:
+                teks = "Sentuh jenis layanan yang Anda butuhkan"
+            self._set_petunjuk(teks, "ajak")

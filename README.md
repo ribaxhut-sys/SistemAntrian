@@ -69,11 +69,58 @@ direset setiap hari:
 
 ```
 26 Agustus              27 Agustus
-A-001  Konsultasi       A-001  Konsultasi
-A-002  Konsultasi       A-002  Konsultasi
+PB-001 PBB              PB-001 PBB
+PB-002 PBB              PB-002 PBB
 B-001  Pengaduan        B-001  Pengaduan
 C-001  Informasi
 ```
+
+**Jenis layanan boleh bertingkat, paling dalam tiga tingkat.** Yang punya
+anak berubah peran menjadi KELOMPOK: di anjungan ia hanya membuka daftar
+isinya dan **tidak pernah menerbitkan nomor**. Susunan bawaannya:
+
+```
+Konsultasi            ← kelompok, tanpa nomor
+    PBB               PB-001
+    PKB               KB-001
+    PAT               AT-001
+    Reklame           RK-001
+    PBJT              ← kelompok, tanpa nomor
+        Restoran      RS-001
+        Parkir        PR-001
+        Hotel         HT-001
+        Hiburan       HB-001
+Pengaduan             B-001
+Informasi             C-001
+```
+
+Nomor terbit atas nama DAUN, bukan atas nama kelompoknya. Karena itu tiap
+jenis pajak punya deret sendiri, dan loket dapat dispesialisasikan lewat
+**Loket → Jenis Layanan** — misalnya satu loket khusus PBB. Kelompok
+ditolak `create_queue()` di service layer, bukan sekadar disembunyikan
+dari layar: anjungan memegang daftar layanan di memori dan bisa saja masih
+memegang daftar lama beberapa detik sesudah admin menambahkan anak
+pertama ke sebuah jenis layanan.
+
+Susunannya diubah dari **Pengaturan → Jenis Layanan**, lewat kolom
+**Induk** pada dialog Tambah/Ubah. Tombol **Naik**/**Turun** menggeser
+kedudukan **di antara saudara sekelompok** saja; pindah kelompok adalah
+perbuatan lain dan tidak boleh terjadi karena Naik ditekan sekali terlalu
+banyak.
+
+Tiga hal yang mengikutinya, dan mudah terlupakan:
+
+- **Menonaktifkan kelompok ikut menonaktifkan seluruh isinya.** Kalau
+  tidak, PBB dan PKB justru naik menjadi kartu tingkat teratas di
+  anjungan — persis kebalikan dari yang diminta admin saat menutup
+  Konsultasi. Mengaktifkannya kembali juga mengembalikan isinya.
+- **Kelompok yang seluruh anaknya nonaktif kembali menjadi jenis layanan
+  biasa** dan menerbitkan nomornya sendiri. Jauh lebih baik daripada
+  kartu yang membuka daftar kosong di depan pengunjung yang sudah berdiri
+  di sana.
+- **Kelompok tidak ikut diperingatkan sebagai "layanan tanpa loket".** Ia
+  tidak pernah punya antrian yang bisa terlantar, dan memperingatkannya
+  hanya akan mengubur peringatan yang sungguhan.
 
 **Tiket antrian** dicetak 80 × 88 mm. Selain nomor, jenis layanan, loket,
 tanggal, dan jam, tiket menyebut **sisa antrian** pada saat tiket dicetak:
@@ -426,6 +473,38 @@ tidak boleh mendahului petugas yang belum selesai mengetik kata kuncinya.
 Baris yang sedang dibaca juga tidak melompat sendiri — dipertahankan
 selama lembarnya masih ada di hasil yang baru.
 
+### Menu bertingkat di anjungan
+
+Menyentuh kartu **Konsultasi** tidak menerbitkan nomor apa pun: kisi
+kartunya berganti isi menjadi PBB, PKB, PAT, Reklame, dan PBJT, dan
+menyentuh PBJT menggantinya sekali lagi menjadi Restoran, Parkir, Hotel,
+dan Hiburan. Baru di kartu terdalam layar konfirmasi muncul.
+
+Yang membedakan kartu kelompok dari kartu layanan hanyalah warna dan satu
+tanda — kartunya lebih biru, dan di tempat prefix berdiri tanda `›`, bukan
+huruf. Huruf besar di kartu anjungan dibaca pengunjung sebagai nomor yang
+akan ia terima; memajang "PJ" pada kartu yang tidak pernah menerbitkan
+nomor menjanjikan PJ-001 yang tidak akan pernah ada.
+
+Dua pengaman untuk layar yang berdiri tanpa penjaga:
+
+- **Kartu KEMBALI berdiri paling depan**, sebesar kartu layanan lainnya,
+  dan **tidak ikut dimatikan selama jeda pengambilan nomor**. Jalan keluar
+  tidak boleh menjadi satu-satunya sasaran sentuh yang lebih kecil
+  daripada yang lain, dan jeda tidak boleh mengurung pengunjung di dalam
+  menu.
+- **Anjungan pulang sendiri ke menu utama** setelah 25 detik tanpa
+  disentuh, dan segera sesudah sebuah nomor terbit. Pengunjung yang
+  berbalik pergi tidak boleh meninggalkan layar tersangkut di dalam PBJT
+  untuk orang berikutnya — orang berikutnya itu tidak tahu ia sedang
+  berada di dalam kelompok, dan akan mencari Pengaduan pada daftar yang
+  memang tidak memuatnya.
+
+Bila admin menonaktifkan sebuah kelompok tepat ketika ada pengunjung
+berdiri di dalamnya, jalurnya dipangkas ke tingkat terdekat yang masih
+ada — bukan dibiarkan menunjuk id yang sudah lenyap dan menghasilkan layar
+tanpa satu kartu pun.
+
 ### Panel informasi anjungan
 
 Paruh atas anjungan berisi satu panel yang bergantian isinya, dan seluruh
@@ -436,7 +515,8 @@ disalin ke folder di sebelah aplikasi pada mesin itu sendiri.
 | Keadaan | Isi panel | Berapa lama |
 |---|---|---|
 | Menganggur | Sambutan: teks, atau isi `media/kiosk` berputar bergiliran | terus-menerus |
-| A/B/C disentuh | Media layanan itu, atau **Info Anjungan** berupa teks bila tidak ada berkasnya | sampai YA/BATAL, maksimal 15 detik |
+| Kelompok dibuka | Media/Info kelompok itu — mis. "Siapkan SPPT dan KTP" pada Konsultasi | selama pengunjung memilih di dalamnya |
+| Layanan disentuh | Media layanan itu, atau **Info Anjungan** berupa teks bila tidak ada berkasnya | sampai YA/BATAL, maksimal 15 detik |
 | Nomor terbit | Kartu nomor: nomor besar, jenis layanan, sisa antrian, arahan | sampai tombol hidup lagi |
 
 **Media per jenis layanan** dipasang dari **Pengaturan → Media Anjungan per

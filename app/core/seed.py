@@ -42,12 +42,30 @@ _COUNTERS: list[tuple[str, str]] = [
     ("LOKET-3", "Loket 3"),
 ]
 
-# (code, name, prefix, display_order)
+# (code, name, prefix, display_order, kode induk)
 # prefix menentukan nomor antrian: A-001, B-001, C-001.
-_CATEGORIES: list[tuple[str, str, str, int]] = [
-    ("KONSULTASI", "Konsultasi", "A", 1),
-    ("PENGADUAN", "Pengaduan", "B", 2),
-    ("INFORMASI", "Informasi", "C", 3),
+#
+# Induk disebut dengan KODE, bukan id, karena id-nya belum ada saat daftar
+# ini ditulis. Urutan daftar sekaligus urutan penyisipan: induk selalu
+# berada di atas anaknya, sehingga id induk pasti sudah terbit saat
+# anaknya menyusul.
+#
+# Jenis layanan yang punya anak berubah menjadi KELOMPOK dan berhenti
+# menerbitkan nomor. Prefix-nya tetap diisi supaya tetap unik dan tetap
+# sah bila kelak anaknya dilepas kembali.
+_CATEGORIES: list[tuple[str, str, str, int, str | None]] = [
+    ("KONSULTASI", "Konsultasi", "A", 1, None),
+    ("PBB", "PBB", "PB", 1, "KONSULTASI"),
+    ("PKB", "PKB", "KB", 2, "KONSULTASI"),
+    ("PAT", "PAT", "AT", 3, "KONSULTASI"),
+    ("REKLAME", "Reklame", "RK", 4, "KONSULTASI"),
+    ("PBJT", "PBJT", "PJ", 5, "KONSULTASI"),
+    ("RESTORAN", "Restoran", "RS", 1, "PBJT"),
+    ("PARKIR", "Parkir", "PR", 2, "PBJT"),
+    ("HOTEL", "Hotel", "HT", 3, "PBJT"),
+    ("HIBURAN", "Hiburan", "HB", 4, "PBJT"),
+    ("PENGADUAN", "Pengaduan", "B", 2, None),
+    ("INFORMASI", "Informasi", "C", 3, None),
 ]
 
 # (key, value, description)
@@ -130,24 +148,38 @@ def _seed_counters(session: Session, branch: Branch) -> int:
 
 def _seed_categories(session: Session, branch: Branch) -> int:
     created = 0
-    for code, name, prefix, order in _CATEGORIES:
+    #: kode -> id, terisi sambil berjalan supaya anak menemukan induknya.
+    #: Ikut memuat jenis layanan yang sudah ada agar seed yang diulang
+    #: pada database lama tetap dapat memasang anak di bawah induk yang
+    #: sudah tersimpan lebih dahulu.
+    id_kode: dict[str, int] = {}
+
+    for code, name, prefix, order, kode_induk in _CATEGORIES:
         exists = session.scalar(
             select(ServiceCategory).where(
                 ServiceCategory.branch_id == branch.id, ServiceCategory.code == code
             )
         )
-        if exists is None:
-            session.add(
-                ServiceCategory(
-                    branch_id=branch.id,
-                    code=code,
-                    name=name,
-                    prefix=prefix,
-                    display_order=order,
-                    status=RecordStatus.ACTIVE,
-                )
-            )
-            created += 1
+        if exists is not None:
+            id_kode[code] = exists.id
+            continue
+
+        category = ServiceCategory(
+            branch_id=branch.id,
+            parent_id=id_kode.get(kode_induk) if kode_induk else None,
+            code=code,
+            name=name,
+            prefix=prefix,
+            display_order=order,
+            status=RecordStatus.ACTIVE,
+        )
+        session.add(category)
+        # id induk harus sudah nyata sebelum anaknya disusun; tanpa flush,
+        # seluruh baris baru menunggu di memori tanpa id sampai commit.
+        session.flush()
+        id_kode[code] = category.id
+        created += 1
+
     if created:
         logger.info("Seed: %d jenis layanan dibuat", created)
     return created

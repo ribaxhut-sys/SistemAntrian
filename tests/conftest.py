@@ -135,6 +135,82 @@ def database(app_config):
     return app_config
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "layanan_bertingkat: jangan ratakan pohon jenis layanan bawaan "
+        "(lihat fixture layanan_bawaan_datar)",
+    )
+
+
+def _ratakan_jenis_layanan() -> None:
+    """Buang seluruh jenis layanan yang punya induk, dari yang terdalam."""
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import ServiceCategory
+
+    with session_scope() as session:
+        for _ in range(10):  # kedalaman menu selalu jauh di bawah ini
+            induk = {
+                id_
+                for id_ in session.scalars(
+                    sa.select(ServiceCategory.parent_id).where(
+                        ServiceCategory.parent_id.is_not(None)
+                    )
+                )
+            }
+            daun = [
+                baris
+                for baris in session.scalars(
+                    sa.select(ServiceCategory).where(
+                        ServiceCategory.parent_id.is_not(None)
+                    )
+                )
+                if baris.id not in induk
+            ]
+            if not daun:
+                return
+            for baris in daun:
+                session.delete(baris)
+            session.flush()
+
+
+@pytest.fixture(autouse=True)
+def layanan_bawaan_datar(request):
+    """
+    Ratakan pohon jenis layanan bawaan sebelum test berjalan.
+
+    Seed memasang susunan konsultasi perpajakan — PBB, PKB, PAT, Reklame,
+    dan PBJT beserta isinya — di bawah "Konsultasi". Itu benar untuk
+    pemasangan sungguhan, tetapi akibatnya Konsultasi menjadi KELOMPOK dan
+    berhenti menerbitkan nomor, sedangkan hampir seluruh test di berkas
+    lain menguji mekanika antrian di atas tiga layanan datar A/B/C.
+
+    Susunan layanan sebuah kantor adalah KONFIGURASI, bukan perilaku
+    aplikasi. Meratakannya di satu tempat jauh lebih jujur daripada
+    menyebar pengetahuan tentang pohon perpajakan ke ratusan assertion
+    yang sebenarnya hanya peduli bahwa A-001 menyusul A-001 berikutnya.
+
+    Test yang memang menguji susunan bertingkat — seed, anjungan, aturan
+    kelompok — memakai marker `layanan_bertingkat` untuk melewati ini.
+    """
+    # Yang diminta `seeded`, bukan `database`: init_database() hanya
+    # menyiapkan skema, dan jenis layanan bawaan baru ditulis oleh
+    # seed_initial_data(). Meratakan sebelum seed berjalan tidak
+    # meratakan apa pun.
+    if "seeded" not in request.fixturenames:
+        # Test yang tidak pernah menyentuh data master; tidak ada yang
+        # perlu diratakan, dan menyeed database di sini hanya akan
+        # memperlambat seluruh suite.
+        yield
+        return
+    request.getfixturevalue("seeded")
+    if request.node.get_closest_marker("layanan_bertingkat") is None:
+        _ratakan_jenis_layanan()
+    yield
+
+
 @pytest.fixture
 def session(database) -> Iterator[Session]:
     """Session yang otomatis di-commit bila blok test selesai tanpa error."""

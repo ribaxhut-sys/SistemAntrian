@@ -150,8 +150,13 @@ class RegistrationPage(QWidget):
         )
         self.label_pendaftaran_tertutup.setVisible(not self.pendaftaran_dibuka)
 
+        # only_leaf: yang ditawarkan kepada petugas hanyalah jenis layanan
+        # yang benar-benar menerbitkan nomor. "Konsultasi" sudah menjadi
+        # kelompok dan tidak punya nomor sendiri; menampilkannya di sini
+        # hanya menyiapkan tombol yang pasti ditolak service.
         berhasil, data = jalankan_aman(
-            self, lambda: self.master.list_categories(only_active=True)
+            self,
+            lambda: self.master.list_categories(only_active=True, only_leaf=True),
         )
         if not berhasil:
             return

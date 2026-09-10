@@ -331,6 +331,12 @@ class CategoryTab(_TabelTab):
     """Pengelolaan jenis layanan dan prefix nomor antrian."""
 
     kolom = ("Kode", "Nama Layanan", "Prefix", "Contoh Nomor", "Status")
+
+    #: Penjorok baris anak pada kolom nama. Susunan induk-anak diperlihatkan
+    #: lewat jarak, bukan lewat kolom "Induk" tersendiri: nama induknya
+    #: sudah berdiri persis di atasnya, dan kolom yang mengulanginya di
+    #: setiap baris anak hanya memakan lebar tanpa menambah keterangan.
+    JOROK = "        "
     penjelasan = (
         "Prefix menentukan nomor antrian tiap jenis layanan. Prefix wajib "
         "berbeda antar layanan agar nomor tidak bertabrakan. Urutan baris di "
@@ -373,7 +379,7 @@ class CategoryTab(_TabelTab):
                 baris,
                 [
                     layanan.code,
-                    layanan.name,
+                    self.JOROK * layanan.level + layanan.name,
                     layanan.prefix,
                     layanan.contoh_nomor,
                     badge_status(layanan.is_active),
@@ -393,10 +399,19 @@ class CategoryTab(_TabelTab):
         # turun. Dimatikan di sini, bukan dijawab dengan pesan kesalahan
         # sesudah ditekan: batas urutan terlihat sendiri di layar, jadi
         # tombolnya tidak perlu berpura-pura masih bisa dipakai.
-        self.tombol_naik.setEnabled(baris is not None and baris > 0)
-        self.tombol_turun.setEnabled(
-            baris is not None and baris < self.tabel.rowCount() - 1
-        )
+        #
+        # Batasnya dihitung DI ANTARA SAUDARA SEKELOMPOK, bukan pada
+        # seluruh tabel. PBB adalah baris kedua tabel tetapi baris pertama
+        # di dalam Konsultasi; tombol Naik di situ tidak akan melakukan
+        # apa pun bila ditekan.
+        if baris is None or baris >= len(self.data):
+            self.tombol_naik.setEnabled(False)
+            self.tombol_turun.setEnabled(False)
+            return
+        induk = self.data[baris].parent_id
+        saudara = [i for i, k in enumerate(self.data) if k.parent_id == induk]
+        self.tombol_naik.setEnabled(baris != saudara[0])
+        self.tombol_turun.setEnabled(baris != saudara[-1])
 
     def pindahkan(self, *, naik: bool) -> None:
         """
@@ -419,7 +434,7 @@ class CategoryTab(_TabelTab):
             self.pilih_id(layanan.id)
 
     def tambah(self) -> None:
-        dialog = CategoryDialog(self)
+        dialog = CategoryDialog(self, semua=self.data)
         if dialog.exec() != CategoryDialog.DialogCode.Accepted:
             return
         berhasil, _ = jalankan_aman(
@@ -429,6 +444,7 @@ class CategoryTab(_TabelTab):
                 name=dialog.nama,
                 prefix=dialog.prefix,
                 info_text=dialog.info_text,
+                parent_id=dialog.induk_id,
             ),
         )
         if berhasil:
@@ -440,7 +456,7 @@ class CategoryTab(_TabelTab):
             return
         layanan = self.data[baris]
 
-        dialog = CategoryDialog(self, category=layanan)
+        dialog = CategoryDialog(self, category=layanan, semua=self.data)
         if dialog.exec() != CategoryDialog.DialogCode.Accepted:
             return
 
@@ -450,6 +466,7 @@ class CategoryTab(_TabelTab):
                 name=dialog.nama,
                 prefix=dialog.prefix,
                 info_text=dialog.info_text,
+                parent_id=dialog.induk_id,
             )
 
         try:
@@ -461,7 +478,10 @@ class CategoryTab(_TabelTab):
             berhasil, _ = jalankan_aman(
                 self,
                 lambda: self.master.update_category(
-                    layanan.id, name=dialog.nama, info_text=dialog.info_text
+                    layanan.id,
+                    name=dialog.nama,
+                    info_text=dialog.info_text,
+                    parent_id=dialog.induk_id,
                 ),
             )
             if berhasil:
