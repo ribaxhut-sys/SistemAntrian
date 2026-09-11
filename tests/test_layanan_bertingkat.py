@@ -961,3 +961,48 @@ def test_pulang_otomatis_tidak_menghapus_kartu_nomor(anjungan):
 
     assert dipanggil == [], "papan dibersihkan padahal kartu nomor masih tampil"
     assert anjungan.label_ajakan.text() == "NOMOR ANDA SUDAH TERBIT"
+
+
+def test_totem_sempit_submenu_tidak_keluar_layar(qtbot, kios_bertingkat, auth):
+    """
+    Submenu totem pada skala Windows 150% tidak boleh terpotong di kanan.
+
+    Di dalam kelompok kisinya tiga kolom. Pada lebar 720 px, tiga kartu
+    selebar minimumnya beserta celahnya menuntut 640 px dari 624 yang ada,
+    dan kartu ketiga dahulu terpotong di tepi kanan layar.
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    from app.services.master_data_service import MasterDataService
+    from app.services.settings_service import SettingsService
+    from app.services.sound_service import NullSoundPlayer
+    from app.ui.kiosk.kiosk_page import KioskPage
+
+    halaman = KioskPage(
+        kios_bertingkat,
+        MasterDataService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        totem=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.papan.hentikan()
+    halaman._penghitung.stop()
+    halaman._pemeriksa_layanan.stop()
+    halaman.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    halaman.resize(720, 1280)
+    halaman.show()
+    for _ in range(3):
+        QApplication.processEvents()
+
+    _kartu(halaman, "Konsultasi").click()
+    for _ in range(3):
+        QApplication.processEvents()
+
+    assert halaman.width() == 720
+    kanan = halaman.halaman_pilihan.width()
+    assert "PBB" in _nama_kartu(halaman)
+    for kartu in halaman.kartu_kisi:
+        if kartu.isVisible():
+            assert kartu.geometry().right() <= kanan, (kartu.geometry().getRect(), kanan)

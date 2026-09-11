@@ -37,6 +37,7 @@ from app.ui.display.tema import (
     Palet,
     palet_untuk,
 )
+from app.ui.efek import pasang_efek
 from app.ui.kiosk.sambutan import PanelSambutanKios
 
 logger = get_logger("ui.display")
@@ -1075,6 +1076,11 @@ class DisplayPage(QWidget):
         #: Pita loket mini anjungan berdiri. Diisi KioskPage; papan biasa
         #: membiarkannya None.
         self.pita_loket_kios = None
+        #: Ukuran huruf judul yang terakhir ditulis — lihat `_gaya_judul`.
+        self._ukuran_judul = 0
+        #: Lebar, ukuran rancangan, dan teks yang terakhir diukur untuk
+        #: judul. Sama berarti hasil pengukurannya masih berlaku.
+        self._kunci_judul: tuple | None = None
 
         self._bangun_tampilan()
         self.muat_ulang()
@@ -1236,7 +1242,7 @@ class DisplayPage(QWidget):
         self.baris_berikutnya = QGridLayout(self.wadah_berikutnya)
         self.baris_berikutnya.setContentsMargins(0, 0, 0, 0)
         self.efek_berikutnya = QGraphicsOpacityEffect(self.wadah_berikutnya)
-        self.wadah_berikutnya.setGraphicsEffect(self.efek_berikutnya)
+        pasang_efek(self.wadah_berikutnya, self.efek_berikutnya)
         # Panel dibangun ulang setiap tema berganti, dan animasi yang masih
         # menunjuk efek milik panel lama akan menyentuh objek yang sudah
         # dibuang.
@@ -1466,7 +1472,7 @@ class DisplayPage(QWidget):
         efek.setBlurRadius(radius)
         efek.setOffset(0, y)
         efek.setColor(QColor(0, 0, 0, alpha))
-        widget.setGraphicsEffect(efek)
+        pasang_efek(widget, efek)
 
     # -----------------------------------------------------------------
     # Ukuran
@@ -1501,6 +1507,10 @@ class DisplayPage(QWidget):
         if abs(skala - self.skala) >= 0.02:
             self.skala = skala
             self._terapkan_ukuran()
+        # Lebar yang berubah tanpa skala ikut berubah — totem yang
+        # menyempit, jendela yang ditarik — tetap bisa membuat judul tidak
+        # muat.
+        self._gaya_judul()
 
         # Ditunda sampai Qt selesai menata isinya. Tinggi panel baru
         # diketahui SETELAH tata letak berjalan, sedangkan resizeEvent tiba
@@ -1508,6 +1518,69 @@ class DisplayPage(QWidget):
         # final. singleShot dengan `self` sebagai konteks ikut batal
         # sendiri bila layarnya keburu ditutup.
         QTimer.singleShot(0, self, self._sesuaikan_daftar)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - nama dari Qt
+        super().showEvent(event)
+        # Judul hanya dipas saat sudah tampil — lihat `_gaya_judul`. Papan
+        # yang ukurannya sudah final SEBELUM ditampilkan tidak menerima
+        # resize lagi sesudahnya, dan tanpa panggilan ini judulnya tidak
+        # pernah dipas: totem berskala 200% memenggal nama kantornya.
+        self._gaya_judul()
+
+    def _gaya_judul(self, *, paksa: bool = False) -> None:
+        """
+        Judul papan sebesar skalanya, kecuali lebih lebar daripada tempatnya.
+
+        Judul memakai huruf 800 yang direnggangkan 4 px per huruf, dan
+        labelnya boleh menyempit sampai 1 px. Pada totem berskala Windows
+        200% (540 px), "ANTRIAN PELAYANAN CRO" menuntut 529 px dari 492
+        yang ada, dan nama kantor terpenggal di kedua ujungnya. Hurufnya
+        yang mengalah; ukuran rancangannya tidak pernah dilampaui, jadi
+        layar yang judulnya sudah muat tidak berubah sama sekali.
+        """
+        ukuran = self.px("judul")
+        lebar = self.label_judul.width()
+        # Hanya judul yang sudah tampil. Sebelumnya lebarnya adalah lebar
+        # bawaan widget (640 px), dan judul yang disusutkan dari angka itu
+        # memendekkan kepala papan tepat ketika anjungan menghitung lalu
+        # mengunci tinggi panelnya: bentuk panel informasinya bergeser dari
+        # 3:1 ke 3,06:1 dan tidak pernah kembali.
+        dipas = (
+            lebar > 1 and self.label_judul.isVisible() and bool(self.label_judul.text())
+        )
+        kunci = (lebar if dipas else 0, ukuran, self.label_judul.text())
+        if not paksa and kunci == self._kunci_judul:
+            return
+        self._kunci_judul = kunci
+        if dipas:
+            font = QFont(self.label_judul.font())
+            font.setPixelSize(ukuran)
+            font.setWeight(QFont.Weight(800))
+            font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4)
+            butuh = QFontMetrics(font).horizontalAdvance(self.label_judul.text())
+            if butuh > lebar:
+                ukuran = max(10, int(ukuran * lebar / butuh))
+        self._tulis_judul(ukuran)
+        if not dipas:
+            return
+        # Taksiran di atas memakai SALINAN huruf, dan dapat meleset beberapa
+        # piksel — pada huruf cadangan offscreen, 12 px di skala 200%.
+        # Diperiksa ulang dengan huruf yang benar-benar terpasang.
+        while ukuran > 10:
+            self.label_judul.ensurePolished()
+            if self.label_judul.sizeHint().width() <= lebar:
+                break
+            ukuran -= 1
+            self._tulis_judul(ukuran)
+
+    def _tulis_judul(self, ukuran: int) -> None:
+        """Pasang gaya judul papan pada ukuran huruf `ukuran`."""
+        self._ukuran_judul = ukuran
+        self.label_judul.setStyleSheet(
+            f"color: {self.palet.judul}; background: transparent;"
+            f" font-size: {ukuran}px; font-weight: 800; letter-spacing: 4px;"
+        )
+        self.label_judul.setMinimumHeight(self.label_judul.sizeHint().height())
 
     def _sesuaikan_daftar(self) -> None:
         """
@@ -1618,10 +1691,7 @@ class DisplayPage(QWidget):
             else round(tinggi_panel * 0.8)
         )
 
-        self.label_judul.setStyleSheet(
-            f"color: {p.judul}; background: transparent;"
-            f" font-size: {self.px('judul')}px; font-weight: 800; letter-spacing: 4px;"
-        )
+        self._gaya_judul(paksa=True)
         self.label_jam.setStyleSheet(
             f"color: {p.jam}; background: transparent;"
             f" font-size: {self.px('jam')}px; font-weight: 600; letter-spacing: 2px;"

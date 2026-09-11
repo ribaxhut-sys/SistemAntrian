@@ -140,16 +140,17 @@ Cara mencetaknya diatur lewat pengaturan `ticket.printer`:
 **Kegagalan mencetak tidak pernah membatalkan antrian.** Nomor sudah terbit
 dan tersimpan sebelum tiket dicetak; petugas cukup menyebutkan nomornya.
 
-**Tiga jenis mesin, tiga layar yang berbeda.** Yang menentukan adalah
+**Empat jenis mesin, empat layar yang berbeda.** Yang menentukan adalah
 sifat komputernya, bukan siapa yang sedang memakainya:
 
 | Mesin | Pintasan | Isi layar | Suara | Login |
 |---|---|---|---|---|
 | Televisi ruang tunggu | `AntrianCRO.exe --tv` | Papan nomor besar, dibaca dari seberang ruangan | ya | tidak |
 | Anjungan ambil nomor | `AntrianCRO.exe --kios` | Pilih layanan, cetak tiket, ringkasan antrian berlangsung | tidak | tidak |
+| Anjungan berdiri (totem 1080×1920) | `AntrianCRO.exe --kios-totem` | Tiga pita tegak: iklan, pilih layanan, papan loket mini | tidak | tidak |
 | Komputer loket (3–5 unit) | `AntrianCRO.exe` | Memanggil dan melayani antrian | tidak | ya |
 
-Kedua mesin publik berjalan **tanpa login**. Komputer yang menghadap publik
+Ketiga mesin publik berjalan **tanpa login**. Komputer yang menghadap publik
 dan tidak diawasi tidak boleh menyimpan kata sandi petugas — atau lebih
 buruk, memaksa seseorang mengetikkannya setiap pagi sampai sandi itu
 tertempel di bawah keyboard. Keduanya juga membuka layar penuh tanpa bilah
@@ -666,21 +667,51 @@ di `logs/app.log`, karena `AntrianCRO.exe` berjendela dan tidak punya
 terminal untuk menampilkannya.
 
 Saat dibuka tanpa argumen, aplikasi menanyakan layar mana yang akan
-dipakai: **Layar Antrian**, **Anjungan Ambil Nomor** (keduanya tanpa login),
-atau **Layar Petugas** (wajib masuk).
+dipakai: **Layar Antrian**, **Anjungan Ambil Nomor**, **Anjungan Berdiri**
+(ketiganya tanpa login), atau **Layar Petugas** (wajib masuk).
 
-Kedua mesin publik sebaiknya **melewati dialog itu**, supaya mati listrik
-siang hari tidak meninggalkan papan nomor kosong sampai ada yang mengklik:
+Mesin publik sebaiknya **melewati dialog itu**, supaya mati listrik siang
+hari tidak meninggalkan papan nomor kosong sampai ada yang mengklik:
 
 ```powershell
-.\.venv\Scripts\python.exe -m app.main --tv      # televisi ruang tunggu
-.\.venv\Scripts\python.exe -m app.main --kios    # anjungan ambil nomor
+.\.venv\Scripts\python.exe -m app.main --tv          # televisi ruang tunggu
+.\.venv\Scripts\python.exe -m app.main --kios        # anjungan ambil nomor
+.\.venv\Scripts\python.exe -m app.main --kios-totem  # anjungan berdiri (totem)
 ```
 
 Pasang perintah yang sama pada pintasan Startup Windows, atau pada
-`AntrianCRO.exe --tv` / `AntrianCRO.exe --kios` di komputer yang sudah
-di-build. `--layar` adalah nama lama `--kios` dan masih berlaku, supaya
-pintasan yang sudah terpasang tidak mati saat aplikasi diperbarui.
+`AntrianCRO.exe --tv` / `AntrianCRO.exe --kios` / `AntrianCRO.exe
+--kios-totem` di komputer yang sudah di-build. `--layar` adalah nama lama
+`--kios` dan masih berlaku, supaya pintasan yang sudah terpasang tidak mati
+saat aplikasi diperbarui.
+
+### Memasang anjungan berdiri (totem)
+
+Tata letak totem dirancang untuk kaca tegak 1080×1920. Periksa hal-hal ini
+di mesinnya sendiri, bukan di laptop:
+
+1. **Settings → Display → Display orientation: Portrait.** Windows harus
+   melaporkan layarnya tegak. Totem yang dilaporkan mendatar dikira laptop
+   dan dibuka sebagai jendela pratinjau kecil — dan setelah mati listrik,
+   ia kembali menjadi jendela kecil lagi.
+2. **Settings → Display → Scale: 100%.** Pada 100% setiap pita setinggi
+   640 piksel, persis ukuran rancangannya.
+3. **Pintasan Startup:** `AntrianCRO.exe --kios-totem`, tanpa `--jendela`.
+4. **Uji di mesinnya:** printer thermal, respons layar sentuh, dan media
+   iklan. Bidang iklan totem berbentuk sekitar 2:1 (anjungan biasa 3:1);
+   gambar atau video yang disiapkan untuk 3:1 tampil berbingkai.
+
+**Menguji totem di laptop.** Laptop berlayar mendatar otomatis membuka
+totem sebagai miniatur tegak — juga bila dipilih lewat dialog. Ukurannya
+sebesar yang muat di layar, paling besar 50%; `--jendela=PERSEN` memilih
+sendiri, misalnya 40% supaya layar antrian muat di sebelahnya:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.main --kios-totem --jendela=40
+```
+
+Miniatur ini untuk memeriksa susunan dan alur, bukan keterbacaan dari jarak
+berdiri: di laptop 14 inci ukurannya kira-kira seperlima kaca totem 43 inci.
 
 Jeda antar-pengambilan nomor di kios diatur lewat `kiosk.cooldown_seconds`
 (bawaan 10 detik). Jeda ini **hanya** berlaku pada sesi kios — meja

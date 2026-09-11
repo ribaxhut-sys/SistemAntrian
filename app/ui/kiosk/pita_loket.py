@@ -18,6 +18,12 @@ from app.ui.display.tema import Palet
 
 #: Tinggi acuan kartu di pita, supaya nomor tetap besar meski pita pendek.
 TINGGI_ACUAN_PITA = 520
+#: Batas skala huruf kartu di pita. Batas bawahnya serendah ini supaya
+#: nama loket tetap utuh pada totem berskala Windows 200% (540 px, tiap
+#: kartu sekitar 157 px): huruf kecil masih terbaca, "LOKET" tanpa
+#: angkanya tidak menunjuk loket mana pun.
+SKALA_PITA_MIN = 0.4
+SKALA_PITA_MAKS = 1.15
 
 
 class PitaLoketKios(QFrame):
@@ -118,13 +124,89 @@ class PitaLoketKios(QFrame):
             self.kartu_loket.append(kartu)
 
     def _skala_kartu(self) -> None:
+        """
+        Skala huruf kartu dari tinggi pita, lalu dijepit oleh LEBARNYA.
+
+        Skala dari tinggi saja memotong kepala kartu: pada totem 1080x1920
+        pita setinggi 640 px meminta skala 1,15, dan "LOKET 1" butuh 160 px
+        sementara kartu hanya memberinya 131 — yang tampil "LOKET" tanpa
+        angkanya, dan pil "KOSONG" terbaca ":OSON(". Pita ini hanya punya
+        satu tugas, yaitu memberi tahu loket MANA yang memanggil, dan nama
+        loket yang kehilangan angkanya menggagalkan tugas itu.
+
+        `muatkan_huruf()` milik kartu hanya mengurus tinggi; lebar diurus di
+        sini. Semua kartu memakai skala yang sama: kartu yang hurufnya lebih
+        kecil dari tetangganya terbaca sebagai loket yang kurang penting.
+        """
         tinggi = self.height()
         if tinggi <= 0:
             return
-        skala = min(1.15, max(0.55, tinggi / TINGGI_ACUAN_PITA))
-        for kartu in self.kartu_loket:
-            kartu.set_skala(skala)
-            kartu.muatkan_huruf()
+        skala = min(SKALA_PITA_MAKS, max(SKALA_PITA_MIN, tinggi / TINGGI_ACUAN_PITA))
+        # Lebar kepala sebanding dengan skalanya, tetapi tidak persis:
+        # ukuran huruf dibulatkan dan punya batas bawah. Beberapa putaran
+        # cukup untuk mengejar sisa pembulatan itu.
+        for _putaran in range(4):
+            for kartu in self.kartu_loket:
+                kartu.set_skala(skala)
+                kartu.muatkan_huruf()
+            lebih = max(
+                (self._rasio_kepala(kartu) for kartu in self.kartu_loket),
+                default=1.0,
+            )
+            if lebih <= 1.0 or skala <= SKALA_PITA_MIN:
+                return
+            skala = max(SKALA_PITA_MIN, skala / lebih * 0.97)
+
+    @staticmethod
+    def _rasio_kepala(kartu: KartuLoket) -> float:
+        """
+        Seberapa jauh kepala kartu melampaui lebarnya: tuntutan / lebar.
+
+        Lebih dari 1 berarti nama loket atau pil statusnya terpotong. Dua
+        cara mengukurnya, dan yang lebih besar yang dipakai, sebab masing-
+        masing buta pada saat yang berbeda:
+
+        * TAKSIRAN dari tulisan, tepi, dan celah kartu. Bekerja sebelum
+          label ditata — saat pita baru saja mendapat tingginya, yaitu tepat
+          ketika anjungan baru dinyalakan. Celahnya diambil dari susunan
+          kepala yang sebenarnya: celah itu diwarisi dari susunan induknya
+          dan ikut membesar bersama skala, dan angka tetap 12 px pernah
+          membuatnya meleset cukup jauh untuk memotong angka loket.
+        * PENGUKURAN langsung pada label yang sudah ditata, penangkap apa
+          pun yang tidak terlihat oleh taksiran.
+
+        Kartu yang belum punya lebar dianggap muat.
+        """
+        if kartu.width() <= 1:
+            return 1.0
+        nama, status = kartu.label_nama, kartu.label_status
+        for label in (nama, status):
+            label.ensurePolished()
+
+        tepi = kartu.susunan_isi.contentsMargins()
+        dalam = kartu.width() - tepi.left() - tepi.right() - 2 * kartu.palet.tebal_tepi
+        dalam = max(1, dalam)
+        if kartu.palet.status_berpil:
+            # Nama dan pil berdampingan dalam satu susunan kepala: nama,
+            # pegas, pil — dua celah.
+            kepala = kartu.susunan_isi.itemAt(0)
+            susunan_kepala = kepala.layout() if kepala is not None else None
+            celah = max(0, susunan_kepala.spacing()) if susunan_kepala is not None else 0
+            taksiran = (
+                nama.sizeHint().width() + 2 * celah + status.sizeHint().width()
+            ) / dalam
+        else:
+            taksiran = max(nama.sizeHint().width(), status.sizeHint().width()) / dalam
+
+        susunan = kartu.layout()
+        if susunan is not None:
+            susunan.activate()
+        langsung = 1.0
+        for label in (nama, status):
+            if label.isVisibleTo(kartu) and label.width() > 1:
+                langsung = max(langsung, label.sizeHint().width() / label.width())
+
+        return max(1.0, taksiran, langsung)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - nama API Qt
         super().resizeEvent(event)

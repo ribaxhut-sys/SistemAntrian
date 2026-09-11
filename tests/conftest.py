@@ -473,3 +473,18 @@ def layani_sampai_selesai(antrian_siap, cro_queue, terbitkan):
         return cro_queue.complete(antrian.id)
 
     return _layani
+
+
+@pytest.fixture(autouse=True)
+def efek_grafis_menyala():
+    """
+    Pulihkan efek grafis sesudah setiap test.
+
+    Pratinjau totem mematikannya untuk seluruh proses (app/ui/efek.py).
+    Tanpa pemulihan ini, test yang berjalan sesudah test pratinjau mewarisi
+    bayangan yang nonaktif, dan hasilnya bergantung pada urutan test.
+    """
+    from app.ui.efek import setel_efek_grafis
+
+    yield
+    setel_efek_grafis(True)

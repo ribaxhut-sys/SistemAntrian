@@ -41,7 +41,13 @@ from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.settings.dialogs import LABEL_PERAN
 from app.ui.display.display_page import DisplayPage
 from app.ui.kiosk.kiosk_page import KioskPage
-from app.ui.kiosk.pratinjau import LEBAR_TOTEM_ASLI, PratinjauTotem, ukuran_jendela_totem
+from app.ui.efek import setel_efek_grafis
+from app.ui.kiosk.pratinjau import (
+    LEBAR_TOTEM_ASLI,
+    PratinjauTotem,
+    layar_mendatar,
+    ukuran_jendela_totem,
+)
 from app.ui.notes.note_page import NotePage
 from app.ui.queue.service_page import ServicePage
 from app.ui.registration.registration_page import RegistrationPage
@@ -54,6 +60,12 @@ from app.ui.survey.survey_page import SurveyPage
 logger = get_logger("ui.main")
 
 TINGGI_TAK_TERBATAS = (1 << 24) - 1
+
+
+def _area_layar_utama() -> QRect:
+    """Area kerja layar utama, atau 1280×720 bila Qt belum mengenal layar apa pun."""
+    layar = QApplication.primaryScreen()
+    return layar.availableGeometry() if layar is not None else QRect(0, 0, 1280, 720)
 
 
 @dataclass(frozen=True)
@@ -194,7 +206,8 @@ class MainWindow(QMainWindow):
         parent: QWidget | None = None,
         *,
         anjungan_totem: bool = False,
-        berjendela: bool = False,
+        berjendela: bool | None = None,
+        persen_pratinjau: int | None = None,
     ) -> None:
         super().__init__(parent)
         # Sejak keluar dari layar kembali ke Login/Pilihan Mode alih-alih
@@ -208,8 +221,28 @@ class MainWindow(QMainWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.auth = auth
         self.anjungan_totem = anjungan_totem
+        area = _area_layar_utama()
+        if berjendela is None:
+            # Kaca totem selalu berdiri tegak. Dibuka layar penuh di layar
+            # mendatar — laptop, lewat dialog pilihan yang tidak bisa menulis
+            # --jendela — ketiga pitanya terbentang menjadi pita pipih yang
+            # tidak mirip mesin sungguhannya. Totem sungguhan berdiri tegak,
+            # jadi di sana tetap layar penuh. Mesin publik lain tidak
+            # tersentuh: layarnya memang mendatar.
+            berjendela = anjungan_totem and layar_mendatar(area)
         #: True = jangan layar penuh. Untuk melihat totem utuh di laptop.
         self.berjendela = berjendela
+        #: Persentase pratinjau totem dari `--jendela=PERSEN`. None berarti
+        #: sebesar yang muat di layar, paling besar 50%.
+        self.persen_pratinjau = persen_pratinjau
+        # Pratinjau totem membungkus halaman anjungan dalam
+        # QGraphicsProxyWidget, dan Qt tidak menggambar efek grafis di
+        # dalam proxy: kartu layanan berbayangan hilang dari layar — lihat
+        # app/ui/efek.py. Disetel pada SETIAP jendela, bukan hanya
+        # dimatikan untuk pratinjau: `_jalankan_ui` membuka jendela
+        # berikutnya di proses yang sama, dan layar televisi yang dibuka
+        # sesudah pratinjau tidak boleh ikut kehilangan bayangannya.
+        setel_efek_grafis(not (anjungan_totem and berjendela))
         self.master_service = MasterDataService(auth)
         self.user_service = UserService(auth)
         self.queue_service = QueueService(auth)
@@ -272,13 +305,7 @@ class MainWindow(QMainWindow):
         # Totem + --jendela: miniatur 1080×1920 (sekitar 50% di laptop
         # 1080p), bukan tata letak yang disusun ulang ke jendela mendatar.
         if self.anjungan_totem:
-            layar = QApplication.primaryScreen()
-            area = (
-                layar.availableGeometry()
-                if layar is not None
-                else QRect(0, 0, 1280, 720)
-            )
-            self._geometri_normal = ukuran_jendela_totem(area)
+            self._geometri_normal = ukuran_jendela_totem(area, self.persen_pratinjau)
             self.resize(self._geometri_normal.size())
             self.move(self._geometri_normal.topLeft())
         else:

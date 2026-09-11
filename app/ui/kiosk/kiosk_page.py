@@ -16,7 +16,9 @@ service layer dan oleh hak user PostgreSQL mesin itu di database.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, Qt, QTimer
+import re
+
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
@@ -68,6 +70,7 @@ from app.ui.style import (
     KIOS_SUKSES_TEKAN,
     TEXT_MUTED,
 )
+from app.ui.efek import pasang_efek
 
 logger = get_logger("ui.kiosk")
 
@@ -121,13 +124,12 @@ TANDA_KELOMPOK = ">"
 #: Tanda pada tombol KEMBALI (cadangan tersembunyi; kartu kisi memakai teks).
 TANDA_KEMBALI = "‹"
 
-#: Ukuran wadah kosong di baris pil. Tombol KEMBALI yang terlihat adalah
-#: kartu di dalam kisi, seukuran kartu submenu. Wadah ini hanya menjaga
-#: pil petunjuk tetap di tengah: widget yang disembunyikan berhenti
-#: memakai tempat, jadi tanpa cadangan lebar tetap, pil bergeser setiap
-#: kali pengunjung masuk atau keluar kelompok.
+#: Tinggi wadah kosong di kiri dan kanan pil petunjuk. Tombol KEMBALI
+#: yang terlihat adalah kartu di dalam kisi, seukuran kartu submenu; kedua
+#: wadah ini hanya memesan tinggi baris pil, supaya jatah tinggi kisi di
+#: bawahnya sama di setiap tingkat menu. Lebarnya sengaja tidak dipesan —
+#: lihat catatan baris pil di `_bangun_panel_ambil`.
 TINGGI_TOMBOL_KEMBALI = 36
-LEBAR_TOMBOL_KEMBALI = 220
 
 #: Lama layar konfirmasi menunggu sebelum otomatis batal, dalam milidetik.
 #: Kios tidak berpenjaga: pengunjung yang berbalik pergi tanpa menekan
@@ -240,6 +242,13 @@ SISI_KOTAK_KONFIRMASI = 112
 #: sini berarti nomor sudah terlanjur terbit atau pengunjung mengulang
 #: dari awal.
 TINGGI_TOMBOL_KONFIRMASI_MIN = 220
+#: Ruang kosong di kiri dan kanan tulisan tombol konfirmasi, dan batas
+#: bawah huruf yang menyusut — tombol konfirmasi dan judul panel — saat
+#: widgetnya lebih sempit daripada tulisannya. 12 px cukup untuk menjauhkan
+#: tulisan dari lengkung sudut tombol; 24 px membuat "BATAL, PILIH LAGI"
+#: mentok di batas bawah hurufnya pada skala 200% padahal masih muat.
+TEPI_TULISAN_KONFIRMASI = 12
+HURUF_KONFIRMASI_MIN = 16
 
 #: Pintasan papan ketik untuk menukar posisi iklan dan kartu layanan.
 #:
@@ -289,7 +298,39 @@ def _bayangan(widget: QWidget, radius: int, y: int, alpha: int) -> None:
     efek.setBlurRadius(radius)
     efek.setOffset(0, y)
     efek.setColor(QColor(0, 0, 0, alpha))
-    widget.setGraphicsEffect(efek)
+    pasang_efek(widget, efek)
+
+
+class LabelPil(QLabel):
+    """
+    Pil petunjuk: sebaris bila ruangnya cukup, membungkus bila tidak.
+
+    Dahulu lebar sebarisnya dipasang sebagai lebar MINIMUM. QLabel yang
+    boleh membungkus memang lebih suka melipat teksnya menjadi kotak hampir
+    bujur sangkar, dan minimum itulah yang mencegahnya — tetapi minimum
+    juga tidak bisa ditawar. Pesan terpanjang ("Tiket gagal dicetak. …")
+    menuntut sekitar 740 px, lebih lebar daripada seluruh panel totem pada
+    skala Windows 150%, dan panelnya terdorong keluar layar.
+
+    Lebar sebaris kini menjadi UKURAN YANG DIINGINKAN: diberikan selama
+    ruangnya ada, dilepas — pil membungkus ke baris kedua — bila tidak.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._lebar_sebaris = 0
+
+    def setel_lebar_sebaris(self, lebar: int) -> None:
+        """Lebar yang membuat kalimatnya muat sebaris."""
+        self._lebar_sebaris = lebar
+        self.updateGeometry()
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - nama API Qt
+        dasar = super().sizeHint()
+        if self._lebar_sebaris <= 0:
+            return dasar
+        tinggi = self.heightForWidth(self._lebar_sebaris)
+        return QSize(self._lebar_sebaris, tinggi if tinggi > 0 else dasar.height())
 
 
 class KioskPage(QWidget):
@@ -336,6 +377,16 @@ class KioskPage(QWidget):
         self._urutan_panel = URUTAN_PANEL_IKLAN_ATAS
         #: Kategori yang sedang menunggu konfirmasi pengunjung.
         self._kategori_terpilih = None
+        #: BATAL dan YA di layar konfirmasi, yang hurufnya mengecil
+        #: bila tombolnya lebih sempit daripada tulisannya.
+        self._tombol_konfirmasi: tuple = ()
+        #: Seluruh widget yang hurufnya menyusut bila tidak muat — lihat
+        #: `_siapkan_huruf_menyusut`. `eventFilter` mengukur ulang setiap
+        #: kali salah satunya berubah ukuran.
+        self._huruf_menyusut: list = []
+        #: Fungsi ruang bagi widget yang lebarnya sendiri tidak bisa dipakai
+        #: sebagai ukuran ruang — lihat `_siapkan_huruf_menyusut`.
+        self._ruang_huruf: dict = {}
         #: Kelompok yang sedang terbuka, dari luar ke dalam. Kosong berarti
         #: pengunjung berada di menu utama. Disimpan sebagai daftar
         #: kategori, bukan satu id, supaya Konsultasi > PBJT dapat ditutup
@@ -591,21 +642,19 @@ class KioskPage(QWidget):
         # labelnya diapit dua pegas alih-alih diregangkan selebar panel.
         baris_petunjuk = QHBoxLayout()
         baris_petunjuk.setSpacing(16)
-        # Tombol kembali berdiri di ujung KIRI baris ini, dan tempatnya
-        # dipesan sepanjang layar kios menyala — juga di menu utama, di
-        # mana tombolnya sendiri tidak ada.
+        # Wadah di kiri dan penyeimbang di kanan memesan TINGGI baris ini
+        # sepanjang layar kios menyala, supaya tinggi baris pil — dan
+        # karena itu jatah tinggi kisi di bawahnya — sama di setiap
+        # tingkat menu.
         #
-        # Dua hal ikut terjaga oleh pemesanan itu. Pertama, tinggi baris
-        # pil tidak berubah saat pengunjung masuk ke dalam kelompok,
-        # sehingga jatah tinggi kisi di bawahnya — dan karena itu tinggi
-        # kartunya — tetap sama di setiap tingkat. Kedua, wadah selebar
-        # sama di ujung kanan membuat pil tetap berada di TENGAH panel,
-        # sejajar dengan judul di atasnya; tanpa itu pil bergeser separuh
-        # lebar tombol setiap kali tombolnya muncul.
+        # Lebarnya tidak ikut dipesan. Pil sudah berada di tengah karena
+        # diapit dua pegas yang sama besar, dan dua wadah selebar 220 px
+        # menuntut 472 px sebelum pil mendapat satu piksel pun: lebih
+        # lebar daripada seluruh panel totem pada skala Windows 150%.
         self.wadah_kembali = self._bangun_wadah_kembali()
         baris_petunjuk.addWidget(self.wadah_kembali)
         baris_petunjuk.addStretch(1)
-        self.label_petunjuk = QLabel()
+        self.label_petunjuk = LabelPil()
         self.label_petunjuk.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label_petunjuk.setWordWrap(True)
         self.label_petunjuk.setMaximumWidth(LEBAR_PIL_MAKS)
@@ -613,7 +662,7 @@ class KioskPage(QWidget):
         baris_petunjuk.addWidget(self.label_petunjuk)
         baris_petunjuk.addStretch(1)
         penyeimbang = QWidget()
-        penyeimbang.setFixedSize(LEBAR_TOMBOL_KEMBALI, TINGGI_TOMBOL_KEMBALI)
+        penyeimbang.setFixedHeight(TINGGI_TOMBOL_KEMBALI)
         penyeimbang.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
         )
@@ -633,8 +682,20 @@ class KioskPage(QWidget):
         susunan.addWidget(self.tumpukan, stretch=1)
 
         self.halaman_pilihan = QWidget()
+        # Lebar minimum kisi DIABAIKAN, bukan diteruskan ke jendela.
+        #
+        # Kartu dipasang dengan ukuran tetap. Diteruskan ke atas, tiga kartu
+        # 251 px beserta celahnya menuntut jendela selebar 951 px, sehingga
+        # totem pada skala Windows 125% (864 px) dan 150% (720 px) terdorong
+        # keluar layar di tepi kanan. Dan karena jendelanya tidak pernah bisa
+        # menyempit, kunci ukuran kartu pun tidak pernah batal: kisi tidak
+        # sekali pun dihitung ulang untuk lebar yang sebenarnya.
+        #
+        # Diabaikan, jendela boleh menyempit, peristiwa Resize sampai ke
+        # `eventFilter`, dan kolom serta kartunya dihitung ulang dari lebar
+        # yang benar-benar ada.
         self.halaman_pilihan.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
         self.halaman_pilihan.installEventFilter(self)
         self.kisi = QVBoxLayout(self.halaman_pilihan)
@@ -681,7 +742,7 @@ class KioskPage(QWidget):
         )
         baris_judul.addWidget(self.label_konfirmasi_kode)
 
-        self.label_konfirmasi_layanan = QLabel("")
+        self.label_konfirmasi_layanan = LabelPil()
         self.label_konfirmasi_layanan.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
@@ -689,6 +750,27 @@ class KioskPage(QWidget):
         self.label_konfirmasi_layanan.setStyleSheet(
             f"color: {KIOS_JUDUL}; font-size: 54px; font-weight: 800;"
         )
+        # Nama layanan yang berupa satu kata panjang tidak bisa dibungkus,
+        # dan pada totem berskala 200% kata itu beserta kotak kodenya bisa
+        # lebih lebar daripada panelnya. Hurufnya yang mengalah.
+        self._baris_judul_konfirmasi = baris_judul
+        self._siapkan_huruf_menyusut(
+            self.label_konfirmasi_layanan,
+            dasar=54,
+            tebal=800,
+            tepi=0,
+            per_kata=True,
+            ruang=self._ruang_nama_konfirmasi,
+        )
+        # Ruangnya berubah bersama halaman, bukan bersama labelnya.
+        halaman.installEventFilter(self)
+        # Lebar minimum label yang membungkus adalah kata terpanjangnya pada
+        # huruf SEKARANG. Diteruskan ke atas, kata itu menahan halaman tetap
+        # lebar sebelum hurufnya sempat dipas — dan ruang yang dihitung dari
+        # halaman yang tertahan itu pun tidak pernah menyempit. Lebar yang
+        # dimintanya diatur `LabelPil`: sebaris selama muat, membungkus di
+        # batas kata bila tidak.
+        self.label_konfirmasi_layanan.setMinimumWidth(1)
         baris_judul.addWidget(self.label_konfirmasi_layanan)
         baris_judul.addStretch(1)
         susunan.addLayout(baris_judul, stretch=1)
@@ -712,6 +794,7 @@ class KioskPage(QWidget):
             "QPushButton:pressed { background: #E2E8F0; }"
             "QPushButton:focus { border: 3px solid #94A3B8; outline: none; }"
         )
+        self._siapkan_huruf_menyusut(btn_batal, dasar=32, tebal=700)
         btn_batal.clicked.connect(self._batal_konfirmasi)
         _bayangan(btn_batal, 18, 6, 35)
         baris_tombol.addWidget(btn_batal, stretch=2)
@@ -729,18 +812,197 @@ class KioskPage(QWidget):
             f"QPushButton:focus {{ background: {KIOS_SUKSES}; border: none;"
             " outline: none; }"
         )
+        self._siapkan_huruf_menyusut(btn_konfirmasi, dasar=36, tebal=800)
         btn_konfirmasi.clicked.connect(self._konfirmasi_ambil)
         _bayangan(btn_konfirmasi, 28, 10, 95)
         # Tombol yang menerbitkan nomor mendapat jatah lebih lebar. Pada
         # layar sentuh, lebar adalah bagian dari seberapa jelas sebuah
         # tombol menawarkan diri untuk ditekan.
         baris_tombol.addWidget(btn_konfirmasi, stretch=3)
+        self._tombol_konfirmasi = (btn_batal, btn_konfirmasi)
 
         # Tombolnya diberi jatah dua kali lipat label di atasnya: keduanya
         # yang benar-benar disentuh, jadi keduanya yang paling berhak atas
         # ruang lebih begitu panel lebih lapang daripada jendela pengembang.
         susunan.addLayout(baris_tombol, stretch=2)
         return halaman
+
+    def _siapkan_huruf_menyusut(
+        self,
+        widget: QWidget,
+        *,
+        dasar: int,
+        tebal: int,
+        renggang: int = 0,
+        tepi: int = TEPI_TULISAN_KONFIRMASI,
+        per_kata: bool = False,
+        ruang=None,
+    ) -> None:
+        """
+        Lebar widget bertulisan sebaris mengikuti panel, bukan tulisannya.
+
+        Gaya yang baru dipasang dijadikan templat yang ukuran hurufnya bisa
+        diganti, dan lebar minimum dari tulisannya diabaikan: widget yang
+        menuntut lebar tulisannya sendiri mendorong seluruh halaman keluar
+        layar totem pada skala Windows 150% ke atas. Yang mengalah adalah
+        hurufnya — lihat `_muatkan_huruf`.
+
+        Dipanggil lagi setiap kali gayanya diganti, sebab templat lama
+        membawa warna lama.
+
+        `per_kata` untuk label yang membungkus: yang harus muat adalah kata
+        terpanjangnya, sebab label yang membungkus tidak bisa memotong satu
+        kata dan lebar kata itulah lebar minimumnya.
+
+        `ruang` untuk label yang membungkus: fungsi yang mengembalikan lebar
+        yang tersedia baginya, dihitung dari susunan di sekitarnya. Lebar
+        labelnya sendiri tidak bisa dipakai. Label yang membungkus meminta
+        lebar sempit; huruf yang disusutkan agar muat di lebar itu membuat
+        permintaannya makin sempit lagi, dan lingkaran itu baru berhenti di
+        batas bawah — nama layanan 16 px pada layar yang lapang. Widget
+        dengan `ruang` tidak disentuh kebijakan lebarnya; lebar minimum dan
+        lebar yang dimintanya diurus pemanggilnya — lihat nama layanan di
+        `_bangun_halaman_konfirmasi`.
+        """
+        templat = widget.styleSheet().replace(
+            f"font-size: {dasar}px", "font-size: @HURUF@px"
+        )
+        sudut = re.search(r"border-radius: (\d+)px", templat)
+        widget.setProperty("sudutDasar", int(sudut.group(1)) if sudut else 0)
+        if sudut:
+            templat = templat.replace(sudut.group(0), "border-radius: @SUDUT@px", 1)
+        widget.setProperty("templatGaya", templat)
+        widget.setProperty("hurufDasar", dasar)
+        widget.setProperty("tebalHuruf", tebal)
+        widget.setProperty("renggangHuruf", renggang)
+        widget.setProperty("tepiTulisan", tepi)
+        widget.setProperty("hurufSekarang", dasar)
+        widget.setProperty("perKata", per_kata)
+        if ruang is None:
+            kebijakan = widget.sizePolicy()
+            kebijakan.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+            widget.setSizePolicy(kebijakan)
+        else:
+            self._ruang_huruf[id(widget)] = ruang
+        widget.installEventFilter(self)
+        if widget not in self._huruf_menyusut:
+            self._huruf_menyusut.append(widget)
+
+    @staticmethod
+    def _lebar_tulisan(metrik: QFontMetrics, widget: QWidget) -> int:
+        """Lebar yang harus muat: seluruh tulisan, atau kata terpanjangnya."""
+        teks = widget.text()
+        if widget.property("perKata"):
+            return max((metrik.horizontalAdvance(kata) for kata in teks.split()), default=0)
+        return metrik.horizontalAdvance(teks)
+
+    def _muatkan_huruf(self, widget: QWidget) -> None:
+        """Pas huruf widget ke ruangnya, lalu perbarui lebar yang dimintanya."""
+        self._pas_huruf(widget)
+        if isinstance(widget, LabelPil):
+            # Lebar yang diminta mengikuti huruf yang baru dipas: permintaan
+            # dari huruf lama membuat labelnya membungkus padahal muat, atau
+            # meminta lebih daripada ruang yang ada.
+            widget.ensurePolished()
+            widget.setel_lebar_sebaris(
+                widget.fontMetrics().horizontalAdvance(widget.text()) + KELONGGARAN_PIL
+            )
+
+    def _tulis_gaya_menyusut(self, widget: QWidget, ukuran: int) -> None:
+        """
+        Tulis gaya dari templatnya: ukuran huruf, dan sudut yang muat.
+
+        Qt tidak menggambar sudut yang lebih besar daripada separuh tinggi
+        widgetnya. Ia jatuh ke gambar tombol bawaan — sudut siku, dan tepi
+        dalam bawaan yang lebih lebar, yang memotong tulisan di kedua
+        ujungnya. Tombol konfirmasi setinggi 46 px pada totem berskala 200%
+        mengalami keduanya dengan sudut 26 px. Sudutnya karena itu dijepit
+        ke separuh tinggi yang sebenarnya, persis seperti kartu layanan.
+
+        Gaya hanya ditulis ulang bila hasilnya memang berbeda: tinggi yang
+        berubah tanpa ukuran huruf ikut berubah tetap memperbarui sudutnya.
+        """
+        widget.setProperty("hurufSekarang", ukuran)
+        gaya = widget.property("templatGaya").replace("@HURUF@", str(ukuran))
+        sudut = int(widget.property("sudutDasar") or 0)
+        if sudut:
+            if widget.height() > 1:
+                sudut = max(0, min(sudut, widget.height() // 2 - 1))
+            gaya = gaya.replace("@SUDUT@", str(sudut))
+        if gaya != widget.styleSheet():
+            widget.setStyleSheet(gaya)
+
+    def _pas_huruf(self, widget: QWidget) -> None:
+        """
+        Kecilkan huruf bila widgetnya lebih sempit daripada tulisannya.
+
+        Pada totem berskala 150%, "BATAL, PILIH LAGI" hanya mendapat sekitar
+        250 px. Huruf yang sedikit lebih kecil masih terbaca; tulisan yang
+        terpotong di kedua ujungnya tidak.
+
+        Jarak antarhuruf ikut dihitung. Judul panel direnggangkan 3 px per
+        huruf, dan pada 24 huruf itu 70 px yang tidak terlihat oleh
+        pengukuran huruf biasa.
+        """
+        dasar = widget.property("hurufDasar")
+        templat = widget.property("templatGaya")
+        if not dasar or not templat:
+            return
+        hitung_ruang = self._ruang_huruf.get(id(widget))
+        if hitung_ruang is not None:
+            ruang = hitung_ruang()
+        elif widget.width() > 1:
+            ruang = widget.width() - 2 * int(widget.property("tepiTulisan") or 0)
+        else:
+            return
+        if ruang <= 0:
+            return
+        font = QFont(widget.font())
+        font.setPixelSize(int(dasar))
+        font.setWeight(QFont.Weight(int(widget.property("tebalHuruf") or 700)))
+        font.setLetterSpacing(
+            QFont.SpacingType.AbsoluteSpacing,
+            float(widget.property("renggangHuruf") or 0),
+        )
+        butuh = self._lebar_tulisan(QFontMetrics(font), widget)
+        ukuran = int(dasar)
+        if butuh > ruang > 0:
+            ukuran = max(HURUF_KONFIRMASI_MIN, int(dasar * ruang / butuh))
+        self._tulis_gaya_menyusut(widget, ukuran)
+        # Taksiran di atas memakai SALINAN huruf. Pembulatan, pantulan
+        # tepi huruf, dan jarak antarhuruf dari stylesheet dapat membuatnya
+        # meleset beberapa piksel — pada huruf cadangan offscreen, judul
+        # panel di skala 200% meleset 12 px. Hasilnya karena itu diperiksa
+        # ulang dengan huruf yang benar-benar terpasang, dan diturunkan satu
+        # piksel demi satu piksel sampai muat atau sampai batas bawahnya.
+        while ukuran > HURUF_KONFIRMASI_MIN:
+            widget.ensurePolished()
+            if self._lebar_tulisan(widget.fontMetrics(), widget) <= ruang:
+                break
+            ukuran -= 1
+            self._tulis_gaya_menyusut(widget, ukuran)
+
+    def _ruang_nama_konfirmasi(self) -> int:
+        """
+        Lebar yang tersedia bagi nama layanan di baris judul konfirmasi.
+
+        Lebar halaman konfirmasi dikurangi tepinya, kotak kode di sebelah
+        nama, dan dua celah baris itu. Tumpukan menata halaman yang sedang
+        tersembunyi dengan ukuran yang sama, jadi angkanya sudah benar
+        sebelum pengunjung menyentuh kartu mana pun.
+        """
+        halaman = getattr(self, "halaman_konfirmasi", None)
+        if halaman is None or halaman.width() <= 1:
+            return 0
+        tepi = halaman.layout().contentsMargins()
+        celah = max(0, self._baris_judul_konfirmasi.spacing())
+        return (
+            halaman.width()
+            - tepi.left()
+            - tepi.right()
+            - SISI_KOTAK_KONFIRMASI
+            - 2 * celah
+        )
 
     def _bangun_halaman_hasil(self) -> QWidget:
         """Kartu nomor di pita tengah totem, setinggi dada, siap difoto."""
@@ -779,17 +1041,30 @@ class KioskPage(QWidget):
         self.papan.tampilkan_info_kios(teks, berkas=berkas)
 
     def _gaya_ajakan(self, *, sukses: bool) -> None:
-        """Judul panel: ajakan biasa, atau kabar nomor yang baru terbit."""
+        """
+        Judul panel: ajakan biasa, atau kabar nomor yang baru terbit.
+
+        Hurufnya boleh menyusut. Judul sebaris ini dahulu penahan terakhir
+        lebar halaman: "AMBIL NOMOR ANTRIAN ANDA" berhuruf 30 px menuntut
+        sekitar 530 px, dan totem pada skala Windows 200% hanya menyisakan
+        476 px di dalam panelnya — halamannya terdorong keluar layar.
+        """
         if sukses:
+            dasar, renggang = 38, 2
             self.label_ajakan.setStyleSheet(
                 f"color: {KIOS_SUKSES}; font-size: 38px; font-weight: 800;"
                 " letter-spacing: 2px;"
             )
         else:
+            dasar, renggang = 30, 3
             self.label_ajakan.setStyleSheet(
                 f"color: {KIOS_JUDUL}; font-size: 30px; font-weight: 800;"
                 " letter-spacing: 3px;"
             )
+        self._siapkan_huruf_menyusut(
+            self.label_ajakan, dasar=dasar, tebal=800, renggang=renggang, tepi=4
+        )
+        self._muatkan_huruf(self.label_ajakan)
 
     def _gaya_petunjuk(self, nada: str) -> None:
         """Warnai pil petunjuk sesuai keadaan yang sedang dilaporkannya."""
@@ -804,18 +1079,19 @@ class KioskPage(QWidget):
         """
         Ganti isi pil petunjuk beserta warnanya.
 
-        Lebar minimumnya dihitung dari kalimatnya sendiri. QLabel yang
+        Lebar sebarisnya dihitung dari kalimatnya sendiri. QLabel yang
         boleh membungkus lebih suka melipat teksnya menjadi kotak hampir
         bujur sangkar daripada memanjang, sehingga tanpa perhitungan ini
         ajakan sesingkat "Sentuh jenis layanan yang Anda butuhkan" pun
-        tampil dua baris di tengah panel yang masih sangat lapang.
+        tampil dua baris di tengah panel yang masih sangat lapang. Lebar
+        itu diminta, bukan dipaksakan — lihat `LabelPil`.
         """
         self.label_petunjuk.setText(teks)
         font = QFont(self.font())
         font.setWeight(QFont.Weight(600))
         font.setPixelSize(UKURAN_PIL)
         lebar = QFontMetrics(font).horizontalAdvance(teks) + 2 * PADDING_PIL + KELONGGARAN_PIL
-        self.label_petunjuk.setMinimumWidth(min(LEBAR_PIL_MAKS, lebar))
+        self.label_petunjuk.setel_lebar_sebaris(min(LEBAR_PIL_MAKS, lebar))
         self._gaya_petunjuk(nada)
 
     # -----------------------------------------------------------------
@@ -1062,20 +1338,26 @@ class KioskPage(QWidget):
         `LEBAR_TOMBOL_MIN` — lima layanan tingkat teratas tetap satu
         baris, karena dua baris di sini memendekkan kartu jadi pita.
 
-        Di dalam kelompok selalu tiga kolom, sama dengan menu utama.
-        Acuan 480 px membuat jendela biasa hanya "muat" dua kolom, lalu
-        enam kartu menjadi 3×2 setinggi 23 px — pil pipih di tengah panel.
+        Di dalam kelompok tiga kolom, sama dengan menu utama — kecuali
+        tiga kolom memang tidak muat. Acuan 480 px membuat jendela biasa
+        hanya "muat" dua kolom, lalu enam kartu menjadi 3×2 setinggi 23 px
+        — pil pipih di tengah panel.
         """
         lebar_area = self.halaman_pilihan.width() - 2 * MARGIN_KISI
         if lebar_area <= 0:
             # Belum pernah ditata; jangan menebak dari angka yang belum ada.
             return KOLOM_BAWAAN
-        if self._jalur:
-            # Selalu tiga kolom, sama dengan menu utama. Acuan 480 px
-            # membuat jendela 1280 hanya "muat" dua kolom, lalu enam kartu
-            # menjadi 3×2 setinggi 23 px — pil pipih di tengah panel.
-            return KOLOM_BAWAAN
         muat = (lebar_area + CELAH_TOMBOL) // (LEBAR_TOMBOL_MIN + CELAH_TOMBOL)
+        if self._jalur:
+            # Tiga kolom, sama dengan menu utama. Acuan 480 px membuat
+            # jendela 1280 hanya "muat" dua kolom, lalu enam kartu menjadi
+            # 3×2 setinggi 23 px — pil pipih di tengah panel.
+            #
+            # Tetapi tidak pernah lebih daripada yang muat. Totem pada skala
+            # Windows 150% hanya selebar 720 px: tiga kartu selebar
+            # minimumnya beserta celahnya menuntut 640 px dari 624 yang ada,
+            # dan kartu ketiga terpotong di tepi kanan layar.
+            return max(1, min(KOLOM_BAWAAN, muat))
         return max(1, min(KOLOM_MAKS, muat))
 
     def _susun_tombol(self) -> None:
@@ -1359,7 +1641,8 @@ class KioskPage(QWidget):
         kanan dan kiri pil.
         """
         wadah = QWidget()
-        wadah.setFixedSize(LEBAR_TOMBOL_KEMBALI, TINGGI_TOMBOL_KEMBALI)
+        # Tinggi saja: lihat catatan baris pil di `_bangun_panel_ambil`.
+        wadah.setFixedHeight(TINGGI_TOMBOL_KEMBALI)
         self._tombol_kembali_cadangan = tombol(f"{TANDA_KEMBALI}  KEMBALI")
         self._tombol_kembali_cadangan.setObjectName("tombolKembaliKios")
         self._tombol_kembali_cadangan.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -1882,6 +2165,10 @@ class KioskPage(QWidget):
                     if not self._kunci_masih_berlaku():
                         self._reset_kunci_ukuran()
                     self._sesuaikan_ukuran_tombol()
+            elif obj in self._huruf_menyusut:
+                self._muatkan_huruf(obj)
+            elif obj is getattr(self, "halaman_konfirmasi", None):
+                self._muatkan_huruf(self.label_konfirmasi_layanan)
             elif obj in self.kartu_kisi:
                 # Kartu submenu di jendela 720p sering lebih pendek dari
                 # TINGGI_TOMBOL_MIN. Melewati pewarnaan di sini membuat
@@ -2024,6 +2311,9 @@ class KioskPage(QWidget):
         self._kategori_terpilih = layanan
         self.label_konfirmasi_kode.setText(layanan.prefix)
         self.label_konfirmasi_layanan.setText(layanan.name)
+        # Nama baru, ukuran huruf baru: lebar labelnya mungkin tidak berubah,
+        # jadi tidak ada resize yang akan memicunya.
+        self._muatkan_huruf(self.label_konfirmasi_layanan)
         self._menunggu_konfirmasi = True
         self._perbarui_tombol_kembali()
         self._set_petunjuk("Pastikan pilihan Anda sudah benar", "konfirmasi")

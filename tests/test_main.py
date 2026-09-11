@@ -184,3 +184,21 @@ def test_sapuan_yang_gagal_tidak_dicoba_ulang_sepanjang_hari(monkeypatch) -> Non
     penyapu.periksa()
 
     assert len(percobaan) == 1
+
+
+def test_jendela_dibaca_dengan_dan_tanpa_persen() -> None:
+    """Tanpa --jendela berarti jendela memilih sendiri, bukan layar penuh."""
+    from app.main import pratinjau_dari_argumen
+
+    assert pratinjau_dari_argumen([]) == (None, None)
+    assert pratinjau_dari_argumen(["--kios-totem"]) == (None, None)
+    assert pratinjau_dari_argumen(["--jendela"]) == (True, None)
+    assert pratinjau_dari_argumen(["--kios-totem", "--jendela=40"]) == (True, 40)
+    assert pratinjau_dari_argumen(["--jendela=45%"]) == (True, 45)
+
+
+def test_persen_jendela_rusak_tidak_menggagalkan_peluncuran() -> None:
+    """Salah ketik di pintasan tetap membuka pratinjau, dengan ukuran bawaan."""
+    from app.main import pratinjau_dari_argumen
+
+    assert pratinjau_dari_argumen(["--jendela=empat puluh"]) == (True, None)

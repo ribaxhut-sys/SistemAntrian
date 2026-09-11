@@ -575,7 +575,7 @@ def test_totem_sungguhan_tidak_terkunci_setelah_esc(
 
     auth.logout()
     auth.mulai_sesi_kios()
-    jendela = MainWindow(auth, anjungan_totem=True)
+    jendela = MainWindow(auth, anjungan_totem=True, berjendela=False)
     qtbot.addWidget(jendela)
     halaman = jendela.halaman.currentWidget()
     assert isinstance(halaman, KioskPage)
@@ -592,6 +592,358 @@ def test_totem_sungguhan_tidak_terkunci_setelah_esc(
     jendela.keluar_layar_penuh()
 
     assert jendela.minimumSize() != jendela.maximumSize()
+
+
+def _jendela_pratinjau_totem(qtbot, auth):
+    """Jendela pratinjau totem `--jendela`, beserta halaman anjungannya."""
+    from app.ui.main_window import MainWindow
+
+    auth.logout()
+    auth.mulai_sesi_kios()
+    jendela = MainWindow(auth, anjungan_totem=True, berjendela=True)
+    qtbot.addWidget(jendela)
+    wadah = jendela.halaman.currentWidget()
+    halaman = wadah.isi
+    halaman.papan.hentikan()
+    halaman._penghitung.stop()
+    halaman._pemeriksa_layanan.stop()
+    return jendela, wadah, halaman
+
+
+def test_pratinjau_totem_mematikan_efek_grafis(qtbot, auth, antrian_siap):
+    """
+    Efek grafis tidak tergambar di dalam QGraphicsProxyWidget.
+
+    Kartu layanan yang berbayangan hilang sama sekali dari pratinjau, dan
+    pratinjau tanpa kartu layanan tidak bisa menyimulasikan apa pun. Kartu
+    yang dibangun ulang setelah pindah menu juga harus ikut padam.
+    """
+    from PySide6.QtWidgets import QWidget
+
+    _jendela, _wadah, halaman = _jendela_pratinjau_totem(qtbot, auth)
+
+    berefek = [w for w in halaman.findChildren(QWidget) if w.graphicsEffect() is not None]
+    assert berefek, "tidak ada efek yang diperiksa — uji ini akan lulus kosong"
+    assert not any(w.graphicsEffect().isEnabled() for w in berefek)
+
+    halaman._susun_tombol()
+    assert halaman.kartu_kisi
+    assert not any(
+        kartu.graphicsEffect() is not None and kartu.graphicsEffect().isEnabled()
+        for kartu in halaman.kartu_kisi
+    )
+
+
+def test_pratinjau_totem_benar_benar_menggambar_kartu(qtbot, auth, antrian_siap):
+    """
+    Yang diuji adalah piksel, bukan keberadaan widget.
+
+    Kartu yang hilang dari pratinjau tetap ada, tetap terlihat, dan tetap
+    berukuran 294x260 menurut Qt — hanya tidak tergambar. Satu-satunya
+    bukti yang jujur adalah warna di tempat kartu itu seharusnya berada.
+    """
+    from PySide6.QtCore import QPoint, QPointF
+
+    jendela, wadah, halaman = _jendela_pratinjau_totem(qtbot, auth)
+    jendela.tampilkan()
+    qtbot.waitExposed(jendela)
+    qtbot.wait(300)
+
+    gambar = wadah.viewport().grab().toImage()
+    rasio = gambar.devicePixelRatio()
+    for kartu in halaman.kartu_kisi:
+        # Di atas tulisan kartu, bukan di tengahnya: yang dicari latar
+        # kartunya, dan tulisan putih di tengah kartu terbaca terang.
+        titik = kartu.mapTo(halaman, QPoint(kartu.width() // 2, 18))
+        di_layar = wadah.mapFromScene(QPointF(titik))
+        warna = gambar.pixelColor(round(di_layar.x() * rasio), round(di_layar.y() * rasio))
+        assert warna.lightness() < 200, (
+            f"kartu {kartu.objectName()} tidak tergambar; warna di tempatnya {warna.name()}"
+        )
+
+
+def _label_dijaga(halaman) -> list:
+    """
+    Label sebaris yang punya penjaga lebar: judul panel, judul papan, dan
+    kepala kartu loket di pita.
+
+    Hanya label-label ini yang diperiksa. Label lain tidak punya penjaga
+    — cukup lebar pada huruf Windows sampai skala 200% — dan platform uji
+    offscreen memakai huruf cadangan yang jauh lebih lebar daripada huruf
+    yang pernah dilihat pengunjung. Menuntut semuanya muat di sini hanya
+    mengukur huruf cadangan itu.
+    """
+    dijaga = [halaman.label_ajakan, halaman.papan.label_judul]
+    for kartu in halaman.pita_loket.kartu_loket:
+        dijaga += [kartu.label_nama, kartu.label_status]
+    return dijaga
+
+
+def _label_terpotong_tanpa_alasan(halaman) -> list:
+    """
+    Label dijaga yang terpotong padahal penjaganya masih punya ruang.
+
+    Setiap penjaga boleh kalah hanya di batas bawahnya: judul panel pada
+    16 px, judul papan pada 10 px, dan kepala kartu loket pada skala pita
+    terkecil. Di sana huruf cadangan offscreen pada 150% masih menuntut
+    sekitar 9% lebih lebar daripada yang ada — sedangkan dengan huruf
+    Windows yang dilihat pengunjung, pita tetap utuh sampai skala 200%.
+
+    Aturan ini tidak bergantung pada huruf, dan tetap menangkap pita yang
+    lupa menyusut: kepala kartu yang terpotong pada skala 1,15 bukan
+    batas huruf, melainkan penjaga yang tidak bekerja.
+    """
+    from app.ui.kiosk.pita_loket import SKALA_PITA_MIN
+
+    from app.ui.kiosk.kiosk_page import HURUF_KONFIRMASI_MIN
+
+    di_batas: set[int] = set()
+    for kartu in halaman.pita_loket.kartu_loket:
+        if kartu.skala <= SKALA_PITA_MIN + 0.01:
+            di_batas.update({id(kartu.label_nama), id(kartu.label_status)})
+    if halaman.label_ajakan.property("hurufSekarang") == HURUF_KONFIRMASI_MIN:
+        di_batas.add(id(halaman.label_ajakan))
+    if halaman.papan._ukuran_judul <= 10:
+        di_batas.add(id(halaman.papan.label_judul))
+    return _label_terpotong(
+        [label for label in _label_dijaga(halaman) if id(label) not in di_batas]
+    )
+
+
+def _label_terpotong(labels) -> list:
+    """Label sebaris yang tampak lebih sempit atau pendek daripada isinya."""
+    hasil = []
+    for label in labels:
+        if not label.isVisible() or not label.text() or label.wordWrap():
+            continue
+        butuh = label.sizeHint()
+        if label.width() + 1 < butuh.width() or label.height() + 1 < butuh.height():
+            hasil.append((label.text()[:24], label.size().toTuple(), butuh.toTuple()))
+    return hasil
+
+
+@pytest.mark.parametrize(
+    "skala,lebar,tinggi",
+    [(100, 1080, 1920), (125, 864, 1536), (150, 720, 1280), (200, 540, 960)],
+)
+def test_totem_muat_di_setiap_skala_windows(
+    qtbot, halaman_totem, antrian_siap, skala, lebar, tinggi
+):
+    """
+    Skala Windows tidak boleh mendorong totem keluar layarnya sendiri.
+
+    Kaca 1080×1920 pada skala 125%, 150%, dan 200% terbaca oleh aplikasi
+    sebagai 864×1536, 720×1280, dan 540×960. Dahulu halaman totem menolak
+    lebih sempit
+    daripada 951 px — tiga kartu berukuran tetap beserta celahnya, dan
+    baris pil yang memesan 472 px untuk dua wadah kosong — sehingga tepi
+    kanan dan kartu Loket 3 terpotong keluar layar.
+    """
+    from PySide6.QtCore import Qt
+
+    import re
+
+    from app.ui.kiosk.kiosk_page import (
+        ARAHAN_CETAK,
+        CETAK_GAGAL,
+        HURUF_KONFIRMASI_MIN,
+        TEPI_TULISAN_KONFIRMASI,
+    )
+
+    halaman = halaman_totem
+    halaman.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    halaman.resize(lebar, tinggi)
+    halaman.show()
+    for _ in range(3):
+        QApplication.processEvents()
+
+    assert halaman.width() == lebar, f"{skala}%: halaman menolak menyempit"
+    kanan = halaman.halaman_pilihan.width()
+    for kartu in halaman.kartu_kisi:
+        assert kartu.geometry().right() <= kanan, (skala, kartu.geometry().getRect(), kanan)
+    assert _label_terpotong_tanpa_alasan(halaman) == []
+
+    # Layar konfirmasi: dua tombol bertulisan besar berdampingan.
+    halaman.tombol_layanan[1].click()
+    for _ in range(3):
+        QApplication.processEvents()
+    assert halaman.width() == lebar, f"{skala}%: layar konfirmasi melebarkan halaman"
+    assert halaman._tombol_konfirmasi
+    for tombol in halaman._tombol_konfirmasi:
+        tombol.ensurePolished()
+        # Tulisan harus muat di dalam tepinya, bukan di lebar penuh: di
+        # lebar penuh ia menempel pada bingkai dan lengkung sudut tombol.
+        muat = (
+            tombol.fontMetrics().horizontalAdvance(tombol.text())
+            + 2 * TEPI_TULISAN_KONFIRMASI
+            <= tombol.width()
+        )
+        # Seperti kepala kartu loket: huruf yang sudah di batas bawahnya
+        # boleh tidak muat. Huruf cadangan offscreen pada 16 px masih
+        # menuntut 272 px untuk "BATAL, PILIH LAGI" dari 247 yang ada;
+        # dengan huruf Windows, tulisannya muat di atas batas itu.
+        di_batas = tombol.property("hurufSekarang") == HURUF_KONFIRMASI_MIN
+        assert muat or di_batas, (skala, tombol.text(), tombol.width())
+        # Sudut yang lebih besar daripada separuh tinggi membuat Qt jatuh ke
+        # gambar tombol bawaan: sudut siku, dan tepi dalam yang memotong
+        # tulisan. Pernah terjadi pada tombol setinggi 46 px di skala 200%.
+        sudut = re.search(r"border-radius: (\d+)px", tombol.styleSheet())
+        assert sudut is None or 2 * int(sudut.group(1)) < tombol.height(), (
+            skala, tombol.text(), tombol.height(), sudut.group(1)
+        )
+
+    # Nama layanan: kata terpanjangnya terlihat utuh, dan hurufnya tidak
+    # menyusut tanpa alasan. Pernah lingkaran umpan balik — label sempit,
+    # huruf disusutkan, label makin sempit — membuatnya 16 px di layar
+    # 1080 px yang sangat lapang.
+    nama = halaman.label_konfirmasi_layanan
+    kata = max(nama.text().split(), key=nama.fontMetrics().horizontalAdvance)
+    assert nama.fontMetrics().horizontalAdvance(kata) <= nama.width() or (
+        nama.property("hurufSekarang") == HURUF_KONFIRMASI_MIN
+    ), (skala, kata, nama.width())
+    if skala == 100:
+        assert nama.property("hurufSekarang") == 54, nama.property("hurufSekarang")
+    halaman._batal_konfirmasi()
+
+    # Pesan pil terpanjang, saat tiket gagal dicetak.
+    halaman._set_petunjuk(ARAHAN_CETAK[CETAK_GAGAL], "gagal")
+    for _ in range(3):
+        QApplication.processEvents()
+    assert halaman.width() == lebar, f"{skala}%: pil panjang melebarkan halaman"
+    assert halaman.label_petunjuk.geometry().right() <= halaman.panel_ambil.width()
+
+
+def test_pil_petunjuk_tetap_sebaris_di_panel_lapang(qtbot, bikin_halaman_kios):
+    """Lebar sebaris kini diminta, bukan dipaksakan — tetapi tetap didapat."""
+    halaman = bikin_halaman_kios(3, lebar=1920, tinggi=1080)
+    QApplication.processEvents()
+    pil = halaman.label_petunjuk
+
+    satu_baris = pil.fontMetrics().lineSpacing()
+    assert pil.contentsRect().height() < 2 * satu_baris, (pil.text(), pil.size().toTuple())
+
+
+def test_totem_otomatis_tegak_di_layar_mendatar(qtbot, auth, antrian_siap, monkeypatch):
+    """
+    Totem yang dibuka di laptop tidak boleh terbentang mendatar.
+
+    Dialog pilihan tidak bisa menulis --jendela. Memilih ANJUNGAN BERDIRI
+    di laptop dahulu selalu membuka layar penuh mendatar, dan ketiga
+    pitanya menjadi pita pipih yang tidak mirip mesin sungguhannya.
+    """
+    from app.ui.kiosk.pratinjau import PratinjauTotem
+    from app.ui.main_window import MainWindow
+
+    monkeypatch.setattr("app.ui.main_window.layar_mendatar", lambda area: True)
+    auth.logout()
+    auth.mulai_sesi_kios()
+    jendela = MainWindow(auth, anjungan_totem=True)
+    qtbot.addWidget(jendela)
+    wadah = jendela.halaman.currentWidget()
+    assert isinstance(wadah, PratinjauTotem)
+    wadah.isi.papan.hentikan()
+    wadah.isi._penghitung.stop()
+
+    assert jendela.berjendela is True
+    assert jendela._geometri_normal.height() > jendela._geometri_normal.width()
+
+
+def test_totem_di_layar_tegak_tetap_layar_penuh(qtbot, auth, antrian_siap, monkeypatch):
+    """Totem sungguhan berdiri tegak: pengenalan otomatis tidak menyentuhnya."""
+    from app.ui.kiosk.kiosk_page import KioskPage
+    from app.ui.main_window import MainWindow
+
+    monkeypatch.setattr("app.ui.main_window.layar_mendatar", lambda area: False)
+    auth.logout()
+    auth.mulai_sesi_kios()
+    jendela = MainWindow(auth, anjungan_totem=True)
+    qtbot.addWidget(jendela)
+    halaman = jendela.halaman.currentWidget()
+    assert isinstance(halaman, KioskPage)
+    halaman.papan.hentikan()
+    halaman._penghitung.stop()
+
+    assert jendela.berjendela is False
+
+
+def test_anjungan_biasa_tidak_ikut_berjendela_otomatis(
+    qtbot, auth, antrian_siap, monkeypatch
+):
+    """Layar anjungan biasa memang mendatar; ia tetap layar penuh."""
+    from app.ui.main_window import MainWindow
+
+    monkeypatch.setattr("app.ui.main_window.layar_mendatar", lambda area: True)
+    auth.logout()
+    auth.mulai_sesi_kios()
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+    halaman = jendela.halaman.currentWidget()
+    halaman.papan.hentikan()
+    halaman._penghitung.stop()
+
+    assert jendela.berjendela is False
+
+
+def test_persen_pratinjau_dijepit_ke_yang_muat():
+    """
+    `--jendela=PERSEN` dipakai apa adanya selama masih muat di layar.
+
+    Laptop 14 inci berskala 150% memberi ruang 1707×1019: di sana 50%
+    sudah yang terbesar. Permintaan yang lebih besar tetap diberi yang
+    muat, supaya pita loket di bawah tidak terpotong keluar layar.
+    """
+    from PySide6.QtCore import QRect
+
+    from app.ui.kiosk.pratinjau import layar_mendatar, skala_pratinjau_totem
+
+    laptop = QRect(0, 0, 1707, 1019)
+    muat = skala_pratinjau_totem(laptop)
+
+    assert 0.45 < muat <= 0.5
+    assert skala_pratinjau_totem(laptop, 40) == pytest.approx(0.40)
+    assert skala_pratinjau_totem(laptop, 45) == pytest.approx(0.45)
+    assert skala_pratinjau_totem(laptop, 80) == pytest.approx(muat)
+    # Terlalu kecil untuk dibaca: dijepit ke 25%.
+    assert skala_pratinjau_totem(laptop, 10) == pytest.approx(0.25)
+    # Monitor besar boleh melewati 50% bila memang diminta dan muat.
+    assert skala_pratinjau_totem(QRect(0, 0, 2560, 1440), 60) == pytest.approx(0.60)
+
+    assert layar_mendatar(laptop)
+    assert not layar_mendatar(QRect(0, 0, 1080, 1920))
+
+
+def test_anjungan_biasa_tetap_berbayangan(halaman_kios):
+    """Sakelar pratinjau tidak boleh merampas bayangan anjungan sungguhan."""
+    assert halaman_kios.kartu_kisi
+    assert all(
+        kartu.graphicsEffect() is not None and kartu.graphicsEffect().isEnabled()
+        for kartu in halaman_kios.kartu_kisi
+    )
+
+
+def test_pita_loket_tidak_memotong_nama_dan_status(qtbot, halaman_totem, antrian_siap):
+    """
+    "LOKET 1" tidak boleh tampil sebagai "LOKET".
+
+    Skala huruf pita dahulu hanya mengikuti tinggi. Pada totem 1080x1920
+    nama loket butuh 160 px dari 131 px yang tersedia, dan angkanya — satu-
+    satunya bagian yang membedakan loket yang satu dari yang lain — hilang.
+    """
+    halaman = halaman_totem
+    halaman.resize(1080, 1920)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    halaman.papan.muat_ulang()
+    QApplication.processEvents()
+
+    pita = halaman.pita_loket
+    assert pita.kartu_loket
+    for kartu in pita.kartu_loket:
+        kartu.layout().activate()
+        for label in (kartu.label_nama, kartu.label_status):
+            assert label.width() >= label.sizeHint().width(), (
+                label.text(), label.width(), label.sizeHint().width()
+            )
 
 
 def test_panel_ambil_tidak_menyimpan_ruang_yang_tidak_dipakainya(qtbot, halaman_kios):

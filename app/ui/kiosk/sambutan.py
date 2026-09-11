@@ -45,6 +45,7 @@ from app.core.config import base_dir
 from app.core.logger import get_logger
 from app.services.settings_service import SettingsService
 from app.ui.display.tema import Palet
+from app.ui.efek import efek_grafis_aktif, pasang_efek
 
 logger = get_logger("ui.kiosk.sambutan")
 
@@ -467,7 +468,7 @@ class PanelSambutanKios(QFrame):
         # Pudar hanya pada label teks. QVideoWidget adalah jendela native:
         # QGraphicsOpacityEffect pada tumpukan membuat videonya hitam.
         self._efek = QGraphicsOpacityEffect(self.label_teks)
-        self.label_teks.setGraphicsEffect(self._efek)
+        pasang_efek(self.label_teks, self._efek)
 
         # muat_pengaturan() dipanggil DisplayPage SETELAH bayangan dipasang
         # pada panel ini. Memuat video di sini, sebelum bayangan ada,
@@ -1137,7 +1138,11 @@ class PanelSambutanKios(QFrame):
         if efek is None:
             return
         try:
-            efek.setEnabled(True)
+            # Pratinjau totem mematikan seluruh efek grafis — lihat
+            # app/ui/efek.py. Memulihkan bayangan ke True di sini akan
+            # menyalakannya lagi, dan panel informasinya kembali salah
+            # gambar begitu video pertama selesai diputar.
+            efek.setEnabled(efek_grafis_aktif())
         except RuntimeError:
             # Efeknya sudah dihapus Qt (mis. diganti dari luar panel ini).
             # Bukan alasan untuk menggagalkan pergantian item.

@@ -26,10 +26,33 @@ TINGGI_TOTEM_ASLI = 1920
 #: 1080p dan masih bisa diklik. Pratinjau memakai 50%, atau lebih kecil
 #: bila layarnya tidak muat.
 SKALA_PRATINJAU_MAKS = 0.5
+#: Batas persentase yang boleh diminta lewat `--jendela=PERSEN`. Di bawah
+#: 25% tulisan pil dan nama loket tidak lagi terbaca sama sekali.
+PERSEN_PRATINJAU_MIN = 25
+PERSEN_PRATINJAU_MAKS = 100
 
 
-def skala_pratinjau_totem(area: QRect) -> float:
-    """Skala yang membuat 1080×1920 muat di area kerja, paling besar 50%."""
+def layar_mendatar(area: QRect) -> bool:
+    """
+    True bila area kerja lebih lebar daripada tingginya.
+
+    Kaca totem selalu berdiri tegak. Totem yang dibuka layar penuh di layar
+    mendatar — laptop, monitor meja — membentangkan ketiga pitanya menjadi
+    pita pipih yang sama sekali tidak mirip mesin sungguhannya.
+    """
+    return area.width() > area.height()
+
+
+def skala_pratinjau_totem(area: QRect, persen: int | None = None) -> float:
+    """
+    Skala yang membuat 1080×1920 muat di area kerja.
+
+    Tanpa `persen`: sebesar yang muat, paling besar 50%. Dengan `persen`
+    (`--jendela=40`): sebesar yang diminta, dijepit 25–100%, tetapi tetap
+    tidak pernah melebihi yang muat. Jendela yang lebih tinggi daripada
+    layarnya memotong pita loket di bawah — justru pita yang paling sering
+    dicari saat menguji alur ambil nomor sampai dipanggil.
+    """
     tepi = 32
     sisa = area.adjusted(tepi, tepi, -tepi, -tepi)
     if sisa.width() < 100 or sisa.height() < 100:
@@ -39,12 +62,16 @@ def skala_pratinjau_totem(area: QRect) -> float:
         sisa.height() / TINGGI_TOTEM_ASLI,
         1.0,
     )
-    return min(muat, SKALA_PRATINJAU_MAKS)
+    if persen is None:
+        batas = SKALA_PRATINJAU_MAKS
+    else:
+        batas = min(max(persen, PERSEN_PRATINJAU_MIN), PERSEN_PRATINJAU_MAKS) / 100
+    return min(muat, batas)
 
 
-def ukuran_jendela_totem(area: QRect) -> QRect:
+def ukuran_jendela_totem(area: QRect, persen: int | None = None) -> QRect:
     """Jendela tegak sebesar kaca totem yang sudah diskalakan."""
-    skala = skala_pratinjau_totem(area)
+    skala = skala_pratinjau_totem(area, persen)
     lebar = max(1, round(LEBAR_TOTEM_ASLI * skala))
     tinggi = max(1, round(TINGGI_TOTEM_ASLI * skala))
     kiri = area.x() + (area.width() - lebar) // 2

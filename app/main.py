@@ -23,9 +23,15 @@ Argumen:
                   petugas CRO tanpa sandi; pada .exe tetap minta login.
     --init-only   hanya siapkan database lalu keluar, tanpa membuka jendela.
                   Berguna untuk memeriksa pemasangan di komputer baru.
-    --jendela     buka mesin publik sebagai jendela, bukan layar penuh.
-                  Totem ditampilkan sebagai miniatur 50% dari 1080×1920
-                  (bukan 30%: itu terlalu kecil untuk dibaca).
+    --jendela[=PERSEN]
+                  buka mesin publik sebagai jendela, bukan layar penuh.
+                  Totem tampil sebagai miniatur tegak dari 1080×1920:
+                  sebesar yang muat di layar, paling besar 50%, atau
+                  sebesar PERSEN yang diminta (mis. --jendela=40, supaya
+                  layar antrian muat di sebelahnya) — tetapi tidak pernah
+                  melebihi yang muat. Totem yang dibuka di layar mendatar
+                  (laptop) otomatis tampil begini, juga bila dipilih lewat
+                  dialog pilihan yang tidak bisa menulis argumen ini.
 
 Kedua mesin publik dipasang dengan argumennya masing-masing supaya pulih
 sendiri setelah mati listrik, tanpa perlu ada yang mengklik apa pun.
@@ -182,7 +188,12 @@ def _laporkan_kegagalan_database(config, *, berjendela: bool) -> None:
         logger.exception("Pesan kegagalan database tidak dapat ditampilkan")
 
 
-def _jalankan_ui(*, mode_awal: str | None = None, berjendela: bool = False) -> int:
+def _jalankan_ui(
+    *,
+    mode_awal: str | None = None,
+    berjendela: bool | None = None,
+    persen_jendela: int | None = None,
+) -> int:
     """
     Buka aplikasi berjendela. Import Qt ditunda sampai benar-benar dipakai.
 
@@ -255,6 +266,7 @@ def _jalankan_ui(*, mode_awal: str | None = None, berjendela: bool = False) -> i
                 auth,
                 anjungan_totem=mode == ANJUNGAN_TOTEM,
                 berjendela=berjendela,
+                persen_pratinjau=persen_jendela,
             )
             jendela.tampilkan()
             app.exec()
@@ -329,6 +341,34 @@ def mode_dari_argumen(argv: list[str]) -> str | None:
     return None
 
 
+def pratinjau_dari_argumen(argv: list[str]) -> tuple[bool | None, int | None]:
+    """
+    Baca `--jendela` dan `--jendela=PERSEN`: (berjendela, persen).
+
+    `berjendela` None berarti argumennya tidak ditulis, dan jendela memilih
+    sendiri — totem yang dibuka di layar mendatar otomatis tampil sebagai
+    pratinjau tegak (lihat MainWindow). Persen yang tidak terbaca diabaikan
+    dengan peringatan, bukan menggagalkan peluncuran: salah ketik di
+    pintasan tidak boleh berakhir sebagai layar yang tidak mau terbuka.
+    """
+    berjendela: bool | None = None
+    persen: int | None = None
+    for arg in argv:
+        if arg == "--jendela":
+            berjendela = True
+        elif arg.startswith("--jendela="):
+            berjendela = True
+            nilai = arg.split("=", 1)[1].strip().rstrip("%").strip()
+            try:
+                persen = int(nilai)
+            except ValueError:
+                logger.warning(
+                    "Persentase %r pada --jendela tidak terbaca; memakai bawaan",
+                    nilai,
+                )
+    return berjendela, persen
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     hanya_init = "--init-only" in argv
@@ -369,9 +409,11 @@ def main(argv: list[str] | None = None) -> int:
         # Import Qt ditunda sampai jendela benar-benar dibuka, sehingga mode
         # dibaca di sini dan bukan di awal main(): --init-only harus tetap
         # berjalan di komputer yang PySide6-nya belum lengkap.
+        berjendela, persen_jendela = pratinjau_dari_argumen(argv)
         return _jalankan_ui(
             mode_awal=mode_dari_argumen(argv),
-            berjendela="--jendela" in argv,
+            berjendela=berjendela,
+            persen_jendela=persen_jendela,
         )
     except Exception:
         logger.exception("Kesalahan tak terduga pada aplikasi")
