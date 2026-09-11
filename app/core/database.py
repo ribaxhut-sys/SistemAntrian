@@ -75,6 +75,10 @@ def create_engine(config: AppConfig | None = None) -> Engine:
         pool_pre_ping=True,
         # Loket yang menganggur tidak perlu menggenggam koneksi semalaman.
         pool_recycle=1800,
+        # TCP ke host yang mati bisa menahan puluhan detik. Tiga detik
+        # cukup membedakan "server belum nyala" dari jaringan yang lambat,
+        # dan membuat uji koneksi di bilah status tidak menggantung.
+        connect_args={"connect_timeout": 3},
     )
 
 
@@ -83,7 +87,7 @@ def get_engine() -> Engine:
     global _engine
     if _engine is None:
         _engine = create_engine()
-        logger.info("Engine database dibuat: %s", get_config().db_path)
+        logger.info("Engine database dibuat: %s", get_config().teks_lokasi)
     return _engine
 
 
@@ -162,3 +166,22 @@ def init_database() -> Engine:
     upgrade_to_head()
     logger.info("Database siap digunakan")
     return engine
+
+
+def periksa_koneksi(engine: Engine | None = None) -> bool:
+    """
+    True bila database merespons SELECT 1.
+
+    Kegagalan dicatat di log, bukan diangkat ke pemanggil. Petugas hanya
+    perlu tahu server terjangkau atau tidak; traceback tetap tidak boleh
+    tampil di UI. Tidak pernah berpindah dialect — PostgreSQL yang mati
+    tetap PostgreSQL yang mati, bukan alasan membuka berkas SQLite lokal.
+    """
+    try:
+        mesin = engine or get_engine()
+        with mesin.connect() as conn:
+            conn.execute(sa.text("SELECT 1"))
+        return True
+    except Exception:
+        logger.exception("Database tidak terjangkau")
+        return False

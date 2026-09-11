@@ -181,6 +181,25 @@ class AppConfig:
     def memakai_sqlite(self) -> bool:
         return self.dialect == "sqlite"
 
+    @property
+    def teks_lokasi(self) -> str:
+        """
+        Lokasi database untuk ditampilkan ke petugas.
+
+        Kata sandi tidak pernah ikut: bilah status terbaca siapa saja yang
+        berdiri di dekat meja loket. Untuk PostgreSQL yang ditunjuk adalah
+        host server, bukan berkas SQLite lokal yang memang tidak dipakai.
+        """
+        if self.memakai_sqlite:
+            return str(self.db_path)
+        url = self.url_database
+        host = url.host or "localhost"
+        port = url.port or 5432
+        tujuan = f"{host}:{port}"
+        if url.database:
+            tujuan = f"{tujuan}/{url.database}"
+        return f"PostgreSQL @ {tujuan}"
+
     def ensure_directories(self) -> None:
         """Buat folder yang dibutuhkan bila belum ada."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -218,3 +237,22 @@ def reset_config() -> None:
     """Paksa konfigurasi dibaca ulang. Dipakai oleh test dan fitur restore."""
     global _config
     _config = None
+
+
+def teks_status_database(terhubung: bool, config: AppConfig | None = None) -> str:
+    """
+    Satu baris untuk bilah status: lokasi, plus apakah server terjangkau.
+
+    Aplikasi tidak pernah jatuh ke SQLite lokal hanya karena PostgreSQL
+    sedang mati — split-brain lebih berbahaya daripada loket yang berhenti
+    sejenak. Karena itu status "tidak terjangkau" tetap menunjuk server
+    yang sama, bukan path berkas cadangan.
+    """
+    cfg = config or get_config()
+    if terhubung:
+        return f"Database: {cfg.teks_lokasi}"
+    if cfg.memakai_sqlite:
+        return f"Database tidak terjangkau ({cfg.teks_lokasi})"
+    return (
+        f"Database tidak terjangkau ({cfg.teks_lokasi}) — cek komputer server"
+    )

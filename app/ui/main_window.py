@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QRect, Qt, Signal
+from PySide6.QtCore import QRect, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import APP_NAME, get_config
+from app.core.config import APP_NAME, get_config, teks_status_database
 from app.core.logger import get_logger
 from app.services.auth_service import AuthService
 from app.services.backup_service import BackupService
@@ -55,6 +55,7 @@ from app.ui.settings.backup_page import BackupPage
 from app.ui.settings.close_day_page import CloseDayPage
 from app.ui.settings.master_data_page import MasterDataPage
 from app.ui.settings.settings_page import SettingsPage
+from app.ui.style import DANGER
 from app.ui.survey.survey_page import SurveyPage
 
 logger = get_logger("ui.main")
@@ -66,6 +67,29 @@ def _area_layar_utama() -> QRect:
     """Area kerja layar utama, atau 1280×720 bila Qt belum mengenal layar apa pun."""
     layar = QApplication.primaryScreen()
     return layar.availableGeometry() if layar is not None else QRect(0, 0, 1280, 720)
+
+#: Selang uji koneksi di bilah status, dalam milidetik.
+#:
+#: Cukup jarang agar SELECT 1 dari tiap loket tidak menjadi beban, cukup
+#: rapat agar petugas melihat server mati tanpa harus menekan F5.
+SELANG_PERIKSA_KONEKSI_MS = 10_000
+
+
+class _PemeriksaKoneksi(QThread):
+    """
+    SELECT 1 di utas sendiri.
+
+    Bila komputer server mati, percobaan TCP bisa menahan beberapa detik
+    meski connect_timeout sudah dipasang. Dijalankan di sini supaya meja
+    loket tetap dapat diklik selama pemeriksaan.
+    """
+
+    selesai = Signal(bool)
+
+    def run(self) -> None:
+        from app.core.database import periksa_koneksi
+
+        self.selesai.emit(periksa_koneksi())
 
 
 @dataclass(frozen=True)
@@ -348,11 +372,11 @@ class MainWindow(QMainWindow):
 
         self._susun_menu()
 
-        # Bilah status memuat lokasi lengkap file database. Tidak ada
-        # alasan pengunjung perlu mengetahuinya.
+        # Bilah status memuat lokasi database. Tidak ada alasan pengunjung
+        # perlu mengetahuinya, dan path/host itu tidak boleh tampil di
+        # anjungan maupun televisi.
         if not self.mode_kios:
-            config = get_config()
-            self.statusBar().showMessage(f"Database: {config.db_path}")
+            self._pasang_bilah_database()
 
     def _bangun_kepala(self) -> QWidget:
         kepala = QFrame()
@@ -648,6 +672,56 @@ class MainWindow(QMainWindow):
         if baris >= 0:
             self.halaman.setCurrentIndex(baris)
 
+    def _pasang_bilah_database(self) -> None:
+        """
+        Widget tetap di kanan bilah status, supaya F5 tidak menghapusnya.
+
+        showMessage("Data dimuat ulang.") bersifat sementara; widget biasa
+        ikut tersembunyi, sedangkan permanent widget tetap terlihat. Itulah
+        yang dibutuhkan petugas: lokasi server tidak boleh hilang hanya
+        karena ia menyegarkan daftar antrian.
+        """
+        self._label_database = QLabel()
+        self._label_database.setObjectName("statusDatabase")
+        self._label_database.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.statusBar().addPermanentWidget(self._label_database)
+        self._sedang_memeriksa_db = False
+        self._pemeriksa_db: _PemeriksaKoneksi | None = None
+        # Jendela ini hanya terbuka setelah siapkan_database() berhasil,
+        # jadi status awal "terhubung" akurat tanpa menunggu SELECT 1.
+        self._tampilkan_status_database(True)
+        self._pewaktu_db = QTimer(self)
+        self._pewaktu_db.setInterval(SELANG_PERIKSA_KONEKSI_MS)
+        self._pewaktu_db.timeout.connect(self._jadwalkan_periksa_database)
+        self._pewaktu_db.start()
+
+    def _jadwalkan_periksa_database(self) -> None:
+        """Mulai SELECT 1 di utas sendiri, atau lewati bila yang lalu belum selesai."""
+        if self.mode_kios or self._sedang_memeriksa_db:
+            return
+        self._sedang_memeriksa_db = True
+        pemeriksa = _PemeriksaKoneksi(self)
+        pemeriksa.selesai.connect(self._tampilkan_status_database)
+        pemeriksa.finished.connect(self._selesai_periksa_database)
+        pemeriksa.start()
+        self._pemeriksa_db = pemeriksa
+
+    def _selesai_periksa_database(self) -> None:
+        self._sedang_memeriksa_db = False
+        pemeriksa = self._pemeriksa_db
+        self._pemeriksa_db = None
+        if pemeriksa is not None:
+            pemeriksa.deleteLater()
+
+    def _tampilkan_status_database(self, terhubung: bool) -> None:
+        label = getattr(self, "_label_database", None)
+        if label is None:
+            return
+        label.setText(teks_status_database(terhubung=terhubung))
+        label.setStyleSheet("" if terhubung else f"color: {DANGER};")
+
     def muat_ulang_halaman(self) -> None:
         halaman = self.halaman.currentWidget()
         if isinstance(halaman, PratinjauTotem):
@@ -659,6 +733,7 @@ class MainWindow(QMainWindow):
             # sengaja tidak dibangun pada mode kios.
             if not self.mode_kios:
                 self.statusBar().showMessage("Data dimuat ulang.", 2000)
+                self._jadwalkan_periksa_database()
 
     def ganti_kata_sandi(self) -> None:
         ChangePasswordDialog(self.auth, self).exec()
@@ -680,6 +755,20 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 - nama dari Qt
         """Pastikan sesi berakhir walau jendela ditutup lewat tombol silang."""
+        pewaktu = getattr(self, "_pewaktu_db", None)
+        if pewaktu is not None:
+            pewaktu.stop()
+        pemeriksa = getattr(self, "_pemeriksa_db", None)
+        if pemeriksa is not None:
+            try:
+                pemeriksa.selesai.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            try:
+                if pemeriksa.isRunning():
+                    pemeriksa.wait(400)
+            except RuntimeError:
+                pass
         if self.auth.is_authenticated:
             self.auth.logout()
         super().closeEvent(event)

@@ -8,6 +8,7 @@ import pytest
 from app.core.database import (
     dispose_engine,
     get_engine,
+    periksa_koneksi,
     session_scope,
     transaksi_tulis,
 )
@@ -145,6 +146,26 @@ def test_transaksi_tulis_rollback_saat_error(seeded):
             )
             is None
         )
+
+
+def test_periksa_koneksi_sukses(database):
+    """Bilah status hanya boleh bilang terhubung bila SELECT 1 berhasil."""
+    assert periksa_koneksi() is True
+
+
+def test_periksa_koneksi_gagal_tanpa_mengangkat():
+    """
+    Kegagalan harus menjadi False, bukan exception ke UI.
+
+    Petugas tidak boleh melihat traceback; yang ditampilkan hanya status
+    "tidak terjangkau" di bilah.
+    """
+
+    class Palsu:
+        def connect(self):
+            raise RuntimeError("server mati")
+
+    assert periksa_koneksi(Palsu()) is False  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------

@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QFrame, QPushButton, QStatusBar
+from PySide6.QtWidgets import QDialog, QFrame, QLabel, QPushButton, QStatusBar
 
+from app.core.config import get_config
 from app.core.errors import ValidationError
 from app.models import UserRole
 from app.services.master_data_service import MasterDataService
@@ -19,7 +20,7 @@ from app.services.user_service import UserService
 from app.ui.common import PESAN_TAK_TERDUGA, pesan_untuk_user
 from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.login.login_window import LoginWindow
-from app.ui.main_window import MainWindow, PlaceholderPage
+from app.ui.main_window import SELANG_PERIKSA_KONEKSI_MS, MainWindow, PlaceholderPage
 from app.ui.settings.dialogs import CategoryDialog, CounterDialog, UserDialog
 from app.ui.settings.master_data_page import MasterDataPage
 from tests.conftest import TEST_PASSWORD
@@ -381,6 +382,8 @@ def test_kios_tidak_menampilkan_lokasi_database(qtbot, auth):
     qtbot.addWidget(jendela)
 
     assert jendela.findChild(QStatusBar) is None
+    assert jendela.findChild(QLabel, "statusDatabase") is None
+    assert getattr(jendela, "_pewaktu_db", None) is None
 
 
 def test_kios_tetap_bersih_setelah_muat_ulang(qtbot, auth):
@@ -392,6 +395,48 @@ def test_kios_tetap_bersih_setelah_muat_ulang(qtbot, auth):
     jendela.muat_ulang_halaman()
 
     assert jendela.findChild(QStatusBar) is None
+    assert jendela.findChild(QLabel, "statusDatabase") is None
+
+
+def test_bilah_status_loket_menampilkan_lokasi_database(qtbot, admin_auth):
+    """A9: petugas harus melihat database yang sedang dipakai, bukan tebakan."""
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+
+    cfg = get_config()
+    label = jendela.findChild(QLabel, "statusDatabase")
+    assert label is not None
+    assert cfg.teks_lokasi in label.text()
+    assert "tidak terjangkau" not in label.text()
+    if not cfg.memakai_sqlite:
+        assert "PostgreSQL @" in label.text()
+        assert "queue.db" not in label.text()
+    assert jendela._pewaktu_db.isActive()
+    assert jendela._pewaktu_db.interval() == SELANG_PERIKSA_KONEKSI_MS
+
+
+def test_bilah_status_saat_tidak_terjangkau(qtbot, admin_auth):
+    """A14: server mati tampil sebagai status, bukan traceback."""
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+
+    jendela._tampilkan_status_database(False)
+
+    teks = jendela.findChild(QLabel, "statusDatabase").text()
+    assert "tidak terjangkau" in teks
+    assert str(get_config().teks_lokasi) in teks
+
+
+def test_bilah_status_tetap_setelah_muat_ulang(qtbot, admin_auth):
+    """F5 tidak boleh menghapus lokasi database dari bilah status."""
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    label = jendela.findChild(QLabel, "statusDatabase")
+
+    jendela.muat_ulang_halaman()
+
+    assert jendela.findChild(QLabel, "statusDatabase") is label
+    assert str(get_config().teks_lokasi) in label.text()
 
 
 def test_judul_jendela_kios_tanpa_nama_petugas(qtbot, auth, users):

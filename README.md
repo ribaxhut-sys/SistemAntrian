@@ -796,6 +796,11 @@ Sisanya tinggal menyambung.
 diarahkan ke server tidak akan diam-diam kembali memakai berkas SQLite lokal
 hanya karena variabel lama tertinggal.
 
+Bilah status di komputer loket menampilkan `PostgreSQL @ alamat-server`,
+bukan path `queue.db`. Bila server mati, tulisannya berubah menjadi
+**tidak terjangkau** — aplikasi **tidak** jatuh ke database lokal. Anjungan
+dan televisi tidak menampilkan bilah ini.
+
 ### Setelan yang berbeda di tiap mesin
 
 Pencetak tiket menempel pada satu komputer dan pengeras suara pada komputer

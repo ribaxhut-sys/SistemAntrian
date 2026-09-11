@@ -28,13 +28,14 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | A6 | Pasang PostgreSQL di komputer server, buat database `antrian` | Selesai tanpa error | |
 | A7 | Setel `ANTRIAN_DB_URL` di satu loket, jalankan aplikasi | Skema terbentuk sendiri lewat migration | |
 | A8 | Setel `ANTRIAN_DB_URL` di loket lainnya, jalankan aplikasi | Melihat data yang sama; migration tidak dijalankan ulang | |
-| A9 | Periksa bilah status | Menunjuk server PostgreSQL, bukan berkas lokal | |
+| A9 | Periksa bilah status | Menunjuk `PostgreSQL @ host:port/antrian`, **bukan** berkas `queue.db` lokal. Kata sandi tidak tampil. | |
+| A9b | Salin tulisan di bilah status | Host dapat diseleksi/disalin untuk dilaporkan | |
 | A10 | **Dua loket menerbitkan nomor pada saat yang sama** | Nomor berurutan, **tidak ada yang kembar** | |
 | A11 | Ulangi A10 beberapa kali dengan dua orang menekan bersamaan | Tetap tidak ada nomor kembar | |
 | A12 | Loket A memanggil nomor; amati loket B dan layar antrian | Perubahan terlihat di semua komputer | |
 | A13 | Dua loket mencoba memanggil nomor terdepan bersamaan | Hanya satu yang mendapatkannya | |
-| A14 | Matikan server PostgreSQL saat loket sedang melayani | Pesan berbahasa Indonesia yang jelas, bukan traceback | |
-| A15 | Nyalakan kembali server, lanjutkan melayani | Loket pulih sendiri tanpa perlu dibuka ulang | |
+| A14 | Matikan server PostgreSQL saat loket sedang melayani | Pesan berbahasa Indonesia yang jelas, bukan traceback. Bilah status berubah menjadi **tidak terjangkau** (masih menunjuk host server, bukan `queue.db`). | |
+| A15 | Nyalakan kembali server, lanjutkan melayani | Loket pulih sendiri tanpa perlu dibuka ulang. Bilah status kembali `Database: PostgreSQL @ ...` dalam ±10 detik, atau segera setelah F5. | |
 | A16 | Setel `ANTRIAN_DB_PATH` sekaligus `ANTRIAN_DB_URL` di satu loket | Tetap memakai PostgreSQL, tidak diam-diam kembali ke berkas lokal | |
 
 ## B. Masuk pertama kali

@@ -134,6 +134,7 @@ def test_panel_pengaduan_mati_tanpa_antrian(halaman_kerja):
     assert panel is not None
     assert not panel.isEnabled()
     assert not halaman_kerja.pelapor.isian_nama.isEnabled()
+    assert not halaman_kerja.pelapor.tombol_tempel.isEnabled()
 
 
 def test_panel_pengaduan_hidup_setelah_memanggil(halaman_kerja, terbitkan):
@@ -142,6 +143,7 @@ def test_panel_pengaduan_hidup_setelah_memanggil(halaman_kerja, terbitkan):
     panel = halaman_kerja.panel_pengaduan
     assert panel.isEnabled()
     assert halaman_kerja.pelapor.isian_nama.isEnabled()
+    assert halaman_kerja.pelapor.tombol_tempel.isEnabled()
 
 
 def test_isian_pelapor_tidak_saling_menimpa(halaman_kerja, terbitkan, qtbot):

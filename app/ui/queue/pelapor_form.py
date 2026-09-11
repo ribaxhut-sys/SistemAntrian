@@ -17,8 +17,10 @@ ia hanya akan menjadi nama pengunjung yang tersimpan tanpa satu pun alasan.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QVBoxLayout,
@@ -33,14 +35,28 @@ from app.services.note_service import (
     PANJANG_TELEPON,
     NoteInfo,
 )
+from app.ui.common import konfirmasi, tombol
 from app.ui.style import (
     BORDER,
     FONT_SIZE_SMALL,
     RADIUS,
+    SUCCESS,
     SURFACE,
     TEXT_MUTED,
     WARNING,
 )
+from app.utils.profil_wp import (
+    JENIS_ID_WP,
+    JENIS_INVALID,
+    JENIS_PROFIL,
+    HasilClipboardWp,
+    parse_clipboard_wp,
+)
+
+PESAN_BUKAN_PROFIL = "Clipboard bukan profil WP"
+PESAN_PROFIL_DITEMPEL = "Profil ditempel"
+PESAN_ID_DITEMPEL = "ID WP ditempel"
+PESAN_GANTI = "Ganti data pelapor?"
 
 
 class PelaporForm(QFrame):
@@ -75,9 +91,19 @@ class PelaporForm(QFrame):
         susunan.setContentsMargins(14, 10, 14, 10)
         susunan.setSpacing(8)
 
+        kepala = QHBoxLayout()
+        kepala.setSpacing(8)
         judul = QLabel("DATA PELAPOR")
         judul.setProperty("kapsi", "true")
-        susunan.addWidget(judul)
+        kepala.addWidget(judul)
+        kepala.addStretch()
+        self.tombol_tempel = tombol("Tempel profil")
+        self.tombol_tempel.setStyleSheet(
+            f"padding: 4px 10px; min-height: 18px; font-size: {FONT_SIZE_SMALL}px;"
+        )
+        self.tombol_tempel.clicked.connect(self._saat_tempel)
+        kepala.addWidget(self.tombol_tempel)
+        susunan.addLayout(kepala)
 
         self.isian_nama = self._isian(PANJANG_NAMA, "Nama pelapor")
         self.isian_nomor_pelanggan = self._isian(
@@ -205,6 +231,7 @@ class PelaporForm(QFrame):
         """
         for isian in self._isian_semua:
             isian.setEnabled(aktif)
+        self.tombol_tempel.setEnabled(aktif)
 
     # -----------------------------------------------------------------
     # Penanda wajib
@@ -220,6 +247,82 @@ class PelaporForm(QFrame):
         """
         self._wajib_aktif = wajib
         self._terapkan_wajib()
+
+    # -----------------------------------------------------------------
+    # Tempel dari ECMP
+    # -----------------------------------------------------------------
+
+    def _saat_tempel(self) -> None:
+        """Hanya atas klik. Fokus jendela tidak menempelkan apa pun."""
+        self.tempel_teks(self._teks_clipboard())
+
+    @staticmethod
+    def _teks_clipboard() -> str:
+        """
+        Ambil text/plain dari papan klip Windows.
+
+        html() dan MIME lain sengaja tidak dibaca: yang tersalin dari ECMP
+        adalah teks, dan markup yang kebetulan menempel di papan tidak
+        boleh ikut terisi ke Nama.
+        """
+        aplikasi = QApplication.instance()
+        if aplikasi is None:
+            return ""
+        papan = aplikasi.clipboard()
+        if papan is None:
+            return ""
+        return papan.text() or ""
+
+    def tempel_teks(self, teks: str) -> None:
+        """Isi isian dari teks clipboard yang sudah dipegang pemanggil."""
+        if not self.tombol_tempel.isEnabled():
+            return
+        hasil = parse_clipboard_wp(teks)
+        if hasil.jenis == JENIS_INVALID:
+            self._setel_umpan(PESAN_BUKAN_PROFIL, gagal=True)
+            return
+        if self._bentrok(hasil) and not konfirmasi(self, PESAN_GANTI):
+            return
+        if hasil.jenis == JENIS_PROFIL:
+            self._terapkan_profil(hasil)
+            self._setel_umpan(PESAN_PROFIL_DITEMPEL)
+        elif hasil.jenis == JENIS_ID_WP:
+            self._isi_jika_ada(self.isian_nomor_pelanggan, hasil.id_wp)
+            self._setel_umpan(PESAN_ID_DITEMPEL)
+
+    def _bentrok(self, hasil: HasilClipboardWp) -> bool:
+        """Nama atau No. Pelanggan terisi nilai lain dari yang akan ditempel."""
+        if hasil.jenis == JENIS_PROFIL:
+            return self._berbeda(self.isian_nama, hasil.nama) or self._berbeda(
+                self.isian_nomor_pelanggan, hasil.id_wp
+            )
+        return self._berbeda(self.isian_nomor_pelanggan, hasil.id_wp)
+
+    @staticmethod
+    def _berbeda(isian: QLineEdit, baru: str) -> bool:
+        if not baru:
+            return False
+        sekarang = isian.text().strip()
+        return bool(sekarang) and sekarang != baru
+
+    def _terapkan_profil(self, hasil: HasilClipboardWp) -> None:
+        self._isi_jika_ada(self.isian_nama, hasil.nama)
+        self._isi_jika_ada(self.isian_nomor_pelanggan, hasil.id_wp)
+        self._isi_jika_ada(self.isian_telepon, hasil.telepon)
+        self._isi_jika_ada(self.isian_email, hasil.email)
+
+    @staticmethod
+    def _isi_jika_ada(isian: QLineEdit, nilai: str) -> None:
+        if nilai:
+            isian.setText(nilai)
+
+    def _setel_umpan(self, pesan: str, *, gagal: bool = False) -> None:
+        """Umpan balik singkat; sengaja tanpa mengulang isi yang ditempel."""
+        self.label_petunjuk.setText(pesan)
+        warna = WARNING if gagal else SUCCESS
+        self.label_petunjuk.setStyleSheet(
+            f"color: {warna}; font-size: {FONT_SIZE_SMALL}px; font-weight: 600;"
+        )
 
     def _perbarui_diri(self) -> None:
         """

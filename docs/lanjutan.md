@@ -101,8 +101,10 @@ yang sudah tidak ada → `libshiboken: Internal C++ object already deleted`.
 Pakai `QTimer(self)` dengan `setSingleShot(True)`.
 
 **`self.statusBar()` MEMBUAT bilah status bila belum ada.** Memanggilnya di
-mode kios memunculkan bilah yang sengaja tidak dibangun, lengkap dengan path
-database di depan pengunjung. Sudah dijaga di `MainWindow.muat_ulang_halaman`.
+mode kios memunculkan bilah yang sengaja tidak dibangun, lengkap dengan
+lokasi database di depan pengunjung. Sudah dijaga di
+`MainWindow.muat_ulang_halaman`. Lokasi itu sendiri adalah *permanent
+widget* (`statusDatabase`) supaya F5 tidak menghapusnya.
 
 **`$ErrorActionPreference = "Stop"` merusak skrip PowerShell.** pytest,
 PyInstaller, dan docker menulis keterangan biasa ke stderr, dan Windows

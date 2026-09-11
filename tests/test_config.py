@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.core import config as config_module
-from app.core.config import TIMEZONE, load_config
+from app.core.config import TIMEZONE, load_config, teks_status_database
 
 
 def test_default_paths_berada_di_bawah_base_dir(monkeypatch: pytest.MonkeyPatch):
@@ -57,6 +57,52 @@ def test_url_database_menang_atas_path(tmp_path: Path, monkeypatch: pytest.Monke
     assert not cfg.memakai_sqlite
     assert cfg.url_database.host == "server"
     assert cfg.url_database.database == "antrian"
+    assert cfg.teks_lokasi == "PostgreSQL @ server:5432/antrian"
+    assert "sandi" not in cfg.teks_lokasi
+    assert "petugas" not in cfg.teks_lokasi
+
+
+def test_teks_status_postgres_mati_tetap_menunjuk_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """
+    Server yang mati bukan alasan menampilkan path SQLite lokal.
+
+    Petugas harus tetap melihat host yang dituju, supaya yang diperiksa
+    adalah komputer server — bukan berkas queue.db yang kebetulan ada di
+    mesin loket.
+    """
+    monkeypatch.setenv("ANTRIAN_DB_PATH", str(tmp_path / "queue.db"))
+    monkeypatch.setenv(
+        "ANTRIAN_DB_URL",
+        "postgresql+psycopg://antrian:rahasia@192.168.1.10:5432/antrian",
+    )
+    config_module.reset_config()
+    cfg = load_config()
+
+    teks = teks_status_database(False, cfg)
+    assert teks == (
+        "Database tidak terjangkau (PostgreSQL @ 192.168.1.10:5432/antrian) "
+        "— cek komputer server"
+    )
+    assert "rahasia" not in teks
+    assert "queue.db" not in teks
+
+
+def test_teks_lokasi_sqlite_adalah_path_berkas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    target = tmp_path / "lokasi-lain" / "antrian.db"
+    monkeypatch.setenv("ANTRIAN_DB_PATH", str(target))
+    monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
+    config_module.reset_config()
+
+    cfg = load_config()
+    assert cfg.teks_lokasi == str(target.resolve())
+    assert teks_status_database(True, cfg) == f"Database: {cfg.teks_lokasi}"
+    assert teks_status_database(False, cfg) == (
+        f"Database tidak terjangkau ({cfg.teks_lokasi})"
+    )
 
 
 def test_ensure_directories_membuat_folder_yang_belum_ada(
