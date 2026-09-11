@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from PySide6.QtWidgets import QFrame, QStatusBar
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QFrame, QPushButton, QStatusBar
 
 from app.core.errors import AuthorizationError, BusinessRuleError
 from app.models import UserRole
@@ -234,6 +235,27 @@ def halaman_kios(qtbot, kios, auth):
     return halaman
 
 
+@pytest.fixture
+def halaman_totem(qtbot, kios, auth):
+    """Anjungan berdiri tiga pita, tanpa timer."""
+    from app.services.master_data_service import MasterDataService
+    from app.services.settings_service import SettingsService
+    from app.services.sound_service import NullSoundPlayer
+    from app.ui.kiosk.kiosk_page import KioskPage
+
+    halaman = KioskPage(
+        kios,
+        MasterDataService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        totem=True,
+    )
+    qtbot.addWidget(halaman)
+    halaman.papan.hentikan()
+    halaman._penghitung.stop()
+    return halaman
+
+
 def test_halaman_kios_membuat_tombol_jenis_layanan(halaman_kios):
     assert len(halaman_kios.tombol_layanan) == 3
     assert [c.prefix for c in halaman_kios.kategori] == ["A", "B", "C"]
@@ -301,6 +323,275 @@ def test_nama_layanan_tetap_tampil_pada_layar_penuh(qtbot, halaman_kios):
         # QLabel memotong teksnya diam-diam bila tingginya kurang; yang
         # dijaga di sini adalah tinggi yang dibutuhkan pada lebar sekarang.
         assert label.height() >= label.heightForWidth(label.width())
+
+
+def test_bawaan_iklan_di_atas_kartu_layanan(qtbot, bikin_halaman_kios):
+    """
+    Anjungan berdiri: kartu setinggi tangan, iklan di atas kepala antrean.
+    """
+    halaman = bikin_halaman_kios(3, lebar=1080, tinggi=1920)
+
+    assert halaman.papan.y() < halaman.panel_ambil.y()
+
+
+def test_pengaturan_dapat_menaruh_layanan_di_atas(bikin_halaman_kios, admin_auth):
+    """Layar yang digantung rendah: kartu jangan sampai di lutut."""
+    from app.services.settings_service import URUTAN_PANEL_LAYANAN_ATAS
+
+    SettingsService(admin_auth).set("kiosk.panel_order", URUTAN_PANEL_LAYANAN_ATAS)
+    halaman = bikin_halaman_kios(3, lebar=1080, tinggi=1920)
+
+    assert halaman.panel_ambil.y() < halaman.papan.y()
+
+
+def test_pintasan_tukar_menukar_posisi_dan_menyimpan(qtbot, bikin_halaman_kios):
+    """
+    Orang yang sedang memasang TV menukar posisi dari mesin itu sendiri.
+
+    Sesi kios tidak punya CONFIG_MANAGE, tetapi menukar tata letak adalah
+    perbuatan mesin itu — hak mengambil nomor cukup untuk menyimpannya.
+    """
+    from PySide6.QtGui import QKeySequence
+
+    from app.services.settings_service import (
+        URUTAN_PANEL_IKLAN_ATAS,
+        URUTAN_PANEL_LAYANAN_ATAS,
+    )
+    from app.ui.kiosk.kiosk_page import PINTASAN_TUKAR_PANEL
+
+    halaman = bikin_halaman_kios(3, lebar=1080, tinggi=1920)
+    pintasan = halaman.pintasan_tukar_panel
+    assert pintasan is not None
+    assert pintasan.key() == QKeySequence(PINTASAN_TUKAR_PANEL)
+
+    pintasan.activated.emit()
+    QApplication.processEvents()
+
+    assert halaman.panel_ambil.y() < halaman.papan.y()
+    assert halaman.settings.get("kiosk.panel_order") == URUTAN_PANEL_LAYANAN_ATAS
+
+    pintasan.activated.emit()
+    QApplication.processEvents()
+
+    assert halaman.papan.y() < halaman.panel_ambil.y()
+    assert halaman.settings.get("kiosk.panel_order") == URUTAN_PANEL_IKLAN_ATAS
+
+
+def test_anjungan_tidak_memajang_tombol_tukar(halaman_kios):
+    """
+    Pengunjung tidak boleh bisa memindahkan kartu layanan.
+
+    Pilihan urutan tersimpan untuk seluruh sistem. Tombol yang terlihat di
+    layar publik cukup disentuh sekali oleh seorang anak untuk memindahkan
+    kartu ke atas layar, sampai ada orang yang tahu tombol itu ada.
+    """
+    tombol_tukar = [
+        btn
+        for btn in halaman_kios.findChildren(QPushButton)
+        if "tukar" in btn.text().lower()
+    ]
+    assert tombol_tukar == []
+
+
+def test_gagal_menyimpan_urutan_tidak_menukar_layar(
+    qtbot, bikin_halaman_kios, monkeypatch
+):
+    """
+    Tukar yang tidak tersimpan akan dibalikkan pemeriksaan berkala.
+
+    Lebih jujur bila layarnya tidak berubah sama sekali daripada berbalik
+    sendiri dua puluh detik kemudian tanpa penjelasan.
+    """
+    from app.services.settings_service import URUTAN_PANEL_IKLAN_ATAS
+
+    halaman = bikin_halaman_kios(3, lebar=1080, tinggi=1920)
+
+    def gagal():
+        raise RuntimeError("database tidak terjangkau")
+
+    monkeypatch.setattr(halaman.settings, "tukar_urutan_panel_kios", gagal)
+    halaman.pintasan_tukar_panel.activated.emit()
+    QApplication.processEvents()
+
+    assert halaman._urutan_panel == URUTAN_PANEL_IKLAN_ATAS
+    assert halaman.papan.y() < halaman.panel_ambil.y()
+
+    # Pemeriksaan berkala membaca nilai yang sama dengan layar: tidak ada
+    # yang perlu dibalikkan.
+    halaman._periksa_perubahan_layanan()
+    QApplication.processEvents()
+    assert halaman.papan.y() < halaman.panel_ambil.y()
+
+
+def test_sesi_kios_boleh_menukar_urutan_panel(kios, auth):
+    from app.services.settings_service import URUTAN_PANEL_LAYANAN_ATAS
+
+    settings = SettingsService(auth)
+
+    assert settings.tukar_urutan_panel_kios() == URUTAN_PANEL_LAYANAN_ATAS
+    assert settings.get("kiosk.panel_order") == URUTAN_PANEL_LAYANAN_ATAS
+
+
+def test_sesi_kios_tidak_boleh_mengubah_pengaturan_lain(kios, auth):
+    """Menukar tata letak anjungan tidak membuka seluruh konfigurasi."""
+    with pytest.raises(AuthorizationError):
+        SettingsService(auth).set("display.title", "COBA")
+
+
+def test_anjungan_biasa_tidak_punya_pita_loket(halaman_kios):
+    """Anjungan lama tetap dua zona; pita loket hanya pada totem."""
+    assert halaman_kios.totem is False
+    assert halaman_kios.pita_loket is None
+    assert halaman_kios.findChild(QFrame, "pitaLoketKios") is None
+
+
+def test_totem_membagi_tiga_pita(qtbot, halaman_totem):
+    """
+    Totem Onesia: iklan di atas, kartu di tengah (pinggang–dada),
+    papan loket di bawah yang terlalu rendah untuk disentuh.
+    """
+    halaman = halaman_totem
+    halaman.resize(1080, 1920)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    QApplication.processEvents()
+
+    pita = halaman.findChild(QFrame, "pitaLoketKios")
+    assert pita is not None
+    assert halaman.papan.y() < halaman.panel_ambil.y() < pita.y()
+    assert halaman.pintasan_tukar_panel is None
+    assert pita.label_judul.text() == "SEDANG DILAYANI"
+    assert len(pita.kartu_loket) == 3
+    assert abs(halaman.papan.height() - halaman.panel_ambil.height()) < 80
+    assert abs(halaman.panel_ambil.height() - pita.height()) < 80
+
+
+def test_totem_iklan_tetap_saat_kelompok_dibuka(qtbot, halaman_totem):
+    """Panel atas totem tidak direbut info layanan; iklan tetap jalan."""
+    from app.ui.kiosk.sambutan import HALAMAN_KARTU
+
+    halaman = halaman_totem
+    halaman.resize(1080, 1920)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    QApplication.processEvents()
+
+    konsultasi = next(k for k in halaman.kategori if k.name == "Konsultasi")
+    halaman._pilih_layanan(konsultasi)
+    panel = halaman.papan.panel_info_kios
+    assert panel.tumpukan.currentIndex() != HALAMAN_KARTU
+
+
+def test_totem_nomor_tampil_di_pita_tengah(halaman_totem, antrian_siap):
+    """Kartu nomor di dada, bukan di pita iklan yang terlalu tinggi untuk difoto."""
+    from app.ui.kiosk.sambutan import HALAMAN_KARTU
+
+    halaman_totem.ambil_nomor(antrian_siap["kategori"]["A"])
+
+    assert halaman_totem.tumpukan.currentWidget() is halaman_totem.halaman_hasil
+    assert halaman_totem.label_hasil_nomor.text() == "A-001"
+    assert halaman_totem.label_hasil_layanan.text() == "Konsultasi"
+    assert (
+        halaman_totem.papan.panel_info_kios.tumpukan.currentIndex() != HALAMAN_KARTU
+    )
+
+
+def test_totem_pita_menyebut_loket_dan_yang_menunggu(halaman_totem, antrian_siap):
+    halaman_totem.ambil_nomor(antrian_siap["kategori"]["A"])
+    halaman_totem.papan.muat_ulang()
+
+    pita = halaman_totem.pita_loket
+    assert pita.label_menunggu.text() == "1 orang menunggu"
+    nama = [kartu.label_nama.text() for kartu in pita.kartu_loket]
+    assert nama == ["LOKET 1", "LOKET 2", "LOKET 3"]
+
+
+def test_ukuran_jendela_totem_tegak_di_layar_mendatar():
+    """Laptop 1080p mendapat miniatur 50% (540×960), bukan 1280×720 pipih."""
+    from PySide6.QtCore import QRect
+
+    from app.ui.kiosk.pratinjau import ukuran_jendela_totem
+
+    kotak = ukuran_jendela_totem(QRect(0, 0, 1920, 1080))
+    assert kotak.width() == 540
+    assert kotak.height() == 960
+    assert abs(kotak.width() / kotak.height() - 9 / 16) < 0.02
+
+
+def test_pratinjau_tiga_puluh_persen_terlalu_kecil():
+    """30% dari 1080×1920 = 324×576: tidak dipakai sebagai bawaan."""
+    from app.ui.kiosk.pratinjau import LEBAR_TOTEM_ASLI, TINGGI_TOTEM_ASLI
+
+    assert round(LEBAR_TOTEM_ASLI * 0.3) == 324
+    assert round(TINGGI_TOTEM_ASLI * 0.3) == 576
+    assert round(LEBAR_TOTEM_ASLI * 0.5) == 540
+    assert round(TINGGI_TOTEM_ASLI * 0.5) == 960
+
+
+def test_totem_berjendela_tidak_layar_penuh(qtbot, auth, antrian_siap):
+    """Pratinjau laptop: kaca asli 1080×1920, jendela sekitar 50%."""
+    from app.ui.kiosk.kiosk_page import KioskPage
+    from app.ui.kiosk.pratinjau import (
+        LEBAR_TOTEM_ASLI,
+        PratinjauTotem,
+        TINGGI_TOTEM_ASLI,
+    )
+    from app.ui.main_window import MainWindow
+
+    auth.logout()
+    auth.mulai_sesi_kios()
+    jendela = MainWindow(auth, anjungan_totem=True, berjendela=True)
+    qtbot.addWidget(jendela)
+    wadah = jendela.halaman.currentWidget()
+    assert isinstance(wadah, PratinjauTotem)
+    halaman = wadah.isi
+    halaman.papan.hentikan()
+    halaman._penghitung.stop()
+    jendela.tampilkan()
+
+    assert not jendela.isFullScreen()
+    assert jendela.size() == jendela._geometri_normal.size()
+    assert halaman.width() == LEBAR_TOTEM_ASLI
+    assert halaman.height() == TINGGI_TOTEM_ASLI
+    assert jendela.width() < LEBAR_TOTEM_ASLI
+    assert jendela.height() < TINGGI_TOTEM_ASLI
+    assert isinstance(halaman, KioskPage)
+    assert halaman.totem is True
+
+
+def test_totem_sungguhan_tidak_terkunci_setelah_esc(
+    qtbot, auth, antrian_siap, monkeypatch
+):
+    """
+    Esc di totem sungguhan tidak boleh mengurung halamannya di 540×960.
+
+    Ukuran itu milik pratinjau `--jendela`, yang isinya kaca 1080×1920
+    diperkecil utuh. Di totem sungguhan halaman anjungan duduk langsung di
+    jendela: mengunci jendelanya menyusun ulang tiga pita ke lebar 540 px
+    dalam jendela yang tidak bisa diperbesar lagi.
+    """
+    from app.ui.kiosk.kiosk_page import KioskPage
+    from app.ui.main_window import MainWindow
+
+    auth.logout()
+    auth.mulai_sesi_kios()
+    jendela = MainWindow(auth, anjungan_totem=True)
+    qtbot.addWidget(jendela)
+    halaman = jendela.halaman.currentWidget()
+    assert isinstance(halaman, KioskPage)
+    halaman.papan.hentikan()
+    halaman._penghitung.stop()
+
+    jendela.tampilkan()
+    # Platform uji `offscreen` tidak pernah melaporkan layar penuh. Tanpa
+    # baris ini `keluar_layar_penuh()` tidak melakukan apa-apa, dan uji ini
+    # lulus kosong — juga terhadap kode yang masih mengunci jendelanya.
+    # Yang diuji adalah keadaan SESUDAH layar penuh diturunkan, bukan
+    # kemampuan platform uji membuka layar penuh.
+    monkeypatch.setattr(jendela, "isFullScreen", lambda: True)
+    jendela.keluar_layar_penuh()
+
+    assert jendela.minimumSize() != jendela.maximumSize()
 
 
 def test_panel_ambil_tidak_menyimpan_ruang_yang_tidak_dipakainya(qtbot, halaman_kios):
@@ -984,11 +1275,28 @@ def test_mode_dialog_memilih_anjungan(qtbot):
     dialog = ModeDialog()
     qtbot.addWidget(dialog)
     tombol_anjungan = next(
-        b for b in dialog.findChildren(QPushButton) if "ANJUNGAN" in b.text()
+        b for b in dialog.findChildren(QPushButton) if b.text() == "ANJUNGAN AMBIL NOMOR"
     )
     qtbot.mouseClick(tombol_anjungan, Qt.MouseButton.LeftButton)
 
     assert dialog.pilihan == ANJUNGAN
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+
+
+def test_mode_dialog_memilih_anjungan_berdiri(qtbot):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog, QPushButton
+
+    from app.ui.login.mode_dialog import ANJUNGAN_TOTEM, ModeDialog
+
+    dialog = ModeDialog()
+    qtbot.addWidget(dialog)
+    tombol = next(
+        b for b in dialog.findChildren(QPushButton) if b.text() == "ANJUNGAN BERDIRI"
+    )
+    qtbot.mouseClick(tombol, Qt.MouseButton.LeftButton)
+
+    assert dialog.pilihan == ANJUNGAN_TOTEM
     assert dialog.result() == int(QDialog.DialogCode.Accepted)
 
 
@@ -1014,7 +1322,7 @@ def test_mode_dialog_memilih_layar_antrian(qtbot):
     assert dialog.result() == int(QDialog.DialogCode.Accepted)
 
 
-def test_mode_dialog_menawarkan_empat_pilihan_saat_uji(qtbot):
+def test_mode_dialog_menawarkan_lima_pilihan_saat_uji(qtbot):
     """
     Dari source, admin dan petugas harus dapat dipilih terpisah.
 
@@ -1025,6 +1333,7 @@ def test_mode_dialog_menawarkan_empat_pilihan_saat_uji(qtbot):
 
     from app.ui.login.mode_dialog import (
         ANJUNGAN,
+        ANJUNGAN_TOTEM,
         LAYAR_ADMIN,
         LAYAR_ANTRIAN,
         LAYAR_PETUGAS,
@@ -1035,12 +1344,13 @@ def test_mode_dialog_menawarkan_empat_pilihan_saat_uji(qtbot):
     qtbot.addWidget(dialog)
 
     teks = [b.text() for b in dialog.findChildren(QPushButton)]
-    assert len(teks) == 4
+    assert len(teks) == 5
     assert any("ANTRIAN" in t for t in teks)
-    assert any("ANJUNGAN" in t for t in teks)
+    assert any("ANJUNGAN AMBIL NOMOR" in t for t in teks)
+    assert any("ANJUNGAN BERDIRI" in t for t in teks)
     assert any("ADMIN" in t for t in teks)
     assert any("PETUGAS" in t for t in teks)
-    assert len({LAYAR_ANTRIAN, ANJUNGAN, LAYAR_ADMIN, LAYAR_PETUGAS}) == 4
+    assert len({LAYAR_ANTRIAN, ANJUNGAN, ANJUNGAN_TOTEM, LAYAR_ADMIN, LAYAR_PETUGAS}) == 5
 
 
 def test_mode_dialog_satu_tombol_petugas_bila_wajib_login(qtbot, monkeypatch):
@@ -1054,9 +1364,10 @@ def test_mode_dialog_satu_tombol_petugas_bila_wajib_login(qtbot, monkeypatch):
     qtbot.addWidget(dialog)
 
     teks = [b.text() for b in dialog.findChildren(QPushButton)]
-    assert len(teks) == 3
+    assert len(teks) == 4
     assert not any("ADMIN" in t for t in teks)
     assert any("PETUGAS" in t for t in teks)
+    assert any("ANJUNGAN BERDIRI" in t for t in teks)
 
 
 def test_mode_dialog_memilih_layar_petugas(qtbot):

@@ -17,7 +17,7 @@ service layer dan oleh hak user PostgreSQL mesin itu di database.
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPalette
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
@@ -33,11 +33,16 @@ from app.core.errors import AppError
 from app.core.logger import get_logger
 from app.services.master_data_service import MasterDataService
 from app.services.queue_service import QueueInfo, QueueService
-from app.services.settings_service import SettingsService
+from app.services.settings_service import (
+    URUTAN_PANEL_IKLAN_ATAS,
+    URUTAN_PANEL_LAYANAN_ATAS,
+    SettingsService,
+)
 from app.services.sound_service import SoundPlayer
 from app.services.ticket_service import TicketService, baris_sisa_antrian, mode_pencetak
 from app.ui.common import pesan_untuk_user, tombol
 from app.ui.display.display_page import DisplayPage
+from app.ui.kiosk.pita_loket import PitaLoketKios
 from app.ui.kiosk.sambutan import media_layanan
 from app.ui.style import (
     DISPLAY_KIOS_KELOMPOK,
@@ -236,6 +241,17 @@ SISI_KOTAK_KONFIRMASI = 112
 #: dari awal.
 TINGGI_TOMBOL_KONFIRMASI_MIN = 220
 
+#: Pintasan papan ketik untuk menukar posisi iklan dan kartu layanan.
+#:
+#: Sengaja BUKAN tombol di layar. Anjungan berdiri tanpa penjaga, dan
+#: tombol yang terlihat akan ditekan pengunjung — seorang anak cukup
+#: sekali menyentuhnya untuk memindahkan kartu layanan ke atas layar,
+#: dan pilihan itu tersimpan untuk seluruh sistem sampai ada orang yang
+#: tahu tombolnya ada. Orang yang memasang layar membawa papan ketik;
+#: pengunjung tidak. Pengaturan `kiosk.panel_order` di halaman Pengaturan
+#: menulis nilai yang sama.
+PINTASAN_TUKAR_PANEL = "Ctrl+Shift+T"
+
 
 def baris_kisi(jumlah: int, kolom_maks: int = KOLOM_BAWAAN) -> list[int]:
     """
@@ -287,6 +303,8 @@ class KioskPage(QWidget):
         sound: SoundPlayer,
         ticket: TicketService | None = None,
         parent: QWidget | None = None,
+        *,
+        totem: bool = False,
     ) -> None:
         super().__init__(parent)
         self.queue = queue
@@ -294,6 +312,9 @@ class KioskPage(QWidget):
         self.settings = settings
         self.sound = sound
         self.ticket = ticket
+        #: Anjungan berdiri (totem): tiga pita — iklan, kartu layanan,
+        #: papan loket mini. Anjungan biasa membiarkan ini False.
+        self.totem = totem
         self.kategori: list = []
         self.tombol_layanan: list = []
         self.pendaftaran_dibuka = True
@@ -310,6 +331,9 @@ class KioskPage(QWidget):
         #: layanan supaya admin tidak perlu menutup anjungan untuk
         #: mengubahnya — tidak ada yang menutup aplikasi di mesin itu.
         self._rasio_info = RASIO_INFO_BAWAAN
+        #: Urutan dua panel anjungan. Iklan di atas adalah bawaan; tombol
+        #: Tukar dan pengaturan `kiosk.panel_order` menuliskan yang sama.
+        self._urutan_panel = URUTAN_PANEL_IKLAN_ATAS
         #: Kategori yang sedang menunggu konfirmasi pengunjung.
         self._kategori_terpilih = None
         #: Kelompok yang sedang terbuka, dari luar ke dalam. Kosong berarti
@@ -406,7 +430,6 @@ class KioskPage(QWidget):
         self.papan.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored
         )
-        susunan.addWidget(self.papan, stretch=2)
 
         # Latar kios mengikuti tema papan. Yang terlihat hanyalah sela
         # tipis di sekeliling papan, tetapi sela berwarna biru di bawah
@@ -416,15 +439,124 @@ class KioskPage(QWidget):
         )
 
         self.panel_ambil = self._bangun_panel_ambil()
-        # Dua banding satu, dan panel bawah dibatasi tingginya oleh
-        # `_batasi_tinggi_panel`. Perbandingan saja tidak cukup: pada
-        # layar anjungan yang berdiri tegak (1080x1920) jatah 40% berarti
-        # 768 piksel untuk panel yang isinya hanya menuntut sekitar 414 —
-        # kartu layanan sudah mentok di batas atasnya jauh sebelum itu —
-        # sehingga sisanya menjadi bidang putih kosong, sementara panel
-        # informasi di atasnya yang justru dipandang dari jauh harus
-        # mengalah.
-        susunan.addWidget(self.panel_ambil, stretch=1)
+        self.pintasan_tukar_panel = None
+        self.pita_loket = None
+
+        if self.totem:
+            # Tiga pita sama tinggi: iklan (dilihat), kartu (disentuh),
+            # papan loket mini (terlalu rendah untuk disentuh).
+            # Pintasan tukar tidak dipasang: pada totem kartu layanan sudah
+            # di zona sentuh; menukarnya akan menaikkan kartu ke dahi.
+            self.papan.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
+            self.panel_ambil.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
+            self.pita_loket = PitaLoketKios(self.papan.palet)
+            self.papan.pita_loket_kios = self.pita_loket
+            susunan.addWidget(self.papan, stretch=1)
+            susunan.addWidget(self.panel_ambil, stretch=1)
+            susunan.addWidget(self.pita_loket, stretch=1)
+            self.papan.muat_ulang()
+        else:
+            # Dua banding satu, dan panel bawah dibatasi tingginya oleh
+            # `_setel_tinggi_panel`. Perbandingan saja tidak cukup: pada
+            # layar anjungan yang berdiri tegak (1080x1920) jatah 40% berarti
+            # 768 piksel untuk panel yang isinya hanya menuntut sekitar 414 —
+            # kartu layanan sudah mentok di batas atasnya jauh sebelum itu —
+            # sehingga sisanya menjadi bidang putih kosong, sementara panel
+            # informasi di atasnya yang justru dipandang dari jauh harus
+            # mengalah.
+            susunan.addWidget(self.papan, stretch=2)
+            susunan.addWidget(self.panel_ambil, stretch=1)
+            self._urutan_panel = self._baca_urutan_panel()
+            self._terapkan_urutan_panel()
+            self.pintasan_tukar_panel = QShortcut(
+                QKeySequence(PINTASAN_TUKAR_PANEL), self, self._tukar_posisi_panel
+            )
+
+    def _baca_urutan_panel(self) -> str:
+        """Nilai pengaturan, atau bawaan bila rusak."""
+        try:
+            nilai = self.settings.get("kiosk.panel_order", URUTAN_PANEL_IKLAN_ATAS)
+        except Exception:  # noqa: BLE001 - layar publik tidak boleh mati di sini
+            logger.warning(
+                "Urutan panel anjungan tidak terbaca; memakai %s",
+                URUTAN_PANEL_IKLAN_ATAS,
+                exc_info=True,
+            )
+            return URUTAN_PANEL_IKLAN_ATAS
+        if nilai not in {URUTAN_PANEL_IKLAN_ATAS, URUTAN_PANEL_LAYANAN_ATAS}:
+            logger.warning(
+                "Urutan panel anjungan %s tidak dikenali; memakai %s",
+                nilai,
+                URUTAN_PANEL_IKLAN_ATAS,
+            )
+            return URUTAN_PANEL_IKLAN_ATAS
+        return nilai
+
+    def _layanan_di_atas(self) -> bool:
+        return self._urutan_panel == URUTAN_PANEL_LAYANAN_ATAS
+
+    def _gaya_panel_ambil(self) -> None:
+        """Lembaran menempel ke papan: sudut di tepi yang bersinggungan."""
+        if self._layanan_di_atas():
+            tepi = (
+                f" border-bottom: 5px solid {self.papan.palet.tepi_unggulan};"
+                f" border-bottom-left-radius: {RADIUS_PANEL}px;"
+                f" border-bottom-right-radius: {RADIUS_PANEL}px;"
+            )
+        else:
+            tepi = (
+                f" border-top: 5px solid {self.papan.palet.tepi_unggulan};"
+                f" border-top-left-radius: {RADIUS_PANEL}px;"
+                f" border-top-right-radius: {RADIUS_PANEL}px;"
+            )
+        self.panel_ambil.setStyleSheet(
+            "QFrame#panelAmbil { background: qlineargradient(x1:0, y1:0,"
+            f" x2:0, y2:1, stop:0 {KIOS_PANEL_ATAS}, stop:1 {KIOS_PANEL_BAWAH});"
+            f"{tepi} }}"
+        )
+
+    def _terapkan_urutan_panel(self) -> None:
+        """Pasang iklan dan kartu layanan sesuai `_urutan_panel`."""
+        if self.totem:
+            return
+        susunan = self.layout()
+        if susunan is None:
+            return
+        for widget in (self.papan, self.panel_ambil):
+            susunan.removeWidget(widget)
+        if self._layanan_di_atas():
+            susunan.addWidget(self.panel_ambil, stretch=1)
+            susunan.addWidget(self.papan, stretch=2)
+        else:
+            susunan.addWidget(self.papan, stretch=2)
+            susunan.addWidget(self.panel_ambil, stretch=1)
+        self._gaya_panel_ambil()
+
+    def _tukar_posisi_panel(self) -> None:
+        """
+        Pintasan di anjungan: simpan urutan baru, lalu pasang segera.
+
+        Layar HANYA ditukar bila nilainya benar-benar tersimpan. Pemeriksaan
+        berkala `_periksa_perubahan_layanan` membaca urutan dari database
+        setiap 20 detik, sehingga tukar yang cuma terjadi di layar ini akan
+        dibalikkan diam-diam tidak lama kemudian — dan orang yang menekannya
+        melihat tata letaknya berbalik sendiri tanpa tahu sebabnya. Lebih
+        jujur bila layar tidak berubah sama sekali: ia boleh mencoba lagi.
+        """
+        if self.totem:
+            return
+        try:
+            self._urutan_panel = self.settings.tukar_urutan_panel_kios()
+        except Exception:  # noqa: BLE001 - layar publik tidak boleh mati di sini
+            logger.exception("Urutan panel anjungan tidak tersimpan; layar tidak ditukar")
+            return
+        logger.info("Urutan panel anjungan menjadi %s", self._urutan_panel)
+        self._terapkan_urutan_panel()
+        self._sesuaikan_ukuran_tombol()
 
     def _bangun_panel_ambil(self) -> QWidget:
         panel = QFrame()
@@ -518,6 +650,8 @@ class KioskPage(QWidget):
 
         self.halaman_konfirmasi = self._bangun_halaman_konfirmasi()
         self.tumpukan.addWidget(self.halaman_konfirmasi)
+        self.halaman_hasil = self._bangun_halaman_hasil()
+        self.tumpukan.addWidget(self.halaman_hasil)
 
         return panel
 
@@ -608,6 +742,42 @@ class KioskPage(QWidget):
         susunan.addLayout(baris_tombol, stretch=2)
         return halaman
 
+    def _bangun_halaman_hasil(self) -> QWidget:
+        """Kartu nomor di pita tengah totem, setinggi dada, siap difoto."""
+        halaman = QFrame()
+        halaman.setObjectName("halamanHasilKios")
+        susunan = QVBoxLayout(halaman)
+        susunan.setContentsMargins(24, 8, 24, 8)
+        susunan.setSpacing(4)
+        susunan.addStretch(1)
+
+        self.label_hasil_judul = QLabel("NOMOR ANDA")
+        self.label_hasil_nomor = QLabel("")
+        self.label_hasil_layanan = QLabel("")
+        self.label_hasil_sisa = QLabel("")
+        for label, ukuran, tebal in (
+            (self.label_hasil_judul, 20, 800),
+            (self.label_hasil_nomor, 84, 800),
+            (self.label_hasil_layanan, 28, 700),
+            (self.label_hasil_sisa, 22, 600),
+        ):
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setWordWrap(True)
+            label.setMinimumSize(1, 1)
+            label.setStyleSheet(
+                f"color: {KIOS_JUDUL}; background: transparent;"
+                f" font-size: {ukuran}px; font-weight: {tebal};"
+            )
+            susunan.addWidget(label)
+        susunan.addStretch(1)
+        return halaman
+
+    def _info_papan(self, teks: str | None = None, *, berkas=None) -> None:
+        """Anjungan biasa mengganti panel iklan; totem membiarkan iklan jalan."""
+        if self.totem:
+            return
+        self.papan.tampilkan_info_kios(teks, berkas=berkas)
+
     def _gaya_ajakan(self, *, sukses: bool) -> None:
         """Judul panel: ajakan biasa, atau kabar nomor yang baru terbit."""
         if sukses:
@@ -656,6 +826,11 @@ class KioskPage(QWidget):
         """Segarkan papan nomor, bentuk panel informasi, dan jenis layanan."""
         self.papan.muat_ulang()
         self._rasio_info = self._baca_rasio_info()
+        if not self.totem:
+            urutan = self._baca_urutan_panel()
+            if urutan != self._urutan_panel:
+                self._urutan_panel = urutan
+                self._terapkan_urutan_panel()
 
         try:
             self.pendaftaran_dibuka = self.queue.pendaftaran_dibuka()
@@ -745,6 +920,15 @@ class KioskPage(QWidget):
             self._rasio_info = rasio
             self._sesuaikan_ukuran_tombol()
 
+        urutan = self._baca_urutan_panel()
+        if not self.totem and urutan != self._urutan_panel:
+            logger.info(
+                "Urutan panel anjungan berubah (%s -> %s)", self._urutan_panel, urutan
+            )
+            self._urutan_panel = urutan
+            self._terapkan_urutan_panel()
+            self._sesuaikan_ukuran_tombol()
+
         if self._sidik_layanan(kategori) == self._sidik_layanan(self.kategori):
             return
 
@@ -828,7 +1012,7 @@ class KioskPage(QWidget):
         # punya keterangan — "Siapkan SPPT dan KTP" pada Konsultasi berlaku
         # bagi seluruh isinya — dan pengunjung membacanya justru pada saat
         # ia sedang memilih di dalamnya.
-        self.papan.tampilkan_info_kios(
+        self._info_papan(
             layanan.info_text, berkas=media_layanan(layanan.code)
         )
         # Video layanan (Konsultasi 1920×540) merampas tinggi papan
@@ -845,12 +1029,12 @@ class KioskPage(QWidget):
         self._perbarui_jeda()
         if self._jalur:
             self._pemulang.start(JEDA_PULANG)
-            self.papan.tampilkan_info_kios(
+            self._info_papan(
                 self._jalur[-1].info_text, berkas=media_layanan(self._jalur[-1].code)
             )
         else:
             self._pemulang.stop()
-            self.papan.tampilkan_info_kios(None)
+            self._info_papan(None)
         self._jadwalkan_sesuaikan()
 
     def _pulang(self) -> None:
@@ -867,7 +1051,7 @@ class KioskPage(QWidget):
         # terbit dari layar, tepat ketika pemiliknya sedang membacanya
         # atau memfotonya. Yang membebaskannya nanti `_bersihkan_hasil`.
         if not self._penghapus_hasil.isActive():
-            self.papan.tampilkan_info_kios(None)
+            self._info_papan(None)
         self._jadwalkan_sesuaikan()
 
     def _kolom_maks(self) -> int:
@@ -1612,6 +1796,13 @@ class KioskPage(QWidget):
         ada yang bisa dihitung. Pemanggilnya butuh angka itu SEKARANG:
         geometri Qt baru menyusul pada putaran tata letak berikutnya.
         """
+        if self.totem:
+            sisa_bawah = self._tinggi_chrome_ambil()
+            tinggi = self.panel_ambil.height()
+            if sisa_bawah <= 0 or tinggi <= 0:
+                return 0
+            return max(0, tinggi - sisa_bawah)
+
         panel_info = self.papan.panel_info_kios
         if panel_info is None or panel_info.width() <= 0:
             return 0
@@ -1845,7 +2036,7 @@ class KioskPage(QWidget):
         # Berkasnya dicari setiap kali disentuh, bukan sekali saat halaman
         # dibangun: admin boleh mengganti media layanan selagi anjungan
         # menyala, dan pembacaan folder sekali sentuh tidak mahal.
-        self.papan.tampilkan_info_kios(
+        self._info_papan(
             layanan.info_text, berkas=media_layanan(layanan.code)
         )
 
@@ -1862,11 +2053,11 @@ class KioskPage(QWidget):
             # yang di sebelahnya. Panel papan ikut menampilkan kembali info
             # kelompoknya, sebab itulah yang tampil sebelum ia menyentuh.
             self._pemulang.start(JEDA_PULANG)
-            self.papan.tampilkan_info_kios(
+            self._info_papan(
                 self._jalur[-1].info_text, berkas=media_layanan(self._jalur[-1].code)
             )
         else:
-            self.papan.tampilkan_info_kios(None)
+            self._info_papan(None)
         self._perbarui_jeda()
 
     def _konfirmasi_ambil(self) -> None:
@@ -1892,7 +2083,7 @@ class KioskPage(QWidget):
         if layanan is not None:
             self.ambil_nomor(layanan.id)
         else:
-            self.papan.tampilkan_info_kios(None)
+            self._info_papan(None)
 
     def ambil_nomor(self, category_id: int) -> None:
         """Terbitkan satu nomor untuk pengunjung yang menekan tombol."""
@@ -1909,7 +2100,7 @@ class KioskPage(QWidget):
             # pernah tampil. Tanpa baris ini panel tersangkut memegang
             # media layanan yang tadi disentuh, dan tidak ada lagi yang
             # akan membebaskannya.
-            self.papan.tampilkan_info_kios(None)
+            self._info_papan(None)
             return
 
         self._tahan_petunjuk = False
@@ -2030,11 +2221,19 @@ class KioskPage(QWidget):
         self._set_petunjuk(
             arahan, "gagal" if hasil_cetak == CETAK_GAGAL else "hasil"
         )
-        self.papan.tampilkan_kartu_kios(
-            nomor=nomor.queue_number,
-            layanan=nomor.category_name,
-            sisa=baris_sisa_antrian(self._sisa_antrian(nomor)),
-        )
+        sisa = baris_sisa_antrian(self._sisa_antrian(nomor))
+        if self.totem:
+            self.label_hasil_nomor.setText(nomor.queue_number)
+            self.label_hasil_layanan.setText(nomor.category_name)
+            self.label_hasil_sisa.setText(sisa)
+            self.label_hasil_sisa.setVisible(bool(sisa))
+            self.tumpukan.setCurrentWidget(self.halaman_hasil)
+        else:
+            self.papan.tampilkan_kartu_kios(
+                nomor=nomor.queue_number,
+                layanan=nomor.category_name,
+                sisa=sisa,
+            )
         self._penghapus_hasil.start(self._lama_hasil_ms())
 
     def _sisa_antrian(self, nomor: QueueInfo) -> int | None:
@@ -2081,7 +2280,9 @@ class KioskPage(QWidget):
         # jalurnya memang sudah kosong.
         self._pulang()
         # Satu-satunya tempat panel dibebaskan setelah nomor terbit.
-        self.papan.tampilkan_info_kios(None)
+        self._info_papan(None)
+        if self.totem:
+            self.tumpukan.setCurrentWidget(self.halaman_pilihan)
         self._perbarui_jeda()
 
     def _perbarui_jeda(self) -> None:

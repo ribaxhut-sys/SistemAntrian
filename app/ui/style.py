@@ -40,7 +40,7 @@ SURFACE_ALT = "#F8FAFC"
 
 #: Warna penanda layar pada dialog pilihan mode.
 #:
-#: Empat pilihan di layar pembuka bukan empat tombol yang setara: masing
+#: Lima pilihan di layar pembuka bukan lima tombol yang setara: masing
 #: masing adalah mesin yang berbeda. Warna dipakai supaya orang yang sudah
 #: pernah membukanya mengenali barisnya tanpa membaca ulang penjelasannya,
 #: dan supaya warna anjungan sama dengan tosca yang nanti ia lihat di layar
@@ -49,6 +49,8 @@ MODE_ANTRIAN = "#0284C7"
 MODE_ANTRIAN_SOFT = "#E0F2FE"
 MODE_ANJUNGAN = "#0D9488"
 MODE_ANJUNGAN_SOFT = "#CCFBF1"
+MODE_TOTEM = "#C2410C"
+MODE_TOTEM_SOFT = "#FFEDD5"
 MODE_ADMIN = "#7C3AED"
 MODE_ADMIN_SOFT = "#EDE9FE"
 MODE_PETUGAS = "#4F46E5"
@@ -752,6 +754,11 @@ QPushButton#kartuMode[aksen="anjungan"]:hover {{
     border: 2px solid {MODE_ANJUNGAN};
 }}
 
+QPushButton#kartuMode[aksen="totem"]:hover {{
+    background: {MODE_TOTEM_SOFT};
+    border: 2px solid {MODE_TOTEM};
+}}
+
 QPushButton#kartuMode[aksen="admin"]:hover {{
     background: {MODE_ADMIN_SOFT};
     border: 2px solid {MODE_ADMIN};
@@ -808,6 +815,7 @@ QLabel#ikonMode {{
 
 QLabel#ikonMode[aksen="antrian"] {{ background: {MODE_ANTRIAN_SOFT}; }}
 QLabel#ikonMode[aksen="anjungan"] {{ background: {MODE_ANJUNGAN_SOFT}; }}
+QLabel#ikonMode[aksen="totem"] {{ background: {MODE_TOTEM_SOFT}; }}
 QLabel#ikonMode[aksen="admin"] {{ background: {MODE_ADMIN_SOFT}; }}
 QLabel#ikonMode[aksen="petugas"] {{ background: rgba(255, 255, 255, 45); }}
 

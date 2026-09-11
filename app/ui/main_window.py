@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import QRect, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QFrame,
     QHBoxLayout,
@@ -40,6 +41,7 @@ from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.settings.dialogs import LABEL_PERAN
 from app.ui.display.display_page import DisplayPage
 from app.ui.kiosk.kiosk_page import KioskPage
+from app.ui.kiosk.pratinjau import LEBAR_TOTEM_ASLI, PratinjauTotem, ukuran_jendela_totem
 from app.ui.notes.note_page import NotePage
 from app.ui.queue.service_page import ServicePage
 from app.ui.registration.registration_page import RegistrationPage
@@ -50,6 +52,8 @@ from app.ui.settings.settings_page import SettingsPage
 from app.ui.survey.survey_page import SurveyPage
 
 logger = get_logger("ui.main")
+
+TINGGI_TAK_TERBATAS = (1 << 24) - 1
 
 
 @dataclass(frozen=True)
@@ -184,7 +188,14 @@ class MainWindow(QMainWindow):
     tinggi jendela.
     """
 
-    def __init__(self, auth: AuthService, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        auth: AuthService,
+        parent: QWidget | None = None,
+        *,
+        anjungan_totem: bool = False,
+        berjendela: bool = False,
+    ) -> None:
         super().__init__(parent)
         # Sejak keluar dari layar kembali ke Login/Pilihan Mode alih-alih
         # menutup aplikasi (lihat _jalankan_ui di app/main.py), close()
@@ -196,6 +207,9 @@ class MainWindow(QMainWindow):
         # jendela beserta seluruh anak dan timer-nya benar-benar dihapus.
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.auth = auth
+        self.anjungan_totem = anjungan_totem
+        #: True = jangan layar penuh. Untuk melihat totem utuh di laptop.
+        self.berjendela = berjendela
         self.master_service = MasterDataService(auth)
         self.user_service = UserService(auth)
         self.queue_service = QueueService(auth)
@@ -254,14 +268,30 @@ class MainWindow(QMainWindow):
         # di kiri, daftar tunggu di kanan. Menu di kepala (bukan kolom kiri)
         # menyisakan lebar penuh untuk keduanya. 1280 x 720 masih muat utuh
         # pada layar 1366 x 768 yang paling sempit di kantor.
-        self.resize(1280, 720)
-        #: Geometri jendela biasa, untuk F11. Anjungan dibuka langsung
-        #: fullscreen; tanpa ini, restore Qt memakai ukuran bawaan kecil
-        #: dan kartu layanan dihitung ulang jadi pita.
-        self._geometri_normal = QRect(self.geometry())
+        #
+        # Totem + --jendela: miniatur 1080×1920 (sekitar 50% di laptop
+        # 1080p), bukan tata letak yang disusun ulang ke jendela mendatar.
+        if self.anjungan_totem:
+            layar = QApplication.primaryScreen()
+            area = (
+                layar.availableGeometry()
+                if layar is not None
+                else QRect(0, 0, 1280, 720)
+            )
+            self._geometri_normal = ukuran_jendela_totem(area)
+            self.resize(self._geometri_normal.size())
+            self.move(self._geometri_normal.topLeft())
+        else:
+            self.resize(1280, 720)
+            #: Geometri jendela biasa, untuk F11. Anjungan dibuka langsung
+            #: fullscreen; tanpa ini, restore Qt memakai ukuran bawaan kecil
+            #: dan kartu layanan dihitung ulang jadi pita.
+            self._geometri_normal = QRect(self.geometry())
 
         self._bangun_tampilan()
         self._pasang_pintasan()
+        if self.anjungan_totem:
+            self._kunci_ukuran_totem(True)
 
     # -----------------------------------------------------------------
 
@@ -421,13 +451,7 @@ class MainWindow(QMainWindow):
             _Menu(
                 "Anjungan Ambil Nomor",
                 Permission.QUEUE_CREATE,
-                lambda: KioskPage(
-                    self.queue_service,
-                    self.master_service,
-                    self.settings_service,
-                    self.sound_player,
-                    self.ticket_service,
-                ),
+                self._halaman_anjungan,
                 hanya_kios=True,
             ),
             _Menu(
@@ -493,6 +517,21 @@ class MainWindow(QMainWindow):
 
         self.navigasi.setCurrentRow(0)
 
+    def _halaman_anjungan(self) -> QWidget:
+        """Halaman anjungan, atau miniaturnya bila `--jendela` pada totem."""
+        halaman = KioskPage(
+            self.queue_service,
+            self.master_service,
+            self.settings_service,
+            self.sound_player,
+            self.ticket_service,
+            totem=self.anjungan_totem,
+        )
+        if not (self.anjungan_totem and self.berjendela):
+            return halaman
+        skala = self._geometri_normal.width() / LEBAR_TOTEM_ASLI
+        return PratinjauTotem(halaman, skala)
+
     def _pasang_pintasan(self) -> None:
         """Pintasan papan ketik: petugas loket jarang menyentuh mouse."""
         QShortcut(QKeySequence("F5"), self, self.muat_ulang_halaman)
@@ -517,32 +556,66 @@ class MainWindow(QMainWindow):
 
     # -----------------------------------------------------------------
 
+    def _kunci_ukuran_totem(self, kunci: bool) -> None:
+        """
+        Kunci jendela totem pada ukuran pratinjau.
+
+        Tanpa ini, sizeHint tiga kartu layanan melebar ke 1280×720 begitu
+        jendela ditampilkan, dan pita iklan kembali pipih.
+
+        HANYA untuk pratinjau `--jendela`, di mana isinya adalah kaca
+        1080×1920 yang diperkecil utuh. Totem sungguhan menaruh halaman
+        anjungan langsung di jendela: mengunci jendela itu pada 540×960
+        begitu Esc atau F11 ditekan akan menyusun ulang tiga pita totem ke
+        lebar 540 px, dalam jendela yang tidak bisa diperbesar lagi.
+        """
+        if not (self.anjungan_totem and self.berjendela):
+            return
+        if self._geometri_normal is None:
+            return
+        if kunci:
+            ukuran = self._geometri_normal.size()
+            self.setFixedSize(ukuran)
+            self.move(self._geometri_normal.topLeft())
+        else:
+            self.setMinimumSize(0, 0)
+            self.setMaximumSize(TINGGI_TAK_TERBATAS, TINGGI_TAK_TERBATAS)
+
     def tampilkan(self) -> None:
         """
         Buka jendela sesuai perannya.
 
         Layar yang menghadap pengunjung dibuka penuh sejak awal, tanpa
         bingkai jendela dan tanpa tombol tutup yang menggoda untuk ditekan.
+        `--jendela` meniadakan itu: totem dibuka sebagai miniatur 50%
+        dari kaca 1080×1920, supaya tiga pita terlihat utuh di laptop.
         """
-        if self.mode_kios:
-            self._geometri_normal = QRect(self.geometry())
+        if self.mode_kios and not self.berjendela:
+            self._kunci_ukuran_totem(False)
             self.showFullScreen()
-        else:
-            self.show()
+            return
+        self.show()
+        if self.anjungan_totem:
+            self._kunci_ukuran_totem(True)
 
     def ganti_layar_penuh(self) -> None:
         if self.isFullScreen():
             self.showNormal()
             if self._geometri_normal is not None and self._geometri_normal.isValid():
                 self.setGeometry(self._geometri_normal)
+            self._kunci_ukuran_totem(True)
         else:
             self._geometri_normal = QRect(self.geometry())
+            self._kunci_ukuran_totem(False)
             self.showFullScreen()
 
     def keluar_layar_penuh(self) -> None:
         """Turunkan layar penuh. Tidak melakukan apa-apa bila sudah jendela."""
         if self.isFullScreen():
             self.showNormal()
+            if self._geometri_normal is not None and self._geometri_normal.isValid():
+                self.setGeometry(self._geometri_normal)
+            self._kunci_ukuran_totem(True)
 
     def _ganti_halaman(self, baris: int) -> None:
         if baris >= 0:
@@ -550,6 +623,8 @@ class MainWindow(QMainWindow):
 
     def muat_ulang_halaman(self) -> None:
         halaman = self.halaman.currentWidget()
+        if isinstance(halaman, PratinjauTotem):
+            halaman = halaman.isi
         if hasattr(halaman, "muat_ulang"):
             halaman.muat_ulang()
             # statusBar() membuat bilah status baru bila belum ada, sehingga

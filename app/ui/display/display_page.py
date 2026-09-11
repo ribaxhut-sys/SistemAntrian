@@ -1072,6 +1072,9 @@ class DisplayPage(QWidget):
         #: layanan — lihat `_bangun_info_kios`.
         self.label_info_kios: QLabel | None = None
         self.panel_info_kios: PanelSambutanKios | None = None
+        #: Pita loket mini anjungan berdiri. Diisi KioskPage; papan biasa
+        #: membiarkannya None.
+        self.pita_loket_kios = None
 
         self._bangun_tampilan()
         self.muat_ulang()
@@ -1788,6 +1791,9 @@ class DisplayPage(QWidget):
                 # yang baru dengan yang terpasang dan tidak melakukan apa-apa
                 # bila loket yang memanggil masih yang itu juga.
                 self._tata_kartu(indeks_unggulan)
+
+        if self.pita_loket_kios is not None:
+            self.pita_loket_kios.tampilkan(keadaan)
 
         if self.kartu_sorot is not None:
             self.kartu_sorot.tampilkan(terkini)

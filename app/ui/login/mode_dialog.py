@@ -36,6 +36,7 @@ from app.core.config import APP_NAME, lewati_login_pengembang
 #: tampilan selalu masuk sebagai admin dan tombol panggil tidak muncul.
 LAYAR_ANTRIAN = "antrian"
 ANJUNGAN = "anjungan"
+ANJUNGAN_TOTEM = "anjungan-totem"
 LAYAR_ADMIN = "admin"
 LAYAR_PETUGAS = "petugas"
 
@@ -83,6 +84,16 @@ class ModeDialog(QDialog):
                 ANJUNGAN,
                 ikon="🎫",
                 aksen="anjungan",
+            )
+        )
+        susunan.addWidget(
+            self._bangun_pilihan(
+                "ANJUNGAN BERDIRI",
+                "Totem sentuh tinggi: iklan di atas, pilih layanan di tengah, "
+                "nomor loket di bawah. Tidak perlu masuk.",
+                ANJUNGAN_TOTEM,
+                ikon="🖥",
+                aksen="totem",
             )
         )
         # Komputer loket punya dua peran. Saat uji dari source keduanya
@@ -240,8 +251,8 @@ class ModeDialog(QDialog):
 
         teks = QLabel(
             "Komputer televisi dan anjungan sebaiknya dijalankan dengan "
-            "pintasan AntrianCRO.exe --tv atau --kios. Komputer loket: "
-            "--admin atau --petugas."
+            "pintasan AntrianCRO.exe --tv, --kios, atau --kios-totem. "
+            "Komputer loket: --admin atau --petugas."
         )
         teks.setObjectName("catatanTeks")
         teks.setWordWrap(True)

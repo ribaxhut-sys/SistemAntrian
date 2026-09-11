@@ -12,6 +12,8 @@ Argumen:
                   pilihan dan tanpa login.
     --kios        langsung membuka anjungan ambil nomor, tanpa dialog
                   pilihan dan tanpa login.
+    --kios-totem  langsung membuka anjungan berdiri (totem tiga pita),
+                  tanpa dialog dan tanpa login.
     --layar       nama lama --kios. Dipertahankan supaya pintasan yang sudah
                   terpasang di komputer anjungan tidak mati saat aplikasi
                   diperbarui.
@@ -21,6 +23,9 @@ Argumen:
                   petugas CRO tanpa sandi; pada .exe tetap minta login.
     --init-only   hanya siapkan database lalu keluar, tanpa membuka jendela.
                   Berguna untuk memeriksa pemasangan di komputer baru.
+    --jendela     buka mesin publik sebagai jendela, bukan layar penuh.
+                  Totem ditampilkan sebagai miniatur 50% dari 1080×1920
+                  (bukan 30%: itu terlalu kecil untuk dibaca).
 
 Kedua mesin publik dipasang dengan argumennya masing-masing supaya pulih
 sendiri setelah mati listrik, tanpa perlu ada yang mengklik apa pun.
@@ -177,7 +182,7 @@ def _laporkan_kegagalan_database(config, *, berjendela: bool) -> None:
         logger.exception("Pesan kegagalan database tidak dapat ditampilkan")
 
 
-def _jalankan_ui(*, mode_awal: str | None = None) -> int:
+def _jalankan_ui(*, mode_awal: str | None = None, berjendela: bool = False) -> int:
     """
     Buka aplikasi berjendela. Import Qt ditunda sampai benar-benar dipakai.
 
@@ -203,6 +208,7 @@ def _jalankan_ui(*, mode_awal: str | None = None) -> int:
     from app.ui.login.login_window import LoginWindow
     from app.ui.login.mode_dialog import (
         ANJUNGAN,
+        ANJUNGAN_TOTEM,
         LAYAR_ADMIN,
         LAYAR_ANTRIAN,
         ModeDialog,
@@ -239,13 +245,17 @@ def _jalankan_ui(*, mode_awal: str | None = None) -> int:
                 return 0
             mode = pilihan.pilihan
 
-        if mode in (ANJUNGAN, LAYAR_ANTRIAN):
+        if mode in (ANJUNGAN, ANJUNGAN_TOTEM, LAYAR_ANTRIAN):
             # Tanpa login: komputernya menghadap publik dan tidak diawasi.
-            if mode == ANJUNGAN:
+            if mode in (ANJUNGAN, ANJUNGAN_TOTEM):
                 auth.mulai_sesi_kios()
             else:
                 auth.mulai_sesi_layar()
-            jendela = MainWindow(auth)
+            jendela = MainWindow(
+                auth,
+                anjungan_totem=mode == ANJUNGAN_TOTEM,
+                berjendela=berjendela,
+            )
             jendela.tampilkan()
             app.exec()
             continue  # mesin publik ditutup -> kembali ke layar pilihan mode
@@ -302,10 +312,12 @@ def mode_dari_argumen(argv: list[str]) -> str | None:
     tunggu, sedangkan anjungan yang keliru masih bisa digantikan petugas
     yang menerbitkan nomor dari mejanya.
     """
-    from app.ui.login.mode_dialog import ANJUNGAN, LAYAR_ADMIN, LAYAR_ANTRIAN, LAYAR_PETUGAS
+    from app.ui.login.mode_dialog import ANJUNGAN, ANJUNGAN_TOTEM, LAYAR_ADMIN, LAYAR_ANTRIAN, LAYAR_PETUGAS
 
     if "--tv" in argv:
         return LAYAR_ANTRIAN
+    if "--kios-totem" in argv:
+        return ANJUNGAN_TOTEM
     # --layar adalah nama lama --kios, dipertahankan supaya pintasan yang
     # sudah terpasang di komputer anjungan tidak mati saat aplikasi diperbarui.
     if "--kios" in argv or "--layar" in argv:
@@ -357,7 +369,10 @@ def main(argv: list[str] | None = None) -> int:
         # Import Qt ditunda sampai jendela benar-benar dibuka, sehingga mode
         # dibaca di sini dan bukan di awal main(): --init-only harus tetap
         # berjalan di komputer yang PySide6-nya belum lengkap.
-        return _jalankan_ui(mode_awal=mode_dari_argumen(argv))
+        return _jalankan_ui(
+            mode_awal=mode_dari_argumen(argv),
+            berjendela="--jendela" in argv,
+        )
     except Exception:
         logger.exception("Kesalahan tak terduga pada aplikasi")
         print(

@@ -51,10 +51,11 @@ def test_tanpa_argumen_mode_ditanyakan() -> None:
 
 def test_argumen_membuka_mesin_yang_sesuai() -> None:
     from app.main import mode_dari_argumen
-    from app.ui.login.mode_dialog import ANJUNGAN, LAYAR_ADMIN, LAYAR_ANTRIAN, LAYAR_PETUGAS
+    from app.ui.login.mode_dialog import ANJUNGAN, ANJUNGAN_TOTEM, LAYAR_ADMIN, LAYAR_ANTRIAN, LAYAR_PETUGAS
 
     assert mode_dari_argumen(["--tv"]) == LAYAR_ANTRIAN
     assert mode_dari_argumen(["--kios"]) == ANJUNGAN
+    assert mode_dari_argumen(["--kios-totem"]) == ANJUNGAN_TOTEM
     assert mode_dari_argumen(["--admin"]) == LAYAR_ADMIN
     assert mode_dari_argumen(["--petugas"]) == LAYAR_PETUGAS
 
@@ -83,6 +84,16 @@ def test_layar_antrian_didahulukan_bila_dua_argumen_tertulis() -> None:
     from app.ui.login.mode_dialog import LAYAR_ANTRIAN
 
     assert mode_dari_argumen(["--kios", "--tv"]) == LAYAR_ANTRIAN
+    assert mode_dari_argumen(["--kios-totem", "--tv"]) == LAYAR_ANTRIAN
+
+
+def test_jendela_bukan_mode_mesin() -> None:
+    """`--jendela` hanya meniadakan layar penuh, tidak memilih mesin."""
+    from app.main import mode_dari_argumen
+    from app.ui.login.mode_dialog import ANJUNGAN_TOTEM
+
+    assert mode_dari_argumen(["--jendela"]) is None
+    assert mode_dari_argumen(["--kios-totem", "--jendela"]) == ANJUNGAN_TOTEM
 
 
 # ---------------------------------------------------------------------

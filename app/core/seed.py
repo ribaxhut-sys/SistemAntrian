@@ -103,6 +103,8 @@ _SETTINGS: list[tuple[str, str, str]] = [
      "Lama tiap gambar di folder media anjungan, dalam detik"),
     ("kiosk.info_ratio", "3",
      "Perbandingan lebar:tinggi panel informasi anjungan"),
+    ("kiosk.panel_order", "iklan-atas",
+     "Iklan di atas kartu layanan, atau sebaliknya"),
     ("survey.enabled", "true", "Tampilkan survey setelah pelayanan selesai"),
     ("ticket.footer", "Silakan menunggu hingga nomor Anda dipanggil.",
      "Teks penutup pada tiket antrian"),
