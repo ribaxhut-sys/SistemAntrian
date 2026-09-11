@@ -1,0 +1,46 @@
+# Tes harian di GitHub.
+#
+# Yang dijalankan sama dengan perintah harian di komputer pengembang:
+# pytest di atas SQLite. PostgreSQL (test-postgres.ps1) tetap wajib
+# sebelum rilis, tetapi tidak di sini — Docker di runner Windows tidak
+# sebanding biayanya dengan lampu hijau setiap push.
+#
+# Runner Windows, bukan Ubuntu: aplikasi ini desktop Windows + PySide6.
+# Plugin Qt offscreen di Linux butuh tumpukan library sistem yang tidak
+# ada di komputer petugas, dan kegagalannya bukan kegagalan aplikasi.
+
+name: Tes
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: tes-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sqlite:
+    name: SQLite
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Pasang dependency tes
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest==9.1.1 pytest-qt==4.5.0
+
+      - name: Tes harian
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests -q --tb=line
