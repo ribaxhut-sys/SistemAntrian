@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QRect, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QRect, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -67,6 +67,12 @@ def _area_layar_utama() -> QRect:
     """Area kerja layar utama, atau 1280×720 bila Qt belum mengenal layar apa pun."""
     layar = QApplication.primaryScreen()
     return layar.availableGeometry() if layar is not None else QRect(0, 0, 1280, 720)
+
+
+#: Bagian terbesar area layar yang boleh dipakai jendela yang diletakkan di
+#: tengah. 1280 x 720 lebih besar dari laptop 1366 x 768 berskala 150%
+#: (±910 x 512); jendela yang lebih besar dari layarnya tidak terlihat utuh.
+BAGIAN_LAYAR_MAKS = 0.9
 
 #: Selang uji koneksi di bilah status, dalam milidetik.
 #:
@@ -332,12 +338,17 @@ class MainWindow(QMainWindow):
             self._geometri_normal = ukuran_jendela_totem(area, self.persen_pratinjau)
             self.resize(self._geometri_normal.size())
             self.move(self._geometri_normal.topLeft())
+            #: ukuran_jendela_totem sudah meletakkannya di tengah layar.
+            self._posisi_normal_diketahui = True
         else:
             self.resize(1280, 720)
             #: Geometri jendela biasa, untuk F11. Anjungan dibuka langsung
             #: fullscreen; tanpa ini, restore Qt memakai ukuran bawaan kecil
             #: dan kartu layanan dihitung ulang jadi pita.
             self._geometri_normal = QRect(self.geometry())
+            #: Ukurannya sah, posisinya belum: jendela yang belum pernah
+            #: tampil masih berada di (0, 0). Lihat _turunkan_layar_penuh.
+            self._posisi_normal_diketahui = False
 
         self._bangun_tampilan()
         self._pasang_pintasan()
@@ -651,22 +662,60 @@ class MainWindow(QMainWindow):
 
     def ganti_layar_penuh(self) -> None:
         if self.isFullScreen():
-            self.showNormal()
-            if self._geometri_normal is not None and self._geometri_normal.isValid():
-                self.setGeometry(self._geometri_normal)
-            self._kunci_ukuran_totem(True)
+            self._turunkan_layar_penuh()
         else:
             self._geometri_normal = QRect(self.geometry())
+            self._posisi_normal_diketahui = self.isVisible()
             self._kunci_ukuran_totem(False)
             self.showFullScreen()
 
     def keluar_layar_penuh(self) -> None:
         """Turunkan layar penuh. Tidak melakukan apa-apa bila sudah jendela."""
         if self.isFullScreen():
-            self.showNormal()
-            if self._geometri_normal is not None and self._geometri_normal.isValid():
-                self.setGeometry(self._geometri_normal)
-            self._kunci_ukuran_totem(True)
+            self._turunkan_layar_penuh()
+
+    def _turunkan_layar_penuh(self) -> None:
+        """
+        Kembali ke jendela biasa: ke posisi terakhirnya bila pernah ada,
+        selain itu ke tengah layar tempat jendela ini sedang tampil.
+
+        Anjungan dan layar antrian dibuka langsung layar penuh, jadi tidak
+        pernah punya posisi jendela biasa. Geometri yang dicatat konstruktor
+        berposisi (0, 0) karena jendelanya belum tampil; memulihkannya
+        menaruh jendela di pojok kiri atas dengan bilah judul lewat tepi atas
+        layar — dan jendela tanpa bilah judul tidak dapat digeser dengan mouse.
+        """
+        # Dibaca sebelum showNormal: layar TV sering monitor kedua, dan
+        # jendela harus turun di layar yang sedang ditatap, bukan melompat
+        # ke monitor utama.
+        area = self._area_layar_sekarang()
+        geometri = self._geometri_normal
+        sah = geometri is not None and geometri.isValid()
+
+        self.showNormal()
+        if sah and self._posisi_normal_diketahui:
+            self.setGeometry(geometri)
+        else:
+            self._pusatkan(area, geometri.size() if sah else QSize(1280, 720))
+        self._kunci_ukuran_totem(True)
+
+    def _area_layar_sekarang(self) -> QRect:
+        """Area kerja monitor tempat jendela ini tampil."""
+        layar = self.screen()
+        return layar.availableGeometry() if layar is not None else _area_layar_utama()
+
+    def _pusatkan(self, area: QRect, ukuran: QSize) -> None:
+        """Letakkan jendela di tengah `area`, tidak lebih besar dari BAGIAN_LAYAR_MAKS."""
+        batas = QSize(
+            round(area.width() * BAGIAN_LAYAR_MAKS),
+            round(area.height() * BAGIAN_LAYAR_MAKS),
+        )
+        self.resize(ukuran.boundedTo(batas))
+        bingkai = self.frameGeometry()
+        bingkai.moveCenter(area.center())
+        # Bilah judul wajib di dalam layar, apa pun ukurannya.
+        bingkai.moveTop(max(bingkai.top(), area.top()))
+        self.move(bingkai.topLeft())
 
     def _ganti_halaman(self, baris: int) -> None:
         if baris >= 0:

@@ -489,6 +489,45 @@ def test_esc_hanya_keluar_dari_layar_penuh(qtbot, auth):
     assert jendela.isVisible()
 
 
+def test_esc_dari_layar_penuh_awal_menaruh_jendela_di_tengah(qtbot, auth):
+    """
+    Regresi: anjungan dan layar antrian dibuka langsung layar penuh, jadi
+    posisi jendela biasanya tercatat (0, 0) sebelum jendela pernah tampil.
+    Esc memulihkan titik itu — pojok kiri atas, dengan bilah judul lewat
+    tepi atas layar sehingga jendela tidak dapat digeser dengan mouse.
+    """
+    auth.login("display", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+    jendela.tampilkan()
+
+    jendela.keluar_layar_penuh()
+
+    area = jendela.screen().availableGeometry()
+    bingkai = jendela.frameGeometry()
+    assert bingkai.top() >= area.top(), "bilah judul lewat tepi atas layar"
+    assert abs(bingkai.center().x() - area.center().x()) <= 2
+    assert abs(bingkai.center().y() - area.center().y()) <= 2
+    assert jendela.width() <= area.width()
+    assert jendela.height() <= area.height()
+
+
+def test_esc_setelah_f11_kembali_ke_posisi_terakhir(qtbot, admin_auth):
+    """Jendela yang sudah digeser petugas kembali ke tempatnya, bukan ke tengah."""
+    from PySide6.QtCore import QRect
+
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    jendela.tampilkan()
+    jendela.move(40, 60)
+    sebelum = QRect(jendela.geometry())
+
+    jendela.ganti_layar_penuh()
+    jendela.keluar_layar_penuh()
+
+    assert jendela.geometry() == sebelum
+
+
 def test_kios_dibuka_layar_penuh(qtbot, auth):
     auth.login("display", TEST_PASSWORD)
     jendela = MainWindow(auth)
