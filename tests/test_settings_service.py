@@ -148,6 +148,13 @@ def test_cara_cetak_yang_sah_diterima(settings):
         assert settings.get("ticket.printer") == nilai
 
 
+def test_geser_atas_tiket_dibatasi(settings):
+    with pytest.raises(ValidationError):
+        settings.set("ticket.geser_atas_mm", "7")
+    settings.set("ticket.geser_atas_mm", "0")
+    assert settings.get("ticket.geser_atas_mm") == "0"
+
+
 def test_jenis_sambutan_anjungan_yang_tidak_dikenal_ditolak(settings):
     with pytest.raises(ValidationError):
         settings.set("kiosk.welcome_kind", "youtube")

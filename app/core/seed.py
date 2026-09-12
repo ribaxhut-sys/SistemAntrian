@@ -106,10 +106,14 @@ _SETTINGS: list[tuple[str, str, str]] = [
     ("kiosk.panel_order", "iklan-atas",
      "Iklan di atas kartu layanan, atau sebaliknya"),
     ("survey.enabled", "true", "Tampilkan survey setelah pelayanan selesai"),
-    ("ticket.footer", "Silakan menunggu hingga nomor Anda dipanggil.",
+    ("ticket.header", "BAPENDA DKI JAKARTA",
+     "Judul di baris paling atas tiket antrian"),
+    ("ticket.footer", "Silakan menunggu nomor Anda dipanggil.",
      "Teks penutup pada tiket antrian"),
     ("ticket.printer", "pdf",
      "Cara mencetak tiket: pdf, system, atau none"),
+    ("ticket.geser_atas_mm", "0",
+     "Geser isi tiket ke atas pada pencetak Windows, dalam milimeter"),
 ]
 
 

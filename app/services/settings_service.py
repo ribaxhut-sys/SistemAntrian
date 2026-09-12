@@ -54,8 +54,10 @@ BAWAAN: dict[str, str] = {
     "queue.registration_open": "true",
     "queue.registration_closed_date": "",
     "survey.enabled": "true",
-    "ticket.footer": "Silakan menunggu hingga nomor Anda dipanggil.",
+    "ticket.header": "BAPENDA DKI JAKARTA",
+    "ticket.footer": "Silakan menunggu nomor Anda dipanggil.",
     "ticket.printer": "pdf",
+    "ticket.geser_atas_mm": "0",
 }
 
 _BENAR = {"true", "1", "ya", "yes", "on"}
@@ -129,10 +131,32 @@ SKEMA: tuple[Pengaturan, ...] = (
         kelompok="Tiket",
     ),
     Pengaturan(
+        "ticket.header",
+        "Judul tiket",
+        "Baris paling atas tiket antrian, di atas nama kantor. "
+        "Kosongkan bila tiket tidak memerlukan judul.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Tiket",
+    ),
+    Pengaturan(
         "ticket.footer",
         "Teks penutup tiket",
         "Kalimat di bagian bawah tiket antrian.",
         TEKS,
+        kelompok="Tiket",
+    ),
+    Pengaturan(
+        "ticket.geser_atas_mm",
+        "Naikkan isi tiket",
+        "Hanya untuk pencetak Windows. Pada IWare IW-J200, 1 mm saja sudah "
+        "memotong judul — biarkan 0. Ruang kosong di atas judul diatur di "
+        "driver POS80 (margin atas / unprintable / begin feed), bukan di sini.",
+        ANGKA,
+        minimum=0,
+        maksimum=6,
+        satuan="mm",
+        nilai_khusus="Tidak digeser",
         kelompok="Tiket",
     ),
     Pengaturan(

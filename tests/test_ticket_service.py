@@ -34,7 +34,9 @@ def test_tiket_memuat_keterangan_yang_dibutuhkan(ticket_pdf, reg_queue, antrian_
     assert tiket.queue_number == "A-001"
     assert tiket.category_name == "Konsultasi"
     assert tiket.office_name == "Kantor Pelayanan"
-    assert tiket.footer == "Silakan menunggu hingga nomor Anda dipanggil."
+    assert tiket.footer == "Silakan menunggu nomor Anda dipanggil."
+    assert tiket.header == "BAPENDA DKI JAKARTA"
+    assert tiket.geser_atas_mm == 0
 
 
 def test_tanggal_tiket_berbahasa_indonesia(ticket_pdf, reg_queue, antrian_siap):
@@ -44,6 +46,7 @@ def test_tanggal_tiket_berbahasa_indonesia(ticket_pdf, reg_queue, antrian_siap):
 
     assert any(bulan in tiket.tanggal for bulan in BULAN)
     assert ":" in tiket.jam
+    assert tiket.tanggal_jam == f"{tiket.tanggal}, {tiket.jam}"
 
 
 def test_baris_teks_tiket_memuat_nomor_paling_menonjol():
@@ -62,7 +65,7 @@ def test_baris_teks_tiket_memuat_nomor_paling_menonjol():
     assert baris[0] == "Kantor Pelayanan"
     assert baris[2] == "NOMOR ANTRIAN"
     assert baris[3] == "A-023"
-    assert "26 Agustus 2026" in baris
+    assert "26 Agustus 2026, 20:07" in baris
     assert "Silakan menunggu." in baris
 
 
@@ -251,27 +254,47 @@ def test_sisa_antrian_muat_di_tinggi_struk_yang_tetap(
     harus muat pada tinggi itu juga — baris yang jatuh di luar halaman
     hilang tanpa jejak, jadi tingginya diuji, bukan diandaikan.
     """
+    from dataclasses import replace
+
+    from app.services.ticket_service import ATAS_MM, _tata_letak
+
     assert PdfTicketPrinter.TINGGI_MM == 88
 
     tiket = ticket_pdf.susun(reg_queue.create_queue(antrian_siap["kategori"]["A"]))
     assert tiket.baris_sisa_antrian()
 
-    # Jarak antarbaris persis seperti pada PdfTicketPrinter._gambar, dihitung
-    # dari tepi atas kertas sampai baris catatan kaki yang paling bawah, pada
-    # tiket terpanjang: tiket cetak ulang yang loketnya sudah diketahui.
-    jarak = [
-        12,  # margin atas -> nama kantor
-        8,  # -> "NOMOR ANTRIAN"
-        18,  # -> nomor antrian
-        13,  # -> jenis layanan
-        6,  # -> nama loket
-        6,  # -> tanggal
-        5,  # -> jam
-        7,  # -> sisa antrian
-        6,  # -> catatan kaki baris pertama
-        4.5,  # -> catatan kaki baris kedua
+    # Tiket terpanjang: judul, nama kantor dua baris, loket (tiket cetak
+    # ulang yang loketnya sudah diketahui), dan catatan kaki dua baris.
+    terpanjang = replace(
+        tiket,
+        header="BAPENDA DKI JAKARTA",
+        office_name="UNIT PELAYANAN PEMUNGUTAN PAJAK DAERAH",
+        counter_name="Loket 2",
+        footer=" ".join(["Terima kasih atas kesabaran Anda"] * 5),
+    )
+    baris = _tata_letak(terpanjang, _pas_helvetica, ukuran_nomor=54)
+    tulisan = [b for b in baris if not b.garis]
+
+    assert [b.teks for b in tulisan[:3]] == [
+        "BAPENDA DKI JAKARTA",
+        "UNIT PELAYANAN PEMUNGUTAN",
+        "PAJAK DAERAH",
     ]
-    assert sum(jarak) <= PdfTicketPrinter.TINGGI_MM
+    assert baris[0].teks == "BAPENDA DKI JAKARTA"
+    assert baris[1].garis
+    assert baris[1].y_mm > baris[0].y_mm
+    assert baris[1].y_mm < tulisan[1].y_mm
+    assert tulisan[1].ukuran <= 10
+    assert baris[-1].teks.endswith("…"), "catatan kaki harus dua baris penuh"
+    assert [b.y_mm for b in baris] == sorted(b.y_mm for b in baris)
+
+    # Baris pertama rapat ke tepi atas: 3,5 mm adalah batas huruf 12 pt.
+    assert baris[0].y_mm == ATAS_MM == 3.5
+
+    # IWare makan beberapa mm di kepala kertas. Judul tidak boleh digeser
+    # ke zona itu; yang dinaikkan adalah isi di bawahnya, supaya catatan
+    # kaki tidak mepet ke tepi potong.
+    assert PdfTicketPrinter.TINGGI_MM - baris[-1].y_mm >= 12
 
 
 # ---------------------------------------------------------------------
@@ -447,28 +470,23 @@ def test_gambar_tidak_melempar_dan_menghasilkan_berkas_valid(qt_available, tmp_p
     """
     from datetime import datetime
 
-    from PySide6.QtCore import QSizeF
-    from PySide6.QtGui import QPageSize, QPainter
+    from PySide6.QtGui import QPainter
     from PySide6.QtPrintSupport import QPrinter
+
+    from app.services.ticket_service import _pasang_halaman_tiket
 
     printer = QPrinter(QPrinter.PrinterMode.HighResolution)
     printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
     berkas = tmp_path / "hasil.pdf"
     printer.setOutputFileName(str(berkas))
-    printer.setPageSize(
-        QPageSize(
-            QSizeF(PdfTicketPrinter.LEBAR_MM, PdfTicketPrinter.TINGGI_MM),
-            QPageSize.Unit.Millimeter,
-        )
-    )
-    printer.setFullPage(True)
+    _pasang_halaman_tiket(printer, PdfTicketPrinter.LEBAR_MM)
 
     data = TicketData(
         queue_number="A-023",
         category_name="Konsultasi",
         office_name="Kantor Pelayanan",
         issued_at=datetime(2026, 8, 26, 20, 7),
-        footer="Silakan menunggu hingga nomor Anda dipanggil.",
+        footer="Silakan menunggu nomor Anda dipanggil.",
         counter_name="Loket 2",
     )
 
@@ -485,24 +503,78 @@ def test_gambar_tidak_melempar_dan_menghasilkan_berkas_valid(qt_available, tmp_p
 def test_ukuran_halaman_sama_dengan_tiket_pdf(qt_available, tmp_path):
     """Kedua mode cetak harus menghasilkan ukuran tiket yang identik."""
 
-    from PySide6.QtCore import QSizeF
-    from PySide6.QtGui import QPageSize
+    from PySide6.QtGui import QPageLayout
     from PySide6.QtPrintSupport import QPrinter
+
+    from app.services.ticket_service import _pasang_halaman_tiket
 
     printer = QPrinter(QPrinter.PrinterMode.HighResolution)
     printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
     printer.setOutputFileName(str(tmp_path / "ukuran.pdf"))
-    printer.setPageSize(
-        QPageSize(
-            QSizeF(PdfTicketPrinter.LEBAR_MM, PdfTicketPrinter.TINGGI_MM),
-            QPageSize.Unit.Millimeter,
-        )
-    )
-    printer.setFullPage(True)
+    _pasang_halaman_tiket(printer, PdfTicketPrinter.LEBAR_MM)
 
-    ukuran_mm = printer.pageRect(QPrinter.Unit.Millimeter)
+    tata = printer.pageLayout()
+    assert tata.mode() == QPageLayout.Mode.FullPageMode
+    margin = tata.margins(QPageLayout.Unit.Millimeter)
+    assert margin.top() == 0
+    assert margin.left() == 0
+    assert margin.right() == 0
+    assert margin.bottom() == 0
+
+    ukuran_mm = printer.paperRect(QPrinter.Unit.Millimeter)
     assert abs(ukuran_mm.width() - PdfTicketPrinter.LEBAR_MM) < 1
     assert abs(ukuran_mm.height() - PdfTicketPrinter.TINGGI_MM) < 1
+
+
+def test_geser_printer_tidak_memakan_judul():
+    """
+    Regresi: geseran −14 mm menaruh judul di zona umpan IWare yang tidak
+    tercetak, sehingga "BAPENDA…" hilang dari kertas. Zona itu tidak boleh
+    diisi software.
+    """
+    from app.services.ticket_service import GESER_PRINTER_MM
+
+    assert GESER_PRINTER_MM == 0
+
+
+def test_offset_gdi_tidak_membatalkan_cetak_tanpa_handle():
+    """
+    Regresi: QPrinter PySide6 tidak punya handle(). AttributeError di situ
+    dulu menelan seluruh cetak — nomor terbit, kertas tidak keluar.
+    """
+    from app.services.ticket_service import _offset_fisik_gdi
+
+    class TanpaHandle:
+        pass
+
+    class HandleRusak:
+        def handle(self):
+            raise AttributeError("handle")
+
+    assert _offset_fisik_gdi(TanpaHandle()) == (0, 0)
+    assert _offset_fisik_gdi(HandleRusak()) == (0, 0)
+
+
+def test_gambar_pdf_qt_tidak_ikut_geseran_printer_asli(qt_available, tmp_path):
+    """Berkas PDF lewat Qt harus tetap rapat ke tepi, seperti tiket ReportLab."""
+    from PySide6.QtGui import QPainter
+    from PySide6.QtPrintSupport import QPrinter
+
+    from app.services.ticket_service import _geser_atas_printer_px, _pasang_halaman_tiket
+
+    printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+    printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+    printer.setOutputFileName(str(tmp_path / "tanpa_geser.pdf"))
+    _pasang_halaman_tiket(printer, PdfTicketPrinter.LEBAR_MM)
+
+    painter = QPainter()
+    assert painter.begin(printer)
+    try:
+        kertas = printer.paperRect(QPrinter.Unit.DevicePixel)
+        titik_per_mm = printer.resolution() / 25.4
+        assert _geser_atas_printer_px(printer, titik_per_mm, geser_mm=3) == 0
+    finally:
+        painter.end()
 
 
 # ---------------------------------------------------------------------
@@ -511,11 +583,12 @@ def test_ukuran_halaman_sama_dengan_tiket_pdf(qt_available, tmp_path):
 
 def test_footer_bawaan_muat_tanpa_dipotong():
     from app.services.settings_service import BAWAAN
-    from app.services.ticket_service import MAKS_BARIS_FOOTER, _bungkus
+    from app.services.ticket_service import _bungkus
 
     baris = _bungkus(BAWAAN["ticket.footer"], 38)
 
-    assert len(baris) <= MAKS_BARIS_FOOTER
+    assert baris == ["Silakan menunggu nomor Anda dipanggil."]
+    assert len(baris) == 1
     assert not baris[-1].endswith("…"), "footer bawaan tidak boleh terpotong"
 
 
@@ -540,6 +613,189 @@ def test_footer_pendek_tidak_disentuh():
     from app.services.ticket_service import _bungkus
 
     assert _bungkus("Singkat.", 38) == ["Singkat."]
+
+
+# ---------------------------------------------------------------------
+# Lebar struk
+# ---------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("lebar_printer", "harapan"),
+    [(72.0, 72.0), (48.0, 48.0), (80.0, 80.0), (210.0, 80.0), (0.0, 80.0), (-1.0, 80.0)],
+)
+def test_lebar_halaman_mengikuti_printer_struk_yang_lebih_sempit(lebar_printer, harapan):
+    """
+    Regresi IWare IW-J200 II: driver POS80 melaporkan kertas 72 mm. Halaman
+    80 mm yang dipaksakan membuat seluruh tiket bergeser 4 mm ke kanan dan
+    tepi kanannya terpotong.
+    """
+    from app.services.ticket_service import _lebar_halaman_mm
+
+    assert _lebar_halaman_mm(lebar_printer) == harapan
+
+
+def _muat_helvetica_tebal(lebar_mm):
+    """Pengukur lebar dengan huruf sungguhan, seperti yang dipakai tiket PDF."""
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    return lambda teks, pt: stringWidth(teks, "Helvetica-Bold", pt) <= lebar_mm * mm
+
+
+def test_nama_kantor_panjang_dibungkus_bukan_dipotong():
+    """
+    Regresi: "UNIT PELAYANAN PEMUNGUTAN PAJAK DAERAH" dipotong [:34] menjadi
+    "... PAJAK DA", dan potongan itu pun masih lebih lebar dari kertas 72 mm.
+    """
+    from app.services.ticket_service import TEPI_MM, _pas_lebar
+
+    nama = "UNIT PELAYANAN PEMUNGUTAN PAJAK DAERAH"
+    muat = _muat_helvetica_tebal(72 - 2 * TEPI_MM)
+
+    baris, pt = _pas_lebar(nama, muat, 10, maks_baris=2)
+
+    assert " ".join(baris) == nama
+    assert len(baris) == 2
+    assert all(muat(b, pt) for b in baris)
+
+
+def test_nama_kantor_pendek_tetap_satu_baris_ukuran_asli():
+    from app.services.ticket_service import TEPI_MM, _pas_lebar
+
+    muat = _muat_helvetica_tebal(72 - 2 * TEPI_MM)
+
+    assert _pas_lebar("Kantor Pelayanan", muat, 10, maks_baris=2) == (
+        ["Kantor Pelayanan"],
+        10,
+    )
+
+
+def test_baris_tunggal_kepanjangan_dikecilkan_hurufnya():
+    """Jenis layanan tidak punya ruang baris kedua: hurufnya yang mengecil."""
+    from app.services.ticket_service import TEPI_MM, _pas_lebar
+
+    muat = _muat_helvetica_tebal(72 - 2 * TEPI_MM)
+    nama = "Pelayanan Pajak Kendaraan Bermotor"
+
+    baris, pt = _pas_lebar(nama, muat, 14)
+
+    assert baris == [nama]
+    assert pt < 14
+    assert muat(nama, pt)
+
+
+def test_teks_yang_tetap_kelebaran_dipotong_dengan_elipsis():
+    from app.services.ticket_service import TEPI_MM, UKURAN_HURUF_MIN, _pas_lebar
+
+    muat = _muat_helvetica_tebal(72 - 2 * TEPI_MM)
+
+    baris, pt = _pas_lebar("PELAYANAN " * 20, muat, 14)
+
+    assert pt == UKURAN_HURUF_MIN
+    assert len(baris) == 1
+    assert baris[0].endswith("…")
+    assert muat(baris[0], pt)
+
+
+def _pas_helvetica(teks, ukuran, tebal, maks_baris):
+    """`pas` untuk _tata_letak dengan huruf sungguhan di kertas 72 mm."""
+    from app.services.ticket_service import TEPI_MM, _pas_lebar
+
+    return _pas_lebar(teks, _muat_helvetica_tebal(72 - 2 * TEPI_MM), ukuran, maks_baris)
+
+
+def test_judul_tiket_di_baris_paling_atas():
+    from datetime import datetime
+
+    tiket = TicketData(
+        queue_number="A-001",
+        category_name="Konsultasi",
+        office_name="Kantor Pelayanan",
+        issued_at=datetime(2026, 9, 12, 9, 30),
+        header="BAPENDA DKI JAKARTA",
+    )
+
+    assert tiket.baris_teks()[:4] == [
+        "BAPENDA DKI JAKARTA",
+        "Kantor Pelayanan",
+        "",
+        "NOMOR ANTRIAN",
+    ]
+
+
+def test_tanpa_judul_nama_kantor_naik_ke_baris_pertama():
+    """Judul boleh dikosongkan; tidak boleh menyisakan baris kosong di atas."""
+    from dataclasses import replace
+
+    from app.services.ticket_service import ATAS_MM, _tata_letak
+
+    baris = _tata_letak(
+        replace(_tiket_nama_panjang(), header=""), _pas_helvetica, ukuran_nomor=44
+    )
+
+    assert baris[0].teks == "UNIT PELAYANAN PEMUNGUTAN"
+    assert baris[0].y_mm == ATAS_MM
+    assert not any(b.garis for b in baris)
+
+
+def _tiket_nama_panjang():
+    from datetime import datetime
+
+    return TicketData(
+        queue_number="A-023",
+        category_name="Pelayanan Pajak Kendaraan Bermotor",
+        office_name="UNIT PELAYANAN PEMUNGUTAN PAJAK DAERAH",
+        header="BAPENDA DKI JAKARTA",
+        issued_at=datetime(2026, 9, 12, 9, 30),
+        footer="Silakan menunggu nomor Anda dipanggil.",
+        counter_name="Loket 2",
+        sisa_antrian=3,
+    )
+
+
+def test_jarak_dari_layanan_sampai_catatan_kaki_seragam():
+    """Nama layanan, loket, tanggal-jam, sisa, dan catatan kaki selang-seling sama."""
+    from app.services.ticket_service import JARAK_BLOK_BAWAH_MM, _tata_letak
+
+    baris = [
+        b
+        for b in _tata_letak(_tiket_nama_panjang(), _pas_helvetica, 44)
+        if not b.garis
+    ]
+    bawah = baris[-5:]
+    jarak = [round(b.y_mm - a.y_mm, 2) for a, b in zip(bawah, bawah[1:])]
+
+    assert bawah[0].teks.startswith("Pelayanan")
+    assert bawah[-1].teks.startswith("Silakan menunggu")
+    assert jarak == [JARAK_BLOK_BAWAH_MM] * 4
+
+
+def test_tiket_pdf_nama_kantor_dua_baris(tmp_path):
+    hasil = PdfTicketPrinter(tmp_path).cetak(_tiket_nama_panjang())
+
+    assert hasil.berhasil
+    assert hasil.berkas.read_bytes().startswith(b"%PDF")
+
+
+def test_gambar_qt_nama_kantor_dua_baris_di_kertas_72mm(qt_available, tmp_path):
+    """Jalur Qt sungguhan pada lebar kertas printer struk yang sebenarnya."""
+    from PySide6.QtGui import QPainter
+    from PySide6.QtPrintSupport import QPrinter
+
+    from app.services.ticket_service import _pasang_halaman_tiket
+
+    printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+    printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+    berkas = tmp_path / "72mm.pdf"
+    printer.setOutputFileName(str(berkas))
+    _pasang_halaman_tiket(printer, 72)
+
+    painter = QPainter()
+    assert painter.begin(printer)
+    QtTicketPrinter._gambar(painter, printer, _tiket_nama_panjang())
+    painter.end()
+
+    assert berkas.read_bytes().startswith(b"%PDF")
 
 
 # ---------------------------------------------------------------------
