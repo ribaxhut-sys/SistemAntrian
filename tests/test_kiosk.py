@@ -1695,7 +1695,10 @@ def test_mode_dialog_menawarkan_lima_pilihan_saat_uji(qtbot):
     dialog = ModeDialog()
     qtbot.addWidget(dialog)
 
-    teks = [b.text() for b in dialog.findChildren(QPushButton)]
+    kartu = [
+        b for b in dialog.findChildren(QPushButton) if b.objectName() == "kartuMode"
+    ]
+    teks = [b.text() for b in kartu]
     assert len(teks) == 5
     assert any("ANTRIAN" in t for t in teks)
     assert any("ANJUNGAN AMBIL NOMOR" in t for t in teks)
@@ -1703,6 +1706,9 @@ def test_mode_dialog_menawarkan_lima_pilihan_saat_uji(qtbot):
     assert any("ADMIN" in t for t in teks)
     assert any("PETUGAS" in t for t in teks)
     assert len({LAYAR_ANTRIAN, ANJUNGAN, ANJUNGAN_TOTEM, LAYAR_ADMIN, LAYAR_PETUGAS}) == 5
+    assert any(
+        b.text() == "Atur komputer ini" for b in dialog.findChildren(QPushButton)
+    )
 
 
 def test_mode_dialog_satu_tombol_petugas_bila_wajib_login(qtbot, monkeypatch):
@@ -1715,11 +1721,17 @@ def test_mode_dialog_satu_tombol_petugas_bila_wajib_login(qtbot, monkeypatch):
     dialog = ModeDialog()
     qtbot.addWidget(dialog)
 
-    teks = [b.text() for b in dialog.findChildren(QPushButton)]
+    kartu = [
+        b for b in dialog.findChildren(QPushButton) if b.objectName() == "kartuMode"
+    ]
+    teks = [b.text() for b in kartu]
     assert len(teks) == 4
     assert not any("ADMIN" in t for t in teks)
     assert any("PETUGAS" in t for t in teks)
     assert any("ANJUNGAN BERDIRI" in t for t in teks)
+    assert any(
+        b.text() == "Atur komputer ini" for b in dialog.findChildren(QPushButton)
+    )
 
 
 def test_mode_dialog_memilih_layar_petugas(qtbot):
@@ -1754,6 +1766,73 @@ def test_mode_dialog_memilih_layar_admin(qtbot):
 
     assert dialog.pilihan == LAYAR_ADMIN
     assert dialog.result() == int(QDialog.DialogCode.Accepted)
+
+
+def test_dialog_mesin_bawaan_satu_komputer(qtbot, app_config):
+    from PySide6.QtWidgets import QDialog
+
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    assert dialog.radio_sendiri.isChecked()
+    assert dialog._panel_postgres.isHidden()
+    assert dialog._panel_server.isHidden()
+    dialog._simpan()
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+    assert dialog.pengaturan_tersimpan is not None
+    assert dialog.pengaturan_tersimpan.peran == "sendiri"
+
+
+def test_dialog_mesin_server_menampilkan_alamat(qtbot, app_config):
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog.radio_server.setChecked(True)
+    dialog._perbarui_tampilan()
+    assert not dialog._panel_server.isHidden()
+    assert not dialog._panel_postgres.isHidden()
+    assert dialog.isian_host.isHidden()
+    assert "alamat" in dialog._label_alamat.text().lower()
+
+
+def test_dialog_mesin_klien_wajib_alamat_server(qtbot, app_config):
+    from PySide6.QtWidgets import QDialog
+
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog.radio_klien.setChecked(True)
+    dialog._perbarui_tampilan()
+    assert not dialog.isian_host.isHidden()
+    dialog.isian_host.setText("")
+    dialog._simpan()
+    assert dialog.result() != int(QDialog.DialogCode.Accepted)
+    assert dialog._label_error.isVisible() or dialog._label_error.text()
+    assert "Alamat" in dialog._label_error.text()
+
+
+def test_dialog_mesin_klien_menyimpan_alamat(qtbot, app_config):
+    from PySide6.QtWidgets import QDialog
+
+    from app.core.mesin import baca_berkas_mesin, path_berkas_mesin
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog.radio_klien.setChecked(True)
+    dialog._perbarui_tampilan()
+    dialog.isian_host.setText("192.168.1.10")
+    dialog.isian_pengguna.setText("antrian")
+    dialog.isian_sandi.setText("rahasia-loket")
+    dialog._simpan()
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+    tersimpan = baca_berkas_mesin(path_berkas_mesin(app_config.db_path))
+    assert tersimpan is not None
+    assert tersimpan.host == "192.168.1.10"
+    assert tersimpan.sandi == "rahasia-loket"
 
 
 # ---------------------------------------------------------------------

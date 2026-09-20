@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import APP_NAME, lewati_login_pengembang
+from app.ui.common import tombol
 
 #: Hasil pilihan.
 #:
@@ -258,8 +259,47 @@ class ModeDialog(QDialog):
         teks.setWordWrap(True)
         susunan.addWidget(teks, 1)
 
+        atur = tombol("Atur komputer ini")
+        atur.setObjectName("tombolAturMesin")
+        atur.setAutoDefault(False)
+        atur.setToolTip(
+            "Tetapkan komputer ini sebagai satu komputer, server, atau klien."
+        )
+        atur.clicked.connect(self._atur_komputer)
+        susunan.addWidget(atur)
+
         return kotak
 
     def _pilih(self, nilai: str) -> None:
         self.pilihan = nilai
         self.accept()
+
+    def _atur_komputer(self) -> None:
+        """
+        Peran mesin disimpan di komputer ini, bukan di database bersama.
+
+        Koneksi yang sedang berjalan tidak ditukar diam-diam: engine
+        sudah terbuka, dan menukarnya di tengah sesi membuat layar
+        membaca server yang berbeda dari yang baru saja dilayani.
+        """
+        from app.core.mesin import env_url_mengalahkan
+        from app.ui.common import tampilkan_info, tampilkan_peringatan
+        from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+        dialog = SetupMesinDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if env_url_mengalahkan():
+            tampilkan_peringatan(
+                self,
+                "Isian disimpan, tetapi ANTRIAN_DB_URL masih mengalahkan "
+                "berkas ini. Hapus variabel itu, lalu buka ulang aplikasi.",
+                "Koneksi belum berubah",
+            )
+            return
+        if dialog.memerlukan_buka_ulang:
+            tampilkan_info(
+                self,
+                "Tutup aplikasi, lalu buka kembali agar koneksi baru dipakai.",
+                "Komputer ini",
+            )

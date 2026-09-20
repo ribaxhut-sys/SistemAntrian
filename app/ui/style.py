@@ -685,7 +685,8 @@ QStatusBar {{
    oleh orang yang belum tentu memasang aplikasi ini. Karena itu ia dibuat
    putih dan lapang, bukan abu-abu seperti layar kerja: tidak ada data yang
    perlu dibaca di sini, hanya satu keputusan yang perlu diambil. */
-QDialog#dialogMode {{
+QDialog#dialogMode,
+QDialog#dialogMesin {{
     background: {SURFACE};
 }}
 
@@ -841,6 +842,18 @@ QFrame#catatanMode {{
 QLabel#catatanTeks {{
     color: {TEXT_MUTED};
     font-size: 12px;
+}}
+
+QFrame#panelAlamatServer {{
+    background: {PRIMARY_SOFT};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS}px;
+}}
+
+QLabel#alamatServer {{
+    color: {TEXT};
+    font-size: 13px;
+    font-weight: 600;
 }}
 """
 

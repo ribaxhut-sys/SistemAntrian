@@ -23,6 +23,9 @@ Argumen:
                   petugas CRO tanpa sandi; pada .exe tetap minta login.
     --init-only   hanya siapkan database lalu keluar, tanpa membuka jendela.
                   Berguna untuk memeriksa pemasangan di komputer baru.
+    --setup       buka dialog peran komputer ini (satu komputer / server /
+                  klien) sebelum menyambung ke database. Bukan deteksi
+                  jaringan: orang yang memasang yang menunjuk.
     --jendela[=PERSEN]
                   buka mesin publik sebagai jendela, bukan layar penuh.
                   Totem tampil sebagai miniatur tegak dari 1080×1920:
@@ -41,7 +44,7 @@ from __future__ import annotations
 
 import sys
 
-from app.core.config import APP_NAME, get_config, lewati_login_pengembang
+from app.core.config import APP_NAME, get_config, lewati_login_pengembang, reset_config
 from app.core.database import dispose_engine, init_database
 from app.core.logger import get_logger, setup_logging
 from app.core.migrations import current_revision
@@ -144,7 +147,7 @@ class PenyapuHarian:
         return hanguskan_antrian_hari_lalu()
 
 
-def _laporkan_kegagalan_database(config, *, berjendela: bool) -> None:
+def _laporkan_kegagalan_database(config, *, berjendela: bool) -> bool:
     """
     Beri tahu petugas bahwa database tidak dapat dihubungi.
 
@@ -157,6 +160,9 @@ def _laporkan_kegagalan_database(config, *, berjendela: bool) -> None:
     alamatnya salah ketik.
 
     Kata sandi database TIDAK pernah ikut ditampilkan.
+
+    True bila petugas memilih mengubah koneksi, supaya percobaan berikutnya
+    memakai alamat baru tanpa menutup proses.
     """
     tujuan = config.url_database.render_as_string(hide_password=True)
     pesan = (
@@ -169,23 +175,31 @@ def _laporkan_kegagalan_database(config, *, berjendela: bool) -> None:
 
     print(pesan, file=sys.stderr)
     if not berjendela:
-        return
+        return False
 
     try:
         from PySide6.QtWidgets import QApplication, QMessageBox
 
+        from app.ui.style import STYLESHEET
+
         app = QApplication.instance() or QApplication(sys.argv)
+        app.setApplicationName(APP_NAME)
+        app.setStyleSheet(STYLESHEET)
         kotak = QMessageBox()
         kotak.setIcon(QMessageBox.Icon.Critical)
         kotak.setWindowTitle(APP_NAME)
         kotak.setText("Aplikasi tidak dapat menghubungi database.")
         kotak.setInformativeText(pesan)
+        tutup = kotak.addButton("Tutup", QMessageBox.ButtonRole.RejectRole)
+        kotak.addButton("Ubah koneksi", QMessageBox.ButtonRole.ActionRole)
+        kotak.setDefaultButton(tutup)
         kotak.exec()
-        del app
+        return kotak.clickedButton() is not tutup
     except Exception:
         # Qt sendiri gagal dimuat. Tidak ada lagi yang bisa ditampilkan;
         # yang penting aplikasi berhenti dengan rapi, bukan menumpuk error.
         logger.exception("Pesan kegagalan database tidak dapat ditampilkan")
+        return False
 
 
 def _jalankan_ui(
@@ -227,7 +241,7 @@ def _jalankan_ui(
     from app.ui.main_window import MainWindow
     from app.ui.style import STYLESHEET
 
-    app = QApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setStyleSheet(STYLESHEET)
 
@@ -369,6 +383,68 @@ def pratinjau_dari_argumen(argv: list[str]) -> tuple[bool | None, int | None]:
     return berjendela, persen
 
 
+def _mesin_publik_tanpa_jaga(argv: list[str]) -> bool:
+    """True bila argumennya untuk mesin yang pulih sendiri tanpa klik."""
+    return any(flag in argv for flag in ("--tv", "--kios", "--kios-totem", "--layar"))
+
+
+def perlu_setup_awal(
+    argv: list[str], db_path, *, sedang_uji: bool | None = None
+) -> bool:
+    """
+    True bila .exe baru dibuka dan peran komputer ini belum ditetapkan.
+
+    Dilewati di source (lewati login pengembang), di test, saat URL
+    environment sudah diisi, dan pada pintasan mesin publik: anjungan
+    yang pulih setelah mati listrik tidak boleh berhenti di dialog.
+    """
+    import os
+
+    from app.core.mesin import path_berkas_mesin
+
+    if sedang_uji is None:
+        sedang_uji = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    if sedang_uji:
+        return False
+    lewati = os.environ.get("ANTRIAN_LEWATI_SETUP", "").strip().lower()
+    if lewati in {"1", "true", "ya", "yes", "on"}:
+        return False
+    if os.environ.get("ANTRIAN_DB_URL", "").strip():
+        return False
+    if "--init-only" in argv:
+        return False
+    if _mesin_publik_tanpa_jaga(argv):
+        return False
+    if lewati_login_pengembang():
+        return False
+    return not path_berkas_mesin(db_path).is_file()
+
+
+def _jalankan_dialog_mesin() -> bool:
+    """
+    Tampilkan dialog peran komputer ini. True bila disimpan.
+
+    Memuat ulang konfigurasi setelah disimpan supaya percobaan koneksi
+    berikutnya memakai alamat baru. Engine lama dilepas dulu — Windows
+    menahan berkas SQLite yang masih terbuka.
+    """
+    from PySide6.QtWidgets import QApplication, QDialog
+
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+    from app.ui.style import STYLESHEET
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setStyleSheet(STYLESHEET)
+
+    dialog = SetupMesinDialog()
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return False
+    dispose_engine()
+    reset_config()
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     hanya_init = "--init-only" in argv
@@ -376,17 +452,26 @@ def main(argv: list[str] | None = None) -> int:
     config = get_config()
     setup_logging(config)
 
-    try:
-        dibuat = siapkan_database()
-        backup_harian()
-        # SESUDAH backup: bila sapuan ini ternyata keliru, keadaan sebelum
-        # disapu masih tersimpan pada backup pagi ini.
-        hanguskan_antrian_hari_lalu()
-    except Exception:
-        # Traceback hanya masuk log, tidak pernah ditampilkan ke petugas.
-        logger.exception("Inisialisasi database gagal")
-        _laporkan_kegagalan_database(config, berjendela=not hanya_init)
-        return 1
+    if "--setup" in argv or perlu_setup_awal(argv, config.db_path):
+        _jalankan_dialog_mesin()
+        config = get_config()
+
+    while True:
+        try:
+            dibuat = siapkan_database()
+            backup_harian()
+            # SESUDAH backup: bila sapuan ini ternyata keliru, keadaan sebelum
+            # disapu masih tersimpan pada backup pagi ini.
+            hanguskan_antrian_hari_lalu()
+            break
+        except Exception:
+            # Traceback hanya masuk log, tidak pernah ditampilkan ke petugas.
+            logger.exception("Inisialisasi database gagal")
+            if not _laporkan_kegagalan_database(config, berjendela=not hanya_init):
+                return 1
+            if not _jalankan_dialog_mesin():
+                return 1
+            config = get_config()
 
     if hanya_init:
         # Ikut dicatat ke log, bukan hanya dicetak. Aplikasi dibangun sebagai

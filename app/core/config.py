@@ -8,21 +8,32 @@ sebagai .exe dan lokasi penyimpanan bisa berbeda di tiap komputer.
 Environment variable yang dikenali:
     ANTRIAN_DB_URL       URL SQLAlchemy lengkap. Dipakai bila diisi.
                          Contoh: postgresql+psycopg://user:sandi@server/antrian
+                         Mengalahkan berkas data/mesin.json.
+    ANTRIAN_MESIN_PATH   lokasi berkas peran komputer ini (server/klien).
+                         Kosong berarti data/mesin.json di folder database.
     ANTRIAN_DB_PATH      lokasi file database SQLite, dipakai bila DB_URL kosong
     ANTRIAN_BACKUP_DIR   folder hasil backup
     ANTRIAN_LOG_DIR      folder file log
     ANTRIAN_LOG_LEVEL    DEBUG | INFO | WARNING | ERROR
     ANTRIAN_PRINTER      pencetak tiket mesin ini: pdf | system | none
     ANTRIAN_SUARA        1/0 — mesin ini membunyikan panggilan atau tidak
+    ANTRIAN_BENTUK_LAYAR bentuk layar mesin ini: lebar | memanjang | tegak
     ANTRIAN_LEWATI_LOGIN 1/0 — masuk sebagai admin tanpa nama/sandi
                          (hanya dari source; .exe mengabaikannya)
 
-Dua yang terakhir menimpa pengaturan bersama di database, dan memang harus
-bisa begitu: pencetak tiket menempel pada satu mesin dan pengeras suara
-pada mesin lain, sedangkan `ticket.printer` dan `display.sound_enabled` di
-database bernilai satu untuk seluruh sistem. Tanpa penimpaan per mesin,
-menyalakan pencetak di anjungan berarti kelima komputer loket ikut mencoba
-mencetak ke pencetak yang tidak ada padanya.
+ANTRIAN_PRINTER, ANTRIAN_SUARA, dan ANTRIAN_BENTUK_LAYAR menimpa pengaturan
+bersama di database, dan memang harus bisa begitu: pencetak tiket menempel
+pada satu mesin dan pengeras suara pada mesin lain, sedangkan
+`ticket.printer` dan `display.sound_enabled` di database bernilai satu untuk
+seluruh sistem. Tanpa penimpaan per mesin, menyalakan pencetak di anjungan
+berarti kelima komputer loket ikut mencoba mencetak ke pencetak yang tidak
+ada padanya.
+
+Bentuk layar berlaku sama: televisi ruang tunggu dan papan memanjang di atas
+pintu dapat berjalan berdampingan dari database yang sama, dan `display.
+screen_shape` yang berlaku sistem-wide hanya akan membuat salah satunya
+salah bentuk. Mesin yang tidak menyebut apa-apa mengikuti pengaturan
+bersama — yang bawaannya "auto", sehingga papan mengukur layarnya sendiri.
 
 Beberapa loket yang melayani bersamaan WAJIB memakai PostgreSQL lewat
 ANTRIAN_DB_URL. SQLite hanya sanggup melayani satu komputer: mode WAL
@@ -144,6 +155,9 @@ class AppConfig:
     #: Mesin ini membunyikan panggilan atau tidak. None berarti mengikuti
     #: pengaturan bersama dan bawaan modenya.
     suara: bool | None = None
+    #: Bentuk layar antrian pada mesin ini. Kosong berarti mengikuti
+    #: `display.screen_shape`, yang bawaannya mengukur sendiri.
+    bentuk_layar: str = ""
     timezone: str = TIMEZONE
 
     @property
@@ -151,8 +165,10 @@ class AppConfig:
         """
         URL SQLAlchemy untuk database aktif.
 
-        Bila ANTRIAN_DB_URL tidak diisi, jatuh ke SQLite pada db_path —
-        bentuk yang dipakai pemasangan satu komputer dan seluruh test.
+        Bila ANTRIAN_DB_URL tidak diisi, berkas mesin.json yang menentukan
+        PostgreSQL di komputer server/klien. Keduanya kosong berarti SQLite
+        pada db_path — bentuk yang dipakai pemasangan satu komputer dan
+        seluruh test.
         """
         return self.db_url or f"sqlite:///{self.db_path}"
 
@@ -209,16 +225,23 @@ class AppConfig:
 
 def load_config() -> AppConfig:
     """Bangun konfigurasi dari environment variable dengan default yang aman."""
+    from app.core.mesin import path_berkas_mesin, url_dari_berkas_mesin
+
     root = base_dir()
+    db_path = _path_from_env("ANTRIAN_DB_PATH", root / "data" / "queue.db")
+    db_url = os.environ.get("ANTRIAN_DB_URL", "").strip()
+    if not db_url:
+        db_url = url_dari_berkas_mesin(path_berkas_mesin(db_path))
     return AppConfig(
         base_dir=root,
-        db_path=_path_from_env("ANTRIAN_DB_PATH", root / "data" / "queue.db"),
-        db_url=os.environ.get("ANTRIAN_DB_URL", "").strip(),
+        db_path=db_path,
+        db_url=db_url,
         backup_dir=_path_from_env("ANTRIAN_BACKUP_DIR", root / "backup"),
         log_dir=_path_from_env("ANTRIAN_LOG_DIR", root / "logs"),
         log_level=os.environ.get("ANTRIAN_LOG_LEVEL", "INFO").upper(),
         printer=os.environ.get("ANTRIAN_PRINTER", "").strip(),
         suara=_bool_from_env("ANTRIAN_SUARA"),
+        bentuk_layar=os.environ.get("ANTRIAN_BENTUK_LAYAR", "").strip().lower(),
     )
 
 

@@ -27,6 +27,7 @@ htmlcov/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data/mesin.json
 backup/*.db
 backup/*.zip
 tiket/

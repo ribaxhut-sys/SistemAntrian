@@ -202,3 +202,68 @@ def test_persen_jendela_rusak_tidak_menggagalkan_peluncuran() -> None:
     from app.main import pratinjau_dari_argumen
 
     assert pratinjau_dari_argumen(["--jendela=empat puluh"]) == (True, None)
+
+
+# ---------------------------------------------------------------------
+# Peran komputer ini (server / klien)
+# ---------------------------------------------------------------------
+
+def test_setup_awal_dilewati_selama_pengembangan(tmp_path, monkeypatch) -> None:
+    from app.main import perlu_setup_awal
+
+    monkeypatch.setattr("app.main.lewati_login_pengembang", lambda: True)
+    monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
+    monkeypatch.delenv("ANTRIAN_LEWATI_SETUP", raising=False)
+    assert perlu_setup_awal([], tmp_path / "queue.db", sedang_uji=False) is False
+
+
+def test_setup_awal_pada_exe_baru(tmp_path, monkeypatch) -> None:
+    """
+    .exe yang baru disalin ke komputer server harus menanyakan perannya.
+
+    Tanpa itu, lima loket diam-diam masing-masing memakai SQLite sendiri.
+    """
+    from app.main import perlu_setup_awal
+
+    monkeypatch.setattr("app.main.lewati_login_pengembang", lambda: False)
+    monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
+    monkeypatch.delenv("ANTRIAN_LEWATI_SETUP", raising=False)
+    monkeypatch.delenv("ANTRIAN_MESIN_PATH", raising=False)
+    assert perlu_setup_awal([], tmp_path / "queue.db", sedang_uji=False) is True
+
+
+def test_setup_awal_tidak_menghalangi_anjungan_setelah_mati_listrik(
+    tmp_path, monkeypatch
+) -> None:
+    from app.main import perlu_setup_awal
+
+    monkeypatch.setattr("app.main.lewati_login_pengembang", lambda: False)
+    monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
+    assert perlu_setup_awal(["--kios"], tmp_path / "queue.db", sedang_uji=False) is False
+    assert perlu_setup_awal(["--tv"], tmp_path / "queue.db", sedang_uji=False) is False
+
+
+def test_setup_awal_dilewati_bila_url_environment_sudah_ada(
+    tmp_path, monkeypatch
+) -> None:
+    from app.main import perlu_setup_awal
+
+    monkeypatch.setattr("app.main.lewati_login_pengembang", lambda: False)
+    monkeypatch.setenv(
+        "ANTRIAN_DB_URL", "postgresql+psycopg://a:b@192.168.1.10/antrian"
+    )
+    assert perlu_setup_awal([], tmp_path / "queue.db", sedang_uji=False) is False
+
+
+def test_setup_awal_dilewati_bila_berkas_mesin_sudah_ada(
+    tmp_path, monkeypatch
+) -> None:
+    from app.core.mesin import PengaturanMesin, path_berkas_mesin, tulis_berkas_mesin
+    from app.main import perlu_setup_awal
+
+    monkeypatch.setattr("app.main.lewati_login_pengembang", lambda: False)
+    monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
+    monkeypatch.delenv("ANTRIAN_MESIN_PATH", raising=False)
+    db = tmp_path / "queue.db"
+    tulis_berkas_mesin(path_berkas_mesin(db), PengaturanMesin())
+    assert perlu_setup_awal([], db, sedang_uji=False) is False
