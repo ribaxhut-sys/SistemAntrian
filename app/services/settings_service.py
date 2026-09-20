@@ -27,6 +27,30 @@ logger = get_logger("settings")
 URUTAN_PANEL_IKLAN_ATAS = "iklan-atas"
 URUTAN_PANEL_LAYANAN_ATAS = "layanan-atas"
 
+#: Bentuk layar yang menghadap pengunjung. Yang dipilih adalah RUPA layar,
+#: bukan resolusinya: orang yang memasang televisi mengenali layarnya dari
+#: bentuknya, dan tidak seorang pun menghafal rasio aspek perangkat yang
+#: baru saja digantung di dinding.
+#:
+#: "auto" adalah bawaan dan seharusnya cukup untuk hampir semua pemasangan
+#: — papan mengukur layarnya sendiri. Pilihan lainnya ada untuk satu kasus
+#: yang tidak dapat ditebak: panel LED yang menerima HDMI 1920x1080 lalu
+#: memotong sepetak kecil darinya. Windows tetap melaporkan layar 16:9,
+#: sementara yang benar-benar menyala berbentuk pita memanjang.
+BENTUK_LAYAR_OTOMATIS = "auto"
+BENTUK_LAYAR_LEBAR = "lebar"
+BENTUK_LAYAR_MEMANJANG = "memanjang"
+BENTUK_LAYAR_TEGAK = "tegak"
+
+#: Bentuk yang sah sebagai penimpaan per mesin. "auto" tidak ikut: mesin
+#: yang tidak berpendapat cukup tidak menyebut apa-apa, sama seperti
+#: ANTRIAN_PRINTER yang kosong.
+BENTUK_LAYAR_MANUAL = (
+    BENTUK_LAYAR_LEBAR,
+    BENTUK_LAYAR_MEMANJANG,
+    BENTUK_LAYAR_TEGAK,
+)
+
 #: Nilai cadangan bila sebuah pengaturan belum ada di database, misalnya
 #: karena database dibuat sebelum pengaturan tersebut diperkenalkan.
 BAWAAN: dict[str, str] = {
@@ -41,6 +65,7 @@ BAWAAN: dict[str, str] = {
     "kiosk.welcome_slide_seconds": "10",
     "kiosk.info_ratio": "3",
     "kiosk.panel_order": "iklan-atas",
+    "display.screen_shape": "auto",
     "display.theme": "kaca",
     "display.title": "ANTRIAN PELAYANAN CRO",
     "display.info": "",
@@ -158,6 +183,23 @@ SKEMA: tuple[Pengaturan, ...] = (
         satuan="mm",
         nilai_khusus="Tidak digeser",
         kelompok="Tiket",
+    ),
+    Pengaturan(
+        "display.screen_shape",
+        "Bentuk layar antrian",
+        "Biarkan Otomatis kecuali papannya terlihat keliru. Papan mengukur "
+        "layarnya sendiri dan hampir selalu benar; yang tidak dapat ditebaknya "
+        "adalah panel LED yang menerima gambar 16:9 lalu memotong sepetak "
+        "memanjang darinya. Pilihan ini berlaku untuk KOMPUTER INI saja bila "
+        "mesinnya menyebut ANTRIAN_BENTUK_LAYAR.",
+        PILIHAN,
+        pilihan=(
+            ("auto", "Otomatis (disarankan)"),
+            ("lebar", "Televisi biasa, lebih lebar daripada tinggi"),
+            ("memanjang", "Papan memanjang, seperti pita di atas pintu"),
+            ("tegak", "Layar berdiri, lebih tinggi daripada lebar"),
+        ),
+        kelompok="Layar Antrian",
     ),
     Pengaturan(
         "display.theme",

@@ -78,6 +78,11 @@ _SETTINGS: list[tuple[str, str, str]] = [
      "Lama backup disimpan sebelum dihapus, dalam hari"),
     ("dashboard.refresh_seconds", "30",
      "Jeda penyegaran layar ringkasan harian, dalam detik"),
+    (
+        "display.screen_shape",
+        "auto",
+        "Bentuk layar antrian: auto | lebar | memanjang | tegak",
+    ),
     ("display.theme", "kaca", "Tampilan layar antrian"),
     ("display.title", "ANTRIAN PELAYANAN CRO", "Judul pada layar display"),
     ("display.info", "", "Pengumuman pada tema Split Informasi"),

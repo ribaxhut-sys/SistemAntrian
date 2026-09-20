@@ -20,10 +20,18 @@ from PySide6.QtWidgets import (
 )
 
 from app.core import clock
+from app.core.config import get_config
 from app.core.logger import get_logger
 from app.models import QueueStatus
 from app.services.queue_service import DisplayCounterState, DisplayState, LABEL_STATUS, QueueService
-from app.services.settings_service import SettingsService
+from app.services.settings_service import (
+    BENTUK_LAYAR_LEBAR,
+    BENTUK_LAYAR_MANUAL,
+    BENTUK_LAYAR_MEMANJANG,
+    BENTUK_LAYAR_OTOMATIS,
+    BENTUK_LAYAR_TEGAK,
+    SettingsService,
+)
 from app.services.sound_service import SoundPlayer, suara_diaktifkan
 from app.ui.common import jalankan_aman
 from app.ui.display.tema import (
@@ -308,7 +316,40 @@ TINGGI_ACUAN_TV = 900
 #: sementara nomornya tidak muat pada lebar kartu.
 LEBAR_ACUAN_TV = 1600
 SKALA_MIN = 0.7
+#: Batas bawah khusus papan memanjang, jauh di bawah milik layar biasa.
+#:
+#: Lantai 0,7 ada untuk mencegah huruf televisi menyusut jadi tak terbaca
+#: pada jendela pengembang yang kecil. Pada pita setinggi 90 px lantai itu
+#: berubah jadi bumerang: isi papan tetap lebih tinggi daripada papannya,
+#: dan yang terjadi bukan huruf yang mengecil melainkan huruf yang
+#: TERPOTONG. Nomor yang kecil masih dapat dibaca; nomor yang terpotong
+#: tidak dapat dibaca siapa pun.
+SKALA_MIN_MEMANJANG = 0.2
 SKALA_MAKS = 1.5
+
+#: Rasio lebar:tinggi yang dibaca sebagai papan memanjang.
+#:
+#: Tiga, bukan dua. Monitor ultrawide 21:9 berasio 2,37 dan masih televisi
+#: biasa — tata letak bersusun tetap muat di sana. Yang benar-benar lain
+#: adalah pita di atas pintu, yang mulai dari sekitar 4:1. Angka tiga
+#: memisahkan keduanya tanpa menyerempet salah satu pun.
+RASIO_MEMANJANG = 3.0
+#: Di bawah satu berarti layarnya lebih tinggi daripada lebar.
+RASIO_TEGAK = 1.0
+
+#: Banyaknya kolom kartu loket di dalam kisi. Layar tegak mendapat lebih
+#: sedikit supaya kartunya melebar: pada layar berdiri yang langka adalah
+#: lebar, sedangkan tinggi justru berlebih.
+KOLOM_KARTU = 3
+KOLOM_KARTU_TEGAK = 2
+
+#: Kerangka yang TIDAK dipilih lewat tema, melainkan lewat bentuk layar:
+#: satu deret kartu mendatar, tanpa judul dan tanpa daftar menunggu.
+#:
+#: Sengaja tidak ikut didaftarkan di tema.py. Tidak ada tema yang boleh
+#: memilihnya, karena yang menentukan bukan selera administrator melainkan
+#: bentuk fisik papan yang tergantung di dinding.
+PITA = "pita"
 
 HARI = ("Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu")
 BULAN = (
@@ -325,6 +366,54 @@ BULAN = (
     "November",
     "Desember",
 )
+
+
+def bentuk_dari_ukuran(lebar: int, tinggi: int) -> str:
+    """
+    Tebak bentuk papan dari ukuran layarnya.
+
+    Ukuran nol atau negatif — layar yang belum punya geometri — dianggap
+    layar biasa. Menebak "memanjang" dari ukuran yang belum diketahui
+    berarti membuang judul dan daftar menunggu pada televisi yang
+    sebenarnya baik-baik saja.
+    """
+    if lebar <= 0 or tinggi <= 0:
+        return BENTUK_LAYAR_LEBAR
+    rasio = lebar / tinggi
+    if rasio >= RASIO_MEMANJANG:
+        return BENTUK_LAYAR_MEMANJANG
+    if rasio < RASIO_TEGAK:
+        return BENTUK_LAYAR_TEGAK
+    return BENTUK_LAYAR_LEBAR
+
+
+def bentuk_layar_efektif(
+    settings: SettingsService, *, lebar: int = 0, tinggi: int = 0
+) -> str:
+    """
+    Bentuk papan yang benar-benar dipakai mesin ini.
+
+    Tiga lapis, dari yang paling berhak: environment mesin ini, lalu
+    pengaturan bersama di database, lalu ukuran layar yang sesungguhnya.
+
+    Lapis pertama ada karena satu database melayani banyak layar sekaligus
+    — televisi ruang tunggu dan pita di atas pintu berjalan berdampingan,
+    dan satu nilai bersama hanya akan membuat salah satunya salah bentuk.
+    Lihat ANTRIAN_BENTUK_LAYAR di app.core.config.
+
+    Lapis ketiga adalah yang dipakai hampir semua pemasangan, dan memang
+    seharusnya begitu: orang yang menggantung televisi tidak menghafal
+    rasio aspeknya. Yang tidak dapat ditebaknya hanya satu — panel LED
+    yang menerima gambar 16:9 lalu memotong sepetak memanjang darinya.
+    Windows melaporkan layar 16:9, sementara yang menyala berbentuk pita.
+    Untuk kasus itulah dua lapis di atasnya ada.
+    """
+    pilihan = get_config().bentuk_layar
+    if pilihan not in BENTUK_LAYAR_MANUAL:
+        pilihan = settings.get("display.screen_shape", BENTUK_LAYAR_OTOMATIS)
+    if pilihan in BENTUK_LAYAR_MANUAL:
+        return pilihan
+    return bentuk_dari_ukuran(lebar, tinggi)
 
 
 def teks_waktu(saat: datetime | None = None) -> str:
@@ -992,10 +1081,47 @@ class DisplayPage(QWidget):
         self.palet = palet_untuk(
             tema if tema is not None else settings.get("display.theme", TEMA_BAWAAN)
         )
+
+        #: Bentuk papan: lebar, memanjang, atau tegak. Lihat
+        #: `bentuk_layar_efektif`.
+        #:
+        #: Diukur dari LAYAR, bukan dari widget ini. Widget belum punya
+        #: geometri saat __init__ berjalan, sedangkan kerangka papan sudah
+        #: harus dipilih di sini — dan untuk pemasangan tetap, yang layar
+        #: penuh sepanjang hari, ukuran layar justru jawaban yang lebih
+        #: benar daripada ukuran jendela sesaat.
+        #:
+        #: Papan kios selalu dianggap lebar berapa pun layar mesinnya.
+        #: Ia menempati separuh anjungan yang berdiri tegak, jadi bentuk
+        #: monitor di belakangnya tidak mengatakan apa-apa tentang ruang
+        #: yang benar-benar dimilikinya.
+        layar = self.screen()
+        ukuran = layar.geometry() if layar is not None else None
+        self.bentuk = (
+            BENTUK_LAYAR_LEBAR
+            if kompak
+            else bentuk_layar_efektif(
+                settings,
+                lebar=ukuran.width() if ukuran is not None else 0,
+                tinggi=ukuran.height() if ukuran is not None else 0,
+            )
+        )
+
         # Kios selalu berbentuk kisi. Sorotan dan Split menuntut tinggi yang
         # tidak dimiliki separuh layar kios, dan memaksakannya berarti nama
         # layanan di panel ambil nomor yang mengalah.
-        self.tata_letak = KISI if kompak else self.palet.tata_letak
+        #
+        # Papan memanjang mengalahkan tema dengan alasan yang sama, hanya
+        # lebih keras: kerangka mana pun yang bersusun ke bawah — dan
+        # keenamnya bersusun — tidak muat pada pita setinggi sejengkal.
+        # Yang tetap mengikuti tema adalah WARNANYA, persis seperti pada
+        # papan kios.
+        if kompak:
+            self.tata_letak = KISI
+        elif self.bentuk == BENTUK_LAYAR_MEMANJANG:
+            self.tata_letak = PITA
+        else:
+            self.tata_letak = self.palet.tata_letak
 
         # Papan kios menampilkan sederet nomor saja; televisi menampilkan
         # daftar menunggu selengkapnya, berhalaman, dan berpindah sendiri.
@@ -1173,6 +1299,8 @@ class DisplayPage(QWidget):
             self._bangun_tabel()
         elif self.tata_letak == FOKUS:
             self._bangun_fokus()
+        elif self.tata_letak == PITA:
+            self._bangun_pita()
         else:
             # KISI dan BENTO memakai kerangka yang sama — kepala, kisi
             # kartu, panel menunggu. Yang membedakan bento hanyalah tempat
@@ -1455,6 +1583,44 @@ class DisplayPage(QWidget):
         self.susunan.addLayout(self._bangun_kolom_loket(mendatar=True), stretch=2)
         self.susunan.addWidget(self._bangun_panel_berikutnya(), stretch=3)
 
+    def _bangun_pita(self) -> None:
+        """
+        Kartu loket berjajar mendatar, tanpa apa pun di atas atau di
+        bawahnya.
+
+        Untuk papan memanjang — pita LED di atas pintu, panel sesempit
+        sejengkal yang selebar dua meter. Di sana ruang tegak habis untuk
+        SATU hal saja, dan hal itu adalah "nomor berapa, di loket mana".
+
+        Judul dan jam ikut hilang, dan itu bukan kehilangan: nama kantor
+        sudah tertulis pada dinding tempat papannya tergantung, dan jam
+        tergantung di sebelahnya. Daftar menunggu juga hilang — daftar
+        yang dipaksa masuk ke pita akan terbaca sebagai sederet bintik.
+
+        Kartunya berjajar, bukan bertumpuk. Lima loket bertumpuk pada
+        pita 1920x432 memberi tiap loket 86 px; lima loket berjajar
+        memberinya 384x432, dan di ruang seluas itu nomor masih terbaca
+        dari seberang halaman.
+        """
+        # Judul dan jam tetap DIBANGUN, hanya disembunyikan. Kode bersama
+        # — `_gaya_judul`, pewaktu jam, `_terapkan_ukuran` — menulis ke
+        # kedua label itu tanpa memeriksa kerangka, dan menghapusnya dari
+        # sini berarti membelah metode-metode itu demi satu kerangka.
+        # Widget tersembunyi tidak meminta ruang sedikit pun.
+        self.susunan.addLayout(self._bangun_kepala())
+        self.kepala.setContentsMargins(0, 0, 0, 0)
+        self.kepala.setSpacing(0)
+        self.label_judul.hide()
+        self.label_jam.hide()
+
+        self.susunan.addLayout(self._bangun_kolom_loket(mendatar=True), stretch=1)
+
+        # Dibangun tetap, TIDAK ditambahkan ke tata letak — persis cara
+        # papan kios memperlakukan panel yang sama, dan karena alasan yang
+        # sama: `_terapkan_ukuran`, `tampilkan`, dan `_ukur_daftar` menulis
+        # ke objeknya tanpa syarat apa pun.
+        self._bangun_panel_berikutnya()
+
     def _bayangan(self, widget: QWidget, radius: int, y: int) -> None:
         """
         Bayangan di bawah sebuah panel, sekuat yang diminta tema.
@@ -1489,6 +1655,10 @@ class DisplayPage(QWidget):
         Papan kios tidak pernah diskalakan: ia sudah pas pada jendela
         1100x700, dan membesarkannya di layar penuh justru menggilas panel
         ambil nomor di bawahnya.
+
+        Papan memanjang memakai lantai yang jauh lebih rendah. Lihat
+        SKALA_MIN_MEMANJANG: pada pita, lantai yang terlalu tinggi tidak
+        menyelamatkan keterbacaan melainkan memotong isinya.
         """
         if self.kompak:
             return 1.0
@@ -1497,7 +1667,12 @@ class DisplayPage(QWidget):
         if tinggi <= 0 or lebar <= 0:
             return 1.0
         kasar = min(tinggi / TINGGI_ACUAN_TV, lebar / LEBAR_ACUAN_TV)
-        return min(SKALA_MAKS, max(SKALA_MIN, kasar))
+        lantai = (
+            SKALA_MIN_MEMANJANG
+            if self.bentuk == BENTUK_LAYAR_MEMANJANG
+            else SKALA_MIN
+        )
+        return min(SKALA_MAKS, max(lantai, kasar))
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - nama dari Qt
         super().resizeEvent(event)
@@ -1915,20 +2090,22 @@ class DisplayPage(QWidget):
                 wadah.addWidget(kosong)
             return
 
-        if berkisi or self.tata_letak == FOKUS:
+        if berkisi or self.tata_letak in (FOKUS, PITA):
             # Pita Fokus memakai kartu tegak yang diperkecil, bukan kartu
             # melebar: kartu melebar menaruh nomor di ujung kanan, dan pada
             # lebar seperlima layar nomor itu bertabrakan dengan nama
-            # loketnya sendiri.
+            # loketnya sendiri. Papan memanjang memakai kartu yang sama,
+            # karena di sana setiap kartu justru LEBIH tinggi daripada
+            # lebarnya sekali lagi.
             varian = "kisi"
         elif self.tata_letak == TABEL:
             varian = "tabel"
         else:
             varian = "baris"
 
-        # Tema Fokus menjajarkan loketnya mendatar sebagai satu pita, jadi
-        # berapa pun loketnya, yang bertumpuk tetap satu baris.
-        self._baris_kartu = 1 if self.tata_letak == FOKUS else len(loket)
+        # Tema Fokus dan papan memanjang menjajarkan loketnya mendatar,
+        # jadi berapa pun loketnya, yang bertumpuk tetap satu baris.
+        self._baris_kartu = 1 if self.tata_letak in (FOKUS, PITA) else len(loket)
         # Sel besar hanya ada pada bento; `_tata_kartu` yang menentukannya.
         self._indeks_besar = -1
 
@@ -1972,7 +2149,15 @@ class DisplayPage(QWidget):
         if self.tata_letak == BENTO:
             sel = _sel_bento(jumlah, unggulan)
         else:
-            kolom = min(3, jumlah)
+            # Layar berdiri memberi kartu yang lebih lebar dengan menukar
+            # satu kolom menjadi satu baris tambahan — pertukaran yang
+            # menguntungkan hanya di sana, karena tinggilah yang berlebih.
+            sedia = (
+                KOLOM_KARTU_TEGAK
+                if self.bentuk == BENTUK_LAYAR_TEGAK
+                else KOLOM_KARTU
+            )
+            kolom = min(sedia, jumlah)
             sel = [(i // kolom, i % kolom, 1, 1) for i in range(jumlah)]
         if sel == self._sel_terpasang:
             return

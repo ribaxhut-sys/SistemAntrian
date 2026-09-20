@@ -3073,3 +3073,232 @@ def test_animasi_dipakai_ulang_tidak_menumpuk(
     qtbot.waitUntil(lambda: papan._fase_pudar == "", timeout=5000)
 
     assert papan._animasi_halaman is pertama
+
+
+# ---------------------------------------------------------------------
+# Bentuk layar
+# ---------------------------------------------------------------------
+
+@pytest.fixture
+def bentuk_mesin(monkeypatch):
+    """
+    Setel ANTRIAN_BENTUK_LAYAR seperti satu komputer yang berpendapat.
+
+    Cache konfigurasi wajib dibuang dua kali: sekali supaya nilai barunya
+    terbaca, sekali lagi sesudah env dicabut. Tanpa yang kedua, test
+    berikutnya mewarisi bentuk layar milik test ini — dan gagalnya akan
+    muncul di tempat yang sama sekali tidak berhubungan.
+    """
+    from app.core.config import reset_config
+
+    def pasang(nilai: str) -> None:
+        monkeypatch.setenv("ANTRIAN_BENTUK_LAYAR", nilai)
+        reset_config()
+
+    yield pasang
+
+    monkeypatch.delenv("ANTRIAN_BENTUK_LAYAR", raising=False)
+    reset_config()
+
+
+def _papan(auth, **kwargs):
+    from app.ui.display.display_page import DisplayPage
+
+    return DisplayPage(
+        QueueService(auth),
+        SettingsService(auth),
+        NullSoundPlayer(),
+        otomatis=False,
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize(
+    ("lebar", "tinggi", "harapan"),
+    [
+        (1920, 1080, "lebar"),      # televisi 16:9
+        (1366, 768, "lebar"),
+        (2560, 1080, "lebar"),      # ultrawide 21:9 masih televisi biasa
+        (1920, 432, "memanjang"),   # pita LED di atas pintu
+        (400, 90, "memanjang"),     # panel LED beresolusi rendah
+        (1080, 1920, "tegak"),      # layar berdiri
+        (0, 0, "lebar"),            # belum punya geometri
+        (-1, 500, "lebar"),
+    ],
+)
+def test_bentuk_ditebak_dari_ukuran_layar(lebar, tinggi, harapan):
+    from app.ui.display.display_page import bentuk_dari_ukuran
+
+    assert bentuk_dari_ukuran(lebar, tinggi) == harapan
+
+
+def test_pilihan_bentuk_di_pengaturan_sama_dengan_yang_dikenali_papan():
+    """
+    Daftar di SKEMA ditulis terpisah dari konstantanya, sama seperti daftar
+    tema. Memilih bentuk yang tidak dikenali papan berarti pengaturan yang
+    tampak berubah tetapi tidak mengubah apa pun.
+    """
+    from app.services.settings_service import (
+        BENTUK_LAYAR_MANUAL,
+        BENTUK_LAYAR_OTOMATIS,
+        SKEMA,
+    )
+
+    butir = next(p for p in SKEMA if p.kunci == "display.screen_shape")
+    kode = {k for k, _ in butir.pilihan}
+
+    assert kode == {BENTUK_LAYAR_OTOMATIS, *BENTUK_LAYAR_MANUAL}
+
+
+def test_papan_memanjang_melepas_judul_dan_daftar_menunggu(
+    qtbot, admin_auth, auth, antrian_siap, terbitkan
+):
+    """
+    Pita setinggi sejengkal hanya sanggup menjawab satu pertanyaan: nomor
+    berapa, di loket mana. Judul, jam, dan daftar menunggu yang dipaksa
+    ikut masuk ke sana tidak menjadi kecil — ketiganya menjadi bintik.
+    """
+    from PySide6.QtWidgets import QHBoxLayout
+
+    from app.ui.display.display_page import PITA
+
+    terbitkan("A", 2)
+    SettingsService(admin_auth).set("display.screen_shape", "memanjang")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth)
+    qtbot.addWidget(halaman)
+
+    assert halaman.bentuk == "memanjang"
+    assert halaman.tata_letak == PITA
+    # Kartu berjajar mendatar, satu baris, seluruh loket tetap tampil.
+    assert isinstance(halaman.kolom_loket, QHBoxLayout)
+    assert len(halaman.kartu_loket) == 3
+    # Judul dan jam dibangun tetapi tidak meminta ruang.
+    assert not halaman.label_judul.isVisibleTo(halaman)
+    assert not halaman.label_jam.isVisibleTo(halaman)
+    # Panel menunggu ada objeknya — kode bersama menulis ke sana — tetapi
+    # tidak pernah masuk ke tata letak.
+    assert halaman.panel_berikutnya is not None
+    assert halaman.susunan.indexOf(halaman.panel_berikutnya) == -1
+
+
+def test_papan_lebar_tetap_berjudul_dan_berdaftar(
+    qtbot, admin_auth, auth, antrian_siap, terbitkan
+):
+    """Kebalikannya, supaya test di atas tidak lulus karena papan memang kosong."""
+    terbitkan("A", 2)
+    SettingsService(admin_auth).set("display.screen_shape", "lebar")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth)
+    qtbot.addWidget(halaman)
+
+    assert halaman.bentuk == "lebar"
+    assert halaman.label_judul.isVisibleTo(halaman)
+    assert halaman.susunan.indexOf(halaman.panel_berikutnya) != -1
+
+
+def test_bentuk_mesin_menimpa_pengaturan_bersama(
+    qtbot, admin_auth, auth, antrian_siap, bentuk_mesin
+):
+    """
+    Satu database melayani televisi ruang tunggu DAN pita di atas pintu.
+    Tanpa penimpaan per mesin, menyetel salah satunya membuat yang lain
+    salah bentuk — persis masalah yang dipecahkan ANTRIAN_PRINTER.
+    """
+    SettingsService(admin_auth).set("display.screen_shape", "lebar")
+    bentuk_mesin("memanjang")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth)
+    qtbot.addWidget(halaman)
+
+    assert halaman.bentuk == "memanjang"
+
+
+def test_bentuk_mesin_yang_salah_ketik_diabaikan(
+    qtbot, admin_auth, auth, antrian_siap, bentuk_mesin
+):
+    """
+    Salah ketik di satu komputer tidak boleh mengubah bentuk papan diam-diam.
+    Nilai yang tidak dikenali diperlakukan seperti tidak diisi.
+    """
+    SettingsService(admin_auth).set("display.screen_shape", "lebar")
+    bentuk_mesin("memanjaang")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth)
+    qtbot.addWidget(halaman)
+
+    assert halaman.bentuk == "lebar"
+
+
+def test_papan_kios_tidak_ikut_memanjang(
+    qtbot, admin_auth, auth, antrian_siap, bentuk_mesin
+):
+    """
+    Papan di dalam anjungan menempati separuh totem yang berdiri tegak.
+    Bentuk monitor di belakangnya tidak mengatakan apa pun tentang ruang
+    yang benar-benar dimilikinya.
+    """
+    SettingsService(admin_auth).set("display.screen_shape", "memanjang")
+    bentuk_mesin("memanjang")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth, kompak=True)
+    qtbot.addWidget(halaman)
+
+    assert halaman.bentuk == "lebar"
+    assert halaman.tata_letak != "pita"
+
+
+def test_pita_boleh_mengecil_di_bawah_lantai_layar_biasa(
+    qtbot, admin_auth, auth, antrian_siap
+):
+    """
+    Lantai 0,7 milik televisi berubah jadi bumerang di pita: isinya tidak
+    mengecil melainkan terpotong. Nomor yang kecil masih terbaca; nomor
+    yang terpotong tidak.
+    """
+    from app.ui.display.display_page import SKALA_MIN, SKALA_MIN_MEMANJANG
+
+    SettingsService(admin_auth).set("display.screen_shape", "memanjang")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth)
+    qtbot.addWidget(halaman)
+
+    skala = halaman.hitung_skala(tinggi=120, lebar=1920)
+
+    assert skala < SKALA_MIN
+    assert skala >= SKALA_MIN_MEMANJANG
+
+
+def test_layar_tegak_melebarkan_kartu_dengan_mengurangi_kolom(
+    qtbot, admin_auth, auth, antrian_siap, terbitkan
+):
+    """
+    Pada layar berdiri yang langka adalah lebar, bukan tinggi. Tiga loket
+    sebaris di sana menghasilkan kartu pipih; dua sebaris menghasilkan
+    kartu yang nomornya masih terbaca dari seberang ruangan.
+    """
+    terbitkan("A", 2)
+    SettingsService(admin_auth).set("display.screen_shape", "tegak")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth)
+    qtbot.addWidget(halaman)
+
+    assert halaman.bentuk == "tegak"
+    assert len(halaman.kartu_loket) == 3
+    # Tiga loket dalam dua kolom berarti dua baris.
+    assert halaman.kisi_loket.columnCount() >= 2
+    assert halaman._baris_kartu == 2
