@@ -3473,3 +3473,60 @@ def test_jendela_membangun_ulang_papan_pada_indeks_yang_sama(
     assert baru.tata_letak == PITA
     assert jendela.halaman.count() == jumlah_halaman
     assert jendela.navigasi.count() == jumlah_menu
+
+
+def test_papan_memanjang_tidak_meminta_daftar_menunggu_dari_database(
+    qtbot, admin_auth, auth, antrian_siap, terbitkan, monkeypatch
+):
+    """
+    Panel daftar menunggu dibangun tetapi tidak pernah masuk tata letak.
+    Nomor yang tetap diambil untuknya adalah kueri dua detik sekali,
+    sepanjang jam kerja, pada PostgreSQL yang dibagi lima loket.
+    """
+    terbitkan("A", 4)
+    SettingsService(admin_auth).set("display.screen_shape", "memanjang")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth)
+    qtbot.addWidget(halaman)
+
+    diminta: list[int] = []
+    asli = halaman.queue.display_state
+
+    def catat(jumlah_berikutnya, batas_menunggu):
+        diminta.append(batas_menunggu)
+        return asli(jumlah_berikutnya, batas_menunggu)
+
+    monkeypatch.setattr(halaman.queue, "display_state", catat)
+    halaman.muat_ulang()
+
+    assert diminta == [0]
+    assert not halaman.daftar_menunggu_tampil
+    assert not halaman.berotasi
+
+
+def test_papan_lebar_tetap_meminta_daftar_menunggu(
+    qtbot, admin_auth, auth, antrian_siap, terbitkan, monkeypatch
+):
+    """Kebalikannya, supaya test di atas tidak lulus karena papan diam saja."""
+    terbitkan("A", 4)
+    SettingsService(admin_auth).set("display.screen_shape", "lebar")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth)
+    qtbot.addWidget(halaman)
+
+    diminta: list[int] = []
+    asli = halaman.queue.display_state
+
+    def catat(jumlah_berikutnya, batas_menunggu):
+        diminta.append(batas_menunggu)
+        return asli(jumlah_berikutnya, batas_menunggu)
+
+    monkeypatch.setattr(halaman.queue, "display_state", catat)
+    halaman.muat_ulang()
+
+    assert diminta and diminta[0] > 0
+    assert halaman.daftar_menunggu_tampil

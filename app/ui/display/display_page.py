@@ -1859,7 +1859,9 @@ class DisplayPage(QWidget):
         """
         Batasi tinggi panel daftar menunggu ke jatahnya. Lihat BAGIAN_PANEL.
 
-        Papan kios dilewati: panelnya memang tidak ikut ditampilkan di sana.
+        Papan yang daftarnya tidak tampil dilewati: panelnya memang tidak
+        pernah masuk ke tata letak, dan memotongnya menurut tinggi apa pun
+        tidak mengubah sepiksel pun yang terlihat.
 
         Papan yang belum pernah tampil juga dilewati, sama seperti pada
         `_ukur_daftar`: ukurannya saat itu bukan ukuran layar mana pun,
@@ -1868,7 +1870,11 @@ class DisplayPage(QWidget):
         menunggu sepanjang satu baris, lalu memperbaikinya sendiri satu
         kedipan kemudian.
         """
-        if self.kompak or not self.isVisible() or self.height() <= 0:
+        if (
+            not self.daftar_menunggu_tampil
+            or not self.isVisible()
+            or self.height() <= 0
+        ):
             return
         margin = self.susunan.contentsMargins()
         badan = (
@@ -2077,9 +2083,16 @@ class DisplayPage(QWidget):
         self.perbarui_jam()
         berhasil, keadaan = jalankan_aman(self, lambda: self.queue.display_state(
             self.jumlah_berikutnya,
-            # Papan kios tidak berkolom, sehingga pengelompokannya tidak
-            # perlu disusun sama sekali.
-            0 if self.kompak else self.baris_diminta * KOLOM_PER_LAYANAN * MAKS_HALAMAN,
+            # Papan yang tidak menampilkan daftar menunggu tidak meminta
+            # nomornya sama sekali — lihat `daftar_menunggu_tampil`. Papan
+            # kios memang tidak berkolom, dan papan memanjang tidak punya
+            # tempat untuk daftar mana pun. Nomor yang tetap diambil untuk
+            # keduanya adalah kueri yang dijalankan dua detik sekali,
+            # sepanjang jam kerja, pada PostgreSQL yang sama dengan lima
+            # loket — untuk sesuatu yang tidak pernah digambar.
+            self.baris_diminta * KOLOM_PER_LAYANAN * MAKS_HALAMAN
+            if self.daftar_menunggu_tampil
+            else 0,
         ))
         if not berhasil or keadaan is None:
             return
@@ -2323,15 +2336,31 @@ class DisplayPage(QWidget):
         )
 
     @property
+    def daftar_menunggu_tampil(self) -> bool:
+        """
+        Daftar nomor menunggu benar-benar digambar di papan ini.
+
+        Papan kios dan papan memanjang sama-sama MEMBANGUN panelnya lalu
+        tidak pernah menaruhnya di tata letak — keduanya dengan sengaja,
+        supaya kode bersama tetap punya objek untuk ditulisi. Panel yang
+        tidak pernah tampil itu tidak boleh menuntut apa pun: bukan nomor
+        dari database, bukan pengukuran, bukan animasi.
+        """
+        return not self.kompak and self.tata_letak != PITA
+
+    @property
     def berotasi(self) -> bool:
         """
         Daftar menunggu berpindah halaman sendiri.
 
-        Tidak berlaku pada papan kios: pengunjung berdiri di depannya
-        beberapa detik untuk mengambil nomor, dan daftar yang berpindah
-        sendiri di sana hanya menarik matanya dari tombol layanan.
+        Tidak berlaku pada papan yang daftarnya memang tidak tampil. Di
+        papan kios pengunjung berdiri beberapa detik untuk mengambil nomor,
+        dan daftar yang berpindah sendiri di sana hanya menarik matanya
+        dari tombol layanan; di papan memanjang daftarnya tidak ada sama
+        sekali, sehingga yang berputar adalah animasi yang digambar untuk
+        ruang kosong.
         """
-        return not self.kompak and self.jeda_putar_ms > 0
+        return self.daftar_menunggu_tampil and self.jeda_putar_ms > 0
 
     @property
     def kolom_daftar(self) -> int:
