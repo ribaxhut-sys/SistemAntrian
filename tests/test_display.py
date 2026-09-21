@@ -3246,6 +3246,8 @@ def test_papan_kios_tidak_ikut_memanjang(
     Bentuk monitor di belakangnya tidak mengatakan apa pun tentang ruang
     yang benar-benar dimilikinya.
     """
+    from app.ui.display.display_page import PITA
+
     SettingsService(admin_auth).set("display.screen_shape", "memanjang")
     bentuk_mesin("memanjang")
     auth.logout()
@@ -3255,7 +3257,7 @@ def test_papan_kios_tidak_ikut_memanjang(
     qtbot.addWidget(halaman)
 
     assert halaman.bentuk == "lebar"
-    assert halaman.tata_letak != "pita"
+    assert halaman.tata_letak != PITA
 
 
 def test_pita_boleh_mengecil_di_bawah_lantai_layar_biasa(

@@ -205,7 +205,10 @@ SKEMA: tuple[Pengaturan, ...] = (
         "display.theme",
         "Tampilan layar antrian",
         "Bentuk papan yang menghadap pengunjung. Isinya sama pada semua pilihan — "
-        "seluruh loket tetap tampil; yang berbeda hanya tata letak dan warnanya.",
+        "seluruh loket tetap tampil; yang berbeda hanya tata letak dan warnanya. "
+        "Pada layar memanjang yang terpakai hanya WARNANYA: tata letak mana pun "
+        "bersusun ke bawah, dan pita setinggi sejengkal tidak memuat susunan apa "
+        "pun, sehingga papan menyusun sendiri kartunya berjajar.",
         PILIHAN,
         # Daftar ini sengaja ditulis ulang di sini, tidak diimpor dari
         # app.ui: service tidak boleh bergantung pada lapisan tampilan.
