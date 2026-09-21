@@ -36,6 +36,21 @@ assets/sounds/*.wav
 logs/
 *.log
 
+# ---- Media anjungan (diganti kapan saja, bukan isi repositori) ----
+# Gambar dan video sambutan maupun per layanan adalah isi yang ditukar
+# petugas sewaktu-waktu, bukan bagian dari aplikasi. Ukurannya puluhan
+# megabyte dan sekali masuk ia tinggal di riwayat selamanya, bahkan
+# sesudah dihapus. `.gitkeep` sengaja dikecualikan supaya foldernya tetap
+# ada sesudah clone — `daftar_media_kios()` memang sanggup menghadapi
+# folder yang hilang, tetapi folder yang ada lebih jelas bagi pemasang.
+media/kiosk/*
+!media/kiosk/.gitkeep
+VID/
+
+# ---- Keluaran tangkapan layar pengaturan ----
+# Ditulis ulang setiap kali tests/test_zz_pratinjau.py dijalankan.
+pengaturan-*.png
+
 # ---- Local config / secrets ----
 .env
 .env.*
