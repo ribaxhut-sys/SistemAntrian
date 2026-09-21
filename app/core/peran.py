@@ -65,6 +65,15 @@ MODE_ANJUNGAN = "anjungan"
 MODE_ANJUNGAN_TOTEM = "anjungan-totem"
 MODE_LAYAR_ANTRIAN = "antrian"
 
+#: Mode yang menghadap pengunjung tanpa ada yang menjaganya.
+#:
+#: Komputer seperti ini tidak boleh berhenti di dialog mana pun. Anjungan
+#: yang pulih sesudah mati listrik, dan televisi yang menyala bersama
+#: sakelar lampu pagi hari, tidak punya siapa pun untuk menekan tombol.
+MODE_PUBLIK = frozenset(
+    {MODE_ANJUNGAN, MODE_ANJUNGAN_TOTEM, MODE_LAYAR_ANTRIAN}
+)
+
 #: Nilai `ticket.printer` yang berarti mesin ini tidak mencetak sama sekali.
 TIDAK_MENCETAK = "none"
 
@@ -185,6 +194,18 @@ class PeranKomputer:
             return self.bentuk_layar
         bawaan = self.bawaan
         return bawaan.bentuk_layar if bawaan is not None else ""
+
+    @property
+    def publik(self) -> bool:
+        """
+        Komputer ini menghadap pengunjung dan tidak ada yang menjaganya.
+
+        Lihat MODE_PUBLIK. Dipakai untuk memutuskan apakah aplikasi boleh
+        berhenti di sebuah dialog saat dibuka — dan jawabannya tidak boleh
+        berbeda antara mesin yang menyebut perannya lewat pintasan dan
+        mesin yang menyebutnya lewat berkas.
+        """
+        return self.mode in MODE_PUBLIK
 
     @property
     def disesuaikan(self) -> bool:

@@ -355,6 +355,37 @@ def mode_dari_argumen(argv: list[str]) -> str | None:
     return None
 
 
+def mode_awal_mesin(argv: list[str], db_path) -> str | None:
+    """
+    Mode peluncuran pertama: flag baris perintah, lalu peran yang tersimpan.
+
+    Flag menang. Ia diketik untuk sekali jalan oleh orang yang sedang
+    menguji sesuatu, dan tidak seharusnya kalah oleh berkas yang ditulis
+    berminggu-minggu sebelumnya.
+
+    Peran yang tersimpan menutup kegagalan yang paling mungkin terjadi di
+    lapangan. Dahulu peran layar hanya hidup di dalam pintasan, sehingga
+    komputer yang dinyalakan lewat .exe langsung — atau yang pintasannya
+    rusak sesudah pembaruan — membuka dialog pilih-mode lalu layar login,
+    tepat di depan pengunjung yang sedang menunggu.
+
+    Hanya berlaku pada peluncuran PERTAMA, sama seperti flag. Sesudah
+    layarnya ditutup, tetap lewat dialog pilihan: menutup papan menuntut
+    Ctrl+Q, jadi seseorang memang sudah hadir — dan mesin yang selalu
+    membuka papannya kembali tidak akan pernah bisa ditutup sama sekali.
+    """
+    dari_flag = mode_dari_argumen(argv)
+    if dari_flag is not None:
+        return dari_flag
+
+    from app.core.peran import baca_peran, path_berkas_peran
+
+    mode = baca_peran(path_berkas_peran(db_path)).mode
+    if mode:
+        logger.info("Peran tersimpan membuka mode '%s'.", mode)
+    return mode or None
+
+
 def pratinjau_dari_argumen(argv: list[str]) -> tuple[bool | None, int | None]:
     """
     Baca `--jendela` dan `--jendela=PERSEN`: (berjendela, persen).
@@ -383,9 +414,24 @@ def pratinjau_dari_argumen(argv: list[str]) -> tuple[bool | None, int | None]:
     return berjendela, persen
 
 
-def _mesin_publik_tanpa_jaga(argv: list[str]) -> bool:
-    """True bila argumennya untuk mesin yang pulih sendiri tanpa klik."""
-    return any(flag in argv for flag in ("--tv", "--kios", "--kios-totem", "--layar"))
+def _mesin_publik_tanpa_jaga(argv: list[str], db_path=None) -> bool:
+    """
+    True bila mesin ini pulih sendiri tanpa klik.
+
+    Dibaca dari flag pintasan, dan — bila folder databasenya diketahui —
+    juga dari peran yang tersimpan. Keduanya wajib dijawab sama: sesudah
+    peran dapat disimpan di berkas, mesin yang menyebut dirinya televisi
+    lewat `peran.json` tidak boleh diperlakukan berbeda daripada mesin yang
+    menyebutnya lewat `--tv`.
+    """
+    if any(flag in argv for flag in ("--tv", "--kios", "--kios-totem", "--layar")):
+        return True
+    if db_path is None:
+        return False
+
+    from app.core.peran import baca_peran, path_berkas_peran
+
+    return baca_peran(path_berkas_peran(db_path)).publik
 
 
 def perlu_setup_awal(
@@ -413,7 +459,7 @@ def perlu_setup_awal(
         return False
     if "--init-only" in argv:
         return False
-    if _mesin_publik_tanpa_jaga(argv):
+    if _mesin_publik_tanpa_jaga(argv, db_path):
         return False
     if lewati_login_pengembang():
         return False
@@ -496,7 +542,7 @@ def main(argv: list[str] | None = None) -> int:
         # berjalan di komputer yang PySide6-nya belum lengkap.
         berjendela, persen_jendela = pratinjau_dari_argumen(argv)
         return _jalankan_ui(
-            mode_awal=mode_dari_argumen(argv),
+            mode_awal=mode_awal_mesin(argv, config.db_path),
             berjendela=berjendela,
             persen_jendela=persen_jendela,
         )

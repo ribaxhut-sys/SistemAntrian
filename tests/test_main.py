@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.core import config as config_module
 from app.core import database as database_module
 from app.core import logger as logger_module
@@ -267,3 +269,99 @@ def test_setup_awal_dilewati_bila_berkas_mesin_sudah_ada(
     db = tmp_path / "queue.db"
     tulis_berkas_mesin(path_berkas_mesin(db), PengaturanMesin())
     assert perlu_setup_awal([], db, sedang_uji=False) is False
+
+
+# ---------------------------------------------------------------------
+# Mode peluncuran dari peran yang tersimpan
+# ---------------------------------------------------------------------
+
+def _tulis_peran(folder, **isian):
+    """Tulis peran.json di folder database sebuah mesin."""
+    from app.core.peran import PeranKomputer, tulis_peran
+
+    folder.mkdir(parents=True, exist_ok=True)
+    tulis_peran(folder / "peran.json", PeranKomputer(**isian))
+    return folder / "queue.db"
+
+
+def test_tanpa_flag_dan_tanpa_berkas_tetap_lewat_dialog(tmp_path, monkeypatch):
+    """Perilaku lama tidak berubah untuk komputer yang belum ditetapkan."""
+    monkeypatch.delenv("ANTRIAN_PERAN_PATH", raising=False)
+    from app.main import mode_awal_mesin
+
+    assert mode_awal_mesin([], tmp_path / "data" / "queue.db") is None
+
+
+def test_peran_tersimpan_membuka_modenya_sendiri(tmp_path, monkeypatch):
+    """
+    Kegagalan yang ditutup: dahulu peran layar hanya hidup di pintasan,
+    sehingga komputer yang dinyalakan lewat .exe langsung membuka dialog
+    pilih-mode lalu layar login di depan pengunjung.
+    """
+    monkeypatch.delenv("ANTRIAN_PERAN_PATH", raising=False)
+    from app.main import mode_awal_mesin
+    from app.ui.login.mode_dialog import LAYAR_ANTRIAN
+
+    db = _tulis_peran(tmp_path / "data", peran="televisi")
+
+    assert mode_awal_mesin([], db) == LAYAR_ANTRIAN
+
+
+def test_flag_mengalahkan_peran_tersimpan(tmp_path, monkeypatch):
+    """
+    Flag diketik untuk sekali jalan oleh orang yang sedang menguji
+    sesuatu, dan tidak boleh kalah oleh berkas dari minggu lalu.
+    """
+    monkeypatch.delenv("ANTRIAN_PERAN_PATH", raising=False)
+    from app.main import mode_awal_mesin
+    from app.ui.login.mode_dialog import LAYAR_ADMIN
+
+    db = _tulis_peran(tmp_path / "data", peran="televisi")
+
+    assert mode_awal_mesin(["--admin"], db) == LAYAR_ADMIN
+
+
+def test_berkas_peran_rusak_kembali_ke_dialog(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTRIAN_PERAN_PATH", raising=False)
+    from app.main import mode_awal_mesin
+
+    folder = tmp_path / "data"
+    folder.mkdir(parents=True)
+    (folder / "peran.json").write_text("{ rusak", encoding="utf-8")
+
+    assert mode_awal_mesin([], folder / "queue.db") is None
+
+
+@pytest.mark.parametrize(
+    ("peran", "publik"),
+    [
+        ("televisi", True),
+        ("papan-memanjang", True),
+        ("anjungan", True),
+        ("anjungan-totem", True),
+        ("petugas", False),
+        ("admin", False),
+    ],
+)
+def test_mesin_publik_dikenali_dari_berkas_seperti_dari_flag(
+    tmp_path, monkeypatch, peran, publik
+):
+    """
+    Televisi yang menyebut dirinya lewat peran.json tidak boleh berhenti
+    di dialog pemasangan, sama seperti televisi yang menyebutnya lewat
+    --tv. Tidak ada yang berdiri di sana untuk menekan tombol.
+    """
+    monkeypatch.delenv("ANTRIAN_PERAN_PATH", raising=False)
+    from app.main import _mesin_publik_tanpa_jaga
+
+    db = _tulis_peran(tmp_path / "data", peran=peran)
+
+    assert _mesin_publik_tanpa_jaga([], db) is publik
+
+
+def test_mesin_publik_tanpa_folder_database_tidak_menebak(tmp_path):
+    """Pemanggil lama yang tidak menyebut folder tetap berperilaku sama."""
+    from app.main import _mesin_publik_tanpa_jaga
+
+    assert _mesin_publik_tanpa_jaga([]) is False
+    assert _mesin_publik_tanpa_jaga(["--tv"]) is True
