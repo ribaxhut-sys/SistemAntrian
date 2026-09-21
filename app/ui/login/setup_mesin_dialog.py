@@ -115,6 +115,26 @@ _SEBUTAN_SUARA = {None: "ikut pengaturan", True: "bunyikan", False: "diam"}
 _SEBUTAN_BENTUK = {"": "diukur sendiri"}
 
 
+def _tiket_contoh() -> "TicketData":
+    """
+    Tiket palsu untuk uji cetak.
+
+    Nomornya sengaja tidak menyerupai nomor sungguhan, dan catatan kakinya
+    mengatakannya sendiri. Kertas uji yang tertinggal di meja anjungan
+    tidak boleh terbaca sebagai giliran milik siapa pun.
+    """
+    from app.core import clock
+    from app.services.ticket_service import TicketData
+
+    return TicketData(
+        queue_number="UJI-000",
+        category_name="Uji Cetak",
+        office_name=APP_NAME,
+        issued_at=clock.now(),
+        footer="Tiket contoh untuk menguji pencetak. Bukan nomor antrian.",
+    )
+
+
 class SetupMesinDialog(QDialog):
     """Tanya bagaimana komputer ini memakai database."""
 
@@ -126,6 +146,7 @@ class SetupMesinDialog(QDialog):
 
         cfg = get_config()
         self._db_path = cfg.db_path
+        self._base_dir = cfg.base_dir
         self._url_semula = cfg.database_url
         self.pengaturan_tersimpan: PengaturanMesin | None = None
         self.peran_tersimpan: PeranKomputer | None = None
@@ -403,6 +424,13 @@ class SetupMesinDialog(QDialog):
         uji.setAutoDefault(False)
         uji.clicked.connect(self._uji)
         baris.addWidget(uji)
+
+        cetak = tombol("Uji cetak")
+        cetak.setObjectName("tombolUjiCetak")
+        cetak.setAutoDefault(False)
+        cetak.clicked.connect(self._uji_cetak)
+        baris.addWidget(cetak)
+
         baris.addStretch(1)
 
         batal = tombol("Batal")
@@ -509,6 +537,56 @@ class SetupMesinDialog(QDialog):
         from app.ui.common import tampilkan_info
 
         tampilkan_info(self, "Koneksi berhasil.", "Uji koneksi")
+
+    def _uji_cetak(self) -> None:
+        """
+        Cetak satu tiket contoh memakai setelan yang sedang di layar.
+
+        Pasangan "Uji koneksi", dan sama pentingnya. Pencetak IWare IW-J200
+        menuntut driver POS80 resmi pada port CP001 dan harus menjadi
+        pencetak default; bila salah satunya meleset, ketahuannya baru
+        ketika pengunjung pertama sudah berdiri di depan anjungan. Jauh
+        lebih murah ketahuan sekarang, selagi pemasang masih duduk di depan
+        mesinnya.
+
+        Memakai nilai yang sedang DIPILIH, bukan yang sudah tersimpan:
+        orang menguji sebelum menyimpan, bukan sesudah.
+        """
+        from app.services.ticket_service import buat_printer
+
+        mode = self._peran_dari_form().printer_efektif
+        if mode == "none":
+            self._tampilkan_error(
+                "Komputer ini disetel tidak mencetak apa pun, jadi tidak "
+                "ada yang dapat diuji."
+            )
+            return
+        if not mode:
+            self._tampilkan_error(
+                "Peran ini mengikuti pengaturan bersama, yang baru terbaca "
+                "sesudah database tersambung. Pilih cara mencetak di atas "
+                "untuk mengujinya sekarang."
+            )
+            return
+
+        hasil = buat_printer(mode, self._base_dir / "tiket").cetak(_tiket_contoh())
+        if hasil.gagal:
+            self._tampilkan_error(hasil.pesan)
+            return
+        self._tampilkan_error("")
+
+        from app.ui.common import tampilkan_info
+
+        tujuan = (
+            f" Tersimpan di {hasil.berkas}."
+            if hasil.berkas is not None
+            else ""
+        )
+        tampilkan_info(
+            self,
+            f"Tiket contoh dikirim ke pencetak.{tujuan}",
+            "Uji cetak",
+        )
 
     def _simpan(self) -> None:
         pengaturan = self._pengaturan_dari_form()

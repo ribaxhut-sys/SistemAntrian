@@ -2604,3 +2604,67 @@ def test_dialog_memuat_kembali_peran_yang_sudah_tersimpan(qtbot, app_config):
     assert dialog.pilih_peran.currentData() == "papan-memanjang"
     assert dialog.pilih_suara.currentData() is True
     assert dialog.pilih_bentuk.currentData() is None
+
+
+def test_uji_cetak_menolak_mesin_yang_tidak_mencetak(qtbot, app_config):
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog._pilih_nilai(dialog.pilih_peran, "televisi")
+    dialog._uji_cetak()
+
+    assert "tidak mencetak" in dialog._label_error.text().lower()
+
+
+def test_uji_cetak_mengatakan_bila_caranya_belum_dipilih(qtbot, app_config):
+    """
+    Anjungan mengikuti pengaturan bersama, yang baru terbaca sesudah
+    database tersambung — sedangkan dialog ini tampil sebelum itu.
+    """
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog._pilih_nilai(dialog.pilih_peran, "anjungan")
+    dialog._uji_cetak()
+
+    assert "pilih cara mencetak" in dialog._label_error.text().lower()
+
+
+def test_uji_cetak_pdf_menghasilkan_berkas(qtbot, app_config, monkeypatch):
+    """
+    Pasangan Uji koneksi. Pencetak yang keliru biasanya baru ketahuan
+    ketika pengunjung pertama sudah berdiri di depan anjungan.
+    """
+    from app.ui import common
+    from app.ui.login import setup_mesin_dialog as modul
+
+    # Ditambal di app.ui.common, bukan di modul dialognya: dialog
+    # mengimpornya DI DALAM fungsi, sehingga yang dipanggil selalu yang
+    # asli — dan yang asli membuka kotak modal yang menggantung test.
+    monkeypatch.setattr(common, "tampilkan_info", lambda *a, **k: None)
+
+    dialog = modul.SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog._pilih_nilai(dialog.pilih_peran, "anjungan")
+    dialog._pilih_nilai(dialog.pilih_pencetak, "pdf")
+    dialog._uji_cetak()
+
+    berkas = list((app_config.base_dir / "tiket").glob("*.pdf"))
+
+    assert dialog._label_error.text() == ""
+    assert berkas, "tiket contoh tidak tertulis"
+
+
+def test_tiket_contoh_tidak_menyerupai_nomor_sungguhan():
+    """
+    Kertas uji yang tertinggal di meja anjungan tidak boleh terbaca
+    sebagai giliran milik siapa pun.
+    """
+    from app.ui.login.setup_mesin_dialog import _tiket_contoh
+
+    tiket = _tiket_contoh()
+
+    assert "UJI" in tiket.queue_number
+    assert "bukan nomor antrian" in tiket.footer.lower()
