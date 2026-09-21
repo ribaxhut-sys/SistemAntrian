@@ -57,6 +57,7 @@ from app.core.peran import (
     ANJUNGAN as PERAN_ANJUNGAN,
     ANJUNGAN_TOTEM as PERAN_ANJUNGAN_TOTEM,
     BAWAAN,
+    LABEL,
     PAPAN_MEMANJANG,
     PETUGAS as PERAN_PETUGAS,
     TELEVISI,
@@ -67,17 +68,23 @@ from app.core.peran import (
 )
 from app.ui.common import keterangan, label_error, tombol
 
-#: Nama peran di layar. Disebut menurut BENDA-nya, bukan menurut mode
-#: teknisnya: orang yang memasang mengenali komputernya dari tempat ia
-#: berdiri, bukan dari nama halaman yang dibukanya.
+#: Urutan peran di kotak pilihan, dari yang paling banyak jumlahnya di
+#: kantor ke yang paling jarang. Namanya diambil dari app.core.peran supaya
+#: bilah status dan dialog ini tidak pernah menyebut hal yang sama dengan
+#: dua kata yang berbeda.
 NAMA_PERAN: tuple[tuple[str, str], ...] = (
     ("", "Belum ditetapkan — tanya setiap kali dibuka"),
-    (PERAN_PETUGAS, "Loket petugas"),
-    (PERAN_ADMIN, "Loket admin"),
-    (PERAN_ANJUNGAN, "Anjungan ambil nomor"),
-    (PERAN_ANJUNGAN_TOTEM, "Anjungan berdiri (totem)"),
-    (TELEVISI, "Televisi ruang tunggu"),
-    (PAPAN_MEMANJANG, "Papan memanjang di atas pintu"),
+    *(
+        (kode, LABEL[kode])
+        for kode in (
+            PERAN_PETUGAS,
+            PERAN_ADMIN,
+            PERAN_ANJUNGAN,
+            PERAN_ANJUNGAN_TOTEM,
+            TELEVISI,
+            PAPAN_MEMANJANG,
+        )
+    ),
 )
 
 NAMA_PENCETAK: tuple[tuple[str | None, str], ...] = (

@@ -311,3 +311,35 @@ def test_salah_ketik_meninggalkan_jejak_di_log(caplog):
         dari_dict({"peran": TELEVISI, "printer": "sistem"})
 
     assert "sistem" in caplog.text
+
+
+# ---------------------------------------------------------------------
+# Nama yang tampil
+# ---------------------------------------------------------------------
+
+def test_setiap_peran_punya_nama_yang_tampil():
+    """
+    Peran tanpa nama akan muncul sebagai ruang kosong di bilah status dan
+    sebagai baris kosong di kotak pilihan.
+    """
+    from app.core.peran import LABEL
+
+    assert set(LABEL) == PERAN_SAH
+    assert all(LABEL[kode].strip() for kode in PERAN_SAH)
+
+
+def test_belum_ditetapkan_tidak_punya_nama():
+    """Ruang kosong lebih jujur daripada kata "(tidak ada)"."""
+    assert PeranKomputer().label == ""
+
+
+def test_mesin_yang_menyimpang_diberi_tanda():
+    """
+    Orang yang memasang tujuh komputer perlu melihat bahwa satu di
+    antaranya tidak lagi sama dengan saudara-saudaranya.
+    """
+    biasa = PeranKomputer(peran=TELEVISI)
+    menyimpang = PeranKomputer(peran=TELEVISI, suara=False)
+
+    assert biasa.label == "Televisi ruang tunggu"
+    assert menyimpang.label == "Televisi ruang tunggu (disesuaikan)"

@@ -774,6 +774,19 @@ class MainWindow(QMainWindow):
         yang dibutuhkan petugas: lokasi server tidak boleh hilang hanya
         karena ia menyegarkan daftar antrian.
         """
+        # Peran mesin di kiri lokasi database. Saat memasang tujuh
+        # komputer, memastikan sekilas mana yang mana — tanpa membuka
+        # dialog satu per satu — menghemat lebih banyak waktu daripada
+        # yang terlihat. Mesin yang belum ditetapkan tidak menampilkan
+        # apa-apa: ruang kosong lebih jujur daripada kata "(tidak ada)".
+        from app.core.peran import baca_peran, path_berkas_peran
+
+        peran = baca_peran(path_berkas_peran(get_config().db_path))
+        if peran.label:
+            self._label_peran = QLabel(peran.label)
+            self._label_peran.setObjectName("statusPeran")
+            self.statusBar().addPermanentWidget(self._label_peran)
+
         self._label_database = QLabel()
         self._label_database.setObjectName("statusDatabase")
         self._label_database.setTextInteractionFlags(

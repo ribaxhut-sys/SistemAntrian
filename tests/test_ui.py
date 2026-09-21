@@ -2163,3 +2163,29 @@ def test_dialog_jenis_layanan_baru_belum_bisa_pasang_media(qtbot, admin_auth, se
     qtbot.addWidget(dialog)
 
     assert dialog.media is None
+
+
+def test_bilah_status_menyebut_peran_komputer(qtbot, admin_auth, app_config):
+    """
+    Saat memasang tujuh komputer, memastikan sekilas mana yang mana —
+    tanpa membuka dialog satu per satu — menghemat lebih banyak waktu
+    daripada yang terlihat.
+    """
+    from app.core.peran import PeranKomputer, path_berkas_peran, tulis_peran
+
+    tulis_peran(
+        path_berkas_peran(app_config.db_path), PeranKomputer(peran="petugas")
+    )
+
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+
+    assert jendela._label_peran.text() == "Loket petugas"
+
+
+def test_bilah_status_diam_bila_peran_belum_ditetapkan(qtbot, admin_auth, app_config):
+    """Ruang kosong lebih jujur daripada kata "(tidak ada)"."""
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+
+    assert not hasattr(jendela, "_label_peran")

@@ -130,6 +130,20 @@ BAWAAN: dict[str, BawaanPeran] = {
 
 PERAN_SAH = frozenset(BAWAAN)
 
+#: Nama peran untuk dibaca manusia.
+#:
+#: Disebut menurut BENDA-nya, bukan menurut mode teknis yang dibukanya:
+#: orang yang memasang mengenali komputernya dari tempat ia berdiri di
+#: ruangan, bukan dari nama halaman yang muncul di layarnya.
+LABEL: dict[str, str] = {
+    PETUGAS: "Loket petugas",
+    ADMIN: "Loket admin",
+    ANJUNGAN: "Anjungan ambil nomor",
+    ANJUNGAN_TOTEM: "Anjungan berdiri (totem)",
+    TELEVISI: "Televisi ruang tunggu",
+    PAPAN_MEMANJANG: "Papan memanjang di atas pintu",
+}
+
 
 @dataclass(frozen=True)
 class PeranKomputer:
@@ -194,6 +208,21 @@ class PeranKomputer:
             return self.bentuk_layar
         bawaan = self.bawaan
         return bawaan.bentuk_layar if bawaan is not None else ""
+
+    @property
+    def label(self) -> str:
+        """
+        Nama peran untuk ditampilkan, "" bila belum ditetapkan.
+
+        Diberi tanda "(disesuaikan)" bila ada isian yang menyimpang dari
+        bawaannya. Orang yang memasang tujuh komputer perlu melihat bahwa
+        satu di antaranya tidak lagi sama dengan saudara-saudaranya, tanpa
+        harus membuka tiap isian satu per satu.
+        """
+        nama = LABEL.get(self.peran, "")
+        if nama and self.disesuaikan:
+            return f"{nama} (disesuaikan)"
+        return nama
 
     @property
     def publik(self) -> bool:
