@@ -277,7 +277,77 @@ Lalu uji terima di komputer sungguhan — lihat bagian 8.
 
 ---
 
-## 6. Yang belum pernah diverifikasi manusia
+## 6. Peran tiap komputer — dua berkas, dua pertanyaan
+
+Setiap komputer menjawab dua pertanyaan yang berbeda. Jawabannya disimpan
+di dua berkas TERPISAH di folder database mesin itu, dan keduanya diabaikan
+git: isinya sifat satu mesin, bukan isi repositori.
+
+| Berkas | Menjawab | Ditulis oleh |
+|---|---|---|
+| `data/mesin.json` | peran terhadap **database**: sendiri / server / klien | dialog "Atur komputer ini" |
+| `data/peran.json` | peran terhadap **pengunjung**: dipakai sebagai apa | dialog yang sama, bagian kedua |
+
+**`mesin.json` JANGAN pernah disalin antar-komputer** — ia memuat kata
+sandi database. `peran.json` justru sebaliknya: ia dirancang untuk disalin
+lewat Notepad, karena lima komputer loket isinya sama persis. Ada test yang
+menjaga sandi dan alamat server tidak pernah bocor ke berkas yang boleh
+disalin itu.
+
+### Peran yang dikenali
+
+| Peran | Layar yang dibuka | Pencetak | Suara | Bentuk layar |
+|---|---|---|---|---|
+| `petugas` / `admin` | layar masing-masing | tidak mencetak | ikut pengaturan | ikut pengukuran |
+| `anjungan` / `anjungan-totem` | anjungan | ikut pengaturan | **diam** | ikut pengukuran |
+| `televisi` | papan antrean | tidak mencetak | ikut pengaturan | ikut pengukuran |
+| `papan-memanjang` | papan antrean | tidak mencetak | **diam** | **memanjang** |
+
+Dua baris yang diam punya alasan yang sama: kantor yang memasang televisi
+DAN pita di atas pintu akan mendapat dua pengeras suara memanggil nomor
+yang sama dengan selisih setengah detik, sepanjang hari.
+
+Peran hanya menyatakan apa yang benar-benar diketahuinya tentang mesin itu.
+"Tidak mencetak" adalah fakta tentang komputer loket; tetapi BAGAIMANA
+mencetak, bagi mesin yang memang mencetak, tetap keputusan seluruh kantor
+lewat `ticket.printer`.
+
+Yang disimpan adalah **pilihan, bukan hasil simpulannya**. `null` berarti
+"ikut peran", sehingga perbaikan tabel simpulan di versi berikutnya sampai
+ke seluruh komputer tanpa satu pun harus didatangi.
+
+### Urutan kewenangan
+
+```
+peran layar         : flag CLI  →  peran.json  →  dialog pilih-mode
+pencetak / suara /
+bentuk layar        : environment  →  peran.json  →  pengaturan database
+koneksi database    : ANTRIAN_DB_URL  →  mesin.json  →  SQLite lokal
+```
+
+Environment sengaja tetap di atas berkas. Pemasangan yang sudah memakai
+`setx ANTRIAN_PRINTER` jauh sebelum berkas peran ada harus berperilaku sama
+persis sesudahnya.
+
+### Bentuk layar
+
+`display.screen_shape` (bawaan `auto`) memilih antara `lebar`, `memanjang`,
+dan `tegak`. Bawaannya hampir selalu cukup — papan mengukur layarnya
+sendiri sesudah tampil, lalu MainWindow membangunnya ulang bila bentuknya
+ternyata lain.
+
+Satu kasus tidak dapat diukur: panel LED yang menerima HDMI 1920x1080 lalu
+memotong sepetak memanjang darinya. Windows melaporkan layar 16:9,
+sementara yang menyala berbentuk pita. Untuk itulah pilihan manual ada.
+
+Papan memanjang melepas judul, jam, dan daftar menunggu, menjajarkan kartu
+loket mendatar, dan berhenti meminta nomor menunggu dari database.
+
+Rancangan lengkapnya: [peran-komputer.md](peran-komputer.md).
+
+---
+
+## 7. Yang belum pernah diverifikasi manusia
 
 Ini penting dan jangan dianggap selesai:
 
@@ -297,7 +367,7 @@ Ini penting dan jangan dianggap selesai:
 
 ---
 
-## 7. Perintah penting
+## 8. Perintah penting
 
 ```powershell
 # Test harian (SQLite, cepat)
@@ -317,6 +387,17 @@ docker compose down -v          # menghentikan container uji
 .\build.ps1
 ```
 
+```powershell
+# Penimpaan per mesin (mengalahkan pengaturan bersama di database)
+setx ANTRIAN_PRINTER system         # pdf | system | none
+setx ANTRIAN_SUARA 0                # 1 | 0
+setx ANTRIAN_BENTUK_LAYAR memanjang # lebar | memanjang | tegak
+setx ANTRIAN_DB_URL "postgresql+psycopg://antrian:sandi@192.168.1.10/antrian"
+```
+
+Ketiga yang pertama kini dapat diisi lewat dialog "Atur komputer ini" —
+lihat bagian 6. `setx` tetap bekerja dan tetap menang.
+
 Selalu panggil interpreter `.venv` secara eksplisit. Memanggil `pytest`
 atau `python` langsung berisiko memakai Python global yang versinya berbeda.
 
@@ -326,7 +407,7 @@ diantisipasi lewat pengaturan `backup.pg_dump_path`.
 
 ---
 
-## 8. Rencana setelah kios selesai
+## 9. Rencana setelah kios selesai
 
 Belum dikerjakan sama sekali, sesuai urutan kepentingannya:
 
@@ -343,7 +424,7 @@ Belum dikerjakan sama sekali, sesuai urutan kepentingannya:
 
 ---
 
-## 9. Cara bekerja yang diharapkan
+## 10. Cara bekerja yang diharapkan
 
 - Kerjakan satu langkah, jalankan test, baru lanjut. Jangan menumpuk
   perubahan besar tanpa menjalankan test.

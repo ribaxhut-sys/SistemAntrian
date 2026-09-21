@@ -28,6 +28,10 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 data/mesin.json
+# Peran komputer ini terhadap pengunjung. Sifat SATU mesin, bukan isi
+# repositori: peran yang ikut ter-commit akan diwarisi setiap clone, dan
+# komputer berikutnya membuka layar milik komputer sebelumnya.
+data/peran.json
 backup/*.db
 backup/*.zip
 tiket/

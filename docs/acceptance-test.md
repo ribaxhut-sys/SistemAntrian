@@ -285,6 +285,52 @@ Jalankan seluruhnya, termasuk yang tampak sepele.
 
 ---
 
+## O. Peran tiap komputer
+
+Dijalankan pada mesin yang sesungguhnya, bukan pada satu laptop. Seluruh
+bagian ini menyentuh berkas `data/peran.json` dan dialog "Atur komputer
+ini" — lihat [lanjutan.md bagian 6](lanjutan.md).
+
+| # | Langkah | Hasil yang diharapkan | Hasil |
+|---|---|---|---|
+| O1 | Buka aplikasi di komputer baru, tekan tombol **Atur komputer ini** | Dialog muncul dengan dua bagian: peran terhadap database, dan "Komputer ini dipakai sebagai" | |
+| O2 | Pilih peran **Anjungan ambil nomor**, amati baris Suara panggilan | Butir pertamanya berbunyi "Ikut peran (diam)" — tanpa membuka dokumen apa pun | |
+| O3 | Ganti ke **Televisi ruang tunggu** | Baris Suara berubah menjadi "Ikut peran (ikut pengaturan)", Pencetak menjadi "Ikut peran (tidak mencetak)" | |
+| O4 | Ganti ke **Papan memanjang di atas pintu** | Bentuk layar berbunyi "Ikut peran (memanjang)" dan Suara "Ikut peran (diam)" | |
+| O5 | Tekan **Uji cetak** dengan peran Televisi | Ditolak dengan kalimat: komputer ini disetel tidak mencetak | |
+| O6 | Pilih Anjungan, pilih Pencetak **Cetak ke printer Windows**, tekan Uji cetak | Keluar satu tiket bernomor **UJI-000** dengan catatan kaki "Bukan nomor antrian" | |
+| O7 | Simpan, lalu tutup dan buka aplikasi lagi | Komputer langsung membuka layar perannya, **tanpa** dialog pilih-mode | |
+| O8 | Nyalakan lewat `AntrianCRO.exe` polos, tanpa pintasan ber-flag | Tetap membuka layar perannya — inilah kegagalan yang ditutup fitur ini | |
+| O9 | Periksa bilah status di komputer loket | Nama peran tampil di kiri lokasi database | |
+| O10 | Ubah satu isian menyimpang dari bawaan peran, simpan, buka ulang | Bilah status menulis "… (disesuaikan)" | |
+| O11 | Buka `data/peran.json` dengan Notepad | Terbaca manusia; isian yang ikut peran bernilai `null` | |
+| O12 | Cari kata sandi database di dalam berkas itu | **Tidak ada**; sandi hanya di `mesin.json` | |
+| O13 | Salin `peran.json` dari satu loket ke empat loket lain | Keempatnya berperilaku sama tanpa disetel satu per satu | |
+| O14 | Rusak isi `peran.json` (hapus satu kurung), buka aplikasi | Tetap terbuka; kembali ke dialog pilih-mode; ada peringatan di `logs/app.log` | |
+| O15 | Isi `setx ANTRIAN_PRINTER none` pada mesin anjungan, buka ulang | Environment menang atas berkas peran | |
+| O16 | Jalankan `git status` di komputer pengembangan setelah menetapkan peran | `data/peran.json` **tidak** muncul | |
+
+---
+
+## P. Bentuk layar papan antrean
+
+Dijalankan pada layar yang sesungguhnya. Bagian ini tidak dapat diuji dari
+laptop pengembang: yang diukur adalah benda yang tergantung di dinding.
+
+| # | Langkah | Hasil yang diharapkan | Hasil |
+|---|---|---|---|
+| P1 | Pasang papan pada televisi 16:9 biasa, biarkan Bentuk layar **Otomatis** | Tampil seperti biasa: judul, jam, kartu loket, daftar menunggu | |
+| P2 | Pasang televisi sebagai **monitor kedua**, buka papan | Papan mengenali layar televisinya, bukan monitor utama | |
+| P3 | Pindahkan jendela papan ke monitor lain yang bentuknya berbeda | Papan menyesuaikan diri; tidak perlu ditutup dan dibuka lagi | |
+| P4 | Setel Bentuk layar ke **Papan memanjang**, amati papannya | Judul, jam, dan daftar menunggu hilang; kartu loket berjajar mendatar | |
+| P5 | Amati nomor pada pita memanjang dari seberang ruangan | Terbaca; tidak ada huruf yang terpotong di tepi atas atau bawah | |
+| P6 | Pada papan memanjang, pantau kueri database selama lima menit | Tidak ada permintaan daftar nomor menunggu — panelnya memang tidak digambar | |
+| P7 | Pasang televisi DAN papan memanjang bersamaan, panggil satu nomor | Hanya **satu** pengeras suara berbunyi | |
+| P8 | Setel Bentuk layar ke **Layar berdiri** pada televisi tegak | Kartu loket dua per baris, bukan tiga | |
+| P9 | Ukur pitch panel LED (hitung titik dalam 10 cm, 100 dibagi jumlahnya) | Tercatat; bila P10 ke atas, panel itu kartu teks berjalan dan **bukan** layar untuk aplikasi ini | |
+
+---
+
 ## Persetujuan
 
 | | Nama | Tanggal | Tanda tangan |
