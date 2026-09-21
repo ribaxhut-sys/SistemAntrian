@@ -246,15 +246,21 @@ dicatat di log.
 ## 7. Urutan pengerjaan
 
 Bertahap, tiap tahap berdiri sendiri dan punya tesnya sendiri.
+**Seluruhnya sudah dikerjakan.**
 
-1. **`app/core/peran.py` + tesnya.** Tanpa tampilan, tanpa menyentuh
-   berkas siapa pun. Seluruh tabel simpulan dan urutan kewenangan diuji
-   di sini.
-2. **`app/main.py` membaca `peran.json`.** Menutup kegagalan utama:
-   televisi berhenti membuka dialog di depan pengunjung.
-3. **Dialog menulis `peran.json`.** Sampai tahap ini berkasnya masih
-   ditulis tangan; sesudahnya tidak perlu lagi.
-4. **Bilah status, penimpaan per butir, dan Uji cetak.** Kenyamanan,
-   bukan keharusan — tetapi Uji cetak akan sering dipakai.
+| # | Isi | Commit |
+|---|---|---|
+| 1 | `app/core/peran.py` + tesnya — tabel simpulan, urutan kewenangan, berkas | `ad39a6b` |
+| 2 | `app/main.py` membaca `peran.json`; televisi berhenti membuka dialog di depan pengunjung | `464ed04` |
+| 3 | `app/core/config.py` memakai pencetak, suara, dan bentuk layar dari berkas itu | `f8f5362` |
+| 4 | Dialog menulis `peran.json`; berkasnya tidak perlu lagi ditulis tangan | `383207b` |
+| 5a | Bilah status menyebut peran mesin | `f5964d2` |
+| 5b | Tombol Uji cetak | `90c2107` |
 
-Tahap 1 dan 2 sudah cukup untuk memasang tujuh komputer dengan selamat.
+Rancangan semula menyatukan tahap 3 ke dalam daftar berkas tanpa memberinya
+nomor. Itu keliru: tanpa tahap itu, tiga dari empat isian di `peran.json`
+tersimpan tanpa berpengaruh apa-apa, dan fitur ini hanya akan mengatur
+modenya saja.
+
+Tahap 1 sampai 3 sudah cukup untuk memasang tujuh komputer dengan selamat.
+Tahap 4 membuatnya tidak perlu Notepad, tahap 5 membuatnya nyaman.
