@@ -35,6 +35,12 @@ screen_shape` yang berlaku sistem-wide hanya akan membuat salah satunya
 salah bentuk. Mesin yang tidak menyebut apa-apa mengikuti pengaturan
 bersama — yang bawaannya "auto", sehingga papan mengukur layarnya sendiri.
 
+Ketiganya juga dapat datang dari `peran.json`, yang ditulis lewat tampilan
+alih-alih lewat `setx` — lihat app.core.peran. Environment tetap di urutan
+teratas: pemasangan yang sudah memakai `setx ANTRIAN_PRINTER` hari ini
+berperilaku sama persis besok. Berkas peran hanya mengisi yang tidak
+disebut environment, dan pengaturan bersama di database mengisi sisanya.
+
 Beberapa loket yang melayani bersamaan WAJIB memakai PostgreSQL lewat
 ANTRIAN_DB_URL. SQLite hanya sanggup melayani satu komputer: mode WAL
 memakai shared memory yang tidak berfungsi di filesystem jaringan, dan
@@ -227,11 +233,20 @@ def load_config() -> AppConfig:
     """Bangun konfigurasi dari environment variable dengan default yang aman."""
     from app.core.mesin import path_berkas_mesin, url_dari_berkas_mesin
 
+    from app.core.peran import baca_peran, path_berkas_peran
+
     root = base_dir()
     db_path = _path_from_env("ANTRIAN_DB_PATH", root / "data" / "queue.db")
     db_url = os.environ.get("ANTRIAN_DB_URL", "").strip()
     if not db_url:
         db_url = url_dari_berkas_mesin(path_berkas_mesin(db_path))
+
+    # Peran mesin ini mengisi yang tidak disebut environment. Urutannya
+    # tidak boleh dibalik: komputer yang sudah disetel lewat `setx` jauh
+    # sebelum berkas peran ada harus tetap berperilaku sama.
+    peran = baca_peran(path_berkas_peran(db_path))
+    suara_env = _bool_from_env("ANTRIAN_SUARA")
+
     return AppConfig(
         base_dir=root,
         db_path=db_path,
@@ -239,9 +254,14 @@ def load_config() -> AppConfig:
         backup_dir=_path_from_env("ANTRIAN_BACKUP_DIR", root / "backup"),
         log_dir=_path_from_env("ANTRIAN_LOG_DIR", root / "logs"),
         log_level=os.environ.get("ANTRIAN_LOG_LEVEL", "INFO").upper(),
-        printer=os.environ.get("ANTRIAN_PRINTER", "").strip(),
-        suara=_bool_from_env("ANTRIAN_SUARA"),
-        bentuk_layar=os.environ.get("ANTRIAN_BENTUK_LAYAR", "").strip().lower(),
+        printer=(
+            os.environ.get("ANTRIAN_PRINTER", "").strip() or peran.printer_efektif
+        ),
+        suara=suara_env if suara_env is not None else peran.suara_efektif,
+        bentuk_layar=(
+            os.environ.get("ANTRIAN_BENTUK_LAYAR", "").strip().lower()
+            or peran.bentuk_efektif
+        ),
     )
 
 

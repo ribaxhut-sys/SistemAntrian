@@ -192,3 +192,83 @@ def test_lewati_login_dapat_dimatikan_dari_environment(
     from app.core.config import lewati_login_pengembang
 
     assert lewati_login_pengembang() is False
+
+
+# ---------------------------------------------------------------------
+# Peran mesin mengisi yang tidak disebut environment
+# ---------------------------------------------------------------------
+
+@pytest.fixture
+def mesin_berperan(tmp_path, monkeypatch):
+    """Sebuah komputer dengan peran.json, tanpa environment apa pun."""
+    from app.core.config import reset_config
+    from app.core.peran import PeranKomputer, tulis_peran
+
+    folder = tmp_path / "data"
+    folder.mkdir(parents=True)
+    monkeypatch.setenv("ANTRIAN_DB_PATH", str(folder / "queue.db"))
+    for nama in ("ANTRIAN_PRINTER", "ANTRIAN_SUARA", "ANTRIAN_BENTUK_LAYAR"):
+        monkeypatch.delenv(nama, raising=False)
+    monkeypatch.delenv("ANTRIAN_PERAN_PATH", raising=False)
+
+    def pasang(**isian):
+        tulis_peran(folder / "peran.json", PeranKomputer(**isian))
+        reset_config()
+        from app.core.config import load_config
+
+        return load_config()
+
+    yield pasang
+    reset_config()
+
+
+def test_peran_televisi_mematikan_pencetak(mesin_berperan):
+    """Tidak ada pencetak yang menempel pada komputer televisi."""
+    cfg = mesin_berperan(peran="televisi")
+
+    assert cfg.printer == "none"
+    assert cfg.suara is None
+    assert cfg.bentuk_layar == ""
+
+
+def test_peran_anjungan_mendiamkan_mesinnya(mesin_berperan):
+    cfg = mesin_berperan(peran="anjungan")
+
+    assert cfg.suara is False
+    # Anjungan memang mencetak, tetapi caranya keputusan seluruh kantor.
+    assert cfg.printer == ""
+
+
+def test_peran_papan_memanjang_membawa_bentuk_layarnya(mesin_berperan):
+    cfg = mesin_berperan(peran="papan-memanjang")
+
+    assert cfg.bentuk_layar == "memanjang"
+    assert cfg.suara is False
+
+
+def test_environment_tetap_mengalahkan_berkas_peran(mesin_berperan, monkeypatch):
+    """
+    Pemasangan yang sudah memakai `setx` jauh sebelum berkas peran ada
+    harus berperilaku sama persis sesudahnya.
+    """
+    monkeypatch.setenv("ANTRIAN_PRINTER", "system")
+    monkeypatch.setenv("ANTRIAN_SUARA", "1")
+    monkeypatch.setenv("ANTRIAN_BENTUK_LAYAR", "tegak")
+
+    cfg = mesin_berperan(peran="papan-memanjang")
+
+    assert cfg.printer == "system"
+    assert cfg.suara is True
+    assert cfg.bentuk_layar == "tegak"
+
+
+def test_tanpa_berkas_peran_tidak_ada_yang_berubah(mesin_berperan, tmp_path):
+    """Komputer yang belum ditetapkan berperilaku seperti sebelum fitur ini."""
+    from app.core.config import load_config, reset_config
+
+    reset_config()
+    cfg = load_config()
+
+    assert cfg.printer == ""
+    assert cfg.suara is None
+    assert cfg.bentuk_layar == ""
