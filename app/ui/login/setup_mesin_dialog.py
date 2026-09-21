@@ -1,10 +1,23 @@
 """
-Dialog menetapkan peran komputer ini terhadap database.
+Dialog menetapkan peran komputer ini: terhadap database, dan terhadap
+pengunjung.
 
 Bukan deteksi jaringan. Orang yang memasang memilih: satu komputer,
 server, atau klien. Pilihan itu disimpan di mesin.json pada komputer
 ini saja, lalu komputer klien menuliskan alamat yang ditampilkan di
 sini — bukan mencari sendiri siapa yang sedang menyala.
+
+Bagian kedua menjawab pertanyaan yang berbeda: komputer ini menghadap
+pengunjung sebagai apa. Jawabannya ditulis ke berkas TERPISAH,
+`peran.json`, karena berkas itu dirancang untuk disalin antar-komputer
+sedangkan mesin.json memuat kata sandi database dan tidak boleh disalin
+ke mana pun. Lihat app.core.peran.
+
+Peran MENGISI ketiga isian di bawahnya, tidak mengunci. Isian yang
+dibiarkan pada "Ikut peran" mengikuti tabel simpulan, sehingga perbaikan
+tabel itu di versi berikutnya sampai ke seluruh komputer tanpa satu pun
+harus didatangi. Isian yang diubah menyatakan kehendak, dan kehendak itu
+tersimpan apa adanya.
 """
 
 from __future__ import annotations
@@ -12,6 +25,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QComboBox,
     QDialog,
     QFormLayout,
     QFrame,
@@ -38,7 +52,60 @@ from app.core.mesin import (
     tulis_berkas_mesin,
     uji_koneksi,
 )
+from app.core.peran import (
+    ADMIN as PERAN_ADMIN,
+    ANJUNGAN as PERAN_ANJUNGAN,
+    ANJUNGAN_TOTEM as PERAN_ANJUNGAN_TOTEM,
+    BAWAAN,
+    PAPAN_MEMANJANG,
+    PETUGAS as PERAN_PETUGAS,
+    TELEVISI,
+    PeranKomputer,
+    baca_peran,
+    path_berkas_peran,
+    tulis_peran,
+)
 from app.ui.common import keterangan, label_error, tombol
+
+#: Nama peran di layar. Disebut menurut BENDA-nya, bukan menurut mode
+#: teknisnya: orang yang memasang mengenali komputernya dari tempat ia
+#: berdiri, bukan dari nama halaman yang dibukanya.
+NAMA_PERAN: tuple[tuple[str, str], ...] = (
+    ("", "Belum ditetapkan — tanya setiap kali dibuka"),
+    (PERAN_PETUGAS, "Loket petugas"),
+    (PERAN_ADMIN, "Loket admin"),
+    (PERAN_ANJUNGAN, "Anjungan ambil nomor"),
+    (PERAN_ANJUNGAN_TOTEM, "Anjungan berdiri (totem)"),
+    (TELEVISI, "Televisi ruang tunggu"),
+    (PAPAN_MEMANJANG, "Papan memanjang di atas pintu"),
+)
+
+NAMA_PENCETAK: tuple[tuple[str | None, str], ...] = (
+    (None, ""),  # diisi ulang mengikuti peran
+    ("none", "Tidak mencetak"),
+    ("pdf", "Simpan sebagai PDF di folder tiket"),
+    ("system", "Cetak ke printer Windows"),
+)
+
+NAMA_SUARA: tuple[tuple[bool | None, str], ...] = (
+    (None, ""),
+    (True, "Bunyikan panggilan"),
+    (False, "Diam"),
+)
+
+NAMA_BENTUK: tuple[tuple[str | None, str], ...] = (
+    (None, ""),
+    ("lebar", "Televisi biasa, lebih lebar daripada tinggi"),
+    ("memanjang", "Papan memanjang, seperti pita di atas pintu"),
+    ("tegak", "Layar berdiri, lebih tinggi daripada lebar"),
+)
+
+#: Bunyi "Ikut peran (…)" untuk tiap kemungkinan bawaan. Yang kosong
+#: berarti peran itu memang tidak berpendapat, dan yang berlaku adalah
+#: pengaturan bersama di database.
+_SEBUTAN_PENCETAK = {"": "ikut pengaturan", "none": "tidak mencetak"}
+_SEBUTAN_SUARA = {None: "ikut pengaturan", True: "bunyikan", False: "diam"}
+_SEBUTAN_BENTUK = {"": "diukur sendiri"}
 
 
 class SetupMesinDialog(QDialog):
@@ -54,14 +121,29 @@ class SetupMesinDialog(QDialog):
         self._db_path = cfg.db_path
         self._url_semula = cfg.database_url
         self.pengaturan_tersimpan: PengaturanMesin | None = None
+        self.peran_tersimpan: PeranKomputer | None = None
 
         self._bangun_tampilan()
         self._muat(muat_pengaturan(self._db_path))
+        self._peran_semula = baca_peran(path_berkas_peran(self._db_path))
+        self._muat_peran(self._peran_semula)
         self._perbarui_tampilan()
 
     @property
     def memerlukan_buka_ulang(self) -> bool:
-        """True bila isian yang baru disimpan tidak akan dipakai sebelum dibuka ulang."""
+        """
+        True bila isian yang baru disimpan tidak akan dipakai sebelum
+        aplikasi dibuka ulang.
+
+        Peran ikut dihitung. Mode dibaca sekali saat peluncuran — lihat
+        `mode_awal_mesin` di app.main — sehingga televisi yang baru saja
+        ditetapkan tetap menampilkan layar yang sedang terbuka sampai
+        aplikasinya dijalankan lagi.
+        """
+        if self.peran_tersimpan is not None and (
+            self.peran_tersimpan != self._peran_semula
+        ):
+            return True
         if self.pengaturan_tersimpan is None:
             return False
         if env_url_mengalahkan():
@@ -122,6 +204,9 @@ class SetupMesinDialog(QDialog):
 
         self._panel_postgres = self._bangun_panel_postgres()
         susunan.addWidget(self._panel_postgres)
+
+        self._panel_peran = self._bangun_panel_peran()
+        susunan.addWidget(self._panel_peran)
 
         self._label_error = label_error()
         susunan.addWidget(self._label_error)
@@ -206,6 +291,103 @@ class SetupMesinDialog(QDialog):
         form.addRow("Kata sandi", self.isian_sandi)
 
         return panel
+
+    def _bangun_panel_peran(self) -> QWidget:
+        """
+        Bagian kedua: komputer ini menghadap pengunjung sebagai apa.
+
+        Satu pertanyaan, lalu tiga isian yang SUDAH TERISI olehnya. Isian
+        itu tidak disembunyikan dan tidak dikunci: orang tidak perlu keluar
+        dari perannya untuk menyimpang sedikit darinya, dan yang dibiarkan
+        pada "Ikut peran" tetap ikut ketika tabel simpulan diperbaiki.
+        """
+        panel = QWidget()
+        susunan = QVBoxLayout(panel)
+        susunan.setContentsMargins(0, 8, 0, 0)
+        susunan.setSpacing(8)
+
+        judul = QLabel("Komputer ini dipakai sebagai")
+        judul.setProperty("heading", "true")
+        susunan.addWidget(judul)
+        susunan.addWidget(
+            keterangan(
+                "Komputer yang sudah ditetapkan membuka layarnya sendiri, "
+                "apa pun cara ia dinyalakan — tidak lagi bergantung pada "
+                "pintasan yang benar."
+            )
+        )
+
+        form = QFormLayout()
+        form.setContentsMargins(4, 4, 4, 4)
+        form.setSpacing(8)
+
+        self.pilih_peran = self._kotak_pilih("pilihPeran", NAMA_PERAN)
+        self.pilih_peran.currentIndexChanged.connect(self._perbarui_bawaan_peran)
+        form.addRow("Peran", self.pilih_peran)
+
+        self.pilih_pencetak = self._kotak_pilih("pilihPencetak", NAMA_PENCETAK)
+        form.addRow("Pencetak tiket", self.pilih_pencetak)
+
+        self.pilih_suara = self._kotak_pilih("pilihSuara", NAMA_SUARA)
+        form.addRow("Suara panggilan", self.pilih_suara)
+
+        self.pilih_bentuk = self._kotak_pilih("pilihBentuk", NAMA_BENTUK)
+        form.addRow("Bentuk layar", self.pilih_bentuk)
+
+        susunan.addLayout(form)
+        return panel
+
+    @staticmethod
+    def _kotak_pilih(nama: str, isi) -> QComboBox:
+        """Kotak pilihan yang menyimpan nilainya sebagai data, bukan teks."""
+        kotak = QComboBox()
+        kotak.setObjectName(nama)
+        for nilai, teks in isi:
+            kotak.addItem(teks, userData=nilai)
+        return kotak
+
+    @staticmethod
+    def _pilih_nilai(kotak: QComboBox, nilai) -> None:
+        """Pilih butir yang datanya `nilai`; butir pertama bila tidak ada."""
+        indeks = kotak.findData(nilai)
+        kotak.setCurrentIndex(indeks if indeks >= 0 else 0)
+
+    def _perbarui_bawaan_peran(self) -> None:
+        """
+        Tulis ulang bunyi "Ikut peran (…)" mengikuti peran yang dipilih.
+
+        Inilah yang membuat perannya terbaca tanpa membuka dokumen mana
+        pun: memilih "Anjungan ambil nomor" langsung memperlihatkan bahwa
+        mesin itu akan DIAM, dan orang yang tidak menghendakinya dapat
+        mengubahnya di tempat yang sama.
+        """
+        bawaan = BAWAAN.get(self.pilih_peran.currentData() or "")
+        pencetak = bawaan.printer if bawaan is not None else ""
+        suara = bawaan.suara if bawaan is not None else None
+        bentuk = bawaan.bentuk_layar if bawaan is not None else ""
+
+        self.pilih_pencetak.setItemText(
+            0, f"Ikut peran ({_SEBUTAN_PENCETAK.get(pencetak, pencetak)})"
+        )
+        self.pilih_suara.setItemText(0, f"Ikut peran ({_SEBUTAN_SUARA[suara]})")
+        self.pilih_bentuk.setItemText(
+            0, f"Ikut peran ({_SEBUTAN_BENTUK.get(bentuk, bentuk)})"
+        )
+
+    def _muat_peran(self, peran: PeranKomputer) -> None:
+        self._pilih_nilai(self.pilih_peran, peran.peran)
+        self._pilih_nilai(self.pilih_pencetak, peran.printer)
+        self._pilih_nilai(self.pilih_suara, peran.suara)
+        self._pilih_nilai(self.pilih_bentuk, peran.bentuk_layar)
+        self._perbarui_bawaan_peran()
+
+    def _peran_dari_form(self) -> PeranKomputer:
+        return PeranKomputer(
+            peran=self.pilih_peran.currentData() or "",
+            printer=self.pilih_pencetak.currentData(),
+            suara=self.pilih_suara.currentData(),
+            bentuk_layar=self.pilih_bentuk.currentData(),
+        )
 
     def _bangun_tombol(self) -> QHBoxLayout:
         baris = QHBoxLayout()
@@ -329,4 +511,10 @@ class SetupMesinDialog(QDialog):
             return
         tulis_berkas_mesin(path_berkas_mesin(self._db_path), pengaturan)
         self.pengaturan_tersimpan = pengaturan
+
+        # Berkas kedua, sengaja terpisah: yang ini aman disalin ke komputer
+        # lain sebagai contekan, yang di atas memuat kata sandi database.
+        peran = self._peran_dari_form()
+        tulis_peran(path_berkas_peran(self._db_path), peran)
+        self.peran_tersimpan = peran
         self.accept()

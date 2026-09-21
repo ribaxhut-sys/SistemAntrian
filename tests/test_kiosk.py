@@ -2464,3 +2464,143 @@ def test_gambar_layanan_tidak_ikut_diulang(halaman_kios, folder_media, monkeypat
     assert panel.tumpukan.currentIndex() == HALAMAN_GAMBAR
     assert diulang == []
     assert panel._berkas_layanan is not None
+
+
+# ---------------------------------------------------------------------
+# Dialog: komputer ini dipakai sebagai apa
+# ---------------------------------------------------------------------
+
+def test_dialog_mesin_bawaan_peran_belum_ditetapkan(qtbot, app_config):
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.pilih_peran.currentData() == ""
+    assert dialog.pilih_pencetak.currentData() is None
+    assert dialog.pilih_suara.currentData() is None
+    assert dialog.pilih_bentuk.currentData() is None
+
+
+def test_dialog_mesin_menyimpan_peran_ke_berkasnya_sendiri(qtbot, app_config):
+    from app.core.peran import baca_peran, path_berkas_peran
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog._pilih_nilai(dialog.pilih_peran, "televisi")
+    dialog._simpan()
+
+    tersimpan = baca_peran(path_berkas_peran(app_config.db_path))
+
+    assert tersimpan.peran == "televisi"
+    assert tersimpan.mode == "antrian"
+    assert not tersimpan.disesuaikan
+
+
+def test_kata_sandi_database_tidak_pernah_masuk_berkas_peran(qtbot, app_config):
+    """
+    peran.json dirancang untuk DISALIN ke komputer lain sebagai contekan.
+    Kata sandi yang ikut tersalin akan menyebar ke tujuh mesin sekaligus.
+    """
+    from app.core.peran import path_berkas_peran
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog.radio_klien.setChecked(True)
+    dialog._perbarui_tampilan()
+    dialog.isian_host.setText("192.168.1.10")
+    dialog.isian_pengguna.setText("antrian")
+    dialog.isian_sandi.setText("rahasia-sekali")
+    dialog._pilih_nilai(dialog.pilih_peran, "anjungan")
+    dialog._simpan()
+
+    isi = path_berkas_peran(app_config.db_path).read_text(encoding="utf-8")
+
+    assert "rahasia-sekali" not in isi
+    assert "192.168.1.10" not in isi
+
+
+def test_memilih_peran_memperlihatkan_apa_yang_disimpulkannya(qtbot, app_config):
+    """
+    Inilah yang membuat perannya terbaca tanpa membuka dokumen mana pun:
+    memilih anjungan langsung memperlihatkan bahwa mesin itu akan DIAM.
+    """
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+
+    dialog._pilih_nilai(dialog.pilih_peran, "anjungan")
+    assert "diam" in dialog.pilih_suara.itemText(0).lower()
+
+    dialog._pilih_nilai(dialog.pilih_peran, "televisi")
+    assert "ikut pengaturan" in dialog.pilih_suara.itemText(0).lower()
+    assert "tidak mencetak" in dialog.pilih_pencetak.itemText(0).lower()
+
+    dialog._pilih_nilai(dialog.pilih_peran, "papan-memanjang")
+    assert "memanjang" in dialog.pilih_bentuk.itemText(0).lower()
+
+
+def test_penimpaan_per_isian_tersimpan_sebagai_kehendak(qtbot, app_config):
+    """
+    Televisi yang dibuat diam menyimpan `False`, bukan mengikuti tabel.
+    Isian yang dibiarkan tetap `null` supaya ikut bila tabelnya diperbaiki.
+    """
+    from app.core.peran import baca_peran, path_berkas_peran
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog._pilih_nilai(dialog.pilih_peran, "televisi")
+    dialog._pilih_nilai(dialog.pilih_suara, False)
+    dialog._simpan()
+
+    tersimpan = baca_peran(path_berkas_peran(app_config.db_path))
+
+    assert tersimpan.suara is False
+    assert tersimpan.printer is None
+    assert tersimpan.disesuaikan
+
+
+def test_peran_yang_berganti_menuntut_buka_ulang(qtbot, app_config):
+    """
+    Mode dibaca sekali saat peluncuran, jadi televisi yang baru ditetapkan
+    tetap menampilkan layar yang sedang terbuka sampai dijalankan lagi.
+    """
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog._pilih_nilai(dialog.pilih_peran, "televisi")
+    dialog._simpan()
+
+    assert dialog.memerlukan_buka_ulang
+
+
+def test_peran_yang_tidak_berubah_tidak_menuntut_buka_ulang(qtbot, app_config):
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog._simpan()
+
+    assert not dialog.memerlukan_buka_ulang
+
+
+def test_dialog_memuat_kembali_peran_yang_sudah_tersimpan(qtbot, app_config):
+    from app.core.peran import PeranKomputer, path_berkas_peran, tulis_peran
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    tulis_peran(
+        path_berkas_peran(app_config.db_path),
+        PeranKomputer(peran="papan-memanjang", suara=True),
+    )
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.pilih_peran.currentData() == "papan-memanjang"
+    assert dialog.pilih_suara.currentData() is True
+    assert dialog.pilih_bentuk.currentData() is None
