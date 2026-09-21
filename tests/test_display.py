@@ -3302,3 +3302,174 @@ def test_layar_tegak_melebarkan_kartu_dengan_mengurangi_kolom(
     # Tiga loket dalam dua kolom berarti dua baris.
     assert halaman.kisi_loket.columnCount() >= 2
     assert halaman._baris_kartu == 2
+
+
+# ---------------------------------------------------------------------
+# Bentuk layar: tebakan yang dibetulkan sesudah papan tampil
+# ---------------------------------------------------------------------
+
+def _lapor_bentuk(halaman) -> list[str]:
+    """Tampung setiap laporan `bentuk_berubah` dari sebuah papan."""
+    laporan: list[str] = []
+    halaman.bentuk_berubah.connect(laporan.append)
+    return laporan
+
+
+def _layar(halaman, lebar: int, tinggi: int) -> None:
+    """Perankan monitor yang tidak dimiliki mesin penguji."""
+    halaman.ukuran_layar = lambda: (lebar, tinggi)
+
+
+def test_bentuk_manual_kosong_bila_diserahkan_pada_papan(admin_auth):
+    from app.ui.display.display_page import bentuk_manual
+
+    SettingsService(admin_auth).set("display.screen_shape", "auto")
+
+    assert bentuk_manual(SettingsService(admin_auth)) == ""
+
+
+def test_bentuk_manual_membaca_pengaturan_lalu_environment(
+    admin_auth, bentuk_mesin
+):
+    from app.ui.display.display_page import bentuk_manual
+
+    pengaturan = SettingsService(admin_auth)
+    pengaturan.set("display.screen_shape", "tegak")
+    assert bentuk_manual(pengaturan) == "tegak"
+
+    bentuk_mesin("memanjang")
+    assert bentuk_manual(pengaturan) == "memanjang"
+
+
+def test_papan_melapor_saat_layarnya_ternyata_memanjang(
+    qtbot, admin_auth, auth, antrian_siap
+):
+    """
+    Halaman dibangun sebelum jendelanya pernah tampil, jadi layar yang
+    terbaca saat itu adalah monitor utama — sedangkan televisi dan pita LED
+    justru sering monitor kedua. Papan wajib melapor begitu melihat layar
+    yang sesungguhnya.
+    """
+    SettingsService(admin_auth).set("display.screen_shape", "auto")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth)
+    qtbot.addWidget(halaman)
+    laporan = _lapor_bentuk(halaman)
+
+    assert halaman.bentuk == "lebar"  # tebakan pembuka dari monitor utama
+
+    _layar(halaman, 1920, 432)
+    halaman._periksa_bentuk()
+
+    assert laporan == ["memanjang"]
+
+
+def test_papan_hanya_melapor_sekali_untuk_bentuk_yang_sama(
+    qtbot, admin_auth, auth, antrian_siap
+):
+    """
+    Laporan datang dari resizeEvent juga, dan jendela layar penuh mengirim
+    itu berkali-kali. Tanpa penahan, satu pita menghasilkan antrean
+    bangun-ulang yang tidak pernah habis.
+    """
+    SettingsService(admin_auth).set("display.screen_shape", "auto")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth)
+    qtbot.addWidget(halaman)
+    laporan = _lapor_bentuk(halaman)
+
+    _layar(halaman, 1920, 432)
+    for _ in range(5):
+        halaman._periksa_bentuk()
+
+    assert laporan == ["memanjang"]
+
+
+def test_papan_yang_bentuknya_dikunci_tidak_pernah_melapor(
+    qtbot, admin_auth, auth, antrian_siap
+):
+    """
+    Papan hasil bangun-ulang menerima bentuknya dari pemanggil. Bila ia
+    menebak lagi dan melapor lagi, ia akan dibangun ulang lagi — tanpa henti.
+    """
+    SettingsService(admin_auth).set("display.screen_shape", "auto")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth, bentuk="memanjang")
+    qtbot.addWidget(halaman)
+    laporan = _lapor_bentuk(halaman)
+
+    assert halaman.bentuk == "memanjang"
+
+    _layar(halaman, 1920, 1080)
+    halaman._periksa_bentuk()
+
+    assert laporan == []
+
+
+def test_bentuk_yang_ditetapkan_manusia_tidak_ditimpa_pengukuran(
+    qtbot, admin_auth, auth, antrian_siap
+):
+    """
+    Orang yang menyebut bentuk layarnya sendiri biasanya sedang membetulkan
+    tebakan yang keliru — panel LED yang memotong sepetak dari gambar 16:9.
+    Mengukur ulang berarti mengembalikannya ke tebakan yang sama.
+    """
+    SettingsService(admin_auth).set("display.screen_shape", "memanjang")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    halaman = _papan(auth)
+    qtbot.addWidget(halaman)
+    laporan = _lapor_bentuk(halaman)
+
+    _layar(halaman, 1920, 1080)
+    halaman._periksa_bentuk()
+
+    assert halaman.bentuk == "memanjang"
+    assert laporan == []
+
+
+def test_jendela_membangun_ulang_papan_pada_indeks_yang_sama(
+    qtbot, admin_auth, auth, antrian_siap
+):
+    """
+    Nomor halaman dipakai langsung sebagai baris menu, jadi papan pengganti
+    wajib menempati indeks yang sama persis — kalau bergeser, menu menunjuk
+    halaman lain.
+    """
+    from app.ui.display.display_page import PITA, DisplayPage
+    from app.ui.main_window import MainWindow
+
+    SettingsService(admin_auth).set("display.screen_shape", "auto")
+    auth.logout()
+    auth.login("display", TEST_PASSWORD)
+
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    indeks = next(
+        i
+        for i in range(jendela.halaman.count())
+        if isinstance(jendela.halaman.widget(i), DisplayPage)
+    )
+    lama = jendela.halaman.widget(indeks)
+    jumlah_menu = jendela.navigasi.count()
+    jumlah_halaman = jendela.halaman.count()
+
+    _layar(lama, 1920, 432)
+    lama._periksa_bentuk()
+
+    baru = jendela.halaman.widget(indeks)
+
+    assert baru is not lama
+    assert isinstance(baru, DisplayPage)
+    assert baru.bentuk == "memanjang"
+    assert baru.tata_letak == PITA
+    assert jendela.halaman.count() == jumlah_halaman
+    assert jendela.navigasi.count() == jumlah_menu

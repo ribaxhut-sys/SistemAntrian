@@ -519,9 +519,7 @@ class MainWindow(QMainWindow):
             _Menu(
                 "Layar Antrian",
                 Permission.DISPLAY_VIEW,
-                lambda: DisplayPage(
-                    self.queue_service, self.settings_service, self.sound_player
-                ),
+                self._halaman_layar_antrian,
                 # Kios sudah memuat papan nomor di dalam layarnya sendiri;
                 # tanpa syarat ini ia mendapat dua menu untuk hal yang sama.
                 kecuali=(Permission.QUEUE_CREATE,),
@@ -578,6 +576,52 @@ class MainWindow(QMainWindow):
             return
 
         self.navigasi.setCurrentRow(0)
+
+    def _halaman_layar_antrian(self) -> QWidget:
+        """Papan antrian televisi, yang melapor bila bentuk layarnya lain."""
+        papan = DisplayPage(
+            self.queue_service, self.settings_service, self.sound_player
+        )
+        papan.bentuk_berubah.connect(
+            lambda bentuk, lama=papan: self._ganti_bentuk_layar(lama, bentuk)
+        )
+        return papan
+
+    def _ganti_bentuk_layar(self, lama: DisplayPage, bentuk: str) -> None:
+        """
+        Bangun ulang papan antrian untuk bentuk layar yang sebenarnya.
+
+        Halaman dibangun di `_susun_menu`, yaitu SEBELUM jendela ini pernah
+        tampil, sehingga papan hanya sanggup menebak layarnya dari monitor
+        utama. Televisi ruang tunggu sering justru monitor kedua, dan pita
+        LED di atas pintu hampir selalu.
+
+        Yang dibuat adalah papan BARU, bukan papan lama yang ditata ulang.
+        Kerangka papan menyebar ke belasan atribut, dan satu saja yang lupa
+        dinolkan akan menunjuk objek C++ yang sudah dihapus — lalu
+        menjatuhkan layar yang seharusnya menyala sepanjang hari kerja.
+        Membuang seluruh papan lama tidak menyisakan atribut untuk dilupakan.
+        """
+        indeks = self.halaman.indexOf(lama)
+        if indeks < 0:
+            return
+        baru = DisplayPage(
+            self.queue_service,
+            self.settings_service,
+            self.sound_player,
+            bentuk=bentuk,
+        )
+        sedang_tampil = self.halaman.currentWidget() is lama
+        # Disisipkan pada indeks yang sama lalu yang lama dicabut: nomor
+        # halaman dipakai langsung sebagai baris menu di `_ganti_halaman`,
+        # dan indeks yang bergeser berarti menu menunjuk halaman lain.
+        self.halaman.insertWidget(indeks, baru)
+        self.halaman.removeWidget(lama)
+        lama.hentikan()
+        lama.deleteLater()
+        if sedang_tampil:
+            self.halaman.setCurrentIndex(indeks)
+        logger.info("Papan antrian dibangun ulang untuk layar %s.", bentuk)
 
     def _halaman_anjungan(self) -> QWidget:
         """Halaman anjungan, atau miniaturnya bila `--jendela` pada totem."""

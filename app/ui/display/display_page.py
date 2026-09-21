@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QFrame,
@@ -387,6 +387,23 @@ def bentuk_dari_ukuran(lebar: int, tinggi: int) -> str:
     return BENTUK_LAYAR_LEBAR
 
 
+def bentuk_manual(settings: SettingsService) -> str:
+    """
+    Bentuk yang DITETAPKAN manusia, atau "" bila ia menyerahkannya pada
+    papan.
+
+    Dipisahkan dari penebakan karena keduanya berbeda derajat: bentuk yang
+    ditetapkan tidak boleh diganggu gugat oleh pengukuran apa pun
+    sesudahnya, sedangkan tebakan justru wajib diperbaiki begitu layar
+    yang sesungguhnya diketahui.
+    """
+    pilihan = get_config().bentuk_layar
+    if pilihan in BENTUK_LAYAR_MANUAL:
+        return pilihan
+    pilihan = settings.get("display.screen_shape", BENTUK_LAYAR_OTOMATIS)
+    return pilihan if pilihan in BENTUK_LAYAR_MANUAL else ""
+
+
 def bentuk_layar_efektif(
     settings: SettingsService, *, lebar: int = 0, tinggi: int = 0
 ) -> str:
@@ -408,12 +425,7 @@ def bentuk_layar_efektif(
     Windows melaporkan layar 16:9, sementara yang menyala berbentuk pita.
     Untuk kasus itulah dua lapis di atasnya ada.
     """
-    pilihan = get_config().bentuk_layar
-    if pilihan not in BENTUK_LAYAR_MANUAL:
-        pilihan = settings.get("display.screen_shape", BENTUK_LAYAR_OTOMATIS)
-    if pilihan in BENTUK_LAYAR_MANUAL:
-        return pilihan
-    return bentuk_dari_ukuran(lebar, tinggi)
+    return bentuk_manual(settings) or bentuk_dari_ukuran(lebar, tinggi)
 
 
 def teks_waktu(saat: datetime | None = None) -> str:
@@ -1059,6 +1071,17 @@ class DisplayPage(QWidget):
     warnanya tetap mengikuti tema yang dipilih.
     """
 
+    #: Bentuk layar yang sesungguhnya baru diketahui, berbeda dari yang
+    #: dipakai membangun papan ini.
+    #:
+    #: Papan tidak membangun ulang dirinya sendiri. Kerangkanya menyebar ke
+    #: belasan atribut — kisi, kolom, panel sorot, panel info — dan yang
+    #: tidak ikut dinolkan akan menunjuk objek C++ yang sudah dihapus, lalu
+    #: menjatuhkan papan yang seharusnya menyala sepanjang hari. Yang
+    #: membangun papan inilah yang membuangnya dan membuat yang baru; lihat
+    #: MainWindow._ganti_bentuk_layar.
+    bentuk_berubah = Signal(str)
+
     def __init__(
         self,
         queue: QueueService,
@@ -1069,6 +1092,7 @@ class DisplayPage(QWidget):
         otomatis: bool = True,
         kompak: bool = False,
         tema: str | None = None,
+        bentuk: str | None = None,
     ) -> None:
         super().__init__(parent)
         self.queue = queue
@@ -1082,30 +1106,35 @@ class DisplayPage(QWidget):
             tema if tema is not None else settings.get("display.theme", TEMA_BAWAAN)
         )
 
-        #: Bentuk papan: lebar, memanjang, atau tegak. Lihat
-        #: `bentuk_layar_efektif`.
+        #: Bentuk papan: lebar, memanjang, atau tegak.
         #:
-        #: Diukur dari LAYAR, bukan dari widget ini. Widget belum punya
-        #: geometri saat __init__ berjalan, sedangkan kerangka papan sudah
-        #: harus dipilih di sini — dan untuk pemasangan tetap, yang layar
-        #: penuh sepanjang hari, ukuran layar justru jawaban yang lebih
-        #: benar daripada ukuran jendela sesaat.
-        #:
-        #: Papan kios selalu dianggap lebar berapa pun layar mesinnya.
-        #: Ia menempati separuh anjungan yang berdiri tegak, jadi bentuk
+        #: Papan kios selalu dianggap lebar berapa pun layar mesinnya. Ia
+        #: menempati separuh anjungan yang berdiri tegak, jadi bentuk
         #: monitor di belakangnya tidak mengatakan apa-apa tentang ruang
         #: yang benar-benar dimilikinya.
-        layar = self.screen()
-        ukuran = layar.geometry() if layar is not None else None
-        self.bentuk = (
-            BENTUK_LAYAR_LEBAR
-            if kompak
-            else bentuk_layar_efektif(
-                settings,
-                lebar=ukuran.width() if ukuran is not None else 0,
-                tinggi=ukuran.height() if ukuran is not None else 0,
-            )
+        #:
+        #: `bentuk` yang diisi pemanggil mengunci nilainya. Dipakai saat
+        #: papan dibangun ULANG karena bentuk layarnya ternyata lain —
+        #: tanpa itu papan baru akan menebak lagi, melapor lagi, dan
+        #: dibangun ulang lagi tanpa henti.
+        self._bentuk_dikunci = kompak or bentuk is not None or bool(
+            bentuk_manual(settings)
         )
+        if kompak:
+            self.bentuk = BENTUK_LAYAR_LEBAR
+        elif bentuk is not None:
+            self.bentuk = bentuk
+        else:
+            # Tebakan pembuka, dan memang hanya tebakan: halaman dibangun
+            # sebelum jendelanya pernah tampil (lihat MainWindow._susun_menu),
+            # sehingga layar yang terbaca di sini adalah monitor UTAMA —
+            # bukan televisi yang sering justru monitor kedua. Yang
+            # membetulkannya adalah `_periksa_bentuk` sesudah papan tampil.
+            self.bentuk = bentuk_layar_efektif(settings)
+
+        #: Bentuk yang sudah pernah dilaporkan lewat `bentuk_berubah`.
+        #: Mencegah laporan berulang bila tidak ada yang menanggapinya.
+        self._bentuk_dilaporkan = ""
 
         # Kios selalu berbentuk kisi. Sorotan dan Split menuntut tinggi yang
         # tidak dimiliki separuh layar kios, dan memaksakannya berarti nama
@@ -1687,6 +1716,10 @@ class DisplayPage(QWidget):
         # muat.
         self._gaya_judul()
 
+        # Jendela yang digeser ke monitor lain, atau yang baru masuk
+        # layar penuh, sampai ke sini sebagai perubahan ukuran.
+        self._periksa_bentuk()
+
         # Ditunda sampai Qt selesai menata isinya. Tinggi panel baru
         # diketahui SETELAH tata letak berjalan, sedangkan resizeEvent tiba
         # sebelum itu; mengukur di sini juga membaca tinggi yang belum
@@ -1694,8 +1727,56 @@ class DisplayPage(QWidget):
         # sendiri bila layarnya keburu ditutup.
         QTimer.singleShot(0, self, self._sesuaikan_daftar)
 
+    def ukuran_layar(self) -> tuple[int, int]:
+        """
+        Ukuran layar tempat papan ini tampil, (0, 0) bila belum ada.
+
+        Satu-satunya tempat yang membaca layar. Dipisahkan supaya test
+        dapat memerankan monitor yang tidak dimiliki mesin pengujinya —
+        pita 1920x432 tidak ada di komputer mana pun yang menjalankan
+        test ini.
+        """
+        layar = self.window().screen()
+        if layar is None:
+            return 0, 0
+        ukuran = layar.geometry()
+        return ukuran.width(), ukuran.height()
+
+    def _periksa_bentuk(self) -> None:
+        """
+        Cocokkan bentuk yang dipakai papan ini dengan layar tempat ia
+        benar-benar tampil, dan lapor bila keduanya berbeda.
+
+        Dibaca dari LAYAR jendelanya, bukan dari ukuran widget ini. Bilah
+        navigasi di kiri memakan lebar halaman, dan pada panel LED 400x90
+        potongan itu saja sudah cukup membuat pita terbaca sebagai layar
+        biasa. Bentuk papan adalah bentuk benda yang tergantung di dinding,
+        dan hanya layarnya yang mengetahui itu.
+
+        Bentuk yang ditetapkan manusia — lewat pengaturan atau
+        ANTRIAN_BENTUK_LAYAR — tidak pernah diperiksa. Orang yang menyebut
+        bentuk layarnya sendiri biasanya sedang membetulkan tebakan yang
+        keliru, dan memeriksanya kembali berarti mengembalikannya ke
+        tebakan yang sama.
+        """
+        if self._bentuk_dikunci:
+            return
+        lebar, tinggi = self.ukuran_layar()
+        baru = bentuk_dari_ukuran(lebar, tinggi)
+        if baru == self.bentuk or baru == self._bentuk_dilaporkan:
+            return
+        self._bentuk_dilaporkan = baru
+        logger.info(
+            "Layar terbaca sebagai %s, papan dibangun sebagai %s; minta bangun ulang.",
+            baru,
+            self.bentuk,
+        )
+        self.bentuk_berubah.emit(baru)
+
     def showEvent(self, event) -> None:  # noqa: N802 - nama dari Qt
         super().showEvent(event)
+        # Saat inilah layar yang sesungguhnya pertama kali dapat dibaca.
+        self._periksa_bentuk()
         # Judul hanya dipas saat sudah tampil — lihat `_gaya_judul`. Papan
         # yang ukurannya sudah final SEBELUM ditampilkan tidak menerima
         # resize lagi sesudahnya, dan tanpa panggilan ini judulnya tidak
