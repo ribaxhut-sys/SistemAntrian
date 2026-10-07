@@ -39,6 +39,6 @@ Aplikasi petugas (Windows) ─────────────────�
 | Istilah | Nama di kode |
 |---|---|
 | Anjungan | `anjungan` (jenis perangkat), `android-kiosk/`, `/v1/kiosk/...` |
-| Layar antrian | `layar_antrian` (jenis perangkat), `app/ui/display/` (Windows, sementara) |
+| Layar antrian | `layar_antrian` (jenis perangkat), `android-kiosk/layar/`, `/v1/layar/...`, `app/ui/display/` (Windows, sementara) — [layar-antrian.md](layar-antrian.md) |
 | Aplikasi server | peran mesin `server`, `app/kiosk_api.py`, `app/services/kiosk_server.py` |
 | Aplikasi petugas | peran mesin `klien`, `app/ui/queue/`, `app/ui/main_window.py` |

@@ -289,6 +289,79 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
     def health():
         return {"status": "ok"}
 
+    def require_layar(
+        request: Request,
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None, Depends(_bearer)
+        ],
+    ) -> str:
+        """
+        Hanya token perangkat berjenis layar antrian.
+
+        Token bersama tidak diterima di sini: layar antrian baru, jadi tidak
+        ada TV lama yang perlu dilindungi masa peralihannya. Token anjungan
+        juga ditolak; satu perangkat, satu tugas (docs/istilah.md).
+        """
+        if perangkat is None or credentials is None:
+            raise tolak()
+        pemilik = perangkat.perangkat_dari_token(credentials.credentials)
+        if pemilik is None or pemilik.dicabut or pemilik.jenis != "layar_antrian":
+            raise tolak()
+        catat_kontak(request, pemilik.device_id)
+        return pemilik.device_id
+
+    @app.get("/v1/layar/state", dependencies=[Depends(require_layar)])
+    def layar_state():
+        """Isi papan: nomor tiap loket, nomor berikutnya, dan yang menunggu."""
+        jumlah = services.settings.get_int("display.next_count", 3)
+        state = services.queue.display_state(jumlah_berikutnya=max(1, jumlah))
+        return {
+            "title": services.settings.get("display.title", "ANTRIAN PELAYANAN CRO"),
+            "sound_enabled": services.settings.get_bool("display.sound_enabled", True),
+            "counters": [
+                {
+                    "name": loket.counter_name,
+                    "queue_number": loket.antrian.queue_number if loket.antrian else None,
+                    "category": loket.antrian.category_name if loket.antrian else None,
+                    "status": (
+                        loket.antrian.label_status
+                        if loket.antrian is not None
+                        else ("ISTIRAHAT" if loket.istirahat else "KOSONG")
+                    ),
+                }
+                for loket in state.loket
+            ],
+            "next": [q.queue_number for q in state.berikutnya],
+            "total_waiting": state.total_menunggu,
+            "server_time_ms": int(time.time() * 1000),
+            "timezone": TIMEZONE,
+        }
+
+    @app.get("/v1/layar/calls", dependencies=[Depends(require_layar)])
+    def layar_calls(after: int | None = None):
+        """
+        Panggilan sesudah id `after`, beserta kalimat yang diucapkan.
+
+        Tanpa `after`, hanya id terakhir yang dikembalikan: TV yang baru
+        menyala tidak membunyikan ulang panggilan yang sudah lewat.
+        """
+        from app.services.sound_service import teks_pengumuman
+
+        terakhir, panggilan = services.queue.panggilan_sejak(after)
+        return {
+            "last_id": terakhir,
+            "calls": [
+                {
+                    "id": p.id,
+                    "queue_number": p.queue_number,
+                    "counter_name": p.counter_name,
+                    "call_number": p.call_number,
+                    "text": teks_pengumuman(p.queue_number, p.counter_name),
+                }
+                for p in panggilan
+            ],
+        }
+
     @app.post("/v1/kiosk/pair")
     def pair(request: PairRequest):
         """Tukar kode 6 angka dari Layanan Anjungan dengan token perangkat."""

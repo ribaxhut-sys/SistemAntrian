@@ -176,6 +176,11 @@ def _teks_pengumuman(queue_number: str, counter_name: str | None) -> str:
     return kalimat + "."
 
 
+def teks_pengumuman(queue_number: str, counter_name: str | None) -> str:
+    """Kalimat pengumuman; dipakai juga layar antrian Android lewat API."""
+    return _teks_pengumuman(queue_number, counter_name)
+
+
 class ChimeSoundPlayer:
     """
     Membunyikan nada panggilan, lalu mengucapkan pengumuman lengkap.

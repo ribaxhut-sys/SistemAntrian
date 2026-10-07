@@ -1,5 +1,5 @@
 <#
-    Build the Android ticket kiosk APK.
+    Build APK anjungan (tablet) dan APK layar antrian (TV).
 
     Requires JDK 17 and Android SDK Platform 35. Set ANDROID_HOME to the
     SDK directory if Android Studio installed it outside the usual location.
@@ -77,5 +77,14 @@ Copy-Item -LiteralPath $apk -Destination (Join-Path $apkFolder "anjungan.apk") -
 @{ version_code = $versionCode; version_name = $versionName } |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $apkFolder "anjungan.json") -Encoding UTF8
 
+# Layar antrian (TV Android): APK terpisah, dipasang manual di TV box.
+$layarApk = Join-Path $PSScriptRoot "android-kiosk\layar\build\outputs\apk\debug\layar-debug.apk"
+if (-not (Test-Path $layarApk)) { throw "APK layar antrian tidak ditemukan: $layarApk" }
+$layarGradle = Get-Content (Join-Path $PSScriptRoot "android-kiosk\layar\build.gradle") -Raw
+if ($layarGradle -notmatch 'versionName\s+"([^"]+)"') { throw "versionName layar tidak ditemukan." }
+$layarRelease = Join-Path $PSScriptRoot "dist\AntrianLayar-$($Matches[1]).apk"
+Copy-Item -LiteralPath $layarApk -Destination $layarRelease -Force
+
 Write-Host "Selesai: $release" -ForegroundColor Green
+Write-Host "Selesai: $layarRelease" -ForegroundColor Green
 Write-Host "Server membagikan versi $versionName (kode $versionCode) dari: $apkFolder" -ForegroundColor Green

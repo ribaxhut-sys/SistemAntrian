@@ -12,6 +12,8 @@ import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
+import sqlalchemy as sa
+
 from app.core import clock
 from app.core.database import session_scope
 from app.core.errors import BusinessRuleError, NotFoundError
@@ -204,6 +206,16 @@ class DisplayServiceQueue:
     menunggu: list[QueueInfo]
     #: Seluruh yang menunggu pada layanan ini, termasuk yang tidak termuat.
     total: int
+
+
+@dataclass(frozen=True)
+class Panggilan:
+    """Satu pemanggilan (termasuk panggil ulang), untuk dibunyikan layar antrian."""
+
+    id: int
+    queue_number: str
+    counter_name: str
+    call_number: int
 
 
 @dataclass(frozen=True)
@@ -568,6 +580,43 @@ class QueueService:
             total_menunggu=len(menunggu),
             layanan=layanan,
         )
+
+    def panggilan_sejak(self, setelah_id: int | None, batas: int = 20) -> tuple[int, list[Panggilan]]:
+        """
+        Panggilan hari ini sesudah `setelah_id`, untuk layar antrian Android.
+
+        Setiap pemanggilan — termasuk panggil ULANG — adalah satu baris
+        QueueCall dengan id yang naik, sehingga TV cukup mengingat id
+        terakhir yang sudah dibunyikannya. `setelah_id` None berarti TV baru
+        tersambung: yang dikembalikan hanya id terakhir, tanpa panggilan,
+        supaya TV yang baru menyala tidak membunyikan ulang panggilan lama.
+        """
+        sesi = self.auth.require_permission(Permission.DISPLAY_VIEW)
+        hari = clock.today()
+        from app.models import QueueCall
+
+        with session_scope() as session:
+            dasar = (
+                sa.select(QueueCall.id, Queue.queue_number, Counter.name, QueueCall.call_number)
+                .join(Queue, Queue.id == QueueCall.queue_id)
+                .join(Counter, Counter.id == QueueCall.counter_id)
+                .where(Queue.branch_id == sesi.branch_id, Queue.queue_date == hari)
+            )
+            terakhir = session.scalar(
+                sa.select(sa.func.max(QueueCall.id))
+                .join(Queue, Queue.id == QueueCall.queue_id)
+                .where(Queue.branch_id == sesi.branch_id, Queue.queue_date == hari)
+            ) or 0
+            if setelah_id is None:
+                return terakhir, []
+            baris = session.execute(
+                dasar.where(QueueCall.id > setelah_id).order_by(QueueCall.id).limit(batas)
+            ).all()
+        hasil = [
+            Panggilan(id=i, queue_number=nomor, counter_name=loket, call_number=ke)
+            for i, nomor, loket, ke in baris
+        ]
+        return (hasil[-1].id if hasil else max(terakhir, setelah_id)), hasil
 
     @staticmethod
     def _kelompokkan_per_layanan(

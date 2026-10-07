@@ -207,3 +207,72 @@ def test_api_mencatat_hasil_cetak(layanan):
     assert jawab.status_code == 200
     (info,) = layanan.daftar()
     assert info.printer_ok is True
+
+
+# ---------------------------------------------------------------------
+# Layar antrian (TV Android)
+# ---------------------------------------------------------------------
+
+
+def _pasang(klien, layanan, device_id, kind):
+    # Langsung ke tabel: fixture CRO sudah mengganti sesi admin.
+    from app.core.database import session_scope
+    from app.models import KioskPairingCode
+
+    kode = f"{abs(hash(device_id)) % 1_000_000:06d}"
+    with session_scope() as session:
+        session.add(
+            KioskPairingCode(kode=kode, kedaluwarsa=clock.now() + timedelta(minutes=5))
+        )
+    return klien.post(
+        "/v1/kiosk/pair",
+        json={"code": kode, "device_id": device_id, "name": "TV", "kind": kind},
+    ).json()["token"]
+
+
+def test_layar_antrian_hanya_menerima_token_layar(layanan, antrian_siap):
+    klien = _klien()
+    tv = _pasang(klien, layanan, "tv-0000-0000-0001", "layar_antrian")
+    tablet = _pasang(klien, layanan, "tablet-000-0000-01", "anjungan")
+
+    assert klien.get("/v1/layar/state", headers={"Authorization": f"Bearer {tv}"}).status_code == 200
+    for token in (tablet, TOKEN):
+        jawab = klien.get("/v1/layar/state", headers={"Authorization": f"Bearer {token}"})
+        assert jawab.status_code == 401
+
+
+def test_layar_antrian_menampilkan_loket_dan_berikutnya(layanan, antrian_siap, terbitkan, cro_queue):
+    klien = _klien()
+    tv = _pasang(klien, layanan, "tv-0000-0000-0002", "layar_antrian")
+    terbitkan("A", 3)
+    cro_queue.call_next(antrian_siap["loket"][0])
+
+    isi = klien.get("/v1/layar/state", headers={"Authorization": f"Bearer {tv}"}).json()
+
+    nomor = [c["queue_number"] for c in isi["counters"] if c["queue_number"]]
+    assert nomor == ["A-001"]
+    assert isi["next"][:2] == ["A-002", "A-003"]
+    assert isi["total_waiting"] == 2
+    assert isi["timezone"] == "Asia/Jakarta"
+
+
+def test_layar_antrian_tidak_membunyikan_panggilan_lama(layanan, antrian_siap, terbitkan, cro_queue):
+    klien = _klien()
+    tv = _pasang(klien, layanan, "tv-0000-0000-0003", "layar_antrian")
+    kepala = {"Authorization": f"Bearer {tv}"}
+    terbitkan("A", 2)
+    pertama = cro_queue.call_next(antrian_siap["loket"][0])
+
+    awal = klien.get("/v1/layar/calls", headers=kepala).json()
+    assert awal["calls"] == []
+
+    cro_queue.recall(pertama.id)
+    baru = klien.get("/v1/layar/calls", params={"after": awal["last_id"]}, headers=kepala).json()
+
+    (panggil,) = baru["calls"]
+    assert panggil["queue_number"] == "A-001"
+    assert panggil["call_number"] == 2, "panggil ulang tetap dibunyikan"
+    assert panggil["text"].startswith("Nomor antrian")
+    assert baru["last_id"] == panggil["id"]
+    kosong = klien.get("/v1/layar/calls", params={"after": baru["last_id"]}, headers=kepala).json()
+    assert kosong["calls"] == []
