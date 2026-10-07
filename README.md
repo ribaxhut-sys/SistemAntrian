@@ -301,7 +301,7 @@ setiap kali status berubah — itulah yang menentukan bentuk kisi tombolnya.
 |---|---|
 | `REGISTRATION` | Terbitkan Nomor |
 | `CRO` | Pelayanan · Survey Kepuasan · Pengaduan |
-| `SUPERVISOR` | Pengaduan · Ringkasan Harian · Hasil Survey |
+| `SUPERVISOR` | Pengaduan · Ringkasan Harian · Laporan · Hasil Survey |
 | `ADMIN` | Pengaduan · Data Master · Pengaturan · Backup · Tutup Hari |
 | `DISPLAY` | Layar Antrian |
 | `KIOSK` | Tidak ada layar Windows; sesi API untuk anjungan Android |

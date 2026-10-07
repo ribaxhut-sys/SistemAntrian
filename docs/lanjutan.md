@@ -420,12 +420,11 @@ Belum dikerjakan sama sekali, sesuai urutan kepentingannya:
    sistem layak dipakai, dan tidak ada test otomatis yang bisa
    menggantikannya.
 2. **Ikon aplikasi** — masih ikon bawaan PyInstaller.
-3. **Laporan historis per rentang tanggal** dan export PDF. Sengaja
-   dilewati sebelumnya atas keputusan pemilik; `SurveyService.list_terakhir()`
-   dan `DashboardService` sudah menyediakan datanya.
-4. **Laporan performa per loket/petugas** — kolom denormalisasi di
-   `satisfaction_survey` (`counter_id`, `officer_id`) sudah disiapkan sejak
-   awal justru untuk ini.
+3. ~~Laporan historis per rentang tanggal dan export PDF~~ — **selesai**
+   (Oktober 2026): menu **Laporan** (SUPERVISOR), ekspor PDF dan Excel,
+   `app/services/report_service.py`.
+4. ~~Laporan performa per loket/petugas~~ — **selesai**, tab Per loket dan
+   Per petugas di menu yang sama.
 
 ---
 

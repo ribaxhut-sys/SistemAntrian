@@ -32,6 +32,9 @@ pydantic==2.13.4
 # Generator PDF untuk tiket antrian & laporan cetak
 reportlab==5.0.1
 
+# Ekspor laporan ke Excel (.xlsx) dari layar Laporan.
+openpyxl==3.1.5
+
 # Database timezone IANA.
 # WAJIB: Windows tidak menyediakan tz database sistem, sehingga
 # zoneinfo.ZoneInfo("Asia/Jakarta") akan gagal tanpa paket ini.

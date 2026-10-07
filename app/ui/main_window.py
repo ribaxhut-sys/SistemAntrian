@@ -26,6 +26,7 @@ from app.services.auth_service import AuthService
 from app.services.backup_service import BackupService
 from app.services.dashboard_service import DashboardService
 from app.services.device_service import PerangkatService
+from app.services.report_service import ReportService
 from app.services.master_data_service import MasterDataService
 from app.services.permissions import Permission
 from app.services.queue_service import QueueService
@@ -40,6 +41,7 @@ from app.ui.dashboard.dashboard_page import DashboardPage
 from app.ui.dashboard.survey_result_page import SurveyResultPage
 from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.settings.dialogs import LABEL_PERAN
+from app.ui.dashboard.report_page import LaporanPage
 from app.ui.display.display_page import DisplayPage
 from app.ui.notes.note_page import NotePage
 from app.ui.queue.service_page import ServicePage
@@ -493,6 +495,16 @@ class MainWindow(QMainWindow):
                 "Ringkasan Harian",
                 Permission.DASHBOARD_VIEW,
                 lambda: DashboardPage(self.dashboard_service, self.settings_service),
+            ),
+            # Rentang tanggal, per loket dan per petugas: pertanyaan sesudah
+            # "bagaimana hari ini", dan sebab hak REPORT_VIEW sudah ada.
+            _Menu(
+                "Laporan",
+                Permission.REPORT_VIEW,
+                lambda: LaporanPage(
+                    ReportService(self.auth),
+                    self.settings_service.get("ticket.header", ""),
+                ),
             ),
             # Terpisah dari ringkasan harian karena isinya berbeda jenis:
             # ringkasan menjawab "bagaimana hari ini", daftar ini menjawab

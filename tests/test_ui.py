@@ -1988,7 +1988,7 @@ def test_menu_hasil_survey_hanya_untuk_supervisor(qtbot, auth, antrian_siap):
     jendela = MainWindow(auth)
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-    assert menu == ["Pengaduan", "Ringkasan Harian", "Hasil Survey"]
+    assert menu == ["Pengaduan", "Ringkasan Harian", "Laporan", "Hasil Survey"]
 
     for peran in ("cro", "admin", "registration"):
         auth.logout()
@@ -2012,7 +2012,7 @@ def test_supervisor_hanya_memantau(qtbot, auth, antrian_siap):
     # "Pengaduan" ikut ada, dan itu tetap memantau: supervisor
     # boleh MEMBACA lembar pengaduan, tidak boleh menulis maupun
     # menghapusnya — menulis milik CRO, menghapus milik ADMIN.
-    assert menu == ["Pengaduan", "Ringkasan Harian", "Hasil Survey"]
+    assert menu == ["Pengaduan", "Ringkasan Harian", "Laporan", "Hasil Survey"]
 
 
 def test_tombol_minta_survey_aktif_setelah_pelayanan_selesai(
