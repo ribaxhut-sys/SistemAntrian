@@ -273,6 +273,55 @@ def test_layar_antrian_tidak_membunyikan_panggilan_lama(layanan, antrian_siap, t
     assert panggil["queue_number"] == "A-001"
     assert panggil["call_number"] == 2, "panggil ulang tetap dibunyikan"
     assert panggil["text"].startswith("Nomor antrian")
+    assert panggil["tokens"][0] == "nomor_antrian"
     assert baru["last_id"] == panggil["id"]
     kosong = klien.get("/v1/layar/calls", params={"after": baru["last_id"]}, headers=kepala).json()
     assert kosong["calls"] == []
+
+
+def test_layar_mengunduh_paket_suara_dan_apk(layanan, antrian_siap, tmp_path, monkeypatch):
+    import json as _json
+
+    monkeypatch.setattr("app.kiosk_api.base_dir", lambda: tmp_path)
+    klien = _klien()
+    tv = _pasang(klien, layanan, "tv-0000-0000-0009", "layar_antrian")
+    kepala = {"Authorization": f"Bearer {tv}"}
+
+    isi = klien.get("/v1/layar/state", headers=kepala).json()
+    assert isi["sound_pack_version"] is None
+    assert isi["app_latest_version_code"] is None
+    assert klien.get("/v1/layar/sound", headers=kepala).status_code == 404
+
+    folder = tmp_path / "media" / "suara-layar"
+    folder.mkdir(parents=True)
+    (folder / "angka_1.wav").write_bytes(b"RIFF-isi")
+    (folder / "paket.json").write_text(
+        _json.dumps({"versi": "abc123", "suara": "X", "klip": {"angka_1": "angka_1.wav"}}),
+        encoding="utf-8",
+    )
+    apk = tmp_path / "apk"
+    apk.mkdir()
+    (apk / "layar.apk").write_bytes(b"PK-layar")
+    (apk / "layar.json").write_text('{"version_code": 2, "version_name": "1.1"}')
+
+    isi = klien.get("/v1/layar/state", headers=kepala).json()
+    assert isi["sound_pack_version"] == "abc123"
+    assert isi["app_latest_version_name"] == "1.1"
+    assert klien.get("/v1/layar/sound", headers=kepala).json()["clips"] == {"angka_1": "angka_1.wav"}
+    assert klien.get("/v1/layar/sound/angka_1.wav", headers=kepala).content == b"RIFF-isi"
+    assert klien.get("/v1/layar/sound/..%2Fpaket.json", headers=kepala).status_code == 404
+    assert klien.get("/v1/layar/app/apk", headers=kepala).content == b"PK-layar"
+
+
+def test_layar_boleh_meminta_sampai_dua_belas_nomor(layanan, antrian_siap, terbitkan):
+    klien = _klien()
+    tv = _pasang(klien, layanan, "tv-0000-0000-0010", "layar_antrian")
+    kepala = {"Authorization": f"Bearer {tv}"}
+    terbitkan("A", 15)
+
+    bawaan = klien.get("/v1/layar/state", headers=kepala).json()
+    banyak = klien.get("/v1/layar/state", params={"next": 50}, headers=kepala).json()
+
+    assert len(bawaan["next"]) == 3
+    assert len(banyak["next"]) == 12
+    assert banyak["total_waiting"] == 15

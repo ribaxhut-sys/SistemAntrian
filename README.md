@@ -149,12 +149,13 @@ dan tersimpan sebelum tiket dicetak; petugas cukup menyebutkan nomornya.
 | Bagian | Perangkat | Tugas | Login |
 |---|---|---|---|
 | **Anjungan** | Tablet Android + printer USB | Pengunjung memilih layanan, nomor dicetak | tidak |
-| **Layar antrian** | TV Android (Maxtor) — sementara `AntrianCRO.exe --tv` | Menampilkan dan membunyikan panggilan | tidak |
+| **Layar antrian** | Panel Android Maxtor — sementara `AntrianCRO.exe --tv` | Menampilkan dan membunyikan panggilan | tidak |
 | **Aplikasi server** | 1 PC Windows berperan server | Database, API untuk anjungan/layar antrian, backup, Layanan Anjungan | ya |
 | **Aplikasi petugas** | PC Windows di tiap loket | Memanggil dan melayani; admin mengelola data | ya |
 
 Anjungan tidak lagi berjalan di Windows. Layar antrian Windows (`--tv`)
-tetap ada sampai aplikasi layar antrian Android siap, lalu ikut dihapus.
+tetap ada sampai layar antrian Maxtor terbukti berjalan, lalu ikut dihapus
+([docs/layar-antrian.md](docs/layar-antrian.md)).
 
 Layar antrian berjalan **tanpa login**: komputer yang menghadap publik dan
 tidak diawasi tidak boleh menyimpan kata sandi petugas. Ia membuka layar

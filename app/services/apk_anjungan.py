@@ -31,10 +31,13 @@ logger = logging.getLogger("antrian.apk_anjungan")
 #: jawaban API berubah dengan cara yang tidak dipahami APK lama.
 #: 5 = 1.4: /v1/kiosk/display tidak lagi mengirim data loket.
 VERSI_MINIMAL = 5
+#: Sama, untuk APK layar antrian (id.sistemantrian.layar).
+VERSI_MINIMAL_LAYAR = 1
+
+#: Dua APK yang dibagikan server: tablet anjungan dan layar antrian.
+JENIS_APK = ("anjungan", "layar")
 
 NAMA_FOLDER = "apk"
-NAMA_APK = "anjungan.apk"
-NAMA_INFO = "anjungan.json"
 TIPE_APK = "application/vnd.android.package-archive"
 
 
@@ -50,18 +53,20 @@ def folder_apk(base: Path) -> Path:
     return Path(base) / NAMA_FOLDER
 
 
-def info_apk(folder: Path) -> InfoApk | None:
+def info_apk(folder: Path, jenis: str = "anjungan") -> InfoApk | None:
     """APK yang siap dibagikan, atau None bila belum ada atau tidak lengkap."""
-    berkas = Path(folder) / NAMA_APK
+    if jenis not in JENIS_APK:
+        raise ValueError(f"Jenis APK tidak dikenal: {jenis}")
+    berkas = Path(folder) / f"{jenis}.apk"
     try:
-        data = json.loads((Path(folder) / NAMA_INFO).read_text(encoding="utf-8-sig"))
+        data = json.loads((Path(folder) / f"{jenis}.json").read_text(encoding="utf-8-sig"))
         kode = int(data["version_code"])
         nama = str(data.get("version_name") or kode)
         ukuran = berkas.stat().st_size
     except FileNotFoundError:
         return None
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        logger.warning("Keterangan APK anjungan di %s tidak terbaca: %s", folder, exc)
+        logger.warning("Keterangan APK %s di %s tidak terbaca: %s", jenis, folder, exc)
         return None
     if ukuran <= 0:
         return None

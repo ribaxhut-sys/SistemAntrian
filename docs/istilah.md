@@ -6,7 +6,7 @@ mana, tabel ini yang memutuskan.
 | Bagian | Perangkat | Tugasnya | Bukan tugasnya |
 |---|---|---|---|
 | **Anjungan** | Tablet Android + printer thermal USB | Pengunjung memilih jenis layanan, nomor terbit di server, tiket dicetak | Menampilkan antrian, jumlah yang menunggu, nomor loket |
-| **Layar antrian** | TV Android (Maxtor) | Menampilkan nomor yang dipanggil tiap loket dan membunyikan panggilan | Menerbitkan nomor |
+| **Layar antrian** | Panel Android Maxtor (jenis sama dengan anjungan, tegak atau mendatar) | Menampilkan nomor yang dipanggil tiap loket dan membunyikan panggilan; suara keluar dari panel ini | Menerbitkan nomor, menerima sentuhan pengunjung |
 | **Aplikasi server** | Satu PC Windows dengan peran *server* | Memegang database PostgreSQL, menjalankan API untuk anjungan dan layar antrian (Task Scheduler), backup harian, menu **Layanan Anjungan** | — |
 | **Aplikasi petugas** | PC Windows di tiap loket (peran *klien*) | Petugas masuk, memanggil, melayani, menyelesaikan, menulis pengaduan; admin mengelola data master, pengguna, dan pengaturan | Menjalankan API atau backup |
 
@@ -15,7 +15,7 @@ mana, tabel ini yang memutuskan.
 ```
 Anjungan (Android) ──┐
                      ├── API (HTTP, LAN) ──► Aplikasi server ──► PostgreSQL
-Layar antrian (TV) ──┘                              ▲
+Layar antrian ───────┘                              ▲
                                                     │
 Aplikasi petugas (Windows) ─────────────────────────┘ (langsung ke PostgreSQL)
 ```
@@ -31,8 +31,8 @@ Aplikasi petugas (Windows) ─────────────────�
 * Anjungan **tidak lagi** berjalan di Windows. Mode `--kios`, `--kios-totem`,
   dan `--layar` sudah dihapus.
 * Layar antrian Windows (`AntrianCRO.exe --tv`) **masih ada** sebagai
-  pengganti sementara sampai aplikasi layar antrian Android selesai, lalu
-  ikut dihapus.
+  pengganti sementara sampai layar antrian Maxtor terbukti berjalan di
+  kantor, lalu ikut dihapus.
 
 ## Di dalam kode
 

@@ -32,7 +32,13 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import get_config
-from app.services.apk_anjungan import VERSI_MINIMAL, InfoApk, folder_apk, info_apk
+from app.services.apk_anjungan import (
+    VERSI_MINIMAL,
+    VERSI_MINIMAL_LAYAR,
+    InfoApk,
+    folder_apk,
+    info_apk,
+)
 from app.services.kiosk_server import (
     StatusTugas,
     _firewall_sudah_siap,
@@ -47,6 +53,13 @@ from app.services.kiosk_server import (
     simpan_token,
     status_tugas_api,
     token_baru,
+)
+from app.services.paket_suara import (
+    InfoPaket,
+    buat_paket,
+    folder_paket,
+    info_paket,
+    nama_loket_aktif,
 )
 from app.ui.common import judul, keterangan, konfirmasi, tampilkan_peringatan, tombol
 from app.ui.style import DANGER, SUCCESS, TEXT_MUTED, WARNING
@@ -74,14 +87,27 @@ class StatusLayanan:
     tugas: StatusTugas
     firewall: bool
     apk: InfoApk | None = None
+    apk_layar: InfoApk | None = None
+    paket: InfoPaket | None = None
+    #: Kata dari nama loket yang belum punya klip di paket suara.
+    kata_kurang: tuple[str, ...] = ()
 
 
 def periksa_status() -> StatusLayanan:
+    base = get_config().base_dir
+    paket = info_paket(folder_paket(base))
+    try:
+        kurang = tuple(paket.kurang(nama_loket_aktif())) if paket else ()
+    except Exception:  # noqa: BLE001 - status tetap tampil walau database tersendat
+        kurang = ()
     return StatusLayanan(
         api=api_sudah_berjalan(port_api()),
         tugas=status_tugas_api(),
         firewall=_firewall_sudah_siap(),
-        apk=info_apk(folder_apk(get_config().base_dir)),
+        apk=info_apk(folder_apk(base)),
+        apk_layar=info_apk(folder_apk(base), "layar"),
+        paket=paket,
+        kata_kurang=kurang,
     )
 
 
@@ -197,9 +223,26 @@ class LayananAnjunganPage(QWidget):
         self.baris_tugas = _BarisStatus(grid, 1, "Task Scheduler")
         self.baris_firewall = _BarisStatus(grid, 2, "Firewall")
         self.baris_apk = _BarisStatus(grid, 3, "APK anjungan")
-        for baris in (self.baris_api, self.baris_tugas, self.baris_firewall, self.baris_apk):
+        self.baris_apk_layar = _BarisStatus(grid, 4, "APK layar antrian")
+        self.baris_paket = _BarisStatus(grid, 5, "Paket suara")
+        for baris in (
+            self.baris_api, self.baris_tugas, self.baris_firewall,
+            self.baris_apk, self.baris_apk_layar, self.baris_paket,
+        ):
             baris.setel(_MEMERIKSA, "")
         isi_status.addLayout(grid)
+        baris_paket = QHBoxLayout()
+        self.buat_paket = tombol("Buat ulang paket suara")
+        self.buat_paket.clicked.connect(self._buat_paket_suara)
+        baris_paket.addWidget(self.buat_paket)
+        baris_paket.addStretch()
+        isi_status.addLayout(baris_paket)
+        isi_status.addWidget(
+            keterangan(
+                "Paket suara dipakai layar antrian yang tidak punya suara Bahasa "
+                "Indonesia sendiri. Buat ulang bila nama loket berubah."
+            )
+        )
         layout.addWidget(kartu_status)
 
         # --- Sambungkan tablet ----------------------------------------------
@@ -357,6 +400,33 @@ class LayananAnjunganPage(QWidget):
                 _NORMAL, f"Versi {apk.nama_versi} siap diunduh tablet"
             )
 
+        apk_layar = status.apk_layar
+        if apk_layar is None:
+            self.baris_apk_layar.setel(
+                _BELUM,
+                "Belum ada di folder apk\\ — layar antrian tidak dapat diperbarui "
+                "dari server. Jalankan build-android-kiosk.ps1.",
+            )
+        elif apk_layar.kode_versi < VERSI_MINIMAL_LAYAR:
+            self.baris_apk_layar.setel(
+                _TINDAKAN, f"Versi {apk_layar.nama_versi} terlalu lama — build ulang APK"
+            )
+        else:
+            self.baris_apk_layar.setel(
+                _NORMAL, f"Versi {apk_layar.nama_versi} siap diunduh layar"
+            )
+
+        paket = status.paket
+        if paket is None:
+            self.baris_paket.setel(
+                _BELUM, "Belum dibuat — layar tanpa suara Indonesia hanya berbunyi nada"
+            )
+        elif status.kata_kurang:
+            kata = ", ".join(k.removeprefix("kata_") for k in status.kata_kurang)
+            self.baris_paket.setel(_BELUM, f"Perlu dibuat ulang: kata baru {kata}")
+        else:
+            self.baris_paket.setel(_NORMAL, f"{paket.jumlah} klip · suara {paket.suara}")
+
         terpasang = bool(tugas.terdaftar)
         label_pasang = LABEL_PASANG_ULANG if terpasang else LABEL_PASANG
         self.pasang.setText(_teks_tombol(label_pasang))
@@ -411,6 +481,16 @@ class LayananAnjunganPage(QWidget):
 
         for baris in (self.baris_api, self.baris_tugas, self.baris_firewall):
             baris.setel(_MEMERIKSA, "Menunggu izin Administrator…")
+        self._jalankan(kerja, self._tampilkan_status)
+
+    def _buat_paket_suara(self) -> None:
+        folder = folder_paket(get_config().base_dir)
+
+        def kerja() -> StatusLayanan:
+            buat_paket(folder, nama_loket_aktif())
+            return periksa_status()
+
+        self.baris_paket.setel(_MEMERIKSA, "Membuat klip dengan suara Windows…")
         self._jalankan(kerja, self._tampilkan_status)
 
     def _hapus(self) -> None:

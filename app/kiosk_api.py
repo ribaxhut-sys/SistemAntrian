@@ -33,9 +33,16 @@ from app.core.errors import (
 from app.core.logger import get_logger, setup_logging
 from app.core.migrations import current_revision
 from app.core.seed import seed_initial_data
-from app.services.apk_anjungan import TIPE_APK, VERSI_MINIMAL, folder_apk, info_apk
+from app.services.apk_anjungan import (
+    TIPE_APK,
+    VERSI_MINIMAL,
+    VERSI_MINIMAL_LAYAR,
+    folder_apk,
+    info_apk,
+)
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
+from app.services.paket_suara import folder_paket, info_paket, token_pengumuman
 from app.services.queue_service import QueueService
 from app.services.settings_service import SettingsService
 from app.services.ticket_service import (
@@ -311,10 +318,20 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         return pemilik.device_id
 
     @app.get("/v1/layar/state", dependencies=[Depends(require_layar)])
-    def layar_state():
-        """Isi papan: nomor tiap loket, nomor berikutnya, dan yang menunggu."""
-        jumlah = services.settings.get_int("display.next_count", 3)
-        state = services.queue.display_state(jumlah_berikutnya=max(1, jumlah))
+    def layar_state(next: int | None = None):
+        """
+        Isi papan: nomor tiap loket, nomor berikutnya, dan yang menunggu.
+
+        `next` (paling banyak 12): layar meminta lebih banyak nomor
+        berikutnya supaya daftarnya dapat memanjang saat antrian ramai;
+        `display.next_count` tetap menjadi jumlah paling sedikit.
+        """
+        jumlah = max(1, services.settings.get_int("display.next_count", 3))
+        if next is not None:
+            jumlah = max(jumlah, min(int(next), 12))
+        state = services.queue.display_state(jumlah_berikutnya=jumlah)
+        apk = info_apk(folder_apk(base_dir()), "layar")
+        paket = info_paket(folder_paket(base_dir()))
         return {
             "title": services.settings.get("display.title", "ANTRIAN PELAYANAN CRO"),
             "sound_enabled": services.settings.get_bool("display.sound_enabled", True),
@@ -335,7 +352,51 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "total_waiting": state.total_menunggu,
             "server_time_ms": int(time.time() * 1000),
             "timezone": TIMEZONE,
+            "app_min_version_code": VERSI_MINIMAL_LAYAR,
+            "app_latest_version_code": apk.kode_versi if apk else None,
+            "app_latest_version_name": apk.nama_versi if apk else None,
+            # Layar mengunduh ulang paket suara bila versinya berubah.
+            "sound_pack_version": paket.versi if paket else None,
         }
+
+    @app.get(
+        "/v1/layar/app/apk",
+        dependencies=[Depends(require_layar)],
+        response_class=FileResponse,
+    )
+    def layar_apk():
+        apk = info_apk(folder_apk(base_dir()), "layar")
+        if apk is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="APK layar antrian belum tersedia di server.",
+            )
+        return FileResponse(
+            apk.berkas, media_type=TIPE_APK, filename=f"AntrianLayar-{apk.nama_versi}.apk"
+        )
+
+    @app.get("/v1/layar/sound", dependencies=[Depends(require_layar)])
+    def layar_sound_index():
+        """Daftar klip paket suara: kunci → nama berkas."""
+        paket = info_paket(folder_paket(base_dir()))
+        if paket is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Paket suara belum dibuat di Layanan Anjungan.",
+            )
+        return {"version": paket.versi, "voice": paket.suara, "clips": paket.klip}
+
+    @app.get(
+        "/v1/layar/sound/{filename}",
+        dependencies=[Depends(require_layar)],
+        response_class=FileResponse,
+    )
+    def layar_sound_clip(filename: str):
+        """Satu klip; hanya berkas yang tercantum di indeks paket."""
+        paket = info_paket(folder_paket(base_dir()))
+        if paket is None or filename not in set(paket.klip.values()):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Klip tidak ada.")
+        return FileResponse(folder_paket(base_dir()) / filename, media_type="audio/wav")
 
     @app.get("/v1/layar/calls", dependencies=[Depends(require_layar)])
     def layar_calls(after: int | None = None):
@@ -357,6 +418,8 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                     "counter_name": p.counter_name,
                     "call_number": p.call_number,
                     "text": teks_pengumuman(p.queue_number, p.counter_name),
+                    # Urutan klip paket suara, untuk layar tanpa TTS Indonesia.
+                    "tokens": token_pengumuman(p.queue_number, p.counter_name),
                 }
                 for p in panggilan
             ],
