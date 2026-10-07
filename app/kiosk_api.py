@@ -15,7 +15,7 @@ from typing import Annotated
 from uuid import UUID
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
@@ -33,6 +33,7 @@ from app.core.errors import (
 from app.core.logger import get_logger, setup_logging
 from app.core.migrations import current_revision
 from app.core.seed import seed_initial_data
+from app.services.apk_anjungan import TIPE_APK, VERSI_MINIMAL, folder_apk, info_apk
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
 from app.services.queue_service import QueueService
@@ -221,6 +222,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         sehingga sengaja tidak dikirim ke sini.
         """
         media = welcome_media_paths()
+        apk = info_apk(folder_apk(base_dir()))
         return {
             "title": services.settings.get("display.title", "ANTRIAN PELAYANAN CRO"),
             "welcome_text": services.settings.get(
@@ -240,6 +242,11 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             # zona waktunya bisa terpasang di luar Indonesia.
             "server_time_ms": int(time.time() * 1000),
             "timezone": TIMEZONE,
+            # Pembaruan APK dari server. Di bawah versi minimal, tablet
+            # berhenti menerbitkan nomor dan menawarkan pembaruan.
+            "app_min_version_code": VERSI_MINIMAL,
+            "app_latest_version_code": apk.kode_versi if apk else None,
+            "app_latest_version_name": apk.nama_versi if apk else None,
         }
 
     @app.get(
@@ -266,8 +273,40 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         media_type = mimetypes.guess_type(media.name)[0] or "application/octet-stream"
         return FileResponse(media, media_type=media_type)
 
+    @app.get(
+        "/v1/kiosk/app/apk",
+        dependencies=[Depends(require_token)],
+        response_class=FileResponse,
+    )
+    def download_apk():
+        """APK anjungan terbaru untuk pembaruan dari server."""
+        apk = info_apk(folder_apk(base_dir()))
+        if apk is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="APK anjungan belum tersedia di server.",
+            )
+        return FileResponse(
+            apk.berkas,
+            media_type=TIPE_APK,
+            filename=f"AntrianKiosk-{apk.nama_versi}.apk",
+        )
+
     @app.post("/v1/kiosk/tickets", dependencies=[Depends(require_token)])
-    def issue_ticket(request: TicketRequest):
+    def issue_ticket(
+        request: TicketRequest,
+        x_app_version_code: Annotated[int | None, Header()] = None,
+    ):
+        # APK lama salah membaca jawaban API sekarang. Lebih baik nomor
+        # tidak terbit sama sekali daripada terbit tanpa tercetak benar.
+        if x_app_version_code is None or x_app_version_code < VERSI_MINIMAL:
+            raise HTTPException(
+                status_code=status.HTTP_426_UPGRADE_REQUIRED,
+                detail=(
+                    "Aplikasi anjungan perlu diperbarui sebelum dapat "
+                    "menerbitkan nomor."
+                ),
+            )
         with ticket_lock:
             cached = ticket_responses.get(request.request_id)
             if cached is not None:

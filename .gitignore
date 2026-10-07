@@ -16,6 +16,8 @@ dist/
 **/build/
 **/.gradle/
 android-kiosk/local.properties
+# APK hasil build-android-kiosk.ps1 yang dibagikan server ke tablet
+/apk/
 *.egg-info/
 *.spec.bak
 

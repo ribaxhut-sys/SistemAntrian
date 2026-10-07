@@ -58,7 +58,24 @@ finally {
 
 $apk = Join-Path $PSScriptRoot "android-kiosk\app\build\outputs\apk\debug\app-debug.apk"
 if (-not (Test-Path $apk)) { throw "APK tidak ditemukan: $apk" }
-$release = Join-Path $PSScriptRoot "dist\AntrianKiosk-1.4.apk"
+# Versi dibaca dari build.gradle supaya nama berkas, keterangan untuk server,
+# dan isi APK tidak pernah berbeda.
+$gradleText = Get-Content (Join-Path $PSScriptRoot "android-kiosk\app\build.gradle") -Raw
+if ($gradleText -notmatch 'versionCode\s+(\d+)') { throw "versionCode tidak ditemukan di build.gradle." }
+$versionCode = [int]$Matches[1]
+if ($gradleText -notmatch 'versionName\s+"([^"]+)"') { throw "versionName tidak ditemukan di build.gradle." }
+$versionName = $Matches[1]
+
+$release = Join-Path $PSScriptRoot "dist\AntrianKiosk-$versionName.apk"
 New-Item -ItemType Directory -Path (Split-Path $release -Parent) -Force | Out-Null
 Copy-Item -LiteralPath $apk -Destination $release -Force
+
+# Salinan yang dibagikan server ke tablet (Layanan Anjungan, pembaruan APK).
+$apkFolder = Join-Path $PSScriptRoot "apk"
+New-Item -ItemType Directory -Path $apkFolder -Force | Out-Null
+Copy-Item -LiteralPath $apk -Destination (Join-Path $apkFolder "anjungan.apk") -Force
+@{ version_code = $versionCode; version_name = $versionName } |
+    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $apkFolder "anjungan.json") -Encoding UTF8
+
 Write-Host "Selesai: $release" -ForegroundColor Green
+Write-Host "Server membagikan versi $versionName (kode $versionCode) dari: $apkFolder" -ForegroundColor Green

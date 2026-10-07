@@ -11,9 +11,12 @@ import pytest
 
 from app.core.errors import BusinessRuleError
 from app.models.enums import QueueStatus
+from app.services.apk_anjungan import VERSI_MINIMAL
 from app.services.master_data_service import CategoryInfo
 from app.services.queue_service import QueueInfo
 from app.services.ticket_service import TicketData
+
+VERSI_APK = {"X-App-Version-Code": str(VERSI_MINIMAL)}
 
 
 TOKEN = "bapendacro"
@@ -181,7 +184,7 @@ def test_api_returns_active_categories_and_ticket_lines():
     from app.kiosk_api import create_app
 
     client = TestClient(create_app(TOKEN, _Services()))
-    headers = {"Authorization": f"Bearer {TOKEN}"}
+    headers = {"Authorization": f"Bearer {TOKEN}", **VERSI_APK}
 
     categories = client.get("/v1/kiosk/categories", headers=headers)
     assert categories.status_code == 200
@@ -212,8 +215,10 @@ def test_api_returns_active_categories_and_ticket_lines():
     assert ticket.json()["cooldown_seconds"] == 10
 
 
-def test_api_display_hanya_berisi_keperluan_ambil_nomor():
+def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
     from app.kiosk_api import create_app
+
+    monkeypatch.setattr("app.kiosk_api.base_dir", lambda: tmp_path)
 
     client = TestClient(create_app(TOKEN, _Services()))
     response = client.get(
@@ -232,6 +237,9 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor():
         "welcome_media": [],
         "registration_open": True,
         "cooldown_remaining_seconds": 0,
+        "app_min_version_code": VERSI_MINIMAL,
+        "app_latest_version_code": None,
+        "app_latest_version_name": None,
     }
     assert "counters" not in isi
 
@@ -247,7 +255,7 @@ def test_api_serves_only_configured_kiosk_media(tmp_path, monkeypatch):
     services = _Services()
     services.settings.welcome_kind = "media"
     client = TestClient(create_app(TOKEN, services))
-    headers = {"Authorization": f"Bearer {TOKEN}"}
+    headers = {"Authorization": f"Bearer {TOKEN}", **VERSI_APK}
 
     media = client.get("/v1/kiosk/media/sambutan.jpg", headers=headers)
     assert media.status_code == 200
@@ -268,7 +276,7 @@ def test_api_returns_business_errors_without_creating_a_ticket():
     client = TestClient(create_app(TOKEN, _Services()))
     response = client.post(
         "/v1/kiosk/tickets",
-        headers={"Authorization": f"Bearer {TOKEN}"},
+        headers={"Authorization": f"Bearer {TOKEN}", **VERSI_APK},
         json={"category_id": 99, "request_id": str(uuid4())},
     )
     assert response.status_code == 409
@@ -280,7 +288,7 @@ def test_repeated_request_id_does_not_issue_a_second_number():
 
     services = _Services()
     client = TestClient(create_app(TOKEN, services))
-    headers = {"Authorization": f"Bearer {TOKEN}"}
+    headers = {"Authorization": f"Bearer {TOKEN}", **VERSI_APK}
     body = {"category_id": 10, "request_id": str(uuid4())}
 
     first = client.post("/v1/kiosk/tickets", headers=headers, json=body)
@@ -289,3 +297,55 @@ def test_repeated_request_id_does_not_issue_a_second_number():
     assert first.status_code == 200
     assert retry.json() == first.json()
     assert services.queue.created == 1
+
+
+def test_apk_lama_tidak_dapat_menerbitkan_nomor():
+    """APK tanpa versi atau di bawah minimal salah membaca jawaban API sekarang."""
+    from app.kiosk_api import create_app
+
+    client = TestClient(create_app(TOKEN, _Services()))
+    body = {"category_id": 10, "request_id": str(uuid4())}
+    for versi in ({}, {"X-App-Version-Code": str(VERSI_MINIMAL - 1)}):
+        response = client.post(
+            "/v1/kiosk/tickets",
+            headers={"Authorization": f"Bearer {TOKEN}", **versi},
+            json=body,
+        )
+        assert response.status_code == 426
+        assert "diperbarui" in response.json()["detail"]
+
+
+def test_apk_terbaru_diumumkan_dan_dapat_diunduh(tmp_path, monkeypatch):
+    from app.kiosk_api import create_app
+
+    folder = tmp_path / "apk"
+    folder.mkdir()
+    (folder / "anjungan.apk").write_bytes(b"PK-isi-apk")
+    (folder / "anjungan.json").write_text(
+        '{"version_code": 6, "version_name": "1.5"}', encoding="utf-8"
+    )
+    monkeypatch.setattr("app.kiosk_api.base_dir", lambda: tmp_path)
+    client = TestClient(create_app(TOKEN, _Services()))
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+
+    isi = client.get("/v1/kiosk/display", headers=headers).json()
+    assert isi["app_latest_version_code"] == 6
+    assert isi["app_latest_version_name"] == "1.5"
+
+    unduh = client.get("/v1/kiosk/app/apk", headers=headers)
+    assert unduh.status_code == 200
+    assert unduh.content == b"PK-isi-apk"
+    assert unduh.headers["content-type"] == "application/vnd.android.package-archive"
+    assert client.get("/v1/kiosk/app/apk").status_code == 401
+
+
+def test_apk_belum_ada_dijawab_404(tmp_path, monkeypatch):
+    from app.kiosk_api import create_app
+
+    monkeypatch.setattr("app.kiosk_api.base_dir", lambda: tmp_path)
+    client = TestClient(create_app(TOKEN, _Services()))
+
+    response = client.get(
+        "/v1/kiosk/app/apk", headers={"Authorization": f"Bearer {TOKEN}"}
+    )
+    assert response.status_code == 404

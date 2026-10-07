@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import get_config
+from app.services.apk_anjungan import VERSI_MINIMAL, InfoApk, folder_apk, info_apk
 from app.services.kiosk_server import (
     StatusTugas,
     _firewall_sudah_siap,
@@ -71,6 +72,7 @@ class StatusLayanan:
     api: bool
     tugas: StatusTugas
     firewall: bool
+    apk: InfoApk | None = None
 
 
 def periksa_status() -> StatusLayanan:
@@ -78,6 +80,7 @@ def periksa_status() -> StatusLayanan:
         api=api_sudah_berjalan(port_api()),
         tugas=status_tugas_api(),
         firewall=_firewall_sudah_siap(),
+        apk=info_apk(folder_apk(get_config().base_dir)),
     )
 
 
@@ -180,7 +183,8 @@ class LayananAnjunganPage(QWidget):
         self.baris_api = _BarisStatus(grid, 0, "API")
         self.baris_tugas = _BarisStatus(grid, 1, "Task Scheduler")
         self.baris_firewall = _BarisStatus(grid, 2, "Firewall")
-        for baris in (self.baris_api, self.baris_tugas, self.baris_firewall):
+        self.baris_apk = _BarisStatus(grid, 3, "APK anjungan")
+        for baris in (self.baris_api, self.baris_tugas, self.baris_firewall, self.baris_apk):
             baris.setel(_MEMERIKSA, "")
         isi_status.addLayout(grid)
         layout.addWidget(kartu_status)
@@ -311,6 +315,24 @@ class LayananAnjunganPage(QWidget):
         else:
             self.baris_firewall.setel(
                 _BELUM, "Belum dibuka — tablet tidak dapat menjangkau komputer ini"
+            )
+
+        apk = status.apk
+        if apk is None:
+            self.baris_apk.setel(
+                _BELUM,
+                "Belum ada di folder apk\\ — tablet tidak dapat diperbarui dari "
+                "server. Jalankan build-android-kiosk.ps1.",
+            )
+        elif apk.kode_versi < VERSI_MINIMAL:
+            self.baris_apk.setel(
+                _TINDAKAN,
+                f"Versi {apk.nama_versi} di server lebih lama dari yang dibutuhkan "
+                "— build ulang APK",
+            )
+        else:
+            self.baris_apk.setel(
+                _NORMAL, f"Versi {apk.nama_versi} siap diunduh tablet"
             )
 
         terpasang = bool(tugas.terdaftar)

@@ -1719,7 +1719,7 @@ def test_layanan_anjungan_hanya_di_komputer_server(qtbot, admin_auth, monkeypatc
     assert jendela._label_api.text() == "API anjungan: ● mati"
 
 
-def _status_palsu(monkeypatch, *, api=False, terdaftar=False, firewall=False):
+def _status_palsu(monkeypatch, *, api=False, terdaftar=False, firewall=False, apk=None):
     from app.services.kiosk_server import StatusTugas, perintah_api
     from app.ui.settings import layanan_anjungan_page as halaman_modul
 
@@ -1731,6 +1731,7 @@ def _status_palsu(monkeypatch, *, api=False, terdaftar=False, firewall=False):
             api=api,
             tugas=StatusTugas(terdaftar, program, " ".join(argumen)),
             firewall=firewall,
+            apk=apk,
         ),
     )
 
@@ -2278,3 +2279,24 @@ def test_bilah_status_diam_bila_peran_belum_ditetapkan(qtbot, admin_auth, app_co
     qtbot.addWidget(jendela)
 
     assert not hasattr(jendela, "_label_peran")
+
+
+def test_halaman_layanan_anjungan_menampilkan_apk_untuk_tablet(
+    qtbot, monkeypatch, app_config, tmp_path
+):
+    from app.services.apk_anjungan import VERSI_MINIMAL, InfoApk
+    from app.ui.settings.layanan_anjungan_page import LayananAnjunganPage
+
+    apk = InfoApk(VERSI_MINIMAL, "1.4", tmp_path / "anjungan.apk", 1000)
+    _status_palsu(monkeypatch, api=True, terdaftar=True, firewall=True, apk=apk)
+    halaman = LayananAnjunganPage()
+    qtbot.addWidget(halaman)
+    qtbot.waitUntil(lambda: halaman._status is not None, timeout=3000)
+    assert halaman.baris_apk.lencana.text() == "Normal"
+    assert "1.4" in halaman.baris_apk.teks.text()
+
+    _status_palsu(monkeypatch, api=True, terdaftar=True, firewall=True, apk=None)
+    halaman.muat_ulang()
+    qtbot.waitUntil(lambda: halaman._status.apk is None, timeout=3000)
+    assert halaman.baris_apk.lencana.text() == "Belum"
+    assert "build-android-kiosk.ps1" in halaman.baris_apk.teks.text()

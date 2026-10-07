@@ -76,6 +76,27 @@ If the tablet loses its connection after requesting a number, use **Ulangi
 permintaan tiket**. The APK reuses the same request ID, so the running server
 returns the existing ticket instead of issuing a second number.
 
+## Pembaruan APK dari server
+
+`build-android-kiosk.ps1` menaruh APK beserta versinya di folder `apk\`
+(`anjungan.apk` dan `anjungan.json`), dan `build-installer.ps1` membawanya ke
+sebelah `AntrianCRO.exe`. Server membagikannya ke tablet; statusnya terlihat
+pada baris **APK anjungan** di Layanan Anjungan.
+
+- Server menetapkan versi minimal (`VERSI_MINIMAL` di
+  `app/services/apk_anjungan.py`). Tablet di bawahnya berhenti menerbitkan
+  nomor, server menolak tiketnya (HTTP 426), dan layar tablet menawarkan
+  **PERBARUI DARI SERVER**.
+- Versi baru yang belum wajib hanya diberitahukan di ⚙ Pengaturan tablet.
+- Pertama kali, Android meminta izin "Pasang aplikasi tidak dikenal" untuk
+  Anjungan Antrian, lalu meminta konfirmasi pemasangan.
+- Fitur ini ada mulai versi 1.4: tablet 1.3 dipasang manual sekali.
+- Android hanya menerima pembaruan yang ditandatangani kunci yang sama.
+  APK debug ditandatangani kunci komputer yang mem-build-nya, jadi selalu
+  build dari komputer yang sama.
+- Naikkan `versionCode`/`versionName` di `android-kiosk/app/build.gradle`
+  setiap rilis, dan naikkan `VERSI_MINIMAL` bila jawaban API berubah.
+
 ## Android tablet and USB printer
 
 Install `AntrianKiosk-1.4.apk`, connect the tablet to the same Wi-Fi, and

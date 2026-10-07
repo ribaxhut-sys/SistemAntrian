@@ -81,6 +81,17 @@ try {
         $exe = Join-Path $bundle "AntrianCRO.exe"
         if (-not (Test-Path $exe)) { throw "AntrianCRO.exe tidak ditemukan di hasil build." }
 
+        # APK anjungan ikut terpasang di sebelah .exe, supaya server hasil
+        # installer dapat langsung membagikannya ke tablet.
+        $apkSource = Join-Path $PSScriptRoot "apk"
+        if (Test-Path (Join-Path $apkSource "anjungan.apk")) {
+            Copy-Item -LiteralPath $apkSource -Destination (Join-Path $bundle "apk") -Recurse -Force
+            Write-Host "==> APK anjungan ikut dalam installer" -ForegroundColor Cyan
+        }
+        else {
+            Write-Host "==> apk\anjungan.apk belum ada; jalankan build-android-kiosk.ps1 dulu bila tablet perlu diperbarui dari server" -ForegroundColor Yellow
+        }
+
         Write-Host "==> Menguji aplikasi hasil build di folder bersih" -ForegroundColor Cyan
         Copy-Item -LiteralPath $bundle -Destination $cleanTest -Recurse -ErrorAction Stop
         $proses = Start-Process -FilePath (Join-Path $cleanTest "AntrianCRO.exe") `

@@ -2,6 +2,13 @@ package id.sistemantrian.kiosk;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageInstaller;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -14,6 +21,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.view.Gravity;
@@ -36,6 +44,7 @@ import org.json.JSONTokener;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -130,6 +139,43 @@ public final class MainActivity extends Activity {
     // tanpa internet sering salah jam, dan zonanya bisa di luar Indonesia.
     private static final String DEFAULT_TIMEZONE = "Asia/Jakarta";
     private String serverTimezone = DEFAULT_TIMEZONE;
+
+    // Pembaruan APK dari server. Di bawah versi minimal, anjungan berhenti
+    // menerbitkan nomor: APK lama salah membaca jawaban API yang baru.
+    private static final String ACTION_INSTALL_STATUS =
+            "id.sistemantrian.kiosk.INSTALL_STATUS";
+    private int minVersionCode = 0;
+    private int latestVersionCode = 0;
+    private String latestVersionName = "";
+    private boolean updateRequired;
+    private boolean updating;
+    private final BroadcastReceiver installReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            int status = intent.getIntExtra(
+                    PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
+            if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
+                if (confirm != null) {
+                    confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(confirm);
+                }
+                return;
+            }
+            if (status == PackageInstaller.STATUS_SUCCESS) return;
+            updating = false;
+            String message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
+            String text = "Pembaruan dibatalkan atau gagal"
+                    + (message == null ? "." : ": " + message);
+            if (updateRequired) {
+                showUpdatePanel(text);
+            } else {
+                Toast.makeText(MainActivity.this, text, Toast.LENGTH_LONG).show();
+                path.clear();
+                showCategories();
+            }
+        }
+    };
     private long serverOffsetMillis = 0L;
 
     private static String zoneLabel(String zone) {
@@ -177,6 +223,12 @@ public final class MainActivity extends Activity {
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                         | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
         preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
+        IntentFilter installFilter = new IntentFilter(ACTION_INSTALL_STATUS);
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(installReceiver, installFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(installReceiver, installFilter);
+        }
         buildHome();
         if (hasServerConfig()) {
             loadCategories();
@@ -328,6 +380,19 @@ public final class MainActivity extends Activity {
                 applyWelcomeText(welcomeFallbackText);
             }
             registrationOpen = display.optBoolean("registration_open", true);
+            minVersionCode = display.optInt("app_min_version_code", 0);
+            latestVersionCode = display.optInt("app_latest_version_code", 0);
+            latestVersionName = display.isNull("app_latest_version_name")
+                    ? "" : display.optString("app_latest_version_name", "");
+            boolean required = appVersionCode() < minVersionCode;
+            if (required && !updateRequired && !updating) {
+                updateRequired = true;
+                showUpdatePanel(null);
+            } else if (!required && updateRequired) {
+                updateRequired = false;
+                path.clear();
+                showCategories();
+            }
             String zone = display.optString("timezone", DEFAULT_TIMEZONE);
             serverTimezone = zone.startsWith("Asia/") ? zone : DEFAULT_TIMEZONE;
             long serverTime = display.optLong("server_time_ms", 0L);
@@ -572,6 +637,12 @@ public final class MainActivity extends Activity {
     }
 
     private void showCategories() {
+        // Panel unduhan tidak boleh tertimpa penyegaran daftar layanan.
+        if (updating) return;
+        if (updateRequired) {
+            showUpdatePanel(null);
+            return;
+        }
         showingConfirmation = false;
         showingResult = false;
         ticketChoices.clear();
@@ -905,6 +976,8 @@ public final class MainActivity extends Activity {
                 connection.setRequestProperty("Authorization",
                         "Bearer " + preferences.getString(TOKEN, ""));
                 connection.setRequestProperty("Accept", "application/json");
+                connection.setRequestProperty("X-App-Version-Code",
+                        String.valueOf(appVersionCode()));
                 if (body != null) {
                     connection.setDoOutput(true);
                     connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -945,6 +1018,178 @@ public final class MainActivity extends Activity {
                 if (connection != null) connection.disconnect();
             }
         });
+    }
+
+    private int appVersionCode() {
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return Build.VERSION.SDK_INT >= 28
+                    ? (int) info.getLongVersionCode() : info.versionCode;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private String appVersionName() {
+        try {
+            String name = getPackageManager()
+                    .getPackageInfo(getPackageName(), 0).versionName;
+            return name == null ? "?" : name;
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    private String requiredVersionLabel() {
+        return latestVersionCode >= minVersionCode && !latestVersionName.isEmpty()
+                ? latestVersionName : "kode " + minVersionCode;
+    }
+
+    private void showUpdatePanel(String error) {
+        if (contentSlot == null) return;
+        showingConfirmation = false;
+        showingResult = false;
+        ticketChoices.clear();
+        contentSlot.removeAllViews();
+        invitation.setText("APLIKASI PERLU DIPERBARUI");
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setGravity(Gravity.CENTER);
+        panel.setPadding(dp(16), dp(8), dp(16), dp(8));
+        TextView detail = text("Versi tablet " + appVersionName()
+                + " · server membutuhkan " + requiredVersionLabel()
+                + "\nPengambilan nomor dihentikan sampai diperbarui.", 15, MUTED, true);
+        detail.setGravity(Gravity.CENTER);
+        panel.addView(detail);
+        if (error != null) {
+            TextView errorView = text(error, 14, RED, true);
+            errorView.setGravity(Gravity.CENTER);
+            errorView.setPadding(0, dp(8), 0, 0);
+            panel.addView(errorView);
+        }
+        Button update = actionButton("PERBARUI DARI SERVER", true);
+        update.setEnabled(latestVersionCode > appVersionCode());
+        update.setOnClickListener(v -> startUpdate());
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(60));
+        params.topMargin = dp(14);
+        panel.addView(update, params);
+        TextView note = text(latestVersionCode > appVersionCode()
+                ? "Untuk petugas. Android akan meminta izin memasang."
+                : "APK baru belum tersedia di server. Jalankan build-android-kiosk.ps1 di komputer server.",
+                12, MUTED, false);
+        note.setGravity(Gravity.CENTER);
+        note.setPadding(0, dp(8), 0, 0);
+        panel.addView(note);
+        contentSlot.addView(panel);
+        setHint("Hubungi petugas untuk memperbarui anjungan", "tunggu");
+    }
+
+    private void startUpdate() {
+        if (updating) return;
+        if (Build.VERSION.SDK_INT >= 26
+                && !getPackageManager().canRequestPackageInstalls()) {
+            Toast.makeText(this,
+                    "Izinkan \"Pasang aplikasi tidak dikenal\" untuk Anjungan Antrian, "
+                            + "lalu kembali dan tekan Perbarui lagi.",
+                    Toast.LENGTH_LONG).show();
+            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName())));
+            return;
+        }
+        updating = true;
+        contentSlot.removeAllViews();
+        invitation.setText("MENGUNDUH VERSI " + latestVersionName);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setGravity(Gravity.CENTER);
+        panel.setPadding(dp(16), dp(8), dp(16), dp(8));
+        android.widget.ProgressBar bar = new android.widget.ProgressBar(
+                this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(1000);
+        panel.addView(bar, new LinearLayout.LayoutParams(-1, dp(16)));
+        TextView progress = text("Menghubungi server…", 14, MUTED, true);
+        progress.setGravity(Gravity.CENTER);
+        progress.setPadding(0, dp(8), 0, 0);
+        panel.addView(progress);
+        contentSlot.addView(panel);
+        setHint("Jangan matikan tablet selama pembaruan", "tunggu");
+
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+            PackageInstaller.Session session = null;
+            try {
+                String base = preferences.getString(SERVER, "").trim().replaceAll("/+$", "");
+                connection = (HttpURLConnection) new URL(base + "/v1/kiosk/app/apk").openConnection();
+                connection.setConnectTimeout(5000);
+                connection.setReadTimeout(30000);
+                connection.setRequestProperty("Authorization",
+                        "Bearer " + preferences.getString(TOKEN, ""));
+                int code = connection.getResponseCode();
+                if (code != 200) throw new IllegalStateException(
+                        "server menjawab " + code);
+                long total = connection.getContentLengthLong();
+
+                PackageInstaller installer = getPackageManager().getPackageInstaller();
+                PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(
+                        PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+                params.setAppPackageName(getPackageName());
+                if (total > 0) params.setSize(total);
+                int sessionId = installer.createSession(params);
+                session = installer.openSession(sessionId);
+                try (InputStream input = connection.getInputStream();
+                     OutputStream output = session.openWrite("anjungan.apk", 0, total)) {
+                    byte[] buffer = new byte[64 * 1024];
+                    long done = 0;
+                    long lastPost = 0;
+                    int length;
+                    while ((length = input.read(buffer)) != -1) {
+                        output.write(buffer, 0, length);
+                        done += length;
+                        long now = System.currentTimeMillis();
+                        if (now - lastPost > 200) {
+                            lastPost = now;
+                            final long current = done;
+                            handler.post(() -> {
+                                if (total > 0) bar.setProgress((int) (current * 1000 / total));
+                                progress.setText(String.format(new Locale("id", "ID"),
+                                        "%.1f MB%s", current / 1048576.0,
+                                        total > 0 ? String.format(new Locale("id", "ID"),
+                                                " dari %.1f MB", total / 1048576.0) : ""));
+                            });
+                        }
+                    }
+                    session.fsync(output);
+                }
+                Intent status = new Intent(ACTION_INSTALL_STATUS).setPackage(getPackageName());
+                int flags = PendingIntent.FLAG_UPDATE_CURRENT
+                        | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
+                PendingIntent pending = PendingIntent.getBroadcast(
+                        this, sessionId, status, flags);
+                session.commit(pending.getIntentSender());
+                session.close();
+                session = null;
+                handler.post(() -> {
+                    bar.setProgress(1000);
+                    progress.setText("Memasang… setujui di layar Android.");
+                });
+            } catch (Exception e) {
+                if (session != null) session.abandon();
+                String message = e.getMessage() == null ? "server tidak dapat dihubungi" : e.getMessage();
+                handler.post(() -> {
+                    updating = false;
+                    if (updateRequired) {
+                        showUpdatePanel("Unduhan gagal: " + message);
+                    } else {
+                        Toast.makeText(this, "Unduhan gagal: " + message,
+                                Toast.LENGTH_LONG).show();
+                        path.clear();
+                        showCategories();
+                    }
+                });
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }).start();
     }
 
     private void showSettings() {
@@ -991,6 +1236,15 @@ public final class MainActivity extends Activity {
         detectPrinter.setOnClickListener(v ->
                 printerStatus.setText(UsbEscPosPrinter.detect(this)));
         fields.addView(detectPrinter);
+        boolean newer = latestVersionCode > appVersionCode();
+        TextView versionInfo = text("Versi aplikasi " + appVersionName()
+                + (newer ? " · versi " + latestVersionName + " tersedia di server"
+                        : latestVersionCode > 0 ? " · terbaru" : ""),
+                13, newer ? Color.rgb(180, 83, 9) : MUTED, newer);
+        versionInfo.setPadding(0, dp(10), 0, dp(2));
+        fields.addView(versionInfo);
+        Button updateButton = smallButton("Perbarui ke " + latestVersionName);
+        if (newer) fields.addView(updateButton);
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Hubungkan ke server antrean")
                 .setMessage("Pencarian server otomatis bekerja di jaringan lokal yang sama. Printer ESC/POS USB dideteksi otomatis; tidak perlu memasang driver Android terpisah.")
@@ -1020,6 +1274,10 @@ public final class MainActivity extends Activity {
                     loadCategories();
                     loadDisplay();
                 });
+            updateButton.setOnClickListener(v -> {
+                dialog.dismiss();
+                startUpdate();
+            });
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
                 dialog.dismiss();
                 confirmTestTicket();
@@ -1186,6 +1444,11 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        try {
+            unregisterReceiver(installReceiver);
+        } catch (IllegalArgumentException ignored) {
+            // Belum terdaftar.
+        }
         handler.removeCallbacksAndMessages(null);
         worker.shutdownNow();
         super.onDestroy();
