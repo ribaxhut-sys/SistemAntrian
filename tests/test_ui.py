@@ -1697,21 +1697,94 @@ def test_admin_melihat_menu_pengaturan(qtbot, admin_auth):
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
 
     assert "Pengaturan" in menu
-    assert "Server Anjungan Android" in menu
+    # Test berjalan di atas SQLite, jadi komputer ini bukan server.
+    assert "Layanan Anjungan" not in menu
 
 
-def test_halaman_server_android_menyiapkan_token_acak(qtbot, monkeypatch):
+def test_layanan_anjungan_hanya_di_komputer_server(qtbot, admin_auth, monkeypatch):
+    """API anjungan berjalan di pemilik database; komputer lain tidak diberi menunya."""
+    monkeypatch.setattr("app.ui.main_window._komputer_server", lambda: True)
+    monkeypatch.setattr(
+        "app.services.kiosk_server.api_sudah_berjalan", lambda port=8765: False
+    )
+    _status_palsu(monkeypatch)
+    from app.ui.main_window import MainWindow
+
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
+
+    assert "Layanan Anjungan" in menu
+    assert jendela._label_api.text() == "API anjungan: ● mati"
+
+
+def _status_palsu(monkeypatch, *, api=False, terdaftar=False, firewall=False):
+    from app.services.kiosk_server import StatusTugas, perintah_api
+    from app.ui.settings import layanan_anjungan_page as halaman_modul
+
+    program, argumen = perintah_api()
+    monkeypatch.setattr(
+        halaman_modul,
+        "periksa_status",
+        lambda: halaman_modul.StatusLayanan(
+            api=api,
+            tugas=StatusTugas(terdaftar, program, " ".join(argumen)),
+            firewall=firewall,
+        ),
+    )
+
+
+def test_halaman_layanan_anjungan_membuat_dan_menyimpan_token(
+    qtbot, monkeypatch, app_config
+):
     monkeypatch.delenv("ANTRIAN_KIOS_API_TOKEN", raising=False)
     monkeypatch.setattr(
-        "app.ui.settings.android_kiosk_page.muat_token_pengguna", lambda: ""
+        "app.services.kiosk_server.muat_token_pengguna", lambda: ""
     )
-    from app.ui.settings.android_kiosk_page import AndroidKioskServerPage
+    _status_palsu(monkeypatch)
+    from app.services.kiosk_server import muat_token
+    from app.ui.settings.layanan_anjungan_page import LayananAnjunganPage
 
-    halaman = AndroidKioskServerPage()
+    halaman = LayananAnjunganPage()
     qtbot.addWidget(halaman)
 
     assert len(halaman.token.text()) >= 64
     assert halaman.token.isReadOnly()
+    # Tersimpan saat itu juga, supaya API saat Windows menyala dapat membacanya.
+    monkeypatch.delenv("ANTRIAN_KIOS_API_TOKEN", raising=False)
+    assert muat_token() == halaman.token.text()
+
+
+def test_halaman_layanan_anjungan_menunjukkan_yang_belum_dipasang(
+    qtbot, monkeypatch, app_config
+):
+    _status_palsu(monkeypatch)
+    from app.ui.settings.layanan_anjungan_page import LayananAnjunganPage
+
+    halaman = LayananAnjunganPage()
+    qtbot.addWidget(halaman)
+    qtbot.waitUntil(lambda: halaman._status is not None, timeout=3000)
+
+    assert halaman.pasang.text().replace("&&", "&") == "Pasang & nyalakan"
+    assert not halaman.hapus.isEnabled()
+    assert not halaman.catatan.isHidden()
+    assert "Mati" in halaman.baris_api.teks.text()
+
+
+def test_halaman_layanan_anjungan_normal_bila_semua_terpasang(
+    qtbot, monkeypatch, app_config
+):
+    _status_palsu(monkeypatch, api=True, terdaftar=True, firewall=True)
+    from app.ui.settings.layanan_anjungan_page import LayananAnjunganPage
+
+    halaman = LayananAnjunganPage()
+    qtbot.addWidget(halaman)
+    qtbot.waitUntil(lambda: halaman._status is not None, timeout=3000)
+
+    assert halaman.pasang.text().replace("&&", "&") == "Pasang ulang & nyalakan ulang"
+    assert halaman.hapus.isEnabled()
+    assert halaman.catatan.isHidden()
+    assert halaman.baris_tugas.lencana.text() == "Normal"
 
 
 def test_dialog_survey_menyimpan_penilaian(qtbot, auth, layani_sampai_selesai):

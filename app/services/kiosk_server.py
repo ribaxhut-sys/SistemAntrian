@@ -1,17 +1,50 @@
-"""Pengaturan token, firewall, dan proses API untuk anjungan Android."""
+"""
+Layanan API anjungan di komputer SERVER: token, Firewall, Task Scheduler.
+
+Anjungan Android hanya mengambil nomor, dan nomor hanya boleh diterbitkan
+oleh pemilik database. Karena itu API ini adalah bagian dari peran server,
+bukan fitur anjungan: ia berjalan di komputer yang PostgreSQL-nya lokal,
+dan tablet hanya menyambung ke sana.
+
+API didaftarkan sebagai tugas Task Scheduler yang berjalan saat Windows
+menyala, di bawah akun SYSTEM. Alasannya operasional: server di kantor
+dinyalakan pagi hari oleh siapa saja, dan anjungan harus sudah bisa
+menerbitkan nomor sebelum ada yang sempat membuka aplikasi lalu masuk.
+Aplikasi yang dibuka tetap memeriksa dan menyalakan API sebagai cadangan.
+
+Token disimpan sebagai BERKAS di folder database, bukan di registry
+pengguna. Akun SYSTEM tidak dapat membaca HKCU milik petugas, sehingga
+token di registry membuat tugas saat Windows menyala tidak pernah bisa
+mulai. Token lama di registry tetap dibaca, supaya tablet yang sudah
+diatur tidak perlu diatur ulang.
+"""
 
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import secrets
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
+logger = logging.getLogger("antrian.kiosk_server")
+
 NAMA_NILAI_API_OTOMATIS = "ANTRIAN_KIOS_API_AUTO_START"
+NAMA_BERKAS_TOKEN = "anjungan-token.txt"
+NAMA_TUGAS = "AntrianCRO API Anjungan"
+PANJANG_TOKEN_MINIMAL = 8
+PORT_BAWAAN = 8765
+
+#: SYSTEM dan Administrators penuh; pengguna yang masuk boleh membaca dan
+#: MENJALANKAN tugas ini. Tanpa izin jalankan, aplikasi yang dibuka petugas
+#: biasa tidak dapat menyalakan ulang API yang berhenti, dan akan
+#: menjalankan salinan kedua di bawah akunnya sendiri.
+SDDL_TUGAS = "D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;AU)"
 
 
 def token_baru() -> str:
@@ -19,20 +52,35 @@ def token_baru() -> str:
     return secrets.token_urlsafe(48)
 
 
-def simpan_token_pengguna(token: str) -> None:
-    """Simpan token di environment proses dan profil Windows pengguna."""
-    os.environ["ANTRIAN_KIOS_API_TOKEN"] = token
-    try:
-        import winreg
-    except ImportError as exc:
-        raise RuntimeError("Penyimpanan token ini hanya tersedia di Windows.") from exc
+def _db_path_aktif() -> Path:
+    from app.core.config import get_config
 
-    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-        winreg.SetValueEx(key, "ANTRIAN_KIOS_API_TOKEN", 0, winreg.REG_SZ, token)
+    return get_config().db_path
+
+
+def path_berkas_token(db_path: Path | None = None) -> Path:
+    """Letak token: folder database, bersebelahan dengan mesin.json."""
+    db_path = _db_path_aktif() if db_path is None else db_path
+    return Path(db_path).expanduser().resolve().parent / NAMA_BERKAS_TOKEN
+
+
+def simpan_token(token: str, db_path: Path | None = None) -> None:
+    """Simpan token ke berkas. Ditulis lewat berkas sementara lalu diganti."""
+    token = token.strip()
+    if len(token) < PANJANG_TOKEN_MINIMAL:
+        raise ValueError(
+            f"Token API harus minimal {PANJANG_TOKEN_MINIMAL} karakter."
+        )
+    path = path_berkas_token(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sementara = path.with_suffix(path.suffix + ".tmp")
+    sementara.write_text(token + "\n", encoding="utf-8")
+    sementara.replace(path)
+    os.environ["ANTRIAN_KIOS_API_TOKEN"] = token
 
 
 def muat_token_pengguna() -> str:
-    """Baca token API yang disimpan pada profil pengguna Windows."""
+    """Token lama di registry pengguna Windows. Hanya dibaca, tidak ditulis."""
     try:
         import winreg
     except ImportError:
@@ -41,24 +89,47 @@ def muat_token_pengguna() -> str:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
             nilai, _ = winreg.QueryValueEx(key, "ANTRIAN_KIOS_API_TOKEN")
-    except FileNotFoundError:
+    except OSError:
         return ""
     return str(nilai).strip()
 
 
+def muat_token(db_path: Path | None = None) -> str:
+    """
+    Token yang berlaku: environment, lalu berkas, lalu registry lama.
+
+    Environment tetap paling kuat, sama seperti ANTRIAN_DB_URL mengalahkan
+    mesin.json, supaya pemasangan yang sudah memakai setx tidak berubah.
+    """
+    token = os.environ.get("ANTRIAN_KIOS_API_TOKEN", "").strip()
+    if token:
+        return token
+    try:
+        token = path_berkas_token(db_path).read_text(encoding="utf-8").strip()
+    except OSError:
+        token = ""
+    return token or muat_token_pengguna()
+
+
 def muat_api_otomatis() -> bool:
-    """Baca pilihan mulai API otomatis dari profil pengguna Windows."""
+    """
+    Apakah aplikasi menyalakan API saat dibuka. Bawaannya YA.
+
+    Hanya mati bila petugas mematikannya secara tegas. Sebelumnya bawaannya
+    mati, dan server yang lupa dicentang membuat anjungan tidak tersambung
+    tanpa satu pesan pun di log.
+    """
     try:
         import winreg
     except ImportError:
-        return False
+        return True
 
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
             nilai, _ = winreg.QueryValueEx(key, NAMA_NILAI_API_OTOMATIS)
-    except FileNotFoundError:
-        return False
-    return nilai == 1 or str(nilai).strip().lower() in {"1", "true", "yes", "on"}
+    except OSError:
+        return True
+    return not (nilai == 0 or str(nilai).strip().lower() in {"0", "false", "no", "off"})
 
 
 def simpan_api_otomatis(aktif: bool) -> None:
@@ -74,9 +145,45 @@ def simpan_api_otomatis(aktif: bool) -> None:
         )
 
 
-def _firewall_sudah_siap() -> bool:
-    """Periksa dulu apakah aturan yang diperlukan sudah berlaku."""
-    script = r"""
+def komputer_server() -> bool:
+    """
+    Apakah komputer ini pemilik database, satu-satunya tempat API berjalan.
+
+    Sama dengan syarat API otomatis di app.main: peran SERVER dan
+    PostgreSQL. Komputer loket, televisi, dan anjungan Windows tidak
+    pernah menjalankan API, sehingga juga tidak diberi halamannya.
+    """
+    from app.core.config import get_config
+    from app.core.mesin import SERVER, muat_pengaturan
+
+    config = get_config()
+    if config.dialect != "postgresql":
+        return False
+    return muat_pengaturan(config.db_path).peran == SERVER
+
+
+def port_api() -> int:
+    return int(os.environ.get("ANTRIAN_KIOS_API_PORT", str(PORT_BAWAAN)))
+
+
+def perintah_api() -> tuple[str, list[str]]:
+    """Program dan argumen untuk menjalankan API, dari .exe maupun source."""
+    if getattr(sys, "frozen", False):
+        return sys.executable, ["--kios-api"]
+    return sys.executable, ["-m", "app.main", "--kios-api"]
+
+
+def _jalankan_powershell(script: str, *, timeout: int = 15) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["powershell.exe", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+    )
+
+
+_SKRIP_FIREWALL_CEK = r"""
 $ErrorActionPreference = 'Stop'
 $rules = @(
     @{ Name = 'Antrian CRO Kiosk API'; Protocol = 'TCP'; Port = '8765' },
@@ -96,89 +203,8 @@ foreach ($item in $rules) {
 }
 Write-Output 'OK'
 """
-    try:
-        result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", script],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=15,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0 and (result.stdout or "").strip() == "OK"
 
-
-def api_sudah_berjalan(port: int = 8765) -> bool:
-    """Periksa health API lokal agar startup tidak membuat proses ganda."""
-    try:
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{port}/health", timeout=1
-        ) as response:
-            return response.status == 200 and response.read(256) == b'{"status":"ok"}'
-    except (OSError, urllib.error.URLError, TimeoutError):
-        return False
-
-
-def mulai_api_otomatis(
-    base_dir: Path,
-    log_dir: Path,
-    *,
-    token: str | None = None,
-    lingkungan: dict[str, str] | None = None,
-) -> bool:
-    """Mulai API terpisah sekali, bila token dan Firewall sudah disiapkan."""
-    if not muat_api_otomatis():
-        return False
-    token = (token if token is not None else (
-        os.environ.get("ANTRIAN_KIOS_API_TOKEN", "").strip()
-        or muat_token_pengguna()
-    )).strip()
-    if len(token) < 8:
-        return False
-
-    port = int(os.environ.get("ANTRIAN_KIOS_API_PORT", "8765"))
-    if api_sudah_berjalan(port):
-        return True
-    if not _firewall_sudah_siap():
-        return False
-
-    child_environment = dict(os.environ if lingkungan is None else lingkungan)
-    child_environment["ANTRIAN_KIOS_API_TOKEN"] = token
-    if getattr(sys, "frozen", False):
-        arguments = [sys.executable, "--kios-api"]
-    else:
-        arguments = [sys.executable, "-m", "app.main", "--kios-api"]
-
-    try:
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / "kiosk-api.log"
-        creation_flags = (
-            getattr(subprocess, "DETACHED_PROCESS", 0)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        )
-        with log_path.open("ab") as output:
-            subprocess.Popen(
-                arguments,
-                cwd=str(base_dir),
-                env=child_environment,
-                stdin=subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                close_fds=True,
-                creationflags=creation_flags,
-            )
-    except OSError:
-        return False
-    return True
-
-
-def siapkan_firewall() -> None:
-    """Izinkan API TCP dan pencarian UDP pada profil Private, dengan UAC."""
-    if _firewall_sudah_siap():
-        return
-    script = r"""
-$ErrorActionPreference = 'Stop'
+_SKRIP_FIREWALL_PASANG = r"""
 $rules = @(
     @{ Name = 'Antrian CRO Kiosk API'; Protocol = 'TCP'; Port = '8765' },
     @{ Name = 'Antrian CRO Kiosk Discovery'; Protocol = 'UDP'; Port = '8766' }
@@ -198,6 +224,68 @@ foreach ($item in $rules) {
     }
 }
 """
+
+
+def _firewall_sudah_siap() -> bool:
+    """Periksa dulu apakah aturan yang diperlukan sudah berlaku."""
+    try:
+        result = _jalankan_powershell(_SKRIP_FIREWALL_CEK)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and (result.stdout or "").strip() == "OK"
+
+
+def _ps_kutip(teks: str) -> str:
+    """Kutip tunggal PowerShell: satu-satunya karakter khusus adalah '."""
+    return "'" + teks.replace("'", "''") + "'"
+
+
+def _skrip_tugas_pasang(program: str, argumen: list[str], folder_kerja: str) -> str:
+    """
+    Daftarkan ulang tugas API lalu nyalakan.
+
+    - Pemicu saat Windows menyala, ditunda 30 detik supaya layanan
+      PostgreSQL sudah menerima sambungan.
+    - Batas waktu eksekusi dimatikan: bawaan Task Scheduler membunuh tugas
+      sesudah 72 jam, dan server kantor bisa menyala berminggu-minggu.
+    - Dinyalakan ulang tiap menit bila berhenti karena galat.
+    """
+    argumen_teks = " ".join(
+        f'"{arg}"' if " " in arg else arg for arg in argumen
+    )
+    return f"""
+$nama = {_ps_kutip(NAMA_TUGAS)}
+Stop-ScheduledTask -TaskName $nama -ErrorAction SilentlyContinue
+$aksi = New-ScheduledTaskAction -Execute {_ps_kutip(program)} `
+    -Argument {_ps_kutip(argumen_teks)} -WorkingDirectory {_ps_kutip(folder_kerja)}
+$pemicu = New-ScheduledTaskTrigger -AtStartup
+$pemicu.Delay = 'PT30S'
+$pelaku = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$setelan = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
+    -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
+    -MultipleInstances IgnoreNew -StartWhenAvailable `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName $nama -Action $aksi -Trigger $pemicu `
+    -Principal $pelaku -Settings $setelan -Force | Out-Null
+try {{
+    $layanan = New-Object -ComObject 'Schedule.Service'
+    $layanan.Connect()
+    $layanan.GetFolder('\\').GetTask($nama).SetSecurityDescriptor({_ps_kutip(SDDL_TUGAS)}, 0)
+}} catch {{ }}
+Start-ScheduledTask -TaskName $nama
+"""
+
+
+_SKRIP_TUGAS_HAPUS = f"""
+$nama = {_ps_kutip(NAMA_TUGAS)}
+Stop-ScheduledTask -TaskName $nama -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $nama -Confirm:$false -ErrorAction SilentlyContinue
+"""
+
+
+def _jalankan_terangkat(script: str, *, pesan_gagal: str, timeout: int = 120) -> None:
+    """Jalankan skrip PowerShell dengan hak Administrator (satu dialog UAC)."""
+    script = "$ErrorActionPreference = 'Stop'\n" + script
     encoded_script = base64.b64encode(script.encode("utf-16le")).decode("ascii")
     elevated_command = (
         "$ErrorActionPreference = 'Stop'; "
@@ -219,12 +307,185 @@ foreach ($item in $rules) {
             capture_output=True,
             text=True,
             check=False,
-            timeout=120,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("Penyiapan Firewall melewati batas waktu.") from exc
+        raise RuntimeError("Permintaan izin Administrator melewati batas waktu.") from exc
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
-        if not detail:
-            detail = "Izin Administrator ditolak atau aturan Firewall gagal dibuat."
-        raise RuntimeError(detail)
+        raise RuntimeError(detail or pesan_gagal)
+
+
+def siapkan_firewall() -> None:
+    """Izinkan API TCP dan pencarian UDP pada profil Private, dengan UAC."""
+    if _firewall_sudah_siap():
+        return
+    _jalankan_terangkat(
+        _SKRIP_FIREWALL_PASANG,
+        pesan_gagal="Izin Administrator ditolak atau aturan Firewall gagal dibuat.",
+    )
+
+
+def pasang_layanan_api(folder_kerja: Path) -> None:
+    """
+    Firewall dan tugas Task Scheduler sekaligus, dengan satu dialog UAC.
+
+    Selalu didaftarkan ulang, bukan hanya bila belum ada: menekan tombol
+    ini juga cara memperbarui tugas sesudah aplikasi dipindah, dan cara
+    menyalakan ulang API sesudah token diganti.
+    """
+    program, argumen = perintah_api()
+    _jalankan_terangkat(
+        _SKRIP_FIREWALL_PASANG
+        + _skrip_tugas_pasang(program, argumen, str(folder_kerja)),
+        pesan_gagal=(
+            "Izin Administrator ditolak, atau Firewall dan Task Scheduler "
+            "gagal diatur."
+        ),
+    )
+    logger.info("Tugas Task Scheduler '%s' dipasang: %s %s", NAMA_TUGAS, program, argumen)
+
+
+def hapus_layanan_api() -> None:
+    """Hentikan dan hapus tugas Task Scheduler. Aturan Firewall dibiarkan."""
+    _jalankan_terangkat(
+        _SKRIP_TUGAS_HAPUS,
+        pesan_gagal="Izin Administrator ditolak atau tugas gagal dihapus.",
+    )
+    logger.info("Tugas Task Scheduler '%s' dihapus", NAMA_TUGAS)
+
+
+@dataclass(frozen=True)
+class StatusTugas:
+    """Keadaan tugas Task Scheduler sebagaimana terbaca tanpa hak Administrator."""
+
+    #: True terdaftar, False tidak ada, None tidak dapat diperiksa.
+    terdaftar: bool | None
+    program: str = ""
+    argumen: str = ""
+
+    def cocok_dengan(self, program: str, argumen: list[str]) -> bool:
+        """Apakah tugas menunjuk aplikasi yang sedang berjalan ini."""
+        if not self.terdaftar:
+            return False
+        return (
+            os.path.normcase(os.path.normpath(self.program))
+            == os.path.normcase(os.path.normpath(program))
+            and self.argumen.split() == [a.strip('"') for a in argumen]
+        )
+
+
+def status_tugas_api() -> StatusTugas:
+    script = (
+        f"$t = Get-ScheduledTask -TaskName {_ps_kutip(NAMA_TUGAS)} "
+        "-ErrorAction SilentlyContinue\n"
+        "if ($null -eq $t) { Write-Output 'TIDAK-ADA'; exit 0 }\n"
+        "$a = $t.Actions | Select-Object -First 1\n"
+        "Write-Output ('ADA|' + $a.Execute + '|' + $a.Arguments)\n"
+    )
+    try:
+        result = _jalankan_powershell(script)
+    except (OSError, subprocess.TimeoutExpired):
+        return StatusTugas(terdaftar=None)
+    keluaran = (result.stdout or "").strip()
+    if result.returncode != 0 or not keluaran:
+        return StatusTugas(terdaftar=None)
+    if keluaran == "TIDAK-ADA":
+        return StatusTugas(terdaftar=False)
+    _, program, argumen = (keluaran.split("|", 2) + ["", ""])[:3]
+    return StatusTugas(terdaftar=True, program=program, argumen=argumen)
+
+
+def _nyalakan_tugas() -> bool:
+    try:
+        result = _jalankan_powershell(
+            f"Start-ScheduledTask -TaskName {_ps_kutip(NAMA_TUGAS)}"
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def api_sudah_berjalan(port: int = PORT_BAWAAN) -> bool:
+    """Periksa health API lokal agar startup tidak membuat proses ganda."""
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/health", timeout=1
+        ) as response:
+            return response.status == 200 and response.read(256) == b'{"status":"ok"}'
+    except (OSError, urllib.error.URLError, TimeoutError):
+        return False
+
+
+def mulai_api_otomatis(
+    base_dir: Path,
+    log_dir: Path,
+    *,
+    token: str | None = None,
+    lingkungan: dict[str, str] | None = None,
+) -> bool:
+    """
+    Pastikan API berjalan saat aplikasi server dibuka.
+
+    Urutannya: yang sudah berjalan dibiarkan; tugas Task Scheduler
+    dinyalakan bila ada; bila tidak ada, API dijalankan sebagai proses
+    terpisah di bawah akun petugas. Setiap alasan berhenti dicatat, karena
+    anjungan yang tidak tersambung tanpa jejak di log adalah keluhan yang
+    tidak dapat ditelusuri siapa pun.
+    """
+    if not muat_api_otomatis():
+        logger.info("API anjungan tidak dinyalakan: dimatikan di Layanan Anjungan.")
+        return False
+    token = (muat_token() if token is None else token).strip()
+    if len(token) < PANJANG_TOKEN_MINIMAL:
+        logger.warning(
+            "API anjungan tidak dinyalakan: token belum disiapkan. "
+            "Buka Layanan Anjungan pada komputer server."
+        )
+        return False
+
+    port = port_api()
+    if api_sudah_berjalan(port):
+        logger.info("API anjungan sudah berjalan di port %s.", port)
+        return True
+
+    status = status_tugas_api()
+    if status.terdaftar and _nyalakan_tugas():
+        logger.info("API anjungan dinyalakan lewat Task Scheduler.")
+        return True
+
+    if not _firewall_sudah_siap():
+        logger.warning(
+            "API anjungan tidak dinyalakan: aturan Firewall port %s belum ada. "
+            "Tekan Pasang di Layanan Anjungan.",
+            port,
+        )
+        return False
+
+    child_environment = dict(os.environ if lingkungan is None else lingkungan)
+    child_environment["ANTRIAN_KIOS_API_TOKEN"] = token
+    program, argumen = perintah_api()
+
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "kiosk-api.log"
+        creation_flags = (
+            getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        )
+        with log_path.open("ab") as output:
+            subprocess.Popen(
+                [program, *argumen],
+                cwd=str(base_dir),
+                env=child_environment,
+                stdin=subprocess.DEVNULL,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                creationflags=creation_flags,
+            )
+    except OSError as exc:
+        logger.warning("API anjungan gagal dijalankan: %s", exc)
+        return False
+    logger.info("API anjungan dijalankan sebagai proses terpisah (tanpa Task Scheduler).")
+    return True

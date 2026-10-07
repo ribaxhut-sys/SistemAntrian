@@ -23,7 +23,6 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
-import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -76,8 +75,6 @@ public final class MainActivity extends Activity {
     private final List<Category> categories = new ArrayList<>();
     private final List<Category> path = new ArrayList<>();
     private final List<View> ticketChoices = new ArrayList<>();
-    private final List<TextView> counterValues = new ArrayList<>();
-    private final List<String> counterNames = new ArrayList<>();
     private SharedPreferences preferences;
     private FrameLayout contentSlot;
     private TextView displayTitle;
@@ -86,8 +83,6 @@ public final class MainActivity extends Activity {
     private FrameLayout mediaSlot;
     private TextView invitation;
     private TextView hint;
-    private TextView waiting;
-    private LinearLayout counters;
     private Category pendingCategory;
     private String pendingRequestId;
     private float uiScale = 1f;
@@ -119,19 +114,6 @@ public final class MainActivity extends Activity {
             info = json.optString("info");
             parentId = json.isNull("parent_id") ? null : json.optInt("parent_id");
             group = json.optBoolean("is_group");
-        }
-    }
-
-    private static final class Counter {
-        final String name;
-        final String number;
-        final String status;
-
-        Counter(JSONObject json) {
-            name = json.optString("name");
-            number = json.isNull("queue_number")
-                    ? "" : json.optString("queue_number", "");
-            status = json.optString("status", "KOSONG");
         }
     }
 
@@ -260,23 +242,6 @@ public final class MainActivity extends Activity {
         kioskPanel.addView(contentSlot, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(kioskPanel, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        LinearLayout counterPanel = panel();
-        counterPanel.setPadding(dp(14), dp(10), dp(14), dp(10));
-        TextView counterHeading = text("SEDANG DILAYANI", 17, INK, true);
-        counterHeading.setGravity(Gravity.CENTER);
-        counterPanel.addView(counterHeading);
-        HorizontalScrollView counterScroll = new HorizontalScrollView(this);
-        counterScroll.setHorizontalScrollBarEnabled(false);
-        counters = new LinearLayout(this);
-        counters.setGravity(Gravity.CENTER);
-        counters.setPadding(0, dp(8), 0, dp(6));
-        counterScroll.addView(counters);
-        counterPanel.addView(counterScroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        waiting = text("Menghubungkan ke server…", 14, MUTED, true);
-        waiting.setGravity(Gravity.CENTER);
-        counterPanel.addView(waiting);
-        root.addView(counterPanel, new LinearLayout.LayoutParams(-1, 0, 1));
-
         setContentView(root);
         showCategories();
         handler.removeCallbacks(clock);
@@ -352,10 +317,8 @@ public final class MainActivity extends Activity {
                 readyAtMillis = Math.max(readyAtMillis,
                         System.currentTimeMillis() + serverCooldown * 1000L);
             }
-            updateCounters(display);
             updateAvailability();
         }, message -> {
-            if (waiting != null) waiting.setText("Koneksi server terganggu");
             if (hint != null && !showingConfirmation && !showingResult) {
                 setHint("Server tidak merespons. Periksa jaringan atau Pengaturan.", "salah");
             }
@@ -441,58 +404,6 @@ public final class MainActivity extends Activity {
         findParams.topMargin = dp(8);
         placeholder.addView(findServer, findParams);
         contentSlot.addView(placeholder);
-    }
-
-    private void updateCounters(JSONObject display) throws Exception {
-        JSONArray rows = display.getJSONArray("counters");
-        List<Counter> latest = new ArrayList<>();
-        for (int i = 0; i < rows.length(); i++) latest.add(new Counter(rows.getJSONObject(i)));
-        boolean rebuild = latest.size() != counterNames.size();
-        if (!rebuild) {
-            for (int i = 0; i < latest.size(); i++) {
-                if (!latest.get(i).name.equals(counterNames.get(i))) {
-                    rebuild = true;
-                    break;
-                }
-            }
-        }
-        if (rebuild) {
-            counters.removeAllViews();
-            counterNames.clear();
-            counterValues.clear();
-        }
-        for (Counter counter : latest) {
-            int index = counterNames.indexOf(counter.name);
-            if (rebuild) {
-                LinearLayout card = new LinearLayout(this);
-                card.setOrientation(LinearLayout.VERTICAL);
-                card.setGravity(Gravity.CENTER);
-                card.setBackground(rounded(Color.rgb(241, 245, 249), dp(12)));
-                card.setPadding(dp(12), dp(8), dp(12), dp(8));
-                TextView name = text(counter.name.toUpperCase(), 13, MUTED, true);
-                name.setGravity(Gravity.CENTER);
-                TextView value = text("", 15, MUTED, true);
-                value.setGravity(Gravity.CENTER);
-                card.addView(name);
-                card.addView(value);
-                LinearLayout.LayoutParams cardParams =
-                        new LinearLayout.LayoutParams(dp(116), -1);
-                cardParams.setMargins(dp(4), 0, dp(4), 0);
-                counters.addView(card, cardParams);
-                counterNames.add(counter.name);
-                counterValues.add(value);
-                index = counterValues.size() - 1;
-            }
-            TextView value = counterValues.get(index);
-            boolean hasNumber = !counter.number.isEmpty();
-            value.setText(hasNumber ? counter.number : counter.status);
-            value.setTextSize((hasNumber ? 23 : 15) * uiScale);
-            value.setTextColor(hasNumber ? TEAL : MUTED);
-        }
-        int total = display.optInt("total_waiting");
-        String summary = total == 0 ? "Tidak ada yang menunggu"
-                : total == 1 ? "1 orang menunggu" : total + " orang menunggu";
-        if (!summary.contentEquals(waiting.getText())) waiting.setText(summary);
     }
 
     private static boolean isMediaKind(String kind) {

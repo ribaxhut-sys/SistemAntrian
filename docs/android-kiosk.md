@@ -12,19 +12,34 @@ monochrome ESC/POS image to follow the Windows 72 mm thermal layout, rather
 than printing a separate plain-text design. Small differences can remain
 because of printer font rasterization and physical feed calibration.
 
-## Windows server
+## Server Windows
 
-In the Windows application, open **Server Anjungan Android**. The page
-creates a strong API token and shows the computer's local IPv4 address.
-Choose **Siapkan Firewall & Jalankan Server**; Windows asks for
-Administrator permission once to allow TCP 8765 and UDP 8766 on the Private
-network profile. Copy the token shown there into the Android server settings.
-Enable **Mulai API otomatis saat aplikasi Windows dibuka** if the API should
-start with the Windows application. The detached API process stays active
-after the desktop window closes and ends when Windows shuts down. This option
-only starts automatically on a computer configured as the PostgreSQL server.
-The token and Firewall rules must be set up once first, and the application
-must be run under the same Windows user that saved the setting.
+API anjungan adalah bagian dari komputer **server**: ia berjalan di komputer
+yang memegang database PostgreSQL, dan anjungan Android hanya klien yang
+menyambung ke sana. Menu **Layanan Anjungan** karena itu hanya muncul di
+komputer yang perannya server.
+
+1. Masuk sebagai Administrator, buka **Layanan Anjungan**.
+2. Tekan **Pasang & nyalakan** dan setujui UAC. Satu izin itu membuka
+   Firewall (TCP 8765, UDP 8766, profil Private) dan mendaftarkan tugas
+   Task Scheduler `AntrianCRO API Anjungan`.
+3. Salin alamat server dan token ke tablet.
+
+Tugas Task Scheduler berjalan di bawah akun SYSTEM, 30 detik setelah Windows
+menyala, tanpa batas waktu, dan dinyalakan ulang tiap menit bila berhenti.
+Jadi anjungan sudah dapat mengambil nomor walaupun belum ada yang membuka
+aplikasi di server. Saat aplikasi server dibuka, ia memeriksa API dan
+menyalakannya bila mati (dapat dimatikan lewat centang di halaman itu).
+
+Token disimpan di `data\anjungan-token.txt`, bersebelahan dengan
+`mesin.json`, supaya dapat dibaca akun SYSTEM. Token lama di registry
+pengguna tetap dibaca. Sesudah **Buat token baru**, tekan **Pasang ulang &
+nyalakan ulang**, lalu isi token baru di setiap tablet.
+
+Bila aplikasi server dipindah (misalnya dari source ke `.exe`), status Task
+Scheduler menunjukkan "Menunjuk lokasi lain"; tekan **Pasang ulang**.
+Variabel lingkungan yang dipasang dengan `setx` untuk satu pengguna (misalnya
+`ANTRIAN_DB_URL`) TIDAK terbaca oleh akun SYSTEM; pakai `mesin.json`.
 
 In BlueStacks, enter `http://<IPv4-Windows>:8765` manually if automatic
 discovery does not find the server. Use the IPv4 address shown in the Windows
@@ -49,11 +64,11 @@ For a packaged installation, the API can also be started from PowerShell:
 Do not forward either port from the internet. Keep the server and Android
 kiosk on the same trusted LAN; the HTTP connection is not encrypted.
 
-The kiosk API supplies the active service list, live counter/queue status,
-registration availability, and ticket issue requests. The Android screen
-uses the same standing-totem structure as the Windows kiosk: information
-panel, service cards with group navigation, selection confirmation, ticket
-result, and the live counter strip. The information panel uses the Windows
+Anjungan Android hanya mengambil nomor. API memberinya daftar layanan aktif,
+status pendaftaran (buka/tutup dan jeda antar-pengambilan), media sambutan,
+dan penerbitan tiket. Nomor yang sedang dilayani tiap loket tidak dikirim;
+itu urusan papan antrian televisi. Layarnya: panel informasi, kartu layanan
+dengan navigasi kelompok, konfirmasi pilihan, dan hasil tiket. The information panel uses the Windows
 kiosk welcome text or cycles the configured image/video files from
 `media\kiosk`.
 
@@ -63,7 +78,7 @@ returns the existing ticket instead of issuing a second number.
 
 ## Android tablet and USB printer
 
-Install `AntrianKiosk-1.3.apk`, connect the tablet to the same Wi-Fi, and
+Install `AntrianKiosk-1.4.apk`, connect the tablet to the same Wi-Fi, and
 connect the POS80/IWare IW-J200 II printer using a USB host/OTG adapter. At
 first launch the kiosk screen appears without requiring server details.
 The kiosk searches the local network automatically. If no server is found,
@@ -113,4 +128,4 @@ run from the repository root:
 .\build-android-kiosk.ps1
 ```
 
-The generated APK is `dist\AntrianKiosk-1.3.apk`.
+The generated APK is `dist\AntrianKiosk-1.4.apk`.

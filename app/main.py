@@ -509,6 +509,11 @@ def _jalankan_dialog_mesin() -> bool:
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     hanya_init = "--init-only" in argv
+    # API anjungan dijalankan Task Scheduler di bawah akun SYSTEM, tanpa
+    # layar. Dialog galat di sana tidak terlihat siapa pun dan menahan
+    # proses selamanya; lebih baik keluar dengan kode galat supaya Task
+    # Scheduler mencobanya lagi semenit kemudian.
+    tanpa_layar = hanya_init or "--kios-api" in argv
 
     config = get_config()
     setup_logging(config)
@@ -528,7 +533,7 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             # Traceback hanya masuk log, tidak pernah ditampilkan ke petugas.
             logger.exception("Inisialisasi database gagal")
-            if not _laporkan_kegagalan_database(config, berjendela=not hanya_init):
+            if not _laporkan_kegagalan_database(config, berjendela=not tanpa_layar):
                 return 1
             if not _jalankan_dialog_mesin():
                 return 1
@@ -563,8 +568,7 @@ def main(argv: list[str] | None = None) -> int:
             if not mulai_api_otomatis(config.base_dir, config.log_dir):
                 logger.warning(
                     "API anjungan tidak dimulai otomatis. Buka menu "
-                    "'Server Anjungan Android' untuk menyiapkan token "
-                    "dan Firewall."
+                    "'Layanan Anjungan' lalu tekan Pasang & nyalakan."
                 )
 
         # Import Qt ditunda sampai jendela benar-benar dibuka, sehingga mode

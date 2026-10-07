@@ -211,8 +211,13 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
 
     @app.get("/v1/kiosk/display", dependencies=[Depends(require_token)])
     def display():
-        """Return the live counter strip and kiosk availability state."""
-        state = services.queue.display_state(jumlah_berikutnya=0)
+        """
+        Keadaan yang dibutuhkan anjungan untuk menerbitkan tiket, tidak lebih.
+
+        Anjungan Android hanya mengambil nomor. Nomor yang sedang dilayani
+        tiap loket dan jumlah yang menunggu adalah urusan papan antrian,
+        sehingga sengaja tidak dikirim ke sini.
+        """
         media = welcome_media_paths()
         return {
             "title": services.settings.get("display.title", "ANTRIAN PELAYANAN CRO"),
@@ -226,25 +231,8 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 "kiosk.welcome_slide_seconds", 10
             ),
             "welcome_media": [item.name for item in media],
-            "total_waiting": state.total_menunggu,
             "registration_open": services.queue.pendaftaran_dibuka(),
             "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(),
-            "counters": [
-                {
-                    "name": counter.counter_name,
-                    "queue_number": (
-                        counter.antrian.queue_number
-                        if counter.antrian is not None
-                        else None
-                    ),
-                    "status": (
-                        counter.antrian.label_status
-                        if counter.antrian is not None
-                        else ("ISTIRAHAT" if counter.istirahat else "KOSONG")
-                    ),
-                }
-                for counter in state.loket
-            ],
         }
 
     @app.get(
@@ -332,10 +320,15 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
 
 def serve() -> int:
     """Serve the authenticated LAN kiosk API using an initialized database."""
-    token = os.environ.get("ANTRIAN_KIOS_API_TOKEN", "").strip()
+    # Task Scheduler menjalankan proses ini tanpa environment petugas, jadi
+    # token dibaca dari berkas di folder database bila tidak diberikan.
+    from app.services.kiosk_server import muat_token
+
+    token = muat_token()
     if len(token) < MIN_TOKEN_LENGTH:
         logger.error(
-            "ANTRIAN_KIOS_API_TOKEN must contain at least %s characters.",
+            "Token API anjungan belum disiapkan (minimal %s karakter). "
+            "Buka Layanan Anjungan pada komputer server.",
             MIN_TOKEN_LENGTH,
         )
         return 2

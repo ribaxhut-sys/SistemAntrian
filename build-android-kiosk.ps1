@@ -58,7 +58,7 @@ finally {
 
 $apk = Join-Path $PSScriptRoot "android-kiosk\app\build\outputs\apk\debug\app-debug.apk"
 if (-not (Test-Path $apk)) { throw "APK tidak ditemukan: $apk" }
-$release = Join-Path $PSScriptRoot "dist\AntrianKiosk-1.3.apk"
+$release = Join-Path $PSScriptRoot "dist\AntrianKiosk-1.4.apk"
 New-Item -ItemType Directory -Path (Split-Path $release -Parent) -Force | Out-Null
 Copy-Item -LiteralPath $apk -Destination $release -Force
 Write-Host "Selesai: $release" -ForegroundColor Green

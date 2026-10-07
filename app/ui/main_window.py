@@ -51,12 +51,12 @@ from app.ui.kiosk.pratinjau import (
 from app.ui.notes.note_page import NotePage
 from app.ui.queue.service_page import ServicePage
 from app.ui.registration.registration_page import RegistrationPage
-from app.ui.settings.android_kiosk_page import AndroidKioskServerPage
+from app.ui.settings.layanan_anjungan_page import LayananAnjunganPage
 from app.ui.settings.backup_page import BackupPage
 from app.ui.settings.close_day_page import CloseDayPage
 from app.ui.settings.master_data_page import MasterDataPage
 from app.ui.settings.settings_page import SettingsPage
-from app.ui.style import DANGER
+from app.ui.style import DANGER, SUCCESS
 from app.ui.survey.survey_page import SurveyPage
 
 logger = get_logger("ui.main")
@@ -113,6 +113,17 @@ class _Menu:
     #: petugas pendaftaran juga berhak menerbitkan nomor, tetapi layar
     #: pengunjung bukan untuk meja berpetugas.
     hanya_kios: bool = False
+    #: Hanya di komputer yang berperan server database.
+    hanya_server: bool = False
+
+
+def _komputer_server() -> bool:
+    from app.services.kiosk_server import komputer_server
+
+    try:
+        return komputer_server()
+    except Exception:  # noqa: BLE001 - menu tidak boleh menggagalkan jendela
+        return False
 
 
 def _inisial(nama: str) -> str:
@@ -498,10 +509,13 @@ class MainWindow(QMainWindow):
                 Permission.CONFIG_MANAGE,
                 lambda: SettingsPage(self.settings_service, self.master_service),
             ),
+            # Hanya di komputer server: API anjungan berjalan di pemilik
+            # database, dan anjungan Android hanya klien yang menyambung.
             _Menu(
-                "Server Anjungan Android",
+                "Layanan Anjungan",
                 Permission.CONFIG_MANAGE,
-                AndroidKioskServerPage,
+                LayananAnjunganPage,
+                hanya_server=True,
             ),
             _Menu(
                 "Backup",
@@ -562,6 +576,8 @@ class MainWindow(QMainWindow):
             if sesi.kios and not butir.hanya_kios:
                 continue
             if any(self.auth.has_permission(p) for p in butir.kecuali):
+                continue
+            if butir.hanya_server and not _komputer_server():
                 continue
             if butir.permission is None or self.auth.has_permission(butir.permission):
                 self.menu_aktif.append(butir)
@@ -793,6 +809,19 @@ class MainWindow(QMainWindow):
             self._label_peran.setObjectName("statusPeran")
             self.statusBar().addPermanentWidget(self._label_peran)
 
+        # API anjungan hanya di komputer server. Petugas di sana perlu
+        # tahu sekilas bila anjungan tidak dapat mengambil nomor, tanpa
+        # menunggu pengunjung datang mengeluh.
+        if _komputer_server():
+            self._label_api = QLabel()
+            self._label_api.setObjectName("statusApiAnjungan")
+            self.statusBar().addPermanentWidget(self._label_api)
+            self._periksa_api()
+            self._pewaktu_api = QTimer(self)
+            self._pewaktu_api.setInterval(SELANG_PERIKSA_KONEKSI_MS)
+            self._pewaktu_api.timeout.connect(self._periksa_api)
+            self._pewaktu_api.start()
+
         self._label_database = QLabel()
         self._label_database.setObjectName("statusDatabase")
         self._label_database.setTextInteractionFlags(
@@ -826,6 +855,20 @@ class MainWindow(QMainWindow):
         self._pemeriksa_db = None
         if pemeriksa is not None:
             pemeriksa.deleteLater()
+
+    def _periksa_api(self) -> None:
+        """Ketuk /health di 127.0.0.1. Port yang tertutup ditolak seketika."""
+        from app.services.kiosk_server import api_sudah_berjalan, port_api
+
+        label = getattr(self, "_label_api", None)
+        if label is None:
+            return
+        if api_sudah_berjalan(port_api()):
+            label.setText("API anjungan: ● berjalan")
+            label.setStyleSheet(f"color: {SUCCESS};")
+        else:
+            label.setText("API anjungan: ● mati")
+            label.setStyleSheet(f"color: {DANGER};")
 
     def _tampilkan_status_database(self, terhubung: bool) -> None:
         label = getattr(self, "_label_database", None)
@@ -867,10 +910,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 - nama dari Qt
         """Pastikan sesi berakhir walau jendela ditutup lewat tombol silang."""
-        for indeks in range(self.halaman.count()):
-            halaman = self.halaman.widget(indeks)
-            if isinstance(halaman, AndroidKioskServerPage):
-                halaman.hentikan_server()
+        pewaktu_api = getattr(self, "_pewaktu_api", None)
+        if pewaktu_api is not None:
+            pewaktu_api.stop()
         pewaktu = getattr(self, "_pewaktu_db", None)
         if pewaktu is not None:
             pewaktu.stop()

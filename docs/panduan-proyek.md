@@ -187,15 +187,18 @@ nomor duplikat. Daftar uji lengkap ada di [uji terima](acceptance-test.md).
 Lakukan ini setelah aplikasi Windows di PC server sudah tersambung ke database
 bersama PostgreSQL:
 
-1. Login sebagai Administrator di aplikasi Windows.
-2. Buka **Server Anjungan Android**.
-3. Catat alamat IPv4 PC server dan token yang ditampilkan.
-4. Klik **Siapkan Firewall & Jalankan Server**, lalu setujui UAC bila Windows
-   meminta izin. Halaman ini mengizinkan TCP `8765` dan UDP `8766` pada profil
-   Private serta menjalankan API.
-5. Aktifkan **Mulai API otomatis saat aplikasi Windows dibuka**. Pada
-   pembukaan aplikasi berikutnya di PC berperan SERVER, API akan mulai di
-   latar dan tetap berjalan sampai Windows dimatikan.
+1. Login sebagai Administrator di aplikasi Windows pada PC server. Menu
+   **Layanan Anjungan** hanya muncul di PC yang perannya server.
+2. Buka **Layanan Anjungan**, tekan **Pasang & nyalakan**, lalu setujui UAC.
+   Satu izin itu membuka Firewall (TCP `8765`, UDP `8766`, profil Private)
+   dan mendaftarkan tugas Task Scheduler `AntrianCRO API Anjungan` yang
+   menyala sendiri setiap kali Windows dinyalakan, walaupun aplikasi belum
+   dibuka.
+3. Pastikan ketiga status (API, Task Scheduler, Firewall) bertanda Normal.
+   Bilah status di bawah jendela juga menampilkan "API anjungan: ● berjalan".
+4. Catat alamat server dan token yang ditampilkan.
+5. Bila aplikasi server dipindah atau token diganti, tekan **Pasang ulang &
+   nyalakan ulang**.
 6. Di BlueStacks atau tablet, buka pengaturan server dan isi
    `http://<IP-PC-server>:8765` serta token yang sama.
 7. Gunakan **Cari** bila jaringan mendukung broadcast. Jika tidak, isi alamat

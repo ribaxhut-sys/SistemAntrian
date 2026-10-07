@@ -36,11 +36,13 @@ def test_api_otomatis_memakai_token_tersimpan_dan_proses_detached(
     monkeypatch, tmp_path
 ):
     panggilan = {}
-    monkeypatch.delenv("ANTRIAN_KIOS_API_TOKEN", raising=False)
     monkeypatch.setattr(kiosk_server, "muat_api_otomatis", lambda: True)
     monkeypatch.setattr(kiosk_server, "api_sudah_berjalan", lambda port: False)
+    monkeypatch.setattr(
+        kiosk_server, "status_tugas_api", lambda: kiosk_server.StatusTugas(False)
+    )
     monkeypatch.setattr(kiosk_server, "_firewall_sudah_siap", lambda: True)
-    monkeypatch.setattr(kiosk_server, "muat_token_pengguna", lambda: "token-stored")
+    monkeypatch.setattr(kiosk_server, "muat_token", lambda: "token-stored")
 
     def mulai(args, **kwargs):
         panggilan.update(args=args, kwargs=kwargs)
@@ -52,6 +54,122 @@ def test_api_otomatis_memakai_token_tersimpan_dan_proses_detached(
     assert panggilan["kwargs"]["env"]["ANTRIAN_KIOS_API_TOKEN"] == "token-stored"
     assert panggilan["kwargs"]["stdin"] == kiosk_server.subprocess.DEVNULL
     assert panggilan["kwargs"]["stdout"].name.endswith("kiosk-api.log")
+
+
+def test_api_otomatis_mendahulukan_task_scheduler(monkeypatch, tmp_path):
+    """Tugas yang terdaftar dinyalakan; tidak ada salinan kedua dijalankan."""
+    monkeypatch.setattr(kiosk_server, "muat_api_otomatis", lambda: True)
+    monkeypatch.setattr(kiosk_server, "api_sudah_berjalan", lambda port: False)
+    monkeypatch.setattr(
+        kiosk_server,
+        "status_tugas_api",
+        lambda: kiosk_server.StatusTugas(True, "python.exe", "-m app.main --kios-api"),
+    )
+    monkeypatch.setattr(kiosk_server, "_nyalakan_tugas", lambda: True)
+    monkeypatch.setattr(
+        kiosk_server.subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("Task Scheduler seharusnya dipakai"),
+    )
+
+    assert kiosk_server.mulai_api_otomatis(
+        tmp_path, tmp_path / "logs", token="token-cukup-panjang"
+    )
+
+
+def test_api_otomatis_tanpa_token_mencatat_alasannya(monkeypatch, tmp_path, caplog):
+    monkeypatch.setattr(kiosk_server, "muat_api_otomatis", lambda: True)
+
+    with caplog.at_level("WARNING", logger="antrian.kiosk_server"):
+        assert not kiosk_server.mulai_api_otomatis(
+            tmp_path, tmp_path / "logs", token=""
+        )
+    assert "token belum disiapkan" in caplog.text
+
+
+def test_api_otomatis_bawaannya_menyala_di_luar_windows():
+    """Tanpa pilihan tersimpan, API dinyalakan: mati harus dipilih tegas."""
+    assert kiosk_server.muat_api_otomatis() is True
+
+
+def test_token_tersimpan_sebagai_berkas_di_folder_database(monkeypatch, tmp_path):
+    monkeypatch.delenv("ANTRIAN_KIOS_API_TOKEN", raising=False)
+    db_path = tmp_path / "data" / "queue.db"
+
+    kiosk_server.simpan_token("token-rahasia-panjang", db_path)
+    monkeypatch.delenv("ANTRIAN_KIOS_API_TOKEN", raising=False)
+
+    assert (tmp_path / "data" / kiosk_server.NAMA_BERKAS_TOKEN).is_file()
+    assert kiosk_server.muat_token(db_path) == "token-rahasia-panjang"
+
+
+def test_token_environment_mengalahkan_berkas(monkeypatch, tmp_path):
+    db_path = tmp_path / "queue.db"
+    kiosk_server.simpan_token("token-dari-berkas", db_path)
+    monkeypatch.setenv("ANTRIAN_KIOS_API_TOKEN", "token-dari-env")
+
+    assert kiosk_server.muat_token(db_path) == "token-dari-env"
+
+
+def test_token_pendek_ditolak(tmp_path):
+    with pytest.raises(ValueError):
+        kiosk_server.simpan_token("pendek", tmp_path / "queue.db")
+
+
+def _skrip_terangkat(perintah: str) -> str:
+    cocok = re.search(r"-EncodedCommand', '([^']+)'", perintah)
+    assert cocok is not None
+    return base64.b64decode(cocok.group(1)).decode("utf-16le")
+
+
+def test_pasang_layanan_mendaftarkan_tugas_saat_windows_menyala(monkeypatch, tmp_path):
+    panggilan = []
+
+    def jalankan(args, **kwargs):
+        panggilan.append(args)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(kiosk_server.subprocess, "run", jalankan)
+
+    kiosk_server.pasang_layanan_api(tmp_path)
+
+    assert len(panggilan) == 1, "Firewall dan tugas memakai satu dialog UAC"
+    assert "-Verb RunAs" in panggilan[0][-1]
+    script = _skrip_terangkat(panggilan[0][-1])
+    assert kiosk_server.NAMA_TUGAS in script
+    assert "-AtStartup" in script
+    assert "'SYSTEM'" in script
+    assert "[TimeSpan]::Zero" in script, "batas 72 jam bawaan harus dimatikan"
+    assert "--kios-api" in script
+    assert str(tmp_path) in script
+    assert "-Profile Private" in script
+    assert "Start-ScheduledTask" in script
+
+
+def test_status_tugas_membaca_perintah_terdaftar(monkeypatch):
+    monkeypatch.setattr(
+        kiosk_server.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(
+            args, 0, stdout="ADA|C:\\App\\AntrianCRO.exe|--kios-api\n"
+        ),
+    )
+
+    status = kiosk_server.status_tugas_api()
+
+    assert status.terdaftar is True
+    assert status.cocok_dengan("C:\\App\\AntrianCRO.exe", ["--kios-api"])
+    assert not status.cocok_dengan("D:\\Lain\\AntrianCRO.exe", ["--kios-api"])
+
+
+def test_status_tugas_tidak_ada(monkeypatch):
+    monkeypatch.setattr(
+        kiosk_server.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout="TIDAK-ADA\n"),
+    )
+
+    assert kiosk_server.status_tugas_api().terdaftar is False
 
 
 def test_api_otomatis_menghindari_proses_ganda(monkeypatch, tmp_path):

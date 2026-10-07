@@ -205,7 +205,7 @@ def test_api_returns_active_categories_and_ticket_lines():
     assert ticket.json()["cooldown_seconds"] == 10
 
 
-def test_api_returns_live_kiosk_display_state():
+def test_api_display_hanya_berisi_keperluan_ambil_nomor():
     from app.kiosk_api import create_app
 
     client = TestClient(create_app(TOKEN, _Services()))
@@ -220,22 +220,10 @@ def test_api_returns_live_kiosk_display_state():
         "welcome_kind": "teks",
         "welcome_slide_seconds": 10,
         "welcome_media": [],
-        "total_waiting": 2,
         "registration_open": True,
         "cooldown_remaining_seconds": 0,
-        "counters": [
-            {
-                "name": "Loket 1",
-                "queue_number": "A-001",
-                "status": "DIPANGGIL",
-            },
-            {
-                "name": "Loket 2",
-                "queue_number": None,
-                "status": "ISTIRAHAT",
-            },
-        ],
     }
+    assert "counters" not in response.json()
 
 
 def test_api_serves_only_configured_kiosk_media(tmp_path, monkeypatch):
