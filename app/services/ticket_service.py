@@ -294,6 +294,39 @@ class PdfTicketPrinter:
         c.save()
 
 
+def tata_letak_tiket_anjungan(data: TicketData) -> dict:
+    """Susun format raster Android memakai geometri tiket printer Windows."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    lebar = 72.0
+    lebar_isi = lebar - 2 * TEPI_MM
+
+    def pas(isi: str, ukuran: int, tebal: bool, maks_baris: int = 1):
+        nama_huruf = "Helvetica-Bold" if tebal else "Helvetica"
+        return _pas_lebar(
+            isi,
+            lambda teks, pt: stringWidth(teks, nama_huruf, pt) <= lebar_isi,
+            ukuran,
+            maks_baris,
+        )
+
+    rows = _tata_letak(data, pas, ukuran_nomor=44)
+    return {
+        "width_mm": lebar,
+        "height_mm": PdfTicketPrinter.TINGGI_MM,
+        "rows": [
+            {
+                "y_mm": row.y_mm,
+                "text": row.teks,
+                "size": row.ukuran,
+                "bold": row.tebal,
+                "line": row.garis,
+            }
+            for row in rows
+        ],
+    }
+
+
 class QtTicketPrinter:
     """
     Mencetak ke printer Windows lewat Qt.

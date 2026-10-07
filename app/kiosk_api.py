@@ -1,0 +1,406 @@
+"""LAN API for the Android ticket-taking kiosk."""
+
+from __future__ import annotations
+
+import hmac
+import json
+import mimetypes
+import os
+import socket
+import threading
+from pathlib import Path
+from typing import Annotated
+from uuid import UUID
+
+import uvicorn
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
+
+from app.core.config import base_dir, get_config
+from app.core.database import dispose_engine
+from app.core.errors import (
+    AppError,
+    AuthenticationError,
+    AuthorizationError,
+    BusinessRuleError,
+    NotFoundError,
+    ValidationError,
+)
+from app.core.logger import get_logger, setup_logging
+from app.core.migrations import current_revision
+from app.core.seed import seed_initial_data
+from app.services.auth_service import AuthService
+from app.services.master_data_service import MasterDataService
+from app.services.queue_service import QueueService
+from app.services.settings_service import SettingsService
+from app.services.ticket_service import (
+    NullTicketPrinter,
+    TicketService,
+    tata_letak_tiket_anjungan,
+)
+
+_MEDIA_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".bmp",
+    ".webp",
+    ".gif",
+    ".mp4",
+    ".mkv",
+    ".webm",
+    ".avi",
+}
+_MEDIA_KINDS = {"media", "gambar", "video"}
+MIN_TOKEN_LENGTH = 8
+DISCOVERY_REQUEST = b"SISTEMANTRIAN_KIOSK_DISCOVER_V1"
+DISCOVERY_RESPONSE = "SISTEMANTRIAN_KIOSK_SERVER_V1"
+DISCOVERY_PORT = 8766
+
+logger = get_logger("kiosk_api")
+_bearer = HTTPBearer(auto_error=False)
+
+
+def _serve_discovery(
+    discovery_socket: socket.socket,
+    api_port: int,
+    stop_event: threading.Event,
+) -> None:
+    """Answer local UDP discovery broadcasts with the API TCP port."""
+    while not stop_event.is_set():
+        try:
+            payload, address = discovery_socket.recvfrom(1024)
+        except socket.timeout:
+            continue
+        except OSError:
+            if not stop_event.is_set():
+                logger.exception("Listener pencarian server anjungan berhenti")
+            return
+        if payload != DISCOVERY_REQUEST:
+            continue
+        response = json.dumps(
+            {"service": DISCOVERY_RESPONSE, "api_port": api_port}
+        ).encode("utf-8")
+        try:
+            discovery_socket.sendto(response, address)
+        except OSError:
+            if not stop_event.is_set():
+                logger.exception("Jawaban pencarian server anjungan gagal dikirim")
+
+
+class TicketRequest(BaseModel):
+    category_id: int = Field(gt=0)
+    request_id: UUID
+
+
+class KioskServices:
+    def __init__(self) -> None:
+        self.auth = AuthService()
+        self.auth.mulai_sesi_kios()
+        self.settings = SettingsService(self.auth)
+        self.master = MasterDataService(self.auth)
+        self.queue = QueueService(self.auth, self.settings)
+        self.ticket = TicketService(
+            NullTicketPrinter(), self.settings, self.master, self.queue
+        )
+
+
+def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
+    """Build an API application that can issue tickets only for a kiosk session."""
+    if len(token) < MIN_TOKEN_LENGTH:
+        raise ValueError(
+            f"ANTRIAN_KIOS_API_TOKEN must contain at least {MIN_TOKEN_LENGTH} characters."
+        )
+
+    services = services or KioskServices()
+    ticket_lock = threading.Lock()
+    ticket_responses: dict[UUID, dict] = {}
+    app = FastAPI(
+        title="Sistem Antrian CRO Kiosk API",
+        version="1.0.0",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
+
+    def require_token(
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None, Depends(_bearer)
+        ],
+    ) -> None:
+        if credentials is None or not hmac.compare_digest(
+            credentials.credentials, token
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token anjungan tidak sah.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    def welcome_media_paths() -> list[Path]:
+        kind = services.settings.get("kiosk.welcome_kind", "teks")
+        if kind not in _MEDIA_KINDS:
+            return []
+        folder = (base_dir() / "media" / "kiosk").resolve()
+        files = []
+        if folder.is_dir():
+            for item in sorted(folder.iterdir(), key=lambda item: item.name.lower()):
+                if not item.is_file() or item.name.startswith("."):
+                    continue
+                if item.suffix.lower() not in _MEDIA_EXTENSIONS:
+                    continue
+                resolved = item.resolve()
+                try:
+                    resolved.relative_to(folder)
+                except ValueError:
+                    continue
+                files.append(resolved)
+        if files:
+            return files
+        fallback_value = services.settings.get("kiosk.welcome_file", "").strip()
+        fallback = Path(fallback_value) if fallback_value else None
+        if fallback is not None and not fallback.is_absolute():
+            fallback = (folder / fallback).resolve()
+            try:
+                fallback.relative_to(folder)
+            except ValueError:
+                fallback = None
+        return (
+            [fallback]
+            if fallback is not None
+            and fallback.is_file()
+            and fallback.suffix.lower() in _MEDIA_EXTENSIONS
+            else []
+        )
+
+    @app.exception_handler(AppError)
+    async def handle_app_error(_, exc: AppError):
+        if isinstance(exc, AuthenticationError):
+            code = status.HTTP_401_UNAUTHORIZED
+        elif isinstance(exc, AuthorizationError):
+            code = status.HTTP_403_FORBIDDEN
+        elif isinstance(exc, NotFoundError):
+            code = status.HTTP_404_NOT_FOUND
+        elif isinstance(exc, ValidationError):
+            code = status.HTTP_422_UNPROCESSABLE_ENTITY
+        elif isinstance(exc, BusinessRuleError):
+            code = status.HTTP_409_CONFLICT
+        else:
+            code = status.HTTP_400_BAD_REQUEST
+        return JSONResponse(status_code=code, content={"detail": exc.user_message})
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok"}
+
+    @app.get("/v1/kiosk/categories", dependencies=[Depends(require_token)])
+    def categories():
+        return [
+            {
+                "id": item.id,
+                "name": item.name,
+                "prefix": item.prefix,
+                "parent_id": item.parent_id,
+                "is_group": item.punya_anak,
+                "info": item.info_text,
+            }
+            for item in services.master.list_categories(only_active=True)
+        ]
+
+    @app.get("/v1/kiosk/display", dependencies=[Depends(require_token)])
+    def display():
+        """Return the live counter strip and kiosk availability state."""
+        state = services.queue.display_state(jumlah_berikutnya=0)
+        media = welcome_media_paths()
+        return {
+            "title": services.settings.get("display.title", "ANTRIAN PELAYANAN CRO"),
+            "welcome_text": services.settings.get(
+                "kiosk.welcome_text",
+                "Sentuh salah satu layanan di bawah untuk mengambil nomor.",
+            )
+            or "Sentuh salah satu layanan di bawah untuk mengambil nomor.",
+            "welcome_kind": services.settings.get("kiosk.welcome_kind", "teks"),
+            "welcome_slide_seconds": services.settings.get_int(
+                "kiosk.welcome_slide_seconds", 10
+            ),
+            "welcome_media": [item.name for item in media],
+            "total_waiting": state.total_menunggu,
+            "registration_open": services.queue.pendaftaran_dibuka(),
+            "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(),
+            "counters": [
+                {
+                    "name": counter.counter_name,
+                    "queue_number": (
+                        counter.antrian.queue_number
+                        if counter.antrian is not None
+                        else None
+                    ),
+                    "status": (
+                        counter.antrian.label_status
+                        if counter.antrian is not None
+                        else ("ISTIRAHAT" if counter.istirahat else "KOSONG")
+                    ),
+                }
+                for counter in state.loket
+            ],
+        }
+
+    @app.get(
+        "/v1/kiosk/media/{filename}",
+        dependencies=[Depends(require_token)],
+        response_class=FileResponse,
+    )
+    def welcome_media(filename: str):
+        """Serve only configured kiosk welcome media files."""
+        if not filename or filename != Path(filename).name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Media sambutan tidak ditemukan.",
+            )
+        media = next(
+            (item for item in welcome_media_paths() if item.name == filename),
+            None,
+        )
+        if media is None or media.suffix.lower() not in _MEDIA_EXTENSIONS:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Media sambutan tidak ditemukan.",
+            )
+        media_type = mimetypes.guess_type(media.name)[0] or "application/octet-stream"
+        return FileResponse(media, media_type=media_type)
+
+    @app.post("/v1/kiosk/tickets", dependencies=[Depends(require_token)])
+    def issue_ticket(request: TicketRequest):
+        with ticket_lock:
+            cached = ticket_responses.get(request.request_id)
+            if cached is not None:
+                return cached
+
+            queue_info = services.queue.create_queue(request.category_id)
+            ticket_warning = None
+            ticket_layout = None
+            try:
+                ticket = services.ticket.susun(queue_info)
+                ticket_lines = ticket.baris_teks()
+                ticket_layout = tata_letak_tiket_anjungan(ticket)
+                issued_at = ticket.issued_at.isoformat()
+            except Exception:
+                logger.exception(
+                    "Tiket %s terbit, tetapi isi struk gagal disusun",
+                    queue_info.queue_number,
+                )
+                ticket_lines = [
+                    "NOMOR ANTRIAN",
+                    queue_info.queue_number,
+                    queue_info.category_name,
+                ]
+                issued_at = queue_info.created_at.isoformat()
+                ticket_warning = "Nomor terbit; rincian tiket tidak lengkap."
+            try:
+                ahead_count = services.queue.ringkasan_tiket(
+                    queue_info
+                ).sisa_antrian
+            except Exception:
+                logger.warning(
+                    "Sisa antrian untuk %s tidak terbaca",
+                    queue_info.queue_number,
+                    exc_info=True,
+                )
+                ahead_count = None
+            response = {
+                "request_id": str(request.request_id),
+                "queue_number": queue_info.queue_number,
+                "category_name": queue_info.category_name,
+                "issued_at": issued_at,
+                "ahead_count": ahead_count,
+                "ticket_lines": ticket_lines,
+                "ticket_layout": ticket_layout,
+                "ticket_warning": ticket_warning,
+                "cooldown_seconds": services.settings.get_int(
+                    "kiosk.cooldown_seconds", 10
+                ),
+            }
+            ticket_responses[request.request_id] = response
+            if len(ticket_responses) > 1000:
+                ticket_responses.pop(next(iter(ticket_responses)))
+            return response
+
+    return app
+
+
+def serve() -> int:
+    """Serve the authenticated LAN kiosk API using an initialized database."""
+    token = os.environ.get("ANTRIAN_KIOS_API_TOKEN", "").strip()
+    if len(token) < MIN_TOKEN_LENGTH:
+        logger.error(
+            "ANTRIAN_KIOS_API_TOKEN must contain at least %s characters.",
+            MIN_TOKEN_LENGTH,
+        )
+        return 2
+    discovery_socket = None
+    discovery_stop = threading.Event()
+    discovery_thread = None
+    try:
+        services = KioskServices()
+        app = create_app(token, services)
+        host = os.environ.get("ANTRIAN_KIOS_API_HOST", "0.0.0.0")
+        port = int(os.environ.get("ANTRIAN_KIOS_API_PORT", "8765"))
+        discovery_port = int(
+            os.environ.get("ANTRIAN_KIOS_DISCOVERY_PORT", str(DISCOVERY_PORT))
+        )
+        discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        discovery_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        discovery_socket.bind(("0.0.0.0", discovery_port))
+        discovery_socket.settimeout(0.5)
+        discovery_thread = threading.Thread(
+            target=_serve_discovery,
+            args=(discovery_socket, port, discovery_stop),
+            name="kiosk-discovery",
+            daemon=True,
+        )
+        discovery_thread.start()
+        logger.info(
+            "API anjungan dimulai pada %s:%s; pencarian LAN UDP %s "
+            "(revisi database %s)",
+            host,
+            port,
+            discovery_port,
+            current_revision(),
+        )
+        uvicorn.run(app, host=host, port=port, log_config=None)
+        return 0
+    except Exception:
+        logger.exception("API anjungan berhenti karena kesalahan")
+        return 1
+    finally:
+        discovery_stop.set()
+        if discovery_socket is not None:
+            discovery_socket.close()
+        if discovery_thread is not None:
+            discovery_thread.join(timeout=1)
+
+
+def main() -> int:
+    """Initialize the database and serve the authenticated LAN kiosk API."""
+    config = get_config()
+    setup_logging(config)
+    try:
+        from app.core.database import init_database
+
+        init_database()
+        seed_initial_data()
+        return serve()
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return 2
+    except Exception:
+        logger.exception("API anjungan gagal dimulai")
+        return 1
+    finally:
+        dispose_engine()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

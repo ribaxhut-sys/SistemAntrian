@@ -17,15 +17,16 @@ Argumen:
     --layar       nama lama --kios. Dipertahankan supaya pintasan yang sudah
                   terpasang di komputer anjungan tidak mati saat aplikasi
                   diperbarui.
-    --admin       langsung membuka layar admin. Dari source, masuk sebagai
-                  administrator tanpa sandi; pada .exe tetap minta login.
-    --petugas     langsung membuka layar petugas. Dari source, masuk sebagai
-                  petugas CRO tanpa sandi; pada .exe tetap minta login.
+    --admin       langsung membuka layar loket sebagai administrator.
+                  Tetap minta nama dan sandi: beberapa petugas berbagi
+                  komputer yang sama.
+    --petugas     langsung membuka layar loket. Tetap minta nama dan sandi.
     --init-only   hanya siapkan database lalu keluar, tanpa membuka jendela.
                   Berguna untuk memeriksa pemasangan di komputer baru.
     --setup       buka dialog peran komputer ini (satu komputer / server /
                   klien) sebelum menyambung ke database. Bukan deteksi
                   jaringan: orang yang memasang yang menunjuk.
+    --kios-api    jalankan API lokal yang dipakai APK anjungan Android.
     --jendela[=PERSEN]
                   buka mesin publik sebagai jendela, bukan layar penuh.
                   Totem tampil sebagai miniatur tegak dari 1080×1920:
@@ -286,25 +287,18 @@ def _jalankan_ui(
             app.exec()
             continue  # mesin publik ditutup -> kembali ke layar pilihan mode
 
-        # Mode petugas: logout kembali langsung ke layar masuk, tidak
-        # mampir dulu ke layar pilihan mode.
+        # Loket: logout kembali langsung ke layar masuk, tidak mampir
+        # dulu ke layar pilihan mode.
+        #
+        # Beberapa petugas berbagi satu komputer, jadi nama dan sandi
+        # selalu diminta — juga saat dijalankan dari source. Pintasan
+        # tanpa sandi akan memilih satu akun dan menutup jalan yang lain.
+        # Televisi dan anjungan tidak lewat sini.
         while True:
-            if lewati_login_pengembang():
-                # Uji tampilan: jangan minta nama/sandi, dan jangan paksa
-                # ganti sandi bawaan — keduanya menghalangi pekerjaan yang
-                # sedang diuji. Admin dan petugas dipisah: admin tidak
-                # punya hak memanggil, petugas tidak punya hak pengaturan.
-                # Setelah jendela ditutup, kembali ke pilihan mode supaya
-                # tidak masuk lagi diam-diam.
-                if mode == LAYAR_ADMIN:
-                    auth.mulai_sesi_pengembang()
-                else:
-                    auth.mulai_sesi_petugas()
-            else:
-                login = LoginWindow(auth)
-                if login.exec() != QDialog.DialogCode.Accepted:
-                    logger.info("Layar masuk ditutup, kembali ke layar pilihan")
-                    break  # -> layar pilihan mode
+            login = LoginWindow(auth)
+            if login.exec() != QDialog.DialogCode.Accepted:
+                logger.info("Layar masuk ditutup, kembali ke layar pilihan")
+                break  # -> layar pilihan mode
 
             sesi = auth.require_session()
 
@@ -324,8 +318,6 @@ def _jalankan_ui(
             # tanpa bingkai jendela karena layarnya menghadap pengunjung.
             jendela.tampilkan()
             app.exec()
-            if lewati_login_pengembang():
-                break
             # petugas logout -> kembali langsung ke layar masuk
 
 
@@ -457,13 +449,36 @@ def perlu_setup_awal(
         return False
     if os.environ.get("ANTRIAN_DB_URL", "").strip():
         return False
-    if "--init-only" in argv:
+    if "--init-only" in argv or "--kios-api" in argv:
         return False
     if _mesin_publik_tanpa_jaga(argv, db_path):
         return False
     if lewati_login_pengembang():
         return False
     return not path_berkas_mesin(db_path).is_file()
+
+
+def _harus_mulai_api_anjungan_otomatis(config, argv: list[str]) -> bool:
+    """API otomatis hanya untuk peluncuran biasa pada mesin PostgreSQL server."""
+    if any(arg in argv for arg in ("--kios-api", "--init-only", "--setup")):
+        return False
+
+    from app.core.mesin import SERVER, muat_pengaturan
+    from app.services.kiosk_server import muat_api_otomatis
+
+    if not muat_api_otomatis() or config.dialect != "postgresql":
+        return False
+    if muat_pengaturan(config.db_path).peran != SERVER:
+        return False
+
+    host = (config.url_database.host or "").lower()
+    if host not in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}:
+        logger.warning(
+            "API otomatis dilewati: peran mesin SERVER tersimpan, tetapi "
+            "database aktif tidak menunjuk PostgreSQL lokal."
+        )
+        return False
+    return True
 
 
 def _jalankan_dialog_mesin() -> bool:
@@ -537,6 +552,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
+        if "--kios-api" in argv:
+            from app.kiosk_api import serve
+
+            return serve()
+
+        if _harus_mulai_api_anjungan_otomatis(config, argv):
+            from app.services.kiosk_server import mulai_api_otomatis
+
+            if not mulai_api_otomatis(config.base_dir, config.log_dir):
+                logger.warning(
+                    "API anjungan tidak dimulai otomatis. Buka menu "
+                    "'Server Anjungan Android' untuk menyiapkan token "
+                    "dan Firewall."
+                )
+
         # Import Qt ditunda sampai jendela benar-benar dibuka, sehingga mode
         # dibaca di sini dan bukan di awal main(): --init-only harus tetap
         # berjalan di komputer yang PySide6-nya belum lengkap.

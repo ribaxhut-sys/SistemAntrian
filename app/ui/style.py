@@ -844,6 +844,11 @@ QLabel#catatanTeks {{
     font-size: 12px;
 }}
 
+QFrame#garisBagiMesin {{
+    background: {BORDER};
+    border: none;
+}}
+
 QFrame#panelAlamatServer {{
     background: {PRIMARY_SOFT};
     border: 1px solid {BORDER};

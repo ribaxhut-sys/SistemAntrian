@@ -1674,19 +1674,16 @@ def test_mode_dialog_memilih_layar_antrian(qtbot):
     assert dialog.result() == int(QDialog.DialogCode.Accepted)
 
 
-def test_mode_dialog_menawarkan_lima_pilihan_saat_uji(qtbot):
+def test_mode_dialog_loket_satu_tombol(qtbot):
     """
-    Dari source, admin dan petugas harus dapat dipilih terpisah.
-
-    Satu tombol 'Layar Petugas' yang selalu masuk sebagai admin membuat
-    uji panggilan tidak bisa dilakukan tanpa mematikan pintasan login.
+    Loket satu tombol. Beberapa petugas berbagi komputer, jadi yang
+    membedakan administrator dan petugas adalah akun yang masuk.
     """
     from PySide6.QtWidgets import QPushButton
 
     from app.ui.login.mode_dialog import (
         ANJUNGAN,
         ANJUNGAN_TOTEM,
-        LAYAR_ADMIN,
         LAYAR_ANTRIAN,
         LAYAR_PETUGAS,
         ModeDialog,
@@ -1699,13 +1696,13 @@ def test_mode_dialog_menawarkan_lima_pilihan_saat_uji(qtbot):
         b for b in dialog.findChildren(QPushButton) if b.objectName() == "kartuMode"
     ]
     teks = [b.text() for b in kartu]
-    assert len(teks) == 5
+    assert len(teks) == 4
     assert any("ANTRIAN" in t for t in teks)
     assert any("ANJUNGAN AMBIL NOMOR" in t for t in teks)
     assert any("ANJUNGAN BERDIRI" in t for t in teks)
-    assert any("ADMIN" in t for t in teks)
     assert any("PETUGAS" in t for t in teks)
-    assert len({LAYAR_ANTRIAN, ANJUNGAN, ANJUNGAN_TOTEM, LAYAR_ADMIN, LAYAR_PETUGAS}) == 5
+    assert not any("ADMIN" in t for t in teks)
+    assert len({LAYAR_ANTRIAN, ANJUNGAN, ANJUNGAN_TOTEM, LAYAR_PETUGAS}) == 4
     assert any(
         b.text() == "Atur komputer ini" for b in dialog.findChildren(QPushButton)
     )
@@ -1751,21 +1748,19 @@ def test_mode_dialog_memilih_layar_petugas(qtbot):
     assert dialog.result() == int(QDialog.DialogCode.Accepted)
 
 
-def test_mode_dialog_memilih_layar_admin(qtbot):
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QDialog, QPushButton
+def test_mode_dialog_tidak_menawarkan_masuk_admin_tanpa_sandi(qtbot):
+    """Tidak ada kartu yang masuk sebagai administrator tanpa akun."""
+    from PySide6.QtWidgets import QPushButton
 
-    from app.ui.login.mode_dialog import LAYAR_ADMIN, ModeDialog
+    from app.ui.login.mode_dialog import ModeDialog
 
     dialog = ModeDialog()
     qtbot.addWidget(dialog)
-    tombol_admin = next(
-        b for b in dialog.findChildren(QPushButton) if "ADMIN" in b.text()
-    )
-    qtbot.mouseClick(tombol_admin, Qt.MouseButton.LeftButton)
+    kartu = [
+        b for b in dialog.findChildren(QPushButton) if b.objectName() == "kartuMode"
+    ]
 
-    assert dialog.pilihan == LAYAR_ADMIN
-    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+    assert not any("ADMIN" in b.text() for b in kartu)
 
 
 def test_dialog_mesin_bawaan_satu_komputer(qtbot, app_config):
@@ -1782,6 +1777,121 @@ def test_dialog_mesin_bawaan_satu_komputer(qtbot, app_config):
     assert dialog.result() == int(QDialog.DialogCode.Accepted)
     assert dialog.pengaturan_tersimpan is not None
     assert dialog.pengaturan_tersimpan.peran == "sendiri"
+
+
+def test_dialog_mesin_server_hanya_menampilkan_sandi(qtbot, app_config):
+    """Port, database, dan pengguna tidak lagi diubah dari dialog ini."""
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog.radio_server.setChecked(True)
+    dialog._perbarui_tampilan()
+
+    assert dialog.isian_port.isHidden()
+    assert dialog.isian_database.isHidden()
+    assert dialog.isian_pengguna.isHidden()
+    assert not dialog.isian_sandi.isHidden()
+    assert not dialog._tombol_siapkan.isHidden()
+    assert dialog._tombol_cari.isHidden()
+
+
+def test_dialog_sandi_berubah_minta_diketik_ulang(qtbot, app_config):
+    from PySide6.QtWidgets import QDialog
+
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog.radio_server.setChecked(True)
+    dialog._perbarui_tampilan()
+    dialog._sandi_tersimpan = "sandi-lama"
+    dialog.isian_sandi.setText("sandi-lama")
+    dialog._perbarui_ulang_sandi()
+    assert dialog._baris_ulang.isHidden()
+
+    dialog.isian_sandi.setText("sandi-baru")
+    assert not dialog._baris_ulang.isHidden()
+    dialog.isian_ulang.setText("tidak-sama")
+    dialog._simpan()
+    assert dialog.result() != int(QDialog.DialogCode.Accepted)
+    assert "ulang" in dialog._label_error.text().lower()
+
+
+def test_dialog_penolakan_antrian_tidak_mengosongkan_sandi(qtbot, app_config):
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog.radio_server.setChecked(True)
+    dialog._perbarui_tampilan()
+    dialog.isian_sandi.setText("salah")
+    dialog._sesudah_gagal_sambungan(
+        "PostgreSQL menolak pengguna antrian. Kata sandinya tidak cocok."
+    )
+
+    assert dialog.isian_sandi.text() == "salah"
+    assert dialog.isian_port.isHidden()
+    assert "siapkan database" in dialog._label_error.text().lower()
+    assert "belum ada" in dialog._label_error.text().lower()
+
+
+def test_dialog_port_muncul_bila_tidak_menjawab(qtbot, app_config):
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog.radio_server.setChecked(True)
+    dialog._perbarui_tampilan()
+    assert dialog.isian_port.isHidden()
+
+    dialog._sesudah_gagal_sambungan(
+        "Tidak dapat menghubungi database. PostgreSQL tidak menjawab."
+    )
+
+    assert not dialog.isian_port.isHidden()
+    dialog.isian_port.setValue(5433)
+    assert dialog._pengaturan_dari_form().port == 5433
+
+
+def test_dialog_dapat_menampilkan_sandi_lalu_menyembunyikannya(qtbot, app_config):
+    from PySide6.QtWidgets import QLineEdit
+
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog.isian_sandi.setText("rahasia-db")
+    dialog.isian_ulang.setText("rahasia-db")
+
+    assert dialog.isian_sandi.echoMode() == QLineEdit.EchoMode.Password
+    dialog._tukar_tampil_sandi()
+    assert dialog.isian_sandi.echoMode() == QLineEdit.EchoMode.Normal
+    assert dialog.isian_ulang.echoMode() == QLineEdit.EchoMode.Normal
+    assert dialog._tombol_tampil_sandi.text() == "Sembunyikan"
+
+    dialog._tukar_tampil_sandi()
+    assert dialog.isian_sandi.echoMode() == QLineEdit.EchoMode.Password
+    assert dialog.isian_sandi.text() == "rahasia-db"
+
+
+def test_dialog_ubah_port_hanya_untuk_loket_admin(qtbot, app_config):
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+    dialog.radio_server.setChecked(True)
+    dialog._perbarui_tampilan()
+    dialog._pilih_nilai(dialog.pilih_peran, "petugas")
+
+    assert dialog._tombol_ubah_port.isHidden()
+    dialog._buka_ubah_port()
+    assert dialog.isian_port.isHidden()
+
+    dialog._pilih_nilai(dialog.pilih_peran, "admin")
+    assert not dialog._tombol_ubah_port.isHidden()
+    dialog._buka_ubah_port()
+    assert not dialog.isian_port.isHidden()
 
 
 def test_dialog_mesin_server_menampilkan_alamat(qtbot, app_config):

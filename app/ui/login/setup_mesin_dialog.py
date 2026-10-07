@@ -2,10 +2,10 @@
 Dialog menetapkan peran komputer ini: terhadap database, dan terhadap
 pengunjung.
 
-Bukan deteksi jaringan. Orang yang memasang memilih: satu komputer,
-server, atau klien. Pilihan itu disimpan di mesin.json pada komputer
-ini saja, lalu komputer klien menuliskan alamat yang ditampilkan di
-sini — bukan mencari sendiri siapa yang sedang menyala.
+Orang yang memasang memilih: satu komputer, server, atau klien.
+Pilihan itu disimpan di mesin.json pada komputer ini saja. Komputer
+klien mencari PostgreSQL di jaringan yang sama; bila lebih dari satu
+yang menjawab, orang itu yang memilih, bukan aplikasi.
 
 Bagian kedua menjawab pertanyaan yang berbeda: komputer ini menghadap
 pengunjung sebagai apa. Jawabannya ditulis ke berkas TERPISAH,
@@ -22,7 +22,7 @@ tersimpan apa adanya.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QRadioButton,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -40,15 +41,20 @@ from PySide6.QtWidgets import (
 
 from app.core.config import APP_NAME, get_config
 from app.core.mesin import (
+    DATABASE_BAWAAN,
     KLIEN,
+    PENGGUNA_BAWAAN,
+    PORT_BAWAAN,
     SENDIRI,
     SERVER,
     alamat_ipv4_lokal,
+    cari_server_jaringan,
     env_url_mengalahkan,
     kesalahan_isian,
     muat_pengaturan,
     path_berkas_mesin,
     PengaturanMesin,
+    siapkan_database_lokal,
     tulis_berkas_mesin,
     uji_koneksi,
 )
@@ -114,6 +120,24 @@ _SEBUTAN_PENCETAK = {"": "ikut pengaturan", "none": "tidak mencetak"}
 _SEBUTAN_SUARA = {None: "ikut pengaturan", True: "bunyikan", False: "diam"}
 _SEBUTAN_BENTUK = {"": "diukur sendiri"}
 
+#: Pengguna yang boleh tertinggal dari pemasangan lama. Selain ketiga
+#: ini, dialog mengembalikan ke pengguna antrian: isiannya tidak lagi
+#: ditampilkan, jadi nilai asing tidak boleh tersimpan diam-diam.
+_PENGGUNA_TETAP = frozenset({PENGGUNA_BAWAAN, "antrian_kios", "antrian_layar"})
+
+
+class _PencariServer(QThread):
+    """Pindaian jaringan di utas sendiri supaya dialog tetap dapat diklik."""
+
+    selesai = Signal(object)
+
+    def __init__(self, port: int, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._port = port
+
+    def run(self) -> None:
+        self.selesai.emit(cari_server_jaringan(port=self._port))
+
 
 def _tiket_contoh() -> "TicketData":
     """
@@ -142,7 +166,10 @@ class SetupMesinDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("dialogMesin")
         self.setWindowTitle(f"{APP_NAME} — Komputer ini")
-        self.setFixedWidth(560)
+        # Lebar dikunci supaya penjelasan yang dibungkus tidak berubah
+        # tinggi setiap kali jendela ditarik. Tingginya mengikuti isi,
+        # dan isi itu disusun dua kolom agar muat di layar loket yang pendek.
+        self.setFixedWidth(960)
 
         cfg = get_config()
         self._db_path = cfg.db_path
@@ -150,6 +177,9 @@ class SetupMesinDialog(QDialog):
         self._url_semula = cfg.database_url
         self.pengaturan_tersimpan: PengaturanMesin | None = None
         self.peran_tersimpan: PeranKomputer | None = None
+        self._sandi_tersimpan = ""
+        self._wajib_ulang = False
+        self._port_terbuka = False
 
         self._bangun_tampilan()
         self._muat(muat_pengaturan(self._db_path))
@@ -181,8 +211,8 @@ class SetupMesinDialog(QDialog):
 
     def _bangun_tampilan(self) -> None:
         susunan = QVBoxLayout(self)
-        susunan.setContentsMargins(28, 24, 28, 20)
-        susunan.setSpacing(12)
+        susunan.setContentsMargins(20, 14, 20, 12)
+        susunan.setSpacing(8)
 
         judul = QLabel("Bagaimana komputer ini dipakai?")
         judul.setProperty("heading", "true")
@@ -190,8 +220,9 @@ class SetupMesinDialog(QDialog):
         susunan.addWidget(
             keterangan(
                 "Hanya SATU komputer di kantor yang boleh menjadi server. "
-                "Komputer lain menuliskan alamatnya. Aplikasi tidak mencari "
-                "sendiri siapa yang menyala."
+                "Komputer lain mencari PostgreSQL di jaringan yang sama. "
+                "Bila lebih dari satu yang menjawab, pilih yang memang "
+                "server antrian."
             )
         )
 
@@ -211,36 +242,86 @@ class SetupMesinDialog(QDialog):
         )
         self.radio_server = self._radio(
             "Komputer ini adalah SERVER",
-            "PostgreSQL dipasang di mesin ini. Komputer loket, anjungan, dan "
-            "televisi menyambung ke alamat yang ditampilkan di bawah.",
+            "PostgreSQL dipasang di mesin ini. Yang diisi hanya kata sandi "
+            "database. Bila pengguna antrian belum ada, tekan Siapkan database.",
         )
         self.radio_klien = self._radio(
             "Komputer ini menyambung ke SERVER",
-            "Isi alamat komputer server. Anjungan memakai pengguna "
-            "antrian_kios, televisi memakai antrian_layar — bukan akun petugas.",
+            "Cari server di jaringan yang sama. Kata sandinya sama dengan "
+            "yang dibuat di komputer server. Port dan pengguna sudah tetap.",
         )
         self._grup.addButton(self.radio_sendiri)
         self._grup.addButton(self.radio_server)
         self._grup.addButton(self.radio_klien)
-        susunan.addWidget(self._baris_peran(self.radio_sendiri))
-        susunan.addWidget(self._baris_peran(self.radio_server))
-        susunan.addWidget(self._baris_peran(self.radio_klien))
         self._grup.buttonClicked.connect(self._perbarui_tampilan)
 
         self._panel_server = self._bangun_panel_server()
-        susunan.addWidget(self._panel_server)
-
         self._panel_postgres = self._bangun_panel_postgres()
-        susunan.addWidget(self._panel_postgres)
-
         self._panel_peran = self._bangun_panel_peran()
-        susunan.addWidget(self._panel_peran)
+
+        # Dua kolom karena dua pertanyaan ini tidak bergantung satu sama
+        # lain. Menumpuknya membuat tombol Simpan jatuh ke bawah lipatan
+        # pada layar loket yang pendek.
+        kiri = QWidget()
+        susunan_kiri = QVBoxLayout(kiri)
+        susunan_kiri.setContentsMargins(0, 0, 0, 0)
+        susunan_kiri.setSpacing(2)
+        susunan_kiri.addWidget(self._baris_peran(self.radio_sendiri))
+        susunan_kiri.addWidget(self._baris_peran(self.radio_server))
+        susunan_kiri.addWidget(self._baris_peran(self.radio_klien))
+        susunan_kiri.addWidget(self._panel_server)
+        susunan_kiri.addWidget(self._panel_postgres)
+        susunan_kiri.addStretch(1)
+
+        kanan = QWidget()
+        susunan_kanan = QVBoxLayout(kanan)
+        susunan_kanan.setContentsMargins(0, 0, 0, 0)
+        susunan_kanan.setSpacing(0)
+        susunan_kanan.addWidget(self._panel_peran)
+        susunan_kanan.addStretch(1)
+
+        garis = QFrame()
+        garis.setObjectName("garisBagiMesin")
+        garis.setFixedWidth(1)
+        garis.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
+        )
+
+        bagi = QHBoxLayout()
+        bagi.setSpacing(16)
+        bagi.addWidget(kiri, 1)
+        bagi.addWidget(garis)
+        bagi.addWidget(kanan, 1)
+        susunan.addLayout(bagi)
 
         self._label_error = label_error()
         susunan.addWidget(self._label_error)
-
-        susunan.addStretch(1)
         susunan.addLayout(self._bangun_tombol())
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._sesuaikan_tinggi()
+
+    def closeEvent(self, event) -> None:
+        pencari = getattr(self, "_pencari", None)
+        if pencari is not None and pencari.isRunning():
+            pencari.wait(8000)
+        super().closeEvent(event)
+
+    def _sesuaikan_tinggi(self) -> None:
+        """
+        Kunci tinggi ke isi yang sedang terlihat.
+
+        Label penjelasan membungkus kata, jadi tinggi dialog baru benar
+        sesudah lebarnya diketahui. Tanpa ini Qt memakai tinggi satu baris
+        dan isinya terpotong, atau memanjang kosong di bawah tombol.
+        """
+        if not self.isVisible() or self.layout() is None:
+            return
+        self.ensurePolished()
+        tinggi = self.layout().totalHeightForWidth(self.width())
+        if tinggi > 0:
+            self.setFixedHeight(tinggi)
 
     def _radio(self, judul: str, penjelasan: str) -> QRadioButton:
         tombol_radio = QRadioButton(judul)
@@ -251,8 +332,8 @@ class SetupMesinDialog(QDialog):
         """Judul radio plus penjelasan yang terbaca tanpa harus diam di atasnya."""
         kotak = QWidget()
         susunan = QVBoxLayout(kotak)
-        susunan.setContentsMargins(0, 2, 0, 6)
-        susunan.setSpacing(2)
+        susunan.setContentsMargins(0, 0, 0, 2)
+        susunan.setSpacing(0)
         susunan.addWidget(tombol_radio)
         teks = QLabel(tombol_radio.toolTip())
         teks.setProperty("muted", "true")
@@ -264,9 +345,9 @@ class SetupMesinDialog(QDialog):
     def _bangun_panel_server(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("panelAlamatServer")
-        susunan = QVBoxLayout(panel)
-        susunan.setContentsMargins(12, 8, 12, 8)
-        susunan.setSpacing(6)
+        susunan = QHBoxLayout(panel)
+        susunan.setContentsMargins(10, 6, 10, 6)
+        susunan.setSpacing(8)
 
         self._label_alamat = QLabel()
         self._label_alamat.setObjectName("alamatServer")
@@ -274,51 +355,121 @@ class SetupMesinDialog(QDialog):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self._label_alamat.setWordWrap(True)
-        susunan.addWidget(self._label_alamat)
+        susunan.addWidget(self._label_alamat, 1)
 
         salin = tombol("Salin alamat")
         salin.setObjectName("tombolSalinAlamat")
         salin.setAutoDefault(False)
         salin.clicked.connect(self._salin_alamat)
-        baris = QHBoxLayout()
-        baris.addWidget(salin)
-        baris.addStretch(1)
-        susunan.addLayout(baris)
+        susunan.addWidget(salin, 0, Qt.AlignmentFlag.AlignVCenter)
         return panel
 
     def _bangun_panel_postgres(self) -> QWidget:
+        """
+        Kata sandi diketik sekali. Kotak kedua muncul bila sandi yang
+        sudah tersimpan diganti, atau bila PostgreSQL menolaknya.
+        Port disembunyikan sampai 5432 tidak menjawab.
+        """
         panel = QWidget()
-        form = QFormLayout(panel)
-        form.setContentsMargins(4, 4, 4, 4)
-        form.setSpacing(8)
+        luar = QVBoxLayout(panel)
+        luar.setContentsMargins(0, 4, 0, 0)
+        luar.setSpacing(6)
 
+        self._baris_host = QWidget()
+        baris_host = QHBoxLayout(self._baris_host)
+        baris_host.setContentsMargins(0, 0, 0, 0)
+        baris_host.setSpacing(8)
+        self._label_host = QLabel("Alamat server")
         self.isian_host = QLineEdit()
         self.isian_host.setObjectName("isianHost")
-        self.isian_host.setPlaceholderText("contoh: 192.168.1.10")
-        form.addRow("Alamat server", self.isian_host)
+        self.isian_host.setPlaceholderText("tekan Cari di jaringan")
+        self.isian_host.setReadOnly(True)
+        baris_host.addWidget(self._label_host)
+        baris_host.addWidget(self.isian_host, 1)
+        self._tombol_cari = tombol("Cari di jaringan")
+        self._tombol_cari.setObjectName("tombolCariServer")
+        self._tombol_cari.setAutoDefault(False)
+        self._tombol_cari.clicked.connect(self._cari_server)
+        baris_host.addWidget(self._tombol_cari)
+        luar.addWidget(self._baris_host)
+
+        self._pilih_server = QComboBox()
+        self._pilih_server.setObjectName("pilihServer")
+        self._pilih_server.currentIndexChanged.connect(self._pilih_alamat_server)
+        self._baris_pilih = self._kolom_isian("Pilih server", self._pilih_server)
+        self._baris_pilih.setVisible(False)
+        luar.addWidget(self._baris_pilih)
+
+        self._tombol_ubah_port = tombol("Ubah port")
+        self._tombol_ubah_port.setObjectName("tombolUbahPort")
+        self._tombol_ubah_port.setAutoDefault(False)
+        self._tombol_ubah_port.setToolTip(
+            "Peran Loket admin. Nomor yang diganti harus sama di setiap komputer."
+        )
+        self._tombol_ubah_port.clicked.connect(self._buka_ubah_port)
+        self._tombol_ubah_port.hide()
+        luar.addWidget(self._tombol_ubah_port, 0, Qt.AlignmentFlag.AlignLeft)
 
         self.isian_port = QSpinBox()
         self.isian_port.setObjectName("isianPort")
         self.isian_port.setRange(1, 65535)
-        self.isian_port.setValue(5432)
-        form.addRow("Port", self.isian_port)
-
-        self.isian_database = QLineEdit()
-        self.isian_database.setObjectName("isianDatabase")
-        self.isian_database.setPlaceholderText("antrian")
-        form.addRow("Database", self.isian_database)
-
-        self.isian_pengguna = QLineEdit()
-        self.isian_pengguna.setObjectName("isianPengguna")
-        self.isian_pengguna.setPlaceholderText("antrian")
-        form.addRow("Pengguna", self.isian_pengguna)
+        self.isian_port.setValue(PORT_BAWAAN)
+        self._baris_port = self._kolom_isian("Port", self.isian_port)
+        self._baris_port.setVisible(False)
+        self.isian_port.hide()
+        luar.addWidget(self._baris_port)
 
         self.isian_sandi = QLineEdit()
         self.isian_sandi.setObjectName("isianSandi")
         self.isian_sandi.setEchoMode(QLineEdit.EchoMode.Password)
-        form.addRow("Kata sandi", self.isian_sandi)
+        self.isian_sandi.setPlaceholderText("sandi database antrian")
+        self.isian_sandi.textChanged.connect(self._perbarui_ulang_sandi)
+        self._tombol_tampil_sandi = tombol("Tampilkan")
+        self._tombol_tampil_sandi.setObjectName("tombolTampilSandi")
+        self._tombol_tampil_sandi.setAutoDefault(False)
+        self._tombol_tampil_sandi.clicked.connect(self._tukar_tampil_sandi)
+        baris_sandi = QWidget()
+        susunan_sandi = QHBoxLayout(baris_sandi)
+        susunan_sandi.setContentsMargins(0, 0, 0, 0)
+        susunan_sandi.setSpacing(8)
+        susunan_sandi.addWidget(self.isian_sandi, 1)
+        susunan_sandi.addWidget(self._tombol_tampil_sandi)
+        luar.addWidget(self._kolom_isian("Kata sandi database", baris_sandi))
 
+        self.isian_ulang = QLineEdit()
+        self.isian_ulang.setObjectName("isianUlangSandi")
+        self.isian_ulang.setEchoMode(QLineEdit.EchoMode.Password)
+        self.isian_ulang.setPlaceholderText("sandi yang sama")
+        self._baris_ulang = self._kolom_isian("Ketik ulang kata sandi", self.isian_ulang)
+        self._baris_ulang.setVisible(False)
+        luar.addWidget(self._baris_ulang)
+
+        self._tombol_siapkan = tombol("Siapkan database")
+        self._tombol_siapkan.setObjectName("tombolSiapkanDatabase")
+        self._tombol_siapkan.setAutoDefault(False)
+        self._tombol_siapkan.clicked.connect(self._siapkan_database)
+        luar.addWidget(self._tombol_siapkan, 0, Qt.AlignmentFlag.AlignLeft)
+
+        self.isian_database = QLineEdit(panel)
+        self.isian_database.setObjectName("isianDatabase")
+        self.isian_database.setText(DATABASE_BAWAAN)
+        self.isian_database.hide()
+
+        self.isian_pengguna = QLineEdit(panel)
+        self.isian_pengguna.setObjectName("isianPengguna")
+        self.isian_pengguna.setText(PENGGUNA_BAWAAN)
+        self.isian_pengguna.hide()
         return panel
+
+    @staticmethod
+    def _kolom_isian(judul: str, widget: QWidget) -> QWidget:
+        kotak = QWidget()
+        susunan = QVBoxLayout(kotak)
+        susunan.setContentsMargins(0, 0, 0, 0)
+        susunan.setSpacing(2)
+        susunan.addWidget(QLabel(judul))
+        susunan.addWidget(widget)
+        return kotak
 
     def _bangun_panel_peran(self) -> QWidget:
         """
@@ -331,8 +482,8 @@ class SetupMesinDialog(QDialog):
         """
         panel = QWidget()
         susunan = QVBoxLayout(panel)
-        susunan.setContentsMargins(0, 8, 0, 0)
-        susunan.setSpacing(8)
+        susunan.setContentsMargins(0, 0, 0, 0)
+        susunan.setSpacing(6)
 
         judul = QLabel("Komputer ini dipakai sebagai")
         judul.setProperty("heading", "true")
@@ -346,11 +497,13 @@ class SetupMesinDialog(QDialog):
         )
 
         form = QFormLayout()
-        form.setContentsMargins(4, 4, 4, 4)
-        form.setSpacing(8)
+        form.setContentsMargins(0, 2, 0, 0)
+        form.setHorizontalSpacing(8)
+        form.setVerticalSpacing(6)
 
         self.pilih_peran = self._kotak_pilih("pilihPeran", NAMA_PERAN)
         self.pilih_peran.currentIndexChanged.connect(self._perbarui_bawaan_peran)
+        self.pilih_peran.currentIndexChanged.connect(self._perbarui_tombol_port)
         form.addRow("Peran", self.pilih_peran)
 
         self.pilih_pencetak = self._kotak_pilih("pilihPencetak", NAMA_PENCETAK)
@@ -452,12 +605,15 @@ class SetupMesinDialog(QDialog):
         return SENDIRI
 
     def _pengaturan_dari_form(self) -> PengaturanMesin:
+        pengguna = self.isian_pengguna.text().strip()
+        if pengguna not in _PENGGUNA_TETAP:
+            pengguna = PENGGUNA_BAWAAN
         return PengaturanMesin(
             peran=self._peran_terpilih(),
             host=self.isian_host.text().strip(),
             port=int(self.isian_port.value()),
-            nama_database=self.isian_database.text().strip(),
-            pengguna=self.isian_pengguna.text().strip(),
+            nama_database=DATABASE_BAWAAN,
+            pengguna=pengguna,
             sandi=self.isian_sandi.text(),
         )
 
@@ -465,33 +621,131 @@ class SetupMesinDialog(QDialog):
         self.radio_sendiri.setChecked(pengaturan.peran == SENDIRI)
         self.radio_server.setChecked(pengaturan.peran == SERVER)
         self.radio_klien.setChecked(pengaturan.peran == KLIEN)
+        self._sandi_tersimpan = pengaturan.sandi
+        self._wajib_ulang = False
+        self._port_terbuka = pengaturan.port != PORT_BAWAAN
         self.isian_host.setText(pengaturan.host)
         self.isian_port.setValue(pengaturan.port)
         self.isian_database.setText(pengaturan.nama_database)
         self.isian_pengguna.setText(pengaturan.pengguna)
+        self.isian_sandi.blockSignals(True)
         self.isian_sandi.setText(pengaturan.sandi)
+        self.isian_sandi.blockSignals(False)
+        self.isian_ulang.clear()
+
+    def _tampilkan_port(self, tampak: bool) -> None:
+        """Port hanya terlihat bila 5432 tidak menjawab, sudah diganti, atau admin membukanya."""
+        self._port_terbuka = tampak
+        self._baris_port.setVisible(tampak)
+        self.isian_port.setVisible(tampak)
+
+    def _perbarui_tombol_port(self) -> None:
+        """
+        Ubah port tanpa kegagalan hanya untuk peran Loket admin.
+
+        Komputer lain tetap dapat mengisi port bila pencarian atau uji
+        koneksi gagal: nomor itu milik seluruh kantor, bukan milik admin.
+        """
+        admin = self.pilih_peran.currentData() == PERAN_ADMIN
+        self._tombol_ubah_port.setVisible(admin and self._peran_terpilih() != SENDIRI)
+
+    def _buka_ubah_port(self) -> None:
+        if self.pilih_peran.currentData() != PERAN_ADMIN:
+            return
+        self._tampilkan_port(True)
+
+    def _tukar_tampil_sandi(self) -> None:
+        """Tampilkan sandi di layar ini saja. Tidak disalin dan tidak ditulis ke log."""
+        tersembunyi = self.isian_sandi.echoMode() == QLineEdit.EchoMode.Password
+        mode = (
+            QLineEdit.EchoMode.Normal
+            if tersembunyi
+            else QLineEdit.EchoMode.Password
+        )
+        self.isian_sandi.setEchoMode(mode)
+        self.isian_ulang.setEchoMode(mode)
+        self._tombol_tampil_sandi.setText("Sembunyikan" if tersembunyi else "Tampilkan")
+
+    def _perbarui_ulang_sandi(self) -> None:
+        """
+        Kotak kedua untuk sandi yang berubah atau yang baru ditolak.
+
+        Sandi pertama, yang belum pernah tersimpan, cukup diketik sekali.
+        """
+        berubah = bool(self._sandi_tersimpan) and (
+            self.isian_sandi.text() != self._sandi_tersimpan
+        )
+        self._baris_ulang.setVisible(berubah or self._wajib_ulang)
+        if self._baris_ulang.isHidden():
+            self.isian_ulang.clear()
+
+    def _salah_ketik_ulang(self) -> str | None:
+        if self._peran_terpilih() == SENDIRI or self._baris_ulang.isHidden():
+            return None
+        if not self.isian_sandi.text():
+            return "Kata sandi database belum diisi. Ketik ulang di kedua kotak."
+        if self.isian_sandi.text() != self.isian_ulang.text():
+            return "Ketik ulang kata sandi yang sama di kedua kotak."
+        return None
+
+    def _sandi_diterima(self) -> None:
+        self._wajib_ulang = False
+        self._sandi_tersimpan = self.isian_sandi.text()
+        self.isian_ulang.clear()
+        self._perbarui_ulang_sandi()
+
+    def _sesudah_gagal_sambungan(self, pesan: str) -> None:
+        """
+        Penolakan pengguna antrian tidak mengosongkan sandi.
+
+        PostgreSQL memakai kalimat yang sama bila akunnya belum ada dan
+        bila sandinya salah. Mengosongkan kotak membuat orang mengetik
+        ulang sandi yang tidak punya akun. Tombol Siapkan database yang
+        membuat akun itu.
+        """
+        if "menolak pengguna antrian" in pesan.lower():
+            self.isian_sandi.setFocus()
+            self._tampilkan_error(
+                "Pengguna antrian belum ada di PostgreSQL, atau kata "
+                "sandinya tidak cocok. Isi kata sandi yang ingin dipakai, "
+                "lalu tekan Siapkan database. Sandi pengguna postgres "
+                "akan diminta sekali dan tidak disimpan."
+            )
+            return
+        if "tidak menjawab" in pesan.lower() or "tidak dapat menghubungi" in pesan.lower():
+            self._tampilkan_port(True)
+            self._tampilkan_error(
+                f"PostgreSQL tidak menjawab di port {self.isian_port.value()}. "
+                "Ganti port bila nomor itu bentrok atau PostgreSQL memakai "
+                "port lain. Seluruh komputer kantor harus memakai port yang sama."
+            )
+            return
+        self._tampilkan_error(pesan)
 
     def _perbarui_tampilan(self) -> None:
         peran = self._peran_terpilih()
         self._panel_server.setVisible(peran == SERVER)
         self._panel_postgres.setVisible(peran != SENDIRI)
-        self.isian_host.setVisible(peran == KLIEN)
-        # Baris "Alamat server" ikut disembunyikan: label form menempel
-        # pada field, dan field yang invisible masih menyisakan labelnya
-        # bila tidak ikut di-hide lewat item form. QFormLayout tidak
-        # menyembunyikan label otomatis di semua versi Qt, jadi label
-        # diisi ulang lewat setEnabled + buddy row hide via field.
-        form = self._panel_postgres.layout()
-        if isinstance(form, QFormLayout):
-            label = form.labelForField(self.isian_host)
-            if label is not None:
-                label.setVisible(peran == KLIEN)
+        # Pembungkusnya yang dilipat, supaya baris tidak menyisakan
+        # tinggi kosong. Isiannya ikut disembunyikan: isHidden() pada
+        # anak tidak menjadi benar hanya karena induknya tertutup.
+        host_terlihat = peran == KLIEN
+        self._baris_host.setVisible(host_terlihat)
+        self.isian_host.setVisible(host_terlihat)
+        self._tombol_cari.setVisible(host_terlihat)
+        self._tombol_siapkan.setVisible(peran == SERVER)
+        if peran != KLIEN:
+            self._baris_pilih.setVisible(False)
+        self._tampilkan_port(self._port_terbuka)
+        self._perbarui_tombol_port()
+        self._perbarui_ulang_sandi()
 
         alamat = alamat_ipv4_lokal()
         if alamat:
             daftar = "  ·  ".join(alamat)
             self._label_alamat.setText(
-                "Tulis alamat ini di komputer loket, anjungan, dan televisi:\n"
+                "Komputer lain mencari server ini di jaringan yang sama, "
+                "atau menuliskan alamat berikut:\n"
                 f"{daftar}"
             )
         else:
@@ -503,8 +757,121 @@ class SetupMesinDialog(QDialog):
         self._tampilkan_error("")
 
     def _tampilkan_error(self, pesan: str) -> None:
+        self._tampilkan_catatan(pesan, galat=True)
+
+    def _tampilkan_catatan(self, pesan: str, *, galat: bool) -> None:
+        self._label_error.setProperty("error", "true" if galat else "false")
+        self._label_error.setProperty("muted", "true" if pesan and not galat else "false")
+        gaya = self._label_error.style()
+        gaya.unpolish(self._label_error)
+        gaya.polish(self._label_error)
         self._label_error.setText(pesan)
         self._label_error.setVisible(bool(pesan))
+        self._sesuaikan_tinggi()
+
+    def _cari_server(self) -> None:
+        if getattr(self, "_pencari", None) is not None and self._pencari.isRunning():
+            return
+        self._tombol_cari.setEnabled(False)
+        self._baris_pilih.setVisible(False)
+        self._tampilkan_catatan("Mencari PostgreSQL di jaringan ini…", galat=False)
+        self._pencari = _PencariServer(int(self.isian_port.value()), self)
+        self._pencari.selesai.connect(self._sesudah_cari)
+        self._pencari.start()
+
+    def _sesudah_cari(self, hasil: object) -> None:
+        self._tombol_cari.setEnabled(True)
+        daftar = tuple(hasil)
+        self._pilih_server.blockSignals(True)
+        self._pilih_server.clear()
+        for ip in daftar:
+            self._pilih_server.addItem(ip, userData=ip)
+        self._pilih_server.blockSignals(False)
+
+        if not daftar:
+            self.isian_host.setReadOnly(False)
+            self.isian_host.setPlaceholderText("192.168.1.10")
+            self._tampilkan_port(True)
+            self._tampilkan_error(
+                f"Tidak ada PostgreSQL di port {self.isian_port.value()}. "
+                "Ganti port bila server memakai nomor lain, atau isi "
+                "alamat bila server berada di jaringan yang berbeda."
+            )
+            return
+
+        self.isian_host.setReadOnly(True)
+        if len(daftar) == 1:
+            self.isian_host.setText(daftar[0])
+            self._baris_pilih.setVisible(False)
+            self._tampilkan_catatan(
+                f"Ditemukan satu PostgreSQL: {daftar[0]}. Isi kata sandi, "
+                "lalu Uji koneksi. Sandi tidak dikirim selama pencarian.",
+                galat=False,
+            )
+            return
+
+        self._baris_pilih.setVisible(True)
+        self.isian_host.setText(daftar[0])
+        self._tampilkan_catatan(
+            "Ditemukan beberapa PostgreSQL. Pilih yang memang server "
+            "antrian. Aplikasi tidak memilih sendiri.",
+            galat=False,
+        )
+
+    def _pilih_alamat_server(self) -> None:
+        alamat = self._pilih_server.currentData()
+        if alamat:
+            self.isian_host.setText(str(alamat))
+
+    def _siapkan_database(self) -> None:
+        """
+        Buat pengguna dan database antrian di mesin ini.
+
+        Sandi postgres ditanya sekali dan tidak ditulis ke mesin.json.
+        Sandi yang sudah diketik di form menjadi sandi pengguna antrian.
+        """
+        if not self.isian_sandi.text():
+            self._tampilkan_error(
+                "Isi kata sandi database antrian terlebih dahulu. "
+                "Sandi itulah yang akan dibuat."
+            )
+            return
+        salah_sandi = self._salah_ketik_ulang()
+        if salah_sandi:
+            self._tampilkan_error(salah_sandi)
+            return
+        from PySide6.QtWidgets import QInputDialog, QLineEdit
+
+        sandi_postgres, jadi = QInputDialog.getText(
+            self,
+            "Siapkan database",
+            "Kata sandi pengguna postgres, yaitu sandi saat PostgreSQL "
+            "dipasang. Sandi ini tidak disimpan.\n\n"
+            "Sandi di form akan menjadi sandi pengguna antrian.",
+            QLineEdit.EchoMode.Password,
+        )
+        if not jadi:
+            return
+        hasil = siapkan_database_lokal(
+            self.isian_sandi.text(),
+            sandi_postgres,
+            port=int(self.isian_port.value()),
+        )
+        if hasil.gagal:
+            self._sesudah_gagal_sambungan(hasil.gagal)
+            return
+        gagal = uji_koneksi(self._pengaturan_dari_form().ke_url())
+        if gagal:
+            self._sesudah_gagal_sambungan(gagal)
+            return
+        self._sandi_diterima()
+        self._tampilkan_error("")
+        from app.ui.common import tampilkan_info
+
+        pesan = "Database antrian siap. Komputer ini dapat menyimpan."
+        if hasil.peringatan:
+            pesan = f"{pesan}\n\n{hasil.peringatan}"
+        tampilkan_info(self, pesan, "Siapkan database")
 
     def _salin_alamat(self) -> None:
         alamat = alamat_ipv4_lokal()
@@ -529,10 +896,15 @@ class SetupMesinDialog(QDialog):
         if salah:
             self._tampilkan_error(salah)
             return
+        salah_sandi = self._salah_ketik_ulang()
+        if salah_sandi:
+            self._tampilkan_error(salah_sandi)
+            return
         gagal = uji_koneksi(pengaturan.ke_url())
         if gagal:
-            self._tampilkan_error(gagal)
+            self._sesudah_gagal_sambungan(gagal)
             return
+        self._sandi_diterima()
         self._tampilkan_error("")
         from app.ui.common import tampilkan_info
 
@@ -593,6 +965,10 @@ class SetupMesinDialog(QDialog):
         salah = kesalahan_isian(pengaturan)
         if salah:
             self._tampilkan_error(salah)
+            return
+        salah_sandi = self._salah_ketik_ulang()
+        if salah_sandi:
+            self._tampilkan_error(salah_sandi)
             return
         tulis_berkas_mesin(path_berkas_mesin(self._db_path), pengaturan)
         self.pengaturan_tersimpan = pengaturan

@@ -1,10 +1,11 @@
 """
 Peran komputer ini terhadap database.
 
-Bukan pemilihan otomatis di jaringan. Satu orang menunjuk SATU komputer
-sebagai server, komputer lain menuliskan alamatnya. Dua PostgreSQL yang
-sama-sama "menang" menghasilkan nomor antrian pecah — celah yang sudah
-pernah nyata saat beberapa loket menulis bersamaan.
+Satu orang menunjuk SATU komputer sebagai server. Komputer lain boleh
+mencari PostgreSQL di jaringan yang sama, tetapi bila lebih dari satu
+yang menjawab, orang yang memasang yang memilih. Aplikasi tidak
+menunjuk sendiri siapa yang menang: dua PostgreSQL yang sama-sama
+"menang" menghasilkan nomor antrian pecah.
 
 Isinya hidup di berkas `mesin.json` di folder database komputer ini,
 bukan di tabel pengaturan bersama: pengaturan bersama baru terbaca
@@ -20,10 +21,13 @@ komputer anjungan, ke git, atau ke log.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
 import socket
+import struct
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -237,6 +241,11 @@ def kesalahan_isian(pengaturan: PengaturanMesin) -> str | None:
         return "Nama pengguna database belum diisi."
     if pengaturan.peran == KLIEN and not pengaturan.host.strip():
         return "Alamat komputer server belum diisi."
+    if not pengaturan.sandi:
+        return (
+            "Kata sandi database belum diisi. Yang diganti hanya sandi; "
+            "port, nama database, dan pengguna sudah tetap."
+        )
     return None
 
 
@@ -278,6 +287,45 @@ def _layak_ditampilkan(ip: str) -> bool:
     return True
 
 
+def pesan_kegagalan_koneksi(exc: BaseException) -> str:
+    """
+    Pesan petugas dari kegagalan sambungan.
+
+    Teks mentah pengandar sering memuat untaian koneksi, dan untaian itu
+    memuat kata sandi. Yang ditampilkan hanya golongan kesalahannya.
+    """
+    teks = str(exc).lower()
+    if "password authentication failed" in teks or "no password supplied" in teks:
+        if 'user "postgres"' in teks:
+            return (
+                "Kata sandi pengguna postgres ditolak. Isi sandi yang "
+                "diketik saat PostgreSQL dipasang. Sandi itu tidak disimpan."
+            )
+        return (
+            "PostgreSQL menolak pengguna antrian. Kata sandinya tidak "
+            "cocok, atau pengguna itu belum dibuat. Pada komputer server, "
+            "tekan Siapkan database."
+        )
+    if "database" in teks and "does not exist" in teks:
+        return (
+            "Database antrian belum ada. Pada komputer server, tekan "
+            "Siapkan database."
+        )
+    if any(
+        petunjuk in teks
+        for petunjuk in ("refused", "could not connect", "timed out", "timeout", "10061")
+    ):
+        return (
+            "Tidak dapat menghubungi database. PostgreSQL tidak menjawab "
+            "di komputer yang dituju. Pastikan layanannya menyala dan "
+            "komputer ini satu jaringan dengannya."
+        )
+    return (
+        "Tidak dapat menghubungi database. Periksa alamat, PostgreSQL "
+        "sedang menyala, dan komputer ini tersambung ke jaringan yang sama."
+    )
+
+
 def uji_koneksi(url: str) -> str | None:
     """
     None bila database merespons, pesan petugas bila gagal.
@@ -296,11 +344,238 @@ def uji_koneksi(url: str) -> str | None:
         with mesin.connect() as conn:
             conn.execute(sa.text("SELECT 1"))
         return None
-    except Exception:
-        logger.warning("Uji koneksi database gagal")
-        return (
-            "Tidak dapat menghubungi database. Periksa alamat, PostgreSQL "
-            "sedang menyala, dan komputer ini tersambung ke jaringan yang sama."
-        )
+    except Exception as exc:
+        logger.warning("Uji koneksi database gagal: %s", type(exc).__name__)
+        return pesan_kegagalan_koneksi(exc)
     finally:
         mesin.dispose()
+
+
+def alamat_calon_server(ip: str) -> tuple[str, ...]:
+    """
+    Alamat lain pada /24 yang sama.
+
+    Subnet yang lebih besar tidak dipindai: kantor memakai /24, dan
+    memindai 10.0.0.0/8 akan memeriksa jutaan alamat.
+    """
+    try:
+        jaringan = ipaddress.IPv4Network(f"{ip}/24", strict=False)
+    except ipaddress.AddressValueError:
+        return ()
+    return tuple(str(host) for host in jaringan.hosts() if str(host) != ip)
+
+
+def subnet_kantor(alamat: tuple[str, ...] | None = None) -> tuple[str, ...]:
+    """Prefiks /24 dari alamat mesin ini, untuk baris izin pg_hba."""
+    sumber = alamat if alamat is not None else alamat_ipv4_lokal()
+    hasil: list[str] = []
+    for ip in sumber:
+        try:
+            jaringan = str(ipaddress.IPv4Network(f"{ip}/24", strict=False))
+        except ipaddress.AddressValueError:
+            continue
+        if jaringan not in hasil:
+            hasil.append(jaringan)
+    return tuple(hasil)
+
+
+def tambahan_izin_hba(isi: str, subnet: tuple[str, ...]) -> str:
+    """
+    Baris pg_hba yang belum ada.
+
+    Hanya pengguna dan database antrian, hanya subnet kantor, dan hanya
+    scram-sha-256. Tidak ada 0.0.0.0/0 dan tidak ada trust.
+    """
+    ada = isi.splitlines()
+    tambahan: list[str] = []
+    for jaringan in subnet:
+        if any("antrian" in baris and jaringan in baris for baris in ada):
+            continue
+        tambahan.append(f"host\tantrian\tantrian\t{jaringan}\tscram-sha-256")
+    if not tambahan:
+        return ""
+    awalan = "" if (not isi or isi.endswith("\n")) else "\n"
+    return awalan + "\n".join(tambahan) + "\n"
+
+
+def cari_server_jaringan(
+    alamat: tuple[str, ...] | None = None,
+    pemeriksa=None,
+    port: int = PORT_BAWAAN,
+) -> tuple[str, ...]:
+    """
+    Alamat PostgreSQL lain di /24 mesin ini, pada port yang sama.
+
+    Pemeriksaan hanya mengetuk port itu dan membaca satu byte jawaban
+    protokol. Kata sandi tidak dikirim. Alamat mesin ini sendiri tidak
+    ikut: komputer server dipilih lewat peran, bukan lewat pindaian.
+    """
+    sumber = alamat if alamat is not None else alamat_ipv4_lokal()
+    calon: list[str] = []
+    terlihat: set[str] = set()
+    for ip in sumber:
+        for host in alamat_calon_server(ip):
+            if host in terlihat:
+                continue
+            terlihat.add(host)
+            calon.append(host)
+    if not calon:
+        return ()
+
+    cek = pemeriksa or (lambda ip: _postgres_menjawab(ip, port=port))
+    if pemeriksa is None:
+        with ThreadPoolExecutor(max_workers=48) as kolam:
+            jawaban = list(kolam.map(cek, calon))
+    else:
+        jawaban = [bool(cek(ip)) for ip in calon]
+    return tuple(ip for ip, ya in zip(calon, jawaban) if ya)
+
+
+def _postgres_menjawab(ip: str, waktu: float = 0.3, port: int = PORT_BAWAAN) -> bool:
+    """Benar bila port itu menjawab seperti PostgreSQL, tanpa masuk."""
+    try:
+        with socket.create_connection((ip, port), waktu) as soket:
+            soket.settimeout(waktu)
+            # Permintaan SSL. Jawabannya satu byte: S, N, atau E.
+            soket.sendall(struct.pack("!II", 8, 80877103))
+            jawab = soket.recv(1)
+    except OSError:
+        return False
+    return jawab in (b"S", b"N", b"E")
+
+
+@dataclass(frozen=True)
+class HasilSiapkan:
+    """Akibat tombol Siapkan database. Sandi postgres tidak ikut pulang."""
+
+    gagal: str | None = None
+    peringatan: str | None = None
+
+
+def siapkan_database_lokal(
+    sandi_antrian: str,
+    sandi_postgres: str,
+    port: int = PORT_BAWAAN,
+) -> HasilSiapkan:
+    """
+    Buat pengguna dan database antrian di PostgreSQL komputer ini.
+
+    Sandi postgres dipakai sekali untuk perintah itu, lalu dibuang.
+    Sandi antrian yang sedang di form menjadi sandi pengguna antrian.
+    """
+    if not sandi_antrian:
+        return HasilSiapkan(
+            gagal=(
+                "Isi kata sandi database antrian terlebih dahulu. "
+                "Sandi itulah yang akan dibuat."
+            )
+        )
+    if not sandi_postgres:
+        return HasilSiapkan(gagal="Kata sandi pengguna postgres belum diisi.")
+
+    try:
+        import psycopg
+        from psycopg import sql
+    except ImportError:
+        return HasilSiapkan(gagal="Pengandar PostgreSQL tidak terpasang.")
+
+    try:
+        conn = psycopg.connect(
+            host=HOST_LOKAL,
+            port=port,
+            dbname="postgres",
+            user="postgres",
+            password=sandi_postgres,
+            connect_timeout=3,
+            autocommit=True,
+        )
+    except Exception as exc:
+        logger.warning("Penyiapan database gagal masuk: %s", type(exc).__name__)
+        return HasilSiapkan(gagal=pesan_kegagalan_koneksi(exc))
+
+    peringatan = None
+    try:
+        with conn.cursor() as cur:
+            _pastikan_peran(cur, sql, PENGGUNA_BAWAAN, sandi_antrian)
+            _pastikan_database(cur, sql, DATABASE_BAWAAN, PENGGUNA_BAWAAN)
+            cur.execute("SHOW hba_file")
+            baris = cur.fetchone()
+            lokasi = Path(baris[0]) if baris and baris[0] else None
+        if lokasi is not None:
+            peringatan = _tambahkan_izin_jaringan(lokasi)
+            if peringatan is None:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT pg_reload_conf()")
+    except Exception as exc:
+        logger.warning("Penyiapan database gagal: %s", type(exc).__name__)
+        return HasilSiapkan(
+            gagal=(
+                "Pengguna postgres masuk, tetapi database antrian tidak "
+                "dapat dibuat."
+            )
+        )
+    finally:
+        conn.close()
+
+    logger.info("Database antrian disiapkan di komputer ini")
+    return HasilSiapkan(peringatan=peringatan)
+
+
+def _pastikan_peran(cur, sql, nama: str, sandi: str) -> None:
+    cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (nama,))
+    perintah = "ALTER ROLE {} WITH LOGIN PASSWORD {}"
+    if cur.fetchone() is None:
+        perintah = "CREATE ROLE {} WITH LOGIN PASSWORD {}"
+    cur.execute(
+        sql.SQL(perintah).format(sql.Identifier(nama), sql.Literal(sandi))
+    )
+
+
+def _pastikan_database(cur, sql, nama: str, pemilik: str) -> None:
+    cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (nama,))
+    if cur.fetchone() is None:
+        cur.execute(
+            sql.SQL("CREATE DATABASE {} OWNER {}").format(
+                sql.Identifier(nama), sql.Identifier(pemilik)
+            )
+        )
+
+
+def _tambahkan_izin_jaringan(path: Path) -> str | None:
+    """
+    Izinkan subnet kantor menyambung sebagai antrian.
+
+    None bila sudah tertulis. Pesan bila berkasnya tidak dapat diubah:
+    database lokal tetap jadi, komputer lain yang belum.
+    """
+    subnet = subnet_kantor()
+    if not subnet:
+        return (
+            "Database dibuat di komputer ini. Alamat jaringan tidak "
+            "terbaca, jadi komputer lain belum diizinkan masuk."
+        )
+    try:
+        isi = path.read_text(encoding="utf-8")
+    except OSError:
+        return _pesan_hba_manual(subnet)
+    tambahan = tambahan_izin_hba(isi, subnet)
+    if not tambahan:
+        return None
+    try:
+        with path.open("a", encoding="utf-8") as berkas:
+            berkas.write(tambahan)
+    except OSError:
+        return _pesan_hba_manual(subnet)
+    return None
+
+
+def _pesan_hba_manual(subnet: tuple[str, ...]) -> str:
+    baris = "\n".join(
+        f"host    antrian    antrian    {jaringan}    scram-sha-256"
+        for jaringan in subnet
+    )
+    return (
+        "Database antrian sudah dibuat. Komputer lain belum diizinkan "
+        "karena file pg_hba.conf tidak dapat ditulis. Tambahkan baris "
+        f"berikut, lalu muat ulang PostgreSQL:\n{baris}"
+    )

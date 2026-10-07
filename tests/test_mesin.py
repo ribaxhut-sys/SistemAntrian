@@ -172,6 +172,58 @@ def test_uji_koneksi_yang_gagal_berbahasa_indonesia():
     assert "Tidak dapat menghubungi database" in pesan
 
 
+def test_pesan_sandi_tidak_disalahkan_sebagai_jaringan():
+    from app.core.mesin import pesan_kegagalan_koneksi
+
+    pesan = pesan_kegagalan_koneksi(
+        Exception('password authentication failed for user "antrian"')
+    )
+
+    assert "pengguna antrian" in pesan.lower()
+    assert "jaringan yang sama" not in pesan.lower()
+    assert "password authentication" not in pesan
+
+
+def test_pindai_melewati_komputer_ini_dan_tidak_memilih_sendiri():
+    """Lebih dari satu jawaban dikembalikan apa adanya, tanpa pemenang."""
+    from app.core.mesin import cari_server_jaringan
+
+    dipanggil: list[str] = []
+
+    def periksa(ip: str) -> bool:
+        dipanggil.append(ip)
+        return ip in {"192.168.1.20", "192.168.1.30"}
+
+    hasil = cari_server_jaringan(alamat=("192.168.1.5",), pemeriksa=periksa)
+
+    assert hasil == ("192.168.1.20", "192.168.1.30")
+    assert "192.168.1.5" not in dipanggil
+    assert len(dipanggil) == 253
+
+
+def test_izin_jaringan_hanya_subnet_kantor_dan_tidak_trust(tmp_path: Path):
+    from app.core.mesin import tambahan_izin_hba
+
+    isi = "host    all    all    127.0.0.1/32    scram-sha-256\n"
+    tambahan = tambahan_izin_hba(isi, ("192.168.1.0/24",))
+
+    assert "192.168.1.0/24" in tambahan
+    assert "antrian" in tambahan
+    assert "scram-sha-256" in tambahan
+    assert "trust" not in tambahan
+    assert "0.0.0.0/0" not in tambahan
+    assert tambahan_izin_hba(isi + tambahan, ("192.168.1.0/24",)) == ""
+
+
+def test_siapkan_tanpa_sandi_tidak_menyambung():
+    from app.core.mesin import siapkan_database_lokal
+
+    hasil = siapkan_database_lokal("", "sandi-postgres")
+
+    assert hasil.gagal
+    assert hasil.peringatan is None
+
+
 def test_berkas_mesin_dipakai_bila_url_kosong(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

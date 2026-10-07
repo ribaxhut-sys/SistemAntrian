@@ -245,6 +245,19 @@ def test_setup_awal_tidak_menghalangi_anjungan_setelah_mati_listrik(
     assert perlu_setup_awal(["--tv"], tmp_path / "queue.db", sedang_uji=False) is False
 
 
+def test_setup_awal_tidak_menghalangi_server_api_anjungan(
+    tmp_path, monkeypatch
+) -> None:
+    from app.main import perlu_setup_awal
+
+    monkeypatch.setattr("app.main.lewati_login_pengembang", lambda: False)
+    monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
+    assert (
+        perlu_setup_awal(["--kios-api"], tmp_path / "queue.db", sedang_uji=False)
+        is False
+    )
+
+
 def test_setup_awal_dilewati_bila_url_environment_sudah_ada(
     tmp_path, monkeypatch
 ) -> None:

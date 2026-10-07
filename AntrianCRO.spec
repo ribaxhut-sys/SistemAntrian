@@ -17,7 +17,7 @@ Yang wajib ikut dibundel dan tidak terdeteksi otomatis:
                              Asia/Jakarta.
 """
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 datas = [
     ("alembic.ini", "."),
@@ -47,6 +47,12 @@ hiddenimports = [
     "sqlalchemy.engine",
     "sqlalchemy.pool",
 ]
+# `--kios-api` loads the API at runtime, so normal import analysis cannot
+# discover its modules. FastAPI's request stack is also assembled dynamically.
+hiddenimports += ["app.kiosk_api"]
+hiddenimports += collect_submodules("fastapi")
+hiddenimports += collect_submodules("starlette")
+hiddenimports += collect_submodules("uvicorn")
 
 a = Analysis(
     ["app/main.py"],

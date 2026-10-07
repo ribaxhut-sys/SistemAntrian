@@ -13,6 +13,9 @@ env/
 # ---- Packaging / build ----
 build/
 dist/
+**/build/
+**/.gradle/
+android-kiosk/local.properties
 *.egg-info/
 *.spec.bak
 

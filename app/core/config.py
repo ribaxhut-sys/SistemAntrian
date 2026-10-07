@@ -63,10 +63,10 @@ APP_SLUG = "antrian-cro"
 # bukan zona komputer, agar konsisten di mesin mana pun.
 TIMEZONE = "Asia/Jakarta"
 
-#: Pintasan uji tampilan: layar petugas masuk sebagai admin tanpa nama
-#: dan sandi. Matikan sebelum build .exe — dan tetap diabaikan bila
-#: aplikasi sudah dibekukan, supaya lupa mencabutnya tidak membuka loket
-#: tanpa kunci di komputer petugas.
+#: Lewati dialog pemasangan saat dijalankan dari source.
+#:
+#: Bukan jalan masuk tanpa sandi. Loket selalu minta akun, karena beberapa
+#: petugas berbagi satu komputer. Pada .exe konstanta ini diabaikan.
 LEWATI_LOGIN_PENGEMBANG = True
 
 

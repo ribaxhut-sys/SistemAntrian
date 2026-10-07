@@ -1,5 +1,9 @@
 # Sistem Antrian & Survey Kepuasan Pelayanan CRO
 
+Panduan menyeluruh untuk pemasangan, penggunaan, PostgreSQL multi-PC,
+anjungan Android, backup, dan pengembangan ada di
+[docs/panduan-proyek.md](docs/panduan-proyek.md).
+
 Aplikasi desktop lokal untuk mengelola antrian pelayanan CRO
 (Customer Relations Officer) dan mengukur kepuasan pengunjung.
 
@@ -896,8 +900,29 @@ Lokasi penyimpanan dapat dipindahkan tanpa mengubah kode, lewat
 environment variable `ANTRIAN_DB_PATH`, `ANTRIAN_BACKUP_DIR`, dan
 `ANTRIAN_LOG_DIR`.
 
+### Membuat installer Windows versi 1.0
+
+Pasang Inno Setup 6, lalu dari PowerShell di folder proyek jalankan:
+
+```powershell
+.\build-installer.ps1
+```
+
+Skrip menjalankan seluruh test, membangun dan menguji aplikasi di folder
+sementara, lalu menghasilkan `dist\AntrianCRO-Setup-1.0.0.exe`. Installer
+dipasang untuk pengguna saat ini ke `%LOCALAPPDATA%\Programs\AntrianCRO`,
+membuat pintasan Start Menu, dan menawarkan pintasan Desktop. Data aplikasi
+tidak dihapus saat aplikasi di-uninstall.
+
 Sebelum diserahkan ke pengguna, kerjakan daftar periksa pada
 [docs/acceptance-test.md](docs/acceptance-test.md) di komputer tujuan.
+
+## APK Anjungan Android
+
+APK Android hanya menangani pemilihan layanan, penerbitan nomor lewat API
+server Windows, dan pencetakan ke printer thermal USB. Server Windows tetap
+harus menyala. Langkah pemasangan, token API, kebutuhan USB host/OTG, dan
+cara membangun APK dijelaskan di [docs/android-kiosk.md](docs/android-kiosk.md).
 
 ---
 
@@ -936,6 +961,7 @@ pernah tertinggal separuh terpulihkan.
 | pydantic | Validasi data internal |
 | reportlab | PDF tiket dan laporan |
 | tzdata | Database timezone IANA — **wajib**, Windows tidak menyediakannya |
+| FastAPI + Uvicorn | API lokal yang menghubungkan APK anjungan ke server antrean |
 
 **Development** (`requirements-dev.txt`)
 

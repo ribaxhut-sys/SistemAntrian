@@ -26,15 +26,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import APP_NAME, lewati_login_pengembang
+from app.core.config import APP_NAME
 from app.ui.common import tombol
 
 #: Hasil pilihan.
 #:
-#: LAYAR_ANTRIAN dan ANJUNGAN adalah dua mesin publik. LAYAR_ADMIN dan
-#: LAYAR_PETUGAS adalah dua peran di komputer loket: admin mengelola data,
-#: petugas memanggil antrian. Dahulu keduanya satu tombol, sehingga uji
-#: tampilan selalu masuk sebagai admin dan tombol panggil tidak muncul.
+#: LAYAR_ANTRIAN dan ANJUNGAN adalah mesin publik, tanpa login.
+#: LAYAR_PETUGAS adalah loket: administrator dan petugas masuk dengan
+#: akunnya masing-masing. LAYAR_ADMIN tetap ada untuk argumen --admin;
+#: dialog ini tidak menawarkannya sebagai tombol terpisah.
 LAYAR_ANTRIAN = "antrian"
 ANJUNGAN = "anjungan"
 ANJUNGAN_TOTEM = "anjungan-totem"
@@ -97,43 +97,19 @@ class ModeDialog(QDialog):
                 aksen="totem",
             )
         )
-        # Komputer loket punya dua peran. Saat uji dari source keduanya
-        # ditawarkan terpisah supaya admin tidak ikut menelan kursi petugas.
-        # Di .exe cukup satu tombol: yang membedakan adalah akun yang masuk.
-        if lewati_login_pengembang():
-            susunan.addWidget(
-                self._bangun_pilihan(
-                    "LAYAR ADMIN",
-                    "Mengelola data, pengaturan, dan backup. Pintasan uji: "
-                    "masuk sebagai admin tanpa nama dan sandi.",
-                    LAYAR_ADMIN,
-                    ikon="⚙",
-                    aksen="admin",
-                )
+        # Satu tombol loket. Administrator dan petugas dibedakan oleh akun
+        # yang mengetik sandinya, karena beberapa orang berbagi komputer ini.
+        susunan.addWidget(
+            self._bangun_pilihan(
+                "LAYAR PETUGAS",
+                "Melayani antrian, mengelola data, dan melihat laporan. "
+                "Wajib masuk dengan akun masing-masing.",
+                LAYAR_PETUGAS,
+                ikon="📣",
+                aksen="petugas",
+                utama=True,
             )
-            susunan.addWidget(
-                self._bangun_pilihan(
-                    "LAYAR PETUGAS",
-                    "Memanggil dan melayani antrian. Pintasan uji: masuk "
-                    "sebagai petugas CRO tanpa nama dan sandi.",
-                    LAYAR_PETUGAS,
-                    ikon="📣",
-                    aksen="petugas",
-                    utama=True,
-                )
-            )
-        else:
-            susunan.addWidget(
-                self._bangun_pilihan(
-                    "LAYAR PETUGAS",
-                    "Melayani antrian, mengelola data, dan melihat laporan. "
-                    "Wajib masuk dengan akun petugas.",
-                    LAYAR_PETUGAS,
-                    ikon="📣",
-                    aksen="petugas",
-                    utama=True,
-                )
-            )
+        )
 
         susunan.addSpacing(8)
         susunan.addWidget(self._bangun_catatan())

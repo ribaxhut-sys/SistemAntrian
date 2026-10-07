@@ -1697,6 +1697,21 @@ def test_admin_melihat_menu_pengaturan(qtbot, admin_auth):
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
 
     assert "Pengaturan" in menu
+    assert "Server Anjungan Android" in menu
+
+
+def test_halaman_server_android_menyiapkan_token_acak(qtbot, monkeypatch):
+    monkeypatch.delenv("ANTRIAN_KIOS_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "app.ui.settings.android_kiosk_page.muat_token_pengguna", lambda: ""
+    )
+    from app.ui.settings.android_kiosk_page import AndroidKioskServerPage
+
+    halaman = AndroidKioskServerPage()
+    qtbot.addWidget(halaman)
+
+    assert len(halaman.token.text()) >= 64
+    assert halaman.token.isReadOnly()
 
 
 def test_dialog_survey_menyimpan_penilaian(qtbot, auth, layani_sampai_selesai):

@@ -51,6 +51,7 @@ from app.ui.kiosk.pratinjau import (
 from app.ui.notes.note_page import NotePage
 from app.ui.queue.service_page import ServicePage
 from app.ui.registration.registration_page import RegistrationPage
+from app.ui.settings.android_kiosk_page import AndroidKioskServerPage
 from app.ui.settings.backup_page import BackupPage
 from app.ui.settings.close_day_page import CloseDayPage
 from app.ui.settings.master_data_page import MasterDataPage
@@ -498,6 +499,11 @@ class MainWindow(QMainWindow):
                 lambda: SettingsPage(self.settings_service, self.master_service),
             ),
             _Menu(
+                "Server Anjungan Android",
+                Permission.CONFIG_MANAGE,
+                AndroidKioskServerPage,
+            ),
+            _Menu(
                 "Backup",
                 Permission.BACKUP_MANAGE,
                 lambda: BackupPage(self.backup_service),
@@ -861,6 +867,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 - nama dari Qt
         """Pastikan sesi berakhir walau jendela ditutup lewat tombol silang."""
+        for indeks in range(self.halaman.count()):
+            halaman = self.halaman.widget(indeks)
+            if isinstance(halaman, AndroidKioskServerPage):
+                halaman.hentikan_server()
         pewaktu = getattr(self, "_pewaktu_db", None)
         if pewaktu is not None:
             pewaktu.stop()
