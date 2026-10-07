@@ -8,6 +8,7 @@ import mimetypes
 import os
 import socket
 import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
@@ -19,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from app.core.config import base_dir, get_config
+from app.core.config import TIMEZONE, base_dir, get_config
 from app.core.database import dispose_engine
 from app.core.errors import (
     AppError,
@@ -234,6 +235,11 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "welcome_media": [item.name for item in media],
             "registration_open": services.queue.pendaftaran_dibuka(),
             "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(),
+            # Jam di layar anjungan memakai jam dan zona waktu SERVER, bukan
+            # setelan tablet: tablet tanpa internet sering salah jam, dan
+            # zona waktunya bisa terpasang di luar Indonesia.
+            "server_time_ms": int(time.time() * 1000),
+            "timezone": TIMEZONE,
         }
 
     @app.get(

@@ -47,6 +47,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -125,14 +126,30 @@ public final class MainActivity extends Activity {
         void accept(String message);
     }
 
+    // Jam selalu waktu Indonesia dari server, bukan setelan tablet: tablet
+    // tanpa internet sering salah jam, dan zonanya bisa di luar Indonesia.
+    private static final String DEFAULT_TIMEZONE = "Asia/Jakarta";
+    private String serverTimezone = DEFAULT_TIMEZONE;
+    private long serverOffsetMillis = 0L;
+
+    private static String zoneLabel(String zone) {
+        if ("Asia/Makassar".equals(zone)) return "WITA";
+        if ("Asia/Jayapura".equals(zone)) return "WIT";
+        return "WIB";
+    }
+
     private final Runnable clock = new Runnable() {
         @Override
         public void run() {
             updateAvailability();
             if (timeLabel != null) {
-                timeLabel.setText(new SimpleDateFormat(
+                SimpleDateFormat format = new SimpleDateFormat(
                         "EEEE, d MMM yyyy · HH:mm:ss",
-                        new Locale("id", "ID")).format(new Date()));
+                        new Locale("id", "ID"));
+                format.setTimeZone(TimeZone.getTimeZone(serverTimezone));
+                timeLabel.setText(format.format(
+                        new Date(System.currentTimeMillis() + serverOffsetMillis))
+                        + " " + zoneLabel(serverTimezone));
             }
             handler.postDelayed(this, 1000);
         }
@@ -311,6 +328,12 @@ public final class MainActivity extends Activity {
                 applyWelcomeText(welcomeFallbackText);
             }
             registrationOpen = display.optBoolean("registration_open", true);
+            String zone = display.optString("timezone", DEFAULT_TIMEZONE);
+            serverTimezone = zone.startsWith("Asia/") ? zone : DEFAULT_TIMEZONE;
+            long serverTime = display.optLong("server_time_ms", 0L);
+            if (serverTime > 0L) {
+                serverOffsetMillis = serverTime - System.currentTimeMillis();
+            }
             long serverCooldown = Math.max(0L,
                     (long) Math.ceil(display.optDouble("cooldown_remaining_seconds", 0)));
             if (!requestInFlight) {

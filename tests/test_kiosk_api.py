@@ -1,5 +1,6 @@
 from datetime import datetime
 import json
+import time
 import socket
 import threading
 from types import SimpleNamespace
@@ -220,7 +221,10 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor():
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    isi = response.json()
+    assert isi.pop("timezone") == "Asia/Jakarta"
+    assert abs(isi.pop("server_time_ms") - time.time() * 1000) < 5000
+    assert isi == {
         "title": "KANTOR PELAYANAN",
         "welcome_text": "Selamat datang",
         "welcome_kind": "teks",
@@ -229,7 +233,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor():
         "registration_open": True,
         "cooldown_remaining_seconds": 0,
     }
-    assert "counters" not in response.json()
+    assert "counters" not in isi
 
 
 def test_api_serves_only_configured_kiosk_media(tmp_path, monkeypatch):
