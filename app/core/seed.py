@@ -76,6 +76,8 @@ _SETTINGS: list[tuple[str, str, str]] = [
      "Folder perkakas PostgreSQL bila tidak ada di PATH; kosongkan untuk SQLite"),
     ("backup.retention_days", "30",
      "Lama backup disimpan sebelum dihapus, dalam hari"),
+    ("backup.salinan_folder", "",
+     "Folder salinan kedua backup (disk lain/flashdisk); kosongkan bila tidak dipakai"),
     ("dashboard.refresh_seconds", "30",
      "Jeda penyegaran layar ringkasan harian, dalam detik"),
     (

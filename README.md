@@ -869,9 +869,16 @@ tidak pernah dipakai.
 ### Backup dijalankan di komputer server
 
 Backup PostgreSQL memakai `pg_dump`, yang ikut terpasang bersama PostgreSQL.
-Komputer loket biasanya tidak memilikinya. Bila foldernya tidak ada di PATH,
-isi pengaturan **Folder perkakas PostgreSQL** dengan
-`C:\Program Files\PostgreSQL\17\bin`.
+Backup otomatis harian hanya dibuat di komputer **server**; komputer loket
+melewatinya (tercatat di log) karena biasanya tidak punya `pg_dump`.
+
+`pg_dump` dicari di PATH, lalu di `C:\Program Files\PostgreSQL\<versi>\bin`
+(versi tertinggi). Pengaturan **Folder perkakas PostgreSQL** hanya perlu
+diisi bila PostgreSQL dipasang di tempat lain.
+
+Isi **Folder salinan kedua** (misalnya disk `D:` atau flashdisk) agar setiap
+backup juga tersalin ke luar disk database. Masa simpannya sama; bila folder
+itu tidak tersedia, backup utama tetap dibuat dan kegagalannya tercatat.
 
 ---
 
@@ -1053,6 +1060,7 @@ konfirmasi dulu.
 | `backup.auto_enabled` | `true` | Backup otomatis harian saat aplikasi dibuka |
 | `backup.retention_days` | `30` | Lama backup disimpan sebelum dihapus |
 | `backup.pg_dump_path` | — | Folder perkakas PostgreSQL bila tidak ada di PATH |
+| `backup.salinan_folder` | — | Folder salinan kedua backup (disk lain/flashdisk) |
 
 Jenis dan batas tiap pengaturan dijelaskan sekali saja pada `SKEMA` di
 [app/services/settings_service.py](app/services/settings_service.py). Layar

@@ -158,11 +158,16 @@ class PostgresBackup:
         if ditemukan:
             return ditemukan
 
+        for folder in folder_postgresql_terpasang():
+            calon = folder / f"{nama}.exe"
+            if calon.exists():
+                return str(calon)
+
         raise NotFoundError(
             f"{nama} tidak ditemukan. Backup PostgreSQL membutuhkan perkakas "
-            "bawaan PostgreSQL. Isi pengaturan 'backup.pg_dump_path' dengan "
-            "folder bin PostgreSQL, misalnya "
-            r"C:\Program Files\PostgreSQL\17\bin."
+            "bawaan PostgreSQL dan tidak ditemukan di PATH maupun di "
+            r"C:\Program Files\PostgreSQL. Isi pengaturan 'backup.pg_dump_path' "
+            "dengan folder bin PostgreSQL."
         )
 
     def _lingkungan(self) -> dict[str, str]:
@@ -259,6 +264,45 @@ class PostgresBackup:
 
         isi = hasil.stdout.upper()
         return all(tabel.upper() in isi for tabel in TABEL_PENANDA)
+
+
+def _versi(folder: Path) -> tuple[int, ...]:
+    angka = []
+    for bagian in folder.name.split("."):
+        if not bagian.isdigit():
+            return ()
+        angka.append(int(bagian))
+    return tuple(angka)
+
+
+def folder_postgresql_terpasang(akar: list[Path] | None = None) -> list[Path]:
+    """
+    Folder bin PostgreSQL yang terpasang lewat installer Windows, terbaru dulu.
+
+    Installer resmi memasang ke Program Files\\PostgreSQL\\<versi>\\bin dan
+    tidak menambahkannya ke PATH. Tanpa pencarian ini backup gagal setiap
+    hari sampai ada yang ingat mengisi pengaturan foldernya. Versi
+    tertinggi didahulukan: pg_dump boleh lebih baru dari servernya, tidak
+    boleh lebih lama.
+    """
+    if akar is None:
+        akar = [
+            Path(os.environ.get(kunci, cadangan)) / "PostgreSQL"
+            for kunci, cadangan in (
+                ("ProgramFiles", r"C:\Program Files"),
+                ("ProgramW6432", r"C:\Program Files"),
+            )
+        ]
+    hasil: list[Path] = []
+    for induk in dict.fromkeys(akar):
+        try:
+            anak = [p for p in induk.iterdir() if p.is_dir() and _versi(p)]
+        except OSError:
+            continue
+        for folder in sorted(anak, key=_versi, reverse=True):
+            if (folder / "bin").is_dir():
+                hasil.append(folder / "bin")
+    return hasil
 
 
 def buat_mesin(config: AppConfig, folder_alat: str = "") -> MesinBackup:

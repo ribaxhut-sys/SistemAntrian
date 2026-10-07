@@ -14,6 +14,7 @@ dapat ditulis.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +32,25 @@ from app.services.permissions import Permission
 from app.services.settings_service import SettingsService
 
 logger = get_logger("backup")
+
+
+def _boleh_backup_di_sini() -> bool:
+    """
+    Backup otomatis hanya dibuat oleh komputer pemilik database.
+
+    SQLite selalu lokal. Untuk PostgreSQL, komputer loket tidak membuatnya:
+    pg_dump biasanya tidak terpasang di sana, sehingga backup gagal setiap
+    hari di setiap loket dan lognya penuh galat yang tidak berarti apa-apa.
+    """
+    config = get_config()
+    if config.memakai_sqlite:
+        return True
+    from app.core.mesin import SERVER, muat_pengaturan
+
+    if muat_pengaturan(config.db_path).peran == SERVER:
+        return True
+    host = (config.url_database.host or "").lower()
+    return host in {"127.0.0.1", "localhost", "::1"}
 
 #: Pola nama berkas backup, tanpa akhiran. Waktu ikut di nama supaya beberapa
 #: backup dalam satu hari tidak saling menimpa, dan urutannya terbaca tanpa
@@ -179,8 +199,14 @@ class BackupService:
         self.auth.require_permission(Permission.BACKUP_MANAGE)
         return self._daftar_berkas()
 
-    def _daftar_berkas(self) -> list[BackupInfo]:
-        folder = self.folder
+    @property
+    def folder_salinan(self) -> Path | None:
+        """Folder salinan kedua, misalnya disk lain atau flashdisk. None bila kosong."""
+        teks = (self.settings.get("backup.salinan_folder", "") or "").strip()
+        return Path(teks).expanduser() if teks else None
+
+    def _daftar_berkas(self, folder: Path | None = None) -> list[BackupInfo]:
+        folder = self.folder if folder is None else folder
         if not folder.exists():
             return []
 
@@ -241,6 +267,12 @@ class BackupService:
         try:
             if not self.settings.get_bool("backup.auto_enabled", True):
                 return HasilBackup(False, "Backup otomatis dinonaktifkan.")
+            if not _boleh_backup_di_sini():
+                return HasilBackup(
+                    False,
+                    "Backup otomatis dilewati: database berada di komputer "
+                    "server, dan backup dibuat di sana.",
+                )
 
             hari = clock.today()
             if any(i.dibuat_pada.date() == hari for i in self._daftar_berkas()):
@@ -271,7 +303,28 @@ class BackupService:
 
         info = _sebagai_info(tujuan, self.mesin.akhiran)
         logger.info("Backup %s dibuat: %s (%s)", alasan, info.nama, info.label_ukuran)
+        self._salin_kedua(info)
         return info
+
+    def _salin_kedua(self, info: BackupInfo) -> None:
+        """
+        Salin backup ke folder kedua.
+
+        Backup di disk yang sama dengan database ikut hilang bila disk itu
+        rusak, padahal itulah alasan utama backup dibuat. Kegagalannya
+        (flashdisk dicabut, disk penuh) hanya dicatat: backup utama sudah
+        jadi dan tetap sah.
+        """
+        folder = self.folder_salinan
+        if folder is None:
+            return
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(info.berkas, folder / info.nama)
+        except OSError as exc:
+            logger.warning("Salinan kedua backup %s gagal ke %s: %s", info.nama, folder, exc)
+            return
+        logger.info("Salinan kedua backup dibuat: %s", folder / info.nama)
 
     # =================================================================
     # Retensi
@@ -294,7 +347,14 @@ class BackupService:
 
         batas = clock.now().timestamp() - hari * 86400
         dihapus: list[str] = []
-        for info in self._daftar_berkas():
+        kedaluwarsa = list(self._daftar_berkas())
+        salinan = self.folder_salinan
+        if salinan is not None:
+            try:
+                kedaluwarsa += self._daftar_berkas(salinan)
+            except OSError:
+                logger.warning("Folder salinan backup %s tidak terbaca", salinan)
+        for info in kedaluwarsa:
             if info.dibuat_pada.timestamp() >= batas:
                 continue
             try:

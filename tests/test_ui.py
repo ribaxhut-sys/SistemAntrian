@@ -1635,6 +1635,7 @@ def test_pencarian_menyaring_baris_dan_kelompoknya(halaman_pengaturan):
         "backup.auto_enabled",
         "backup.pg_dump_path",
         "backup.retention_days",
+        "backup.salinan_folder",
     }
 
     terlihat = [
@@ -1646,7 +1647,7 @@ def test_pencarian_menyaring_baris_dan_kelompoknya(halaman_pengaturan):
     assert terlihat[0].startswith("Backup")
     # Jumlah hasilnya ikut disebut, supaya daftar kiri berfungsi sebagai
     # daftar hasil.
-    assert "3" in terlihat[0]
+    assert "4" in terlihat[0]
 
     halaman_pengaturan.cari.setText("")
     assert not halaman_pengaturan.baris["ticket.footer"].isHidden()

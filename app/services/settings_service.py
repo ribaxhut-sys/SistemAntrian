@@ -57,6 +57,7 @@ BAWAAN: dict[str, str] = {
     "backup.auto_enabled": "true",
     "backup.pg_dump_path": "",
     "backup.retention_days": "30",
+    "backup.salinan_folder": "",
     "dashboard.refresh_seconds": "30",
     "kiosk.cooldown_seconds": "10",
     "kiosk.welcome_kind": "teks",
@@ -481,8 +482,18 @@ SKEMA: tuple[Pengaturan, ...] = (
         "backup.pg_dump_path",
         "Folder perkakas PostgreSQL",
         "Hanya dibutuhkan bila memakai PostgreSQL dan foldernya tidak ada di "
-        r"PATH, misalnya C:\Program Files\PostgreSQL\17\bin. Kosongkan untuk "
-        "SQLite.",
+        r"PATH dan tidak terpasang di C:\Program Files\PostgreSQL (yang dicari "
+        "otomatis). Kosongkan untuk SQLite.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Backup",
+    ),
+    Pengaturan(
+        "backup.salinan_folder",
+        "Folder salinan kedua",
+        "Setiap backup juga disalin ke sini, misalnya disk D: atau flashdisk. "
+        "Backup yang hanya ada di disk database ikut hilang bila disk itu "
+        "rusak. Masa simpannya sama. Kosongkan bila tidak dipakai.",
         TEKS,
         boleh_kosong=True,
         kelompok="Backup",

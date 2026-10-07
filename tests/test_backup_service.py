@@ -288,3 +288,79 @@ def test_peran_lain_tidak_boleh_memulihkan(auth, antrian_siap):
 
     with pytest.raises(AuthorizationError):
         BackupService(auth).restore("apa pun.db")
+
+
+# ---------------------------------------------------------------------
+# Tahap 1: backup benar-benar jalan di server
+# ---------------------------------------------------------------------
+
+
+def test_pg_dump_dicari_di_program_files_versi_tertinggi(tmp_path):
+    from app.services.backup_engines import folder_postgresql_terpasang
+
+    akar = tmp_path / "PostgreSQL"
+    for versi in ("15", "17", "16", "bukan-versi"):
+        (akar / versi / "bin").mkdir(parents=True)
+    (akar / "18").mkdir()  # tanpa bin: bukan pemasangan lengkap
+
+    hasil = folder_postgresql_terpasang([akar])
+
+    assert [p.parent.name for p in hasil] == ["17", "16", "15"]
+
+
+def test_pg_dump_ditemukan_tanpa_pengaturan(tmp_path, monkeypatch, app_config):
+    from app.services import backup_engines
+
+    bin_pg = tmp_path / "PostgreSQL" / "17" / "bin"
+    bin_pg.mkdir(parents=True)
+    (bin_pg / "pg_dump.exe").write_bytes(b"")
+    monkeypatch.setattr(backup_engines.shutil, "which", lambda nama: None)
+    monkeypatch.setattr(
+        backup_engines, "folder_postgresql_terpasang", lambda: [bin_pg]
+    )
+
+    mesin = backup_engines.PostgresBackup(app_config, "")
+
+    assert mesin._alat("pg_dump") == str(bin_pg / "pg_dump.exe")
+
+
+def test_backup_otomatis_dilewati_di_komputer_loket(backup, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.backup_service._boleh_backup_di_sini", lambda: False
+    )
+
+    hasil = backup.backup_otomatis_bila_perlu()
+
+    assert not hasil.berhasil
+    assert "komputer server" in hasil.pesan
+    assert backup._daftar_berkas() == []
+
+
+def test_backup_disalin_ke_folder_kedua(backup, admin_auth, tmp_path):
+    from app.services.settings_service import SettingsService
+
+    kedua = tmp_path / "flashdisk" / "backup-antrian"
+    SettingsService(admin_auth).set("backup.salinan_folder", str(kedua))
+
+    info = backup.backup()
+
+    assert (kedua / info.nama).is_file()
+    assert (kedua / info.nama).stat().st_size == info.ukuran_byte
+
+
+def test_folder_kedua_yang_gagal_tidak_membatalkan_backup(
+    backup, admin_auth, tmp_path, monkeypatch
+):
+    from app.services import backup_service as modul
+    from app.services.settings_service import SettingsService
+
+    SettingsService(admin_auth).set("backup.salinan_folder", str(tmp_path / "x"))
+
+    def gagal(*args, **kwargs):
+        raise OSError("flashdisk dicabut")
+
+    monkeypatch.setattr(modul.shutil, "copy2", gagal)
+
+    info = backup.backup()
+
+    assert info.berkas.is_file()
