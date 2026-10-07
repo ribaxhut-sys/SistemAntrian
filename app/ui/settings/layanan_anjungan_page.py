@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -157,13 +158,25 @@ def _kartu(judul_kartu: str) -> tuple[QFrame, QVBoxLayout]:
 class LayananAnjunganPage(QWidget):
     """Status, pemasangan, dan data sambungan API anjungan di komputer server."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, perangkat=None, parent: QWidget | None = None) -> None:
+        """`perangkat`: PerangkatService; tanpa itu kartu Perangkat tidak dibangun."""
         super().__init__(parent)
         self._sibuk = False
         self._status: StatusLayanan | None = None
         self._alamat = alamat_ipv4_lan()
 
-        layout = QVBoxLayout(self)
+        # Isi halaman lebih tinggi dari jendela 1280x720 sejak ada daftar
+        # perangkat, jadi seluruhnya digulir.
+        luar = QVBoxLayout(self)
+        luar.setContentsMargins(0, 0, 0, 0)
+        gulir = QScrollArea()
+        gulir.setWidgetResizable(True)
+        gulir.setFrameShape(QFrame.Shape.NoFrame)
+        isi_halaman = QWidget()
+        gulir.setWidget(isi_halaman)
+        luar.addWidget(gulir)
+
+        layout = QVBoxLayout(isi_halaman)
         layout.setContentsMargins(32, 28, 32, 28)
         layout.setSpacing(14)
         layout.addWidget(judul("Layanan Anjungan"))
@@ -271,6 +284,13 @@ class LayananAnjunganPage(QWidget):
         self.api_otomatis.setChecked(muat_api_otomatis())
         self.api_otomatis.toggled.connect(self._ubah_api_otomatis)
         layout.addWidget(self.api_otomatis)
+
+        self.kartu_perangkat = None
+        if perangkat is not None:
+            from app.ui.settings.kartu_perangkat import KartuPerangkat
+
+            self.kartu_perangkat = KartuPerangkat(perangkat)
+            layout.addWidget(self.kartu_perangkat)
         layout.addStretch()
 
         self._pekerja: _Pekerja | None = None
@@ -280,6 +300,8 @@ class LayananAnjunganPage(QWidget):
 
     def muat_ulang(self) -> None:
         """Periksa ulang status di latar. Dipanggil juga oleh F5."""
+        if getattr(self, "kartu_perangkat", None) is not None:
+            self.kartu_perangkat.muat_ulang()
         if self._sibuk:
             return
         self._jalankan(periksa_status, self._tampilkan_status)

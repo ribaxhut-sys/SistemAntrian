@@ -2300,3 +2300,59 @@ def test_halaman_layanan_anjungan_menampilkan_apk_untuk_tablet(
     qtbot.waitUntil(lambda: halaman._status.apk is None, timeout=3000)
     assert halaman.baris_apk.lencana.text() == "Belum"
     assert "build-android-kiosk.ps1" in halaman.baris_apk.teks.text()
+
+
+def test_kartu_perangkat_menampilkan_dan_mencabut(qtbot, admin_auth, monkeypatch):
+    from app.services import device_service
+    from app.services.device_service import PerangkatService
+    from app.ui.settings.kartu_perangkat import KartuPerangkat
+
+    layanan = PerangkatService(admin_auth)
+    token = device_service.pasangkan(
+        layanan.buat_kode().kode, "dev-anjungan-0001", "Anjungan Lobi", "anjungan"
+    )
+    device_service.catat_kontak("dev-tv-0001", nama="TV", jenis="layar_antrian")
+    device_service.catat_printer("dev-anjungan-0001", False, "Printer USB tidak ditemukan")
+
+    kartu = KartuPerangkat(layanan)
+    qtbot.addWidget(kartu)
+
+    nama = {kartu.tabel.item(b, 0).text() for b in range(kartu.tabel.rowCount())}
+    assert nama == {"Anjungan Lobi", "TV"}
+    baris_anjungan = next(
+        b for b in range(kartu.tabel.rowCount())
+        if kartu.tabel.item(b, 0).text() == "Anjungan Lobi"
+    )
+    assert "gagal" in kartu.tabel.item(baris_anjungan, 5).text()
+    assert kartu.tabel.item(baris_anjungan, 1).text() == "Anjungan"
+    assert kartu.token_bersama.isChecked()
+
+    monkeypatch.setattr("app.ui.settings.kartu_perangkat.konfirmasi", lambda *a, **k: True)
+    info = next(p for p in kartu.perangkat if p.nama == "Anjungan Lobi")
+    kartu._cabut(info)
+
+    assert device_service.perangkat_dari_token(token) is None
+    assert "dicabut" in kartu.tabel.item(
+        next(b for b in range(kartu.tabel.rowCount())
+             if kartu.tabel.item(b, 0).text() == "Anjungan Lobi"), 2
+    ).text()
+
+
+def test_kartu_perangkat_menampilkan_kode_pasang(qtbot, admin_auth, monkeypatch):
+    from app.services.device_service import PerangkatService
+    from app.ui.settings import kartu_perangkat as modul
+
+    tampil = {}
+
+    def exec_palsu(dialog):
+        tampil["kode"] = dialog.label_kode.text()
+        return 1
+
+    monkeypatch.setattr(modul.DialogKodePasang, "exec", exec_palsu)
+    kartu = modul.KartuPerangkat(PerangkatService(admin_auth))
+    qtbot.addWidget(kartu)
+
+    kartu._tambah()
+
+    angka = tampil["kode"].replace(" ", "")
+    assert len(angka) == 6 and angka.isdigit()

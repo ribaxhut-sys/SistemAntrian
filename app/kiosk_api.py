@@ -15,7 +15,7 @@ from typing import Annotated
 from uuid import UUID
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
@@ -98,6 +98,33 @@ class TicketRequest(BaseModel):
     request_id: UUID
 
 
+class PairRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=12)
+    device_id: str = Field(min_length=8, max_length=64)
+    name: str = Field(default="", max_length=80)
+    kind: str = Field(default="anjungan", max_length=20)
+
+
+class PrinterReport(BaseModel):
+    ok: bool
+    message: str = Field(default="", max_length=200)
+
+
+class PerangkatDb:
+    """Penghubung API dengan tabel perangkat (app.services.device_service)."""
+
+    def __getattr__(self, nama):
+        from app.services import device_service
+
+        return getattr(device_service, nama)
+
+
+#: Tebakan kode pasang yang salah sebelum semua kode aktif dihanguskan.
+BATAS_TEBAKAN_KODE = 10
+SELANG_TEBAKAN_DETIK = 600
+SELANG_TULIS_KONTAK_DETIK = 30
+
+
 class KioskServices:
     def __init__(self) -> None:
         self.auth = AuthService()
@@ -108,6 +135,7 @@ class KioskServices:
         self.ticket = TicketService(
             NullTicketPrinter(), self.settings, self.master, self.queue
         )
+        self.perangkat = PerangkatDb()
 
 
 def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
@@ -128,19 +156,82 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         openapi_url=None,
     )
 
+    # Tanpa `perangkat` (test lama, atau API yang dijalankan tanpa database
+    # perangkat) hanya token bersama yang dikenal.
+    perangkat = getattr(services, "perangkat", None)
+    kontak_terakhir: dict[str, float] = {}
+    tebakan_salah: list[float] = []
+
+    def tolak() -> HTTPException:
+        return HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token anjungan tidak sah.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    def catat_kontak(request: Request, device_id: str) -> None:
+        sekarang = time.monotonic()
+        if sekarang - kontak_terakhir.get(device_id, -1e9) < SELANG_TULIS_KONTAK_DETIK:
+            return
+        kontak_terakhir[device_id] = sekarang
+        try:
+            versi_kode = int(request.headers.get("x-app-version-code") or 0)
+        except ValueError:
+            versi_kode = 0
+        try:
+            perangkat.catat_kontak(
+                device_id,
+                nama=request.headers.get("x-device-name", ""),
+                jenis=request.headers.get("x-device-kind", "anjungan"),
+                alamat_ip=request.client.host if request.client else "",
+                versi_nama=request.headers.get("x-app-version-name", ""),
+                versi_kode=versi_kode,
+            )
+        except Exception:
+            # Daftar perangkat adalah keterangan, bukan syarat pelayanan.
+            logger.warning("Kontak perangkat %s gagal dicatat", device_id, exc_info=True)
+
     def require_token(
+        request: Request,
         credentials: Annotated[
             HTTPAuthorizationCredentials | None, Depends(_bearer)
         ],
-    ) -> None:
-        if credentials is None or not hmac.compare_digest(
-            credentials.credentials, token
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token anjungan tidak sah.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+    ) -> str:
+        """
+        Token perangkat (hasil pasang) atau token bersama lama.
+
+        Mengembalikan device_id yang dipakai mencatat kontak; kosong bila
+        perangkat tidak menyebutkannya.
+        """
+        if credentials is None:
+            raise tolak()
+        diberikan = credentials.credentials
+        device_id = (request.headers.get("x-device-id") or "").strip()[:64]
+
+        if perangkat is not None:
+            pemilik = perangkat.perangkat_dari_token(diberikan)
+            if pemilik is not None:
+                if pemilik.dicabut:
+                    raise tolak()
+                catat_kontak(request, pemilik.device_id)
+                return pemilik.device_id
+
+        if not hmac.compare_digest(diberikan, token):
+            raise tolak()
+        if perangkat is not None:
+            if not perangkat.token_bersama_aktif():
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=(
+                        "Token bersama sudah dimatikan. Pasangkan perangkat ini "
+                        "dengan kode dari Layanan Anjungan."
+                    ),
+                )
+            if device_id:
+                if perangkat.perangkat_dicabut(device_id):
+                    raise tolak()
+                catat_kontak(request, device_id)
+        return device_id
 
     def welcome_media_paths() -> list[Path]:
         kind = services.settings.get("kiosk.welcome_kind", "teks")
@@ -196,6 +287,49 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
 
     @app.get("/health")
     def health():
+        return {"status": "ok"}
+
+    @app.post("/v1/kiosk/pair")
+    def pair(request: PairRequest):
+        """Tukar kode 6 angka dari Layanan Anjungan dengan token perangkat."""
+        if perangkat is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Pemasangan perangkat tidak tersedia.",
+            )
+        sekarang = time.monotonic()
+        tebakan_salah[:] = [t for t in tebakan_salah if sekarang - t < SELANG_TEBAKAN_DETIK]
+        if len(tebakan_salah) >= BATAS_TEBAKAN_KODE:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Terlalu banyak kode salah. Buat kode baru di Layanan Anjungan.",
+            )
+        try:
+            device_token = perangkat.pasangkan(
+                request.code, request.device_id, request.name, request.kind
+            )
+        except AppError:
+            tebakan_salah.append(sekarang)
+            if len(tebakan_salah) >= BATAS_TEBAKAN_KODE:
+                # Tebakan beruntun: hanguskan semua kode yang masih terbuka.
+                perangkat.batalkan_kode_aktif()
+                logger.warning("Kode pasang dihanguskan setelah %s tebakan salah", len(tebakan_salah))
+            raise
+        return {"token": device_token}
+
+    @app.post("/v1/kiosk/printer")
+    def printer_report(
+        report: PrinterReport,
+        # Bentuk `= Depends(...)`, bukan Annotated: require_token adalah
+        # fungsi lokal yang tidak terbaca FastAPI dari anotasi bertunda.
+        device_id: str = Depends(require_token),  # noqa: B008
+    ):
+        """Hasil cetak terakhir, untuk kolom Printer di daftar perangkat."""
+        if perangkat is not None and device_id:
+            try:
+                perangkat.catat_printer(device_id, report.ok, report.message)
+            except Exception:
+                logger.warning("Status printer %s gagal dicatat", device_id, exc_info=True)
         return {"status": "ok"}
 
     @app.get("/v1/kiosk/categories", dependencies=[Depends(require_token)])

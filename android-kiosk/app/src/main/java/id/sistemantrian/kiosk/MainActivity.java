@@ -67,6 +67,10 @@ public final class MainActivity extends Activity {
     private static final String PREFS = "kiosk";
     private static final String SERVER = "server";
     private static final String TOKEN = "token";
+    private static final String DEVICE_ID = "device_id";
+    private static final String DEVICE_NAME = "device_name";
+    // Jenis perangkat menurut docs/istilah.md: aplikasi ini adalah anjungan.
+    private static final String DEVICE_KIND = "anjungan";
 
     private static final int INK = Color.rgb(15, 23, 42);
     private static final int MUTED = Color.rgb(71, 85, 105);
@@ -599,8 +603,7 @@ public final class MainActivity extends Activity {
             connection = (HttpURLConnection) new URL(mediaUrl).openConnection();
             connection.setConnectTimeout(8000);
             connection.setReadTimeout(20000);
-            connection.setRequestProperty("Authorization",
-                    "Bearer " + preferences.getString(TOKEN, ""));
+            applyHeaders(connection);
             int code = connection.getResponseCode();
             if (code >= 400) throw new IllegalStateException("Media tidak dapat dimuat.");
             ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -853,8 +856,10 @@ public final class MainActivity extends Activity {
                     showResult(number, issued.name, cooldownSeconds);
                     updateAvailability();
                     UsbEscPosPrinter.print(this, number, receipt, layout, message -> {
+                        boolean printed = message.contains("tercetak");
+                        reportPrinter(printed, message);
                         if (hint != null && showingResult) {
-                            setHint(message, message.contains("tercetak") ? "hasil" : "gagal");
+                            setHint(message, printed ? "hasil" : "gagal");
                         }
                     });
                     loadDisplay();
@@ -973,11 +978,8 @@ public final class MainActivity extends Activity {
                 connection.setRequestMethod(method);
                 connection.setConnectTimeout(5000);
                 connection.setReadTimeout(8000);
-                connection.setRequestProperty("Authorization",
-                        "Bearer " + preferences.getString(TOKEN, ""));
+                applyHeaders(connection);
                 connection.setRequestProperty("Accept", "application/json");
-                connection.setRequestProperty("X-App-Version-Code",
-                        String.valueOf(appVersionCode()));
                 if (body != null) {
                     connection.setDoOutput(true);
                     connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -1018,6 +1020,45 @@ public final class MainActivity extends Activity {
                 if (connection != null) connection.disconnect();
             }
         });
+    }
+
+    /** UUID perangkat ini, dibuat sekali dan disimpan selamanya. */
+    private String deviceId() {
+        String id = preferences.getString(DEVICE_ID, "");
+        if (id.isEmpty()) {
+            id = UUID.randomUUID().toString();
+            preferences.edit().putString(DEVICE_ID, id).apply();
+        }
+        return id;
+    }
+
+    private String deviceName() {
+        String name = preferences.getString(DEVICE_NAME, "").trim();
+        return name.isEmpty() ? ("Anjungan " + Build.MODEL) : name;
+    }
+
+    /** Kepala yang dikirim pada setiap permintaan ke server. */
+    private void applyHeaders(HttpURLConnection connection) {
+        connection.setRequestProperty("Authorization",
+                "Bearer " + preferences.getString(TOKEN, ""));
+        connection.setRequestProperty("X-Device-Id", deviceId());
+        connection.setRequestProperty("X-Device-Name", deviceName());
+        connection.setRequestProperty("X-Device-Kind", DEVICE_KIND);
+        connection.setRequestProperty("X-App-Version-Code", String.valueOf(appVersionCode()));
+        connection.setRequestProperty("X-App-Version-Name", appVersionName());
+    }
+
+    /** Hasil cetak terakhir, untuk kolom Printer di Layanan Anjungan. Tidak pernah mengganggu. */
+    private void reportPrinter(boolean ok, String message) {
+        try {
+            JSONObject body = new JSONObject()
+                    .put("ok", ok)
+                    .put("message", message == null ? "" : message.length() > 190
+                            ? message.substring(0, 190) : message);
+            request("POST", "/v1/kiosk/printer", body, json -> { }, error -> { });
+        } catch (Exception ignored) {
+            // Laporan printer hanya keterangan.
+        }
     }
 
     private int appVersionCode() {
@@ -1122,8 +1163,7 @@ public final class MainActivity extends Activity {
                 connection = (HttpURLConnection) new URL(base + "/v1/kiosk/app/apk").openConnection();
                 connection.setConnectTimeout(5000);
                 connection.setReadTimeout(30000);
-                connection.setRequestProperty("Authorization",
-                        "Bearer " + preferences.getString(TOKEN, ""));
+                applyHeaders(connection);
                 int code = connection.getResponseCode();
                 if (code != 200) throw new IllegalStateException(
                         "server menjawab " + code);
@@ -1192,6 +1232,35 @@ public final class MainActivity extends Activity {
         }).start();
     }
 
+    /** Tukar kode pasang dengan token khusus perangkat ini. */
+    private void pairDevice(String code, AlertDialog dialog, EditText codeField) {
+        try {
+            JSONObject body = new JSONObject()
+                    .put("code", code)
+                    .put("device_id", deviceId())
+                    .put("name", deviceName())
+                    .put("kind", DEVICE_KIND);
+            codeField.setEnabled(false);
+            request("POST", "/v1/kiosk/pair", body, json -> {
+                String deviceToken = json.getJSONObject("data").getString("token");
+                preferences.edit().putString(TOKEN, deviceToken).apply();
+                dialog.dismiss();
+                Toast.makeText(this, "Tablet terpasang ke server.", Toast.LENGTH_LONG).show();
+                categories.clear();
+                path.clear();
+                categoriesLoaded = false;
+                showServerPlaceholder("Tablet terpasang. Menghubungkan ke server…");
+                loadCategories();
+                loadDisplay();
+            }, message -> {
+                codeField.setEnabled(true);
+                codeField.setError(message);
+            });
+        } catch (Exception e) {
+            codeField.setError("Kode tidak dapat dikirim.");
+        }
+    }
+
     private void showSettings() {
         LinearLayout fields = new LinearLayout(this);
         fields.setPadding(dp(20), dp(4), dp(20), 0);
@@ -1228,6 +1297,20 @@ public final class MainActivity extends Activity {
         token.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         token.setText(preferences.getString(TOKEN, DEFAULT_TOKEN));
         fields.addView(token);
+        EditText name = new EditText(this);
+        name.setHint("Nama perangkat, contoh Anjungan Lobi");
+        name.setSingleLine(true);
+        name.setText(deviceName());
+        fields.addView(name);
+        EditText pairCode = new EditText(this);
+        pairCode.setHint("Kode pasang 6 angka dari Layanan Anjungan");
+        pairCode.setSingleLine(true);
+        pairCode.setInputType(InputType.TYPE_CLASS_NUMBER);
+        fields.addView(pairCode);
+        TextView pairHint = text(
+                "Isi kode pasang untuk mendapat token khusus tablet ini; token di atas tidak perlu diketik.",
+                12, MUTED, false);
+        fields.addView(pairHint);
         TextView printerStatus = text(
                 UsbEscPosPrinter.detect(this), 13, MUTED, false);
         printerStatus.setPadding(0, dp(6), 0, dp(2));
@@ -1256,8 +1339,20 @@ public final class MainActivity extends Activity {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                     String address = server.getText().toString().trim();
                     String apiToken = token.getText().toString().trim();
+                    String code = pairCode.getText().toString().replaceAll("[^0-9]", "");
                     if (!(address.startsWith("http://") || address.startsWith("https://"))) {
                         server.setError("Alamat harus diawali http:// atau https://");
+                        return;
+                    }
+                    preferences.edit().putString(DEVICE_NAME, name.getText().toString().trim())
+                            .apply();
+                    if (!code.isEmpty()) {
+                        if (code.length() != 6) {
+                            pairCode.setError("Kode pasang 6 angka");
+                            return;
+                        }
+                        preferences.edit().putString(SERVER, address).apply();
+                        pairDevice(code, dialog, pairCode);
                         return;
                     }
                     if (apiToken.length() < 8) {

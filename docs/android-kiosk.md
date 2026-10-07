@@ -76,6 +76,26 @@ If the tablet loses its connection after requesting a number, use **Ulangi
 permintaan tiket**. The APK reuses the same request ID, so the running server
 returns the existing ticket instead of issuing a second number.
 
+## Memasangkan tablet dengan kode
+
+Setiap tablet mendapat token sendiri, sehingga satu tablet yang hilang dapat
+dicabut tanpa mengatur ulang yang lain.
+
+1. Di aplikasi server: **Layanan Anjungan → Perangkat → + Tambah perangkat**.
+   Muncul kode 6 angka, berlaku 10 menit dan sekali pakai.
+2. Di tablet: ⚙ **Pengaturan** → isi alamat server (atau **Cari**), nama
+   perangkat, dan kode itu → **Simpan**.
+3. Tablet muncul di daftar **Perangkat** beserta waktu terakhir terlihat,
+   alamat IP, versi aplikasi, dan hasil cetak terakhir.
+
+**Cabut** menghentikan token tablet itu seketika. Sepuluh kode salah
+berturut-turut menghanguskan semua kode yang masih terbuka.
+
+Selama peralihan, token bersama yang lama tetap diterima (centang **Terima
+token bersama** di kartu Perangkat). Tablet yang memakainya tetap tercatat
+di daftar, ditandai belum dipasangkan. Matikan centang itu setelah semua
+tablet dipasangkan dengan kode.
+
 ## Pembaruan APK dari server
 
 `build-android-kiosk.ps1` menaruh APK beserta versinya di folder `apk\`

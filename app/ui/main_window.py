@@ -25,6 +25,7 @@ from app.core.logger import get_logger
 from app.services.auth_service import AuthService
 from app.services.backup_service import BackupService
 from app.services.dashboard_service import DashboardService
+from app.services.device_service import PerangkatService
 from app.services.master_data_service import MasterDataService
 from app.services.permissions import Permission
 from app.services.queue_service import QueueService
@@ -462,7 +463,7 @@ class MainWindow(QMainWindow):
             _Menu(
                 "Layanan Anjungan",
                 Permission.CONFIG_MANAGE,
-                LayananAnjunganPage,
+                lambda: LayananAnjunganPage(PerangkatService(self.auth)),
                 hanya_server=True,
             ),
             _Menu(

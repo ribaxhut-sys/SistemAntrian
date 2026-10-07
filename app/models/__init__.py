@@ -10,6 +10,7 @@ from app.models.base import Base
 from app.models.branch import Branch
 from app.models.counter import Counter
 from app.models.enums import AuditAction, QueueStatus, RecordStatus, UserRole
+from app.models.kiosk_device import KioskDevice, KioskPairingCode
 from app.models.queue import Queue, QueueSequence
 from app.models.queue_call import QueueCall
 from app.models.queue_note import QueueNote
@@ -26,6 +27,8 @@ __all__ = [
     "Base",
     "Branch",
     "Counter",
+    "KioskDevice",
+    "KioskPairingCode",
     "Queue",
     "QueueCall",
     "QueueNote",
