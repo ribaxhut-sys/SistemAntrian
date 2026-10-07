@@ -82,7 +82,7 @@ def app_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture
-def env_mesin(monkeypatch: pytest.MonkeyPatch):
+def env_mesin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """
     Setel environment variable per-mesin lalu bangun ulang konfigurasi.
 
@@ -90,7 +90,13 @@ def env_mesin(monkeypatch: pytest.MonkeyPatch):
     diuji memang jalur environment variable — bukan pengaturan database.
     Konfigurasi dikembalikan setelah test supaya nilainya tidak bocor ke
     test berikutnya lewat cache `get_config()`.
+
+    `peran.json` diarahkan ke folder sementara yang kosong. Tanpa itu test
+    membaca `data/peran.json` milik komputer pengembang: begitu komputer
+    itu dipasang sebagai loket dengan pencetak `system`, test yang
+    mengharapkan "mesin tidak berpendapat" gagal hanya di komputer itu.
     """
+    monkeypatch.setenv("ANTRIAN_PERAN_PATH", str(tmp_path / "peran.json"))
 
     def setel(**nilai: str | None):
         for kunci, isi in nilai.items():
