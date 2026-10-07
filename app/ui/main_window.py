@@ -40,14 +40,6 @@ from app.ui.dashboard.survey_result_page import SurveyResultPage
 from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.settings.dialogs import LABEL_PERAN
 from app.ui.display.display_page import DisplayPage
-from app.ui.kiosk.kiosk_page import KioskPage
-from app.ui.efek import setel_efek_grafis
-from app.ui.kiosk.pratinjau import (
-    LEBAR_TOTEM_ASLI,
-    PratinjauTotem,
-    layar_mendatar,
-    ukuran_jendela_totem,
-)
 from app.ui.notes.note_page import NotePage
 from app.ui.queue.service_page import ServicePage
 from app.ui.registration.registration_page import RegistrationPage
@@ -60,9 +52,6 @@ from app.ui.style import DANGER, SUCCESS
 from app.ui.survey.survey_page import SurveyPage
 
 logger = get_logger("ui.main")
-
-TINGGI_TAK_TERBATAS = (1 << 24) - 1
-
 
 def _area_layar_utama() -> QRect:
     """Area kerja layar utama, atau 1280×720 bila Qt belum mengenal layar apa pun."""
@@ -109,10 +98,6 @@ class _Menu:
     #: Bila sesi memiliki salah satu hak ini, menu disembunyikan. Dipakai
     #: agar satu peran tidak mendapat dua menu untuk pekerjaan yang sama.
     kecuali: tuple[Permission, ...] = ()
-    #: Hanya untuk sesi kios. Hak akses saja tidak cukup membedakannya:
-    #: petugas pendaftaran juga berhak menerbitkan nomor, tetapi layar
-    #: pengunjung bukan untuk meja berpetugas.
-    hanya_kios: bool = False
     #: Hanya di komputer yang berperan server database.
     hanya_server: bool = False
 
@@ -247,9 +232,7 @@ class MainWindow(QMainWindow):
         auth: AuthService,
         parent: QWidget | None = None,
         *,
-        anjungan_totem: bool = False,
         berjendela: bool | None = None,
-        persen_pratinjau: int | None = None,
     ) -> None:
         super().__init__(parent)
         # Sejak keluar dari layar kembali ke Login/Pilihan Mode alih-alih
@@ -262,29 +245,9 @@ class MainWindow(QMainWindow):
         # jendela beserta seluruh anak dan timer-nya benar-benar dihapus.
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.auth = auth
-        self.anjungan_totem = anjungan_totem
-        area = _area_layar_utama()
-        if berjendela is None:
-            # Kaca totem selalu berdiri tegak. Dibuka layar penuh di layar
-            # mendatar — laptop, lewat dialog pilihan yang tidak bisa menulis
-            # --jendela — ketiga pitanya terbentang menjadi pita pipih yang
-            # tidak mirip mesin sungguhannya. Totem sungguhan berdiri tegak,
-            # jadi di sana tetap layar penuh. Mesin publik lain tidak
-            # tersentuh: layarnya memang mendatar.
-            berjendela = anjungan_totem and layar_mendatar(area)
-        #: True = jangan layar penuh. Untuk melihat totem utuh di laptop.
-        self.berjendela = berjendela
-        #: Persentase pratinjau totem dari `--jendela=PERSEN`. None berarti
-        #: sebesar yang muat di layar, paling besar 50%.
-        self.persen_pratinjau = persen_pratinjau
-        # Pratinjau totem membungkus halaman anjungan dalam
-        # QGraphicsProxyWidget, dan Qt tidak menggambar efek grafis di
-        # dalam proxy: kartu layanan berbayangan hilang dari layar — lihat
-        # app/ui/efek.py. Disetel pada SETIAP jendela, bukan hanya
-        # dimatikan untuk pratinjau: `_jalankan_ui` membuka jendela
-        # berikutnya di proses yang sama, dan layar televisi yang dibuka
-        # sesudah pratinjau tidak boleh ikut kehilangan bayangannya.
-        setel_efek_grafis(not (anjungan_totem and berjendela))
+        #: True = jangan layar penuh (`--jendela`), untuk menguji layar
+        #: antrian di laptop.
+        self.berjendela = bool(berjendela)
         self.master_service = MasterDataService(auth)
         self.user_service = UserService(auth)
         self.queue_service = QueueService(auth)
@@ -316,12 +279,10 @@ class MainWindow(QMainWindow):
             suara_diaktifkan(self.settings_service, anjungan=sesi.kios)
         )
 
-        #: Layar yang menghadap pengunjung, bukan meja petugas.
-        #:
-        #: Tiga bentuk, semuanya dipasang di komputer publik: sesi anjungan
-        #: dan sesi layar antrian yang berjalan tanpa login, serta akun
-        #: DISPLAY yang hanya boleh melihat layar antrian dan tidak boleh
-        #: apa-apa lagi.
+        #: Layar antrian (cadangan TV Android) yang menghadap pengunjung,
+        #: bukan meja petugas: sesi layar tanpa login, atau akun DISPLAY
+        #: yang hanya boleh melihat layar antrian dan tidak boleh apa-apa lagi.
+        #: Anjungan tidak lagi berjalan di Windows (lihat docs/istilah.md).
         #:
         #: Untuk DISPLAY, penentunya hak akses dan bukan nama peran. Bila
         #: suatu saat peran itu diberi kewenangan tambahan, akunnya berhenti
@@ -343,29 +304,16 @@ class MainWindow(QMainWindow):
         # di kiri, daftar tunggu di kanan. Menu di kepala (bukan kolom kiri)
         # menyisakan lebar penuh untuk keduanya. 1280 x 720 masih muat utuh
         # pada layar 1366 x 768 yang paling sempit di kantor.
-        #
-        # Totem + --jendela: miniatur 1080×1920 (sekitar 50% di laptop
-        # 1080p), bukan tata letak yang disusun ulang ke jendela mendatar.
-        if self.anjungan_totem:
-            self._geometri_normal = ukuran_jendela_totem(area, self.persen_pratinjau)
-            self.resize(self._geometri_normal.size())
-            self.move(self._geometri_normal.topLeft())
-            #: ukuran_jendela_totem sudah meletakkannya di tengah layar.
-            self._posisi_normal_diketahui = True
-        else:
-            self.resize(1280, 720)
-            #: Geometri jendela biasa, untuk F11. Anjungan dibuka langsung
-            #: fullscreen; tanpa ini, restore Qt memakai ukuran bawaan kecil
-            #: dan kartu layanan dihitung ulang jadi pita.
-            self._geometri_normal = QRect(self.geometry())
-            #: Ukurannya sah, posisinya belum: jendela yang belum pernah
-            #: tampil masih berada di (0, 0). Lihat _turunkan_layar_penuh.
-            self._posisi_normal_diketahui = False
+        self.resize(1280, 720)
+        #: Geometri jendela biasa, untuk F11. Layar antrian dibuka langsung
+        #: fullscreen; tanpa ini, restore Qt memakai ukuran bawaan kecil.
+        self._geometri_normal = QRect(self.geometry())
+        #: Ukurannya sah, posisinya belum: jendela yang belum pernah
+        #: tampil masih berada di (0, 0). Lihat _turunkan_layar_penuh.
+        self._posisi_normal_diketahui = False
 
         self._bangun_tampilan()
         self._pasang_pintasan()
-        if self.anjungan_totem:
-            self._kunci_ukuran_totem(True)
 
     # -----------------------------------------------------------------
 
@@ -527,21 +475,13 @@ class MainWindow(QMainWindow):
                 Permission.QUEUE_CLOSE_DAY,
                 lambda: CloseDayPage(self.queue_service, self.backup_service),
             ),
-            # Anjungan menggabungkan papan nomor kecil dengan pengambilan
-            # nomor pada satu layar. Televisi ruang tunggu mendapat papan
-            # besarnya saja lewat menu berikutnya.
-            _Menu(
-                "Anjungan Ambil Nomor",
-                Permission.QUEUE_CREATE,
-                self._halaman_anjungan,
-                hanya_kios=True,
-            ),
+            # Cadangan TV Android. Akan hilang bersama --tv begitu aplikasi
+            # layar antrian Android siap (docs/istilah.md).
             _Menu(
                 "Layar Antrian",
                 Permission.DISPLAY_VIEW,
                 self._halaman_layar_antrian,
-                # Kios sudah memuat papan nomor di dalam layarnya sendiri;
-                # tanpa syarat ini ia mendapat dua menu untuk hal yang sama.
+                # Petugas pendaftaran tidak perlu papan di mejanya.
                 kecuali=(Permission.QUEUE_CREATE,),
             ),
             # Satu menu saja untuk pemantauan. Ringkasan harian sudah memuat
@@ -564,17 +504,9 @@ class MainWindow(QMainWindow):
             ),
         ]
 
-        sesi = self.auth.require_session()
+        self.auth.require_session()
         self.menu_aktif: list[_Menu] = []
         for butir in daftar:
-            if butir.hanya_kios and not sesi.kios:
-                continue
-            # Anjungan hanya boleh halaman anjungan. Tanpa ini ia juga
-            # mendapat "Terbitkan Nomor" karena sama-sama berhak
-            # QUEUE_CREATE, dan halaman pertamanya justru meja pendaftaran —
-            # bukan layar yang menghadap pengunjung.
-            if sesi.kios and not butir.hanya_kios:
-                continue
             if any(self.auth.has_permission(p) for p in butir.kecuali):
                 continue
             if butir.hanya_server and not _komputer_server():
@@ -645,21 +577,6 @@ class MainWindow(QMainWindow):
             self.halaman.setCurrentIndex(indeks)
         logger.info("Papan antrian dibangun ulang untuk layar %s.", bentuk)
 
-    def _halaman_anjungan(self) -> QWidget:
-        """Halaman anjungan, atau miniaturnya bila `--jendela` pada totem."""
-        halaman = KioskPage(
-            self.queue_service,
-            self.master_service,
-            self.settings_service,
-            self.sound_player,
-            self.ticket_service,
-            totem=self.anjungan_totem,
-        )
-        if not (self.anjungan_totem and self.berjendela):
-            return halaman
-        skala = self._geometri_normal.width() / LEBAR_TOTEM_ASLI
-        return PratinjauTotem(halaman, skala)
-
     def _pasang_pintasan(self) -> None:
         """Pintasan papan ketik: petugas loket jarang menyentuh mouse."""
         QShortcut(QKeySequence("F5"), self, self.muat_ulang_halaman)
@@ -673,8 +590,8 @@ class MainWindow(QMainWindow):
 
         # Ganti menu tanpa mouse. Angka tanpa Ctrl sudah dipakai menerbitkan
         # nomor di meja pendaftaran (1–9), jadi yang di kepala wajib Ctrl.
-        # Mesin publik tidak mendapatkannya: menunya tersembunyi, dan
-        # menekan Ctrl+1 di anjungan tidak boleh memindahkan apa pun.
+        # Layar antrian tidak mendapatkannya: menunya tersembunyi, dan
+        # menekan Ctrl+1 di sana tidak boleh memindahkan apa pun.
         if not self.mode_kios:
             for indeks in range(min(9, len(self.menu_aktif))):
                 pintasan = QShortcut(QKeySequence(f"Ctrl+{indeks + 1}"), self)
@@ -684,47 +601,18 @@ class MainWindow(QMainWindow):
 
     # -----------------------------------------------------------------
 
-    def _kunci_ukuran_totem(self, kunci: bool) -> None:
-        """
-        Kunci jendela totem pada ukuran pratinjau.
-
-        Tanpa ini, sizeHint tiga kartu layanan melebar ke 1280×720 begitu
-        jendela ditampilkan, dan pita iklan kembali pipih.
-
-        HANYA untuk pratinjau `--jendela`, di mana isinya adalah kaca
-        1080×1920 yang diperkecil utuh. Totem sungguhan menaruh halaman
-        anjungan langsung di jendela: mengunci jendela itu pada 540×960
-        begitu Esc atau F11 ditekan akan menyusun ulang tiga pita totem ke
-        lebar 540 px, dalam jendela yang tidak bisa diperbesar lagi.
-        """
-        if not (self.anjungan_totem and self.berjendela):
-            return
-        if self._geometri_normal is None:
-            return
-        if kunci:
-            ukuran = self._geometri_normal.size()
-            self.setFixedSize(ukuran)
-            self.move(self._geometri_normal.topLeft())
-        else:
-            self.setMinimumSize(0, 0)
-            self.setMaximumSize(TINGGI_TAK_TERBATAS, TINGGI_TAK_TERBATAS)
-
     def tampilkan(self) -> None:
         """
         Buka jendela sesuai perannya.
 
         Layar yang menghadap pengunjung dibuka penuh sejak awal, tanpa
         bingkai jendela dan tanpa tombol tutup yang menggoda untuk ditekan.
-        `--jendela` meniadakan itu: totem dibuka sebagai miniatur 50%
-        dari kaca 1080×1920, supaya tiga pita terlihat utuh di laptop.
+        `--jendela` meniadakan itu, untuk menguji di laptop.
         """
         if self.mode_kios and not self.berjendela:
-            self._kunci_ukuran_totem(False)
             self.showFullScreen()
             return
         self.show()
-        if self.anjungan_totem:
-            self._kunci_ukuran_totem(True)
 
     def ganti_layar_penuh(self) -> None:
         if self.isFullScreen():
@@ -732,7 +620,6 @@ class MainWindow(QMainWindow):
         else:
             self._geometri_normal = QRect(self.geometry())
             self._posisi_normal_diketahui = self.isVisible()
-            self._kunci_ukuran_totem(False)
             self.showFullScreen()
 
     def keluar_layar_penuh(self) -> None:
@@ -745,7 +632,7 @@ class MainWindow(QMainWindow):
         Kembali ke jendela biasa: ke posisi terakhirnya bila pernah ada,
         selain itu ke tengah layar tempat jendela ini sedang tampil.
 
-        Anjungan dan layar antrian dibuka langsung layar penuh, jadi tidak
+        Layar antrian dibuka langsung layar penuh, jadi tidak
         pernah punya posisi jendela biasa. Geometri yang dicatat konstruktor
         berposisi (0, 0) karena jendelanya belum tampil; memulihkannya
         menaruh jendela di pojok kiri atas dengan bilah judul lewat tepi atas
@@ -763,7 +650,6 @@ class MainWindow(QMainWindow):
             self.setGeometry(geometri)
         else:
             self._pusatkan(area, geometri.size() if sah else QSize(1280, 720))
-        self._kunci_ukuran_totem(True)
 
     def _area_layar_sekarang(self) -> QRect:
         """Area kerja monitor tempat jendela ini tampil."""
@@ -879,8 +765,6 @@ class MainWindow(QMainWindow):
 
     def muat_ulang_halaman(self) -> None:
         halaman = self.halaman.currentWidget()
-        if isinstance(halaman, PratinjauTotem):
-            halaman = halaman.isi
         if hasattr(halaman, "muat_ulang"):
             halaman.muat_ulang()
             # statusBar() membuat bilah status baru bila belum ada, sehingga
@@ -896,7 +780,7 @@ class MainWindow(QMainWindow):
     def keluar(self) -> None:
         # Mesin publik tidak pernah sampai ke layar masuk: keluar dari sana
         # mengembalikan ke pilihan layar. Menjanjikan "layar masuk" kepada
-        # orang yang menekan Ctrl+Q di anjungan hanya membuatnya mengira
+        # orang yang menekan Ctrl+Q di layar antrian hanya membuatnya mengira
         # aplikasinya salah.
         pertanyaan = (
             "Tutup layar ini dan kembali ke pilihan layar?"

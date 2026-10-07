@@ -46,10 +46,12 @@ NAMA_BERKAS = "peran.json"
 
 #: Peran yang dikenali. Nilainya terbaca manusia dan ditulis dengan huruf
 #: kecil: berkas ini memang diniatkan untuk dibuka di Notepad.
+#:
+#: Anjungan tidak termasuk: anjungan adalah tablet Android, bukan komputer
+#: Windows (docs/istilah.md). Berkas lama yang masih menyebut "anjungan"
+#: diperlakukan seperti belum ditetapkan.
 PETUGAS = "petugas"
 ADMIN = "admin"
-ANJUNGAN = "anjungan"
-ANJUNGAN_TOTEM = "anjungan-totem"
 TELEVISI = "televisi"
 PAPAN_MEMANJANG = "papan-memanjang"
 
@@ -61,18 +63,14 @@ PAPAN_MEMANJANG = "papan-memanjang"
 #: pola yang sama dipakai daftar tema di settings_service.
 MODE_PETUGAS = "petugas"
 MODE_ADMIN = "admin"
-MODE_ANJUNGAN = "anjungan"
-MODE_ANJUNGAN_TOTEM = "anjungan-totem"
 MODE_LAYAR_ANTRIAN = "antrian"
 
 #: Mode yang menghadap pengunjung tanpa ada yang menjaganya.
 #:
-#: Komputer seperti ini tidak boleh berhenti di dialog mana pun. Anjungan
-#: yang pulih sesudah mati listrik, dan televisi yang menyala bersama
-#: sakelar lampu pagi hari, tidak punya siapa pun untuk menekan tombol.
-MODE_PUBLIK = frozenset(
-    {MODE_ANJUNGAN, MODE_ANJUNGAN_TOTEM, MODE_LAYAR_ANTRIAN}
-)
+#: Komputer seperti ini tidak boleh berhenti di dialog mana pun: televisi
+#: yang menyala bersama sakelar lampu pagi hari tidak punya siapa pun untuk
+#: menekan tombol.
+MODE_PUBLIK = frozenset({MODE_LAYAR_ANTRIAN})
 
 #: Nilai `ticket.printer` yang berarti mesin ini tidak mencetak sama sekali.
 TIDAK_MENCETAK = "none"
@@ -111,15 +109,9 @@ class BawaanPeran:
 BAWAAN: dict[str, BawaanPeran] = {
     PETUGAS: BawaanPeran(mode=MODE_PETUGAS, printer=TIDAK_MENCETAK),
     ADMIN: BawaanPeran(mode=MODE_ADMIN, printer=TIDAK_MENCETAK),
-    # Anjungan sengaja DIAM. Pengunjung berdiri beberapa langkah dari
-    # televisi ruang tunggu, dan dua pengeras suara yang memanggil nomor
-    # yang sama dengan selisih setengah detik terdengar seperti kerusakan.
-    ANJUNGAN: BawaanPeran(mode=MODE_ANJUNGAN, suara=False),
-    ANJUNGAN_TOTEM: BawaanPeran(mode=MODE_ANJUNGAN_TOTEM, suara=False),
     TELEVISI: BawaanPeran(mode=MODE_LAYAR_ANTRIAN, printer=TIDAK_MENCETAK),
-    # Papan memanjang mewarisi diamnya anjungan, dan karena alasan yang
-    # persis sama: kantor yang memasang televisi DAN pita di atas pintu
-    # mendapat dua suara untuk satu panggilan, sepanjang hari.
+    # Papan memanjang sengaja DIAM: kantor yang memasang televisi DAN pita
+    # di atas pintu mendapat dua suara untuk satu panggilan, sepanjang hari.
     PAPAN_MEMANJANG: BawaanPeran(
         mode=MODE_LAYAR_ANTRIAN,
         printer=TIDAK_MENCETAK,
@@ -138,8 +130,6 @@ PERAN_SAH = frozenset(BAWAAN)
 LABEL: dict[str, str] = {
     PETUGAS: "Loket petugas",
     ADMIN: "Loket admin",
-    ANJUNGAN: "Anjungan ambil nomor",
-    ANJUNGAN_TOTEM: "Anjungan berdiri (totem)",
     TELEVISI: "Televisi ruang tunggu",
     PAPAN_MEMANJANG: "Papan memanjang di atas pintu",
 }

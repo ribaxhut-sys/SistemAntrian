@@ -9,14 +9,8 @@ Urutan yang dijalankan:
 
 Argumen:
     --tv          langsung membuka layar antrian ruang tunggu, tanpa dialog
-                  pilihan dan tanpa login.
-    --kios        langsung membuka anjungan ambil nomor, tanpa dialog
-                  pilihan dan tanpa login.
-    --kios-totem  langsung membuka anjungan berdiri (totem tiga pita),
-                  tanpa dialog dan tanpa login.
-    --layar       nama lama --kios. Dipertahankan supaya pintasan yang sudah
-                  terpasang di komputer anjungan tidak mati saat aplikasi
-                  diperbarui.
+                  pilihan dan tanpa login. Cadangan sampai aplikasi layar
+                  antrian Android siap (docs/istilah.md).
     --admin       langsung membuka layar loket sebagai administrator.
                   Tetap minta nama dan sandi: beberapa petugas berbagi
                   komputer yang sama.
@@ -26,19 +20,12 @@ Argumen:
     --setup       buka dialog peran komputer ini (satu komputer / server /
                   klien) sebelum menyambung ke database. Bukan deteksi
                   jaringan: orang yang memasang yang menunjuk.
-    --kios-api    jalankan API lokal yang dipakai APK anjungan Android.
-    --jendela[=PERSEN]
-                  buka mesin publik sebagai jendela, bukan layar penuh.
-                  Totem tampil sebagai miniatur tegak dari 1080×1920:
-                  sebesar yang muat di layar, paling besar 50%, atau
-                  sebesar PERSEN yang diminta (mis. --jendela=40, supaya
-                  layar antrian muat di sebelahnya) — tetapi tidak pernah
-                  melebihi yang muat. Totem yang dibuka di layar mendatar
-                  (laptop) otomatis tampil begini, juga bila dipilih lewat
-                  dialog pilihan yang tidak bisa menulis argumen ini.
+    --kios-api    jalankan API aplikasi server untuk anjungan Android.
+    --jendela     buka layar antrian sebagai jendela, bukan layar penuh.
 
-Kedua mesin publik dipasang dengan argumennya masing-masing supaya pulih
-sendiri setelah mati listrik, tanpa perlu ada yang mengklik apa pun.
+Anjungan tidak lagi berjalan di Windows: anjungan adalah tablet Android
+(docs/istilah.md). Layar antrian dipasang dengan --tv supaya pulih sendiri
+setelah mati listrik, tanpa perlu ada yang mengklik apa pun.
 """
 
 from __future__ import annotations
@@ -207,7 +194,6 @@ def _jalankan_ui(
     *,
     mode_awal: str | None = None,
     berjendela: bool | None = None,
-    persen_jendela: int | None = None,
 ) -> int:
     """
     Buka aplikasi berjendela. Import Qt ditunda sampai benar-benar dipakai.
@@ -232,13 +218,7 @@ def _jalankan_ui(
     from app.services.auth_service import get_auth_service
     from app.ui.login.change_password_dialog import ChangePasswordDialog
     from app.ui.login.login_window import LoginWindow
-    from app.ui.login.mode_dialog import (
-        ANJUNGAN,
-        ANJUNGAN_TOTEM,
-        LAYAR_ADMIN,
-        LAYAR_ANTRIAN,
-        ModeDialog,
-    )
+    from app.ui.login.mode_dialog import LAYAR_ANTRIAN, ModeDialog
     from app.ui.main_window import MainWindow
     from app.ui.style import STYLESHEET
 
@@ -271,18 +251,10 @@ def _jalankan_ui(
                 return 0
             mode = pilihan.pilihan
 
-        if mode in (ANJUNGAN, ANJUNGAN_TOTEM, LAYAR_ANTRIAN):
+        if mode == LAYAR_ANTRIAN:
             # Tanpa login: komputernya menghadap publik dan tidak diawasi.
-            if mode in (ANJUNGAN, ANJUNGAN_TOTEM):
-                auth.mulai_sesi_kios()
-            else:
-                auth.mulai_sesi_layar()
-            jendela = MainWindow(
-                auth,
-                anjungan_totem=mode == ANJUNGAN_TOTEM,
-                berjendela=berjendela,
-                persen_pratinjau=persen_jendela,
-            )
+            auth.mulai_sesi_layar()
+            jendela = MainWindow(auth, berjendela=berjendela)
             jendela.tampilkan()
             app.exec()
             continue  # mesin publik ditutup -> kembali ke layar pilihan mode
@@ -293,7 +265,7 @@ def _jalankan_ui(
         # Beberapa petugas berbagi satu komputer, jadi nama dan sandi
         # selalu diminta — juga saat dijalankan dari source. Pintasan
         # tanpa sandi akan memilih satu akun dan menutup jalan yang lain.
-        # Televisi dan anjungan tidak lewat sini.
+        # Layar antrian tidak lewat sini.
         while True:
             login = LoginWindow(auth)
             if login.exec() != QDialog.DialogCode.Accepted:
@@ -325,21 +297,15 @@ def mode_dari_argumen(argv: list[str]) -> str | None:
     """
     Mode mesin yang diminta lewat baris perintah, atau None bila tidak ada.
 
-    `--tv` didahulukan bila keduanya tertulis: layar antrian adalah yang
-    paling merugikan bila salah — papan kosong terlihat seluruh ruang
-    tunggu, sedangkan anjungan yang keliru masih bisa digantikan petugas
-    yang menerbitkan nomor dari mejanya.
+    `--tv` didahulukan: papan kosong terlihat seluruh ruang tunggu.
+
+    `--kios`, `--kios-totem`, dan `--layar` (anjungan Windows) sudah tidak
+    ada; pintasan lama yang masih memakainya membuka dialog pilihan biasa.
     """
-    from app.ui.login.mode_dialog import ANJUNGAN, ANJUNGAN_TOTEM, LAYAR_ADMIN, LAYAR_ANTRIAN, LAYAR_PETUGAS
+    from app.ui.login.mode_dialog import LAYAR_ADMIN, LAYAR_ANTRIAN, LAYAR_PETUGAS
 
     if "--tv" in argv:
         return LAYAR_ANTRIAN
-    if "--kios-totem" in argv:
-        return ANJUNGAN_TOTEM
-    # --layar adalah nama lama --kios, dipertahankan supaya pintasan yang
-    # sudah terpasang di komputer anjungan tidak mati saat aplikasi diperbarui.
-    if "--kios" in argv or "--layar" in argv:
-        return ANJUNGAN
     if "--admin" in argv:
         return LAYAR_ADMIN
     if "--petugas" in argv:
@@ -378,32 +344,9 @@ def mode_awal_mesin(argv: list[str], db_path) -> str | None:
     return mode or None
 
 
-def pratinjau_dari_argumen(argv: list[str]) -> tuple[bool | None, int | None]:
-    """
-    Baca `--jendela` dan `--jendela=PERSEN`: (berjendela, persen).
-
-    `berjendela` None berarti argumennya tidak ditulis, dan jendela memilih
-    sendiri — totem yang dibuka di layar mendatar otomatis tampil sebagai
-    pratinjau tegak (lihat MainWindow). Persen yang tidak terbaca diabaikan
-    dengan peringatan, bukan menggagalkan peluncuran: salah ketik di
-    pintasan tidak boleh berakhir sebagai layar yang tidak mau terbuka.
-    """
-    berjendela: bool | None = None
-    persen: int | None = None
-    for arg in argv:
-        if arg == "--jendela":
-            berjendela = True
-        elif arg.startswith("--jendela="):
-            berjendela = True
-            nilai = arg.split("=", 1)[1].strip().rstrip("%").strip()
-            try:
-                persen = int(nilai)
-            except ValueError:
-                logger.warning(
-                    "Persentase %r pada --jendela tidak terbaca; memakai bawaan",
-                    nilai,
-                )
-    return berjendela, persen
+def berjendela_dari_argumen(argv: list[str]) -> bool:
+    """`--jendela`: layar antrian dibuka sebagai jendela, untuk diuji di laptop."""
+    return any(arg == "--jendela" or arg.startswith("--jendela=") for arg in argv)
 
 
 def _mesin_publik_tanpa_jaga(argv: list[str], db_path=None) -> bool:
@@ -416,7 +359,7 @@ def _mesin_publik_tanpa_jaga(argv: list[str], db_path=None) -> bool:
     lewat `peran.json` tidak boleh diperlakukan berbeda daripada mesin yang
     menyebutnya lewat `--tv`.
     """
-    if any(flag in argv for flag in ("--tv", "--kios", "--kios-totem", "--layar")):
+    if "--tv" in argv:
         return True
     if db_path is None:
         return False
@@ -574,11 +517,9 @@ def main(argv: list[str] | None = None) -> int:
         # Import Qt ditunda sampai jendela benar-benar dibuka, sehingga mode
         # dibaca di sini dan bukan di awal main(): --init-only harus tetap
         # berjalan di komputer yang PySide6-nya belum lengkap.
-        berjendela, persen_jendela = pratinjau_dari_argumen(argv)
         return _jalankan_ui(
             mode_awal=mode_awal_mesin(argv, config.db_path),
-            berjendela=berjendela,
-            persen_jendela=persen_jendela,
+            berjendela=berjendela_dari_argumen(argv),
         )
     except Exception:
         logger.exception("Kesalahan tak terduga pada aplikasi")

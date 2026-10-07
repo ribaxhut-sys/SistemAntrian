@@ -31,13 +31,13 @@ from app.ui.common import tombol
 
 #: Hasil pilihan.
 #:
-#: LAYAR_ANTRIAN dan ANJUNGAN adalah mesin publik, tanpa login.
-#: LAYAR_PETUGAS adalah loket: administrator dan petugas masuk dengan
-#: akunnya masing-masing. LAYAR_ADMIN tetap ada untuk argumen --admin;
-#: dialog ini tidak menawarkannya sebagai tombol terpisah.
+#: LAYAR_ANTRIAN adalah papan televisi tanpa login, cadangan sampai
+#: aplikasi layar antrian Android siap. LAYAR_PETUGAS adalah loket:
+#: administrator dan petugas masuk dengan akunnya masing-masing.
+#: LAYAR_ADMIN tetap ada untuk argumen --admin; dialog ini tidak
+#: menawarkannya sebagai tombol terpisah. Anjungan tidak ada di sini:
+#: anjungan adalah tablet Android (docs/istilah.md).
 LAYAR_ANTRIAN = "antrian"
-ANJUNGAN = "anjungan"
-ANJUNGAN_TOTEM = "anjungan-totem"
 LAYAR_ADMIN = "admin"
 LAYAR_PETUGAS = "petugas"
 
@@ -75,26 +75,6 @@ class ModeDialog(QDialog):
                 LAYAR_ANTRIAN,
                 ikon="📺",
                 aksen="antrian",
-            )
-        )
-        susunan.addWidget(
-            self._bangun_pilihan(
-                "ANJUNGAN AMBIL NOMOR",
-                "Tempat pengunjung memilih jenis layanan dan mencetak tiket "
-                "antriannya sendiri. Tidak perlu masuk.",
-                ANJUNGAN,
-                ikon="🎫",
-                aksen="anjungan",
-            )
-        )
-        susunan.addWidget(
-            self._bangun_pilihan(
-                "ANJUNGAN BERDIRI",
-                "Totem sentuh tinggi: iklan di atas, pilih layanan di tengah, "
-                "nomor loket di bawah. Tidak perlu masuk.",
-                ANJUNGAN_TOTEM,
-                ikon="🖥",
-                aksen="totem",
             )
         )
         # Satu tombol loket. Administrator dan petugas dibedakan oleh akun

@@ -144,39 +144,25 @@ Cara mencetaknya diatur lewat pengaturan `ticket.printer`:
 **Kegagalan mencetak tidak pernah membatalkan antrian.** Nomor sudah terbit
 dan tersimpan sebelum tiket dicetak; petugas cukup menyebutkan nomornya.
 
-**Empat jenis mesin, empat layar yang berbeda.** Yang menentukan adalah
-sifat komputernya, bukan siapa yang sedang memakainya:
+**Empat bagian, tugasnya tidak bercampur** (rincian: [docs/istilah.md](docs/istilah.md)):
 
-| Mesin | Pintasan | Isi layar | Suara | Login |
-|---|---|---|---|---|
-| Televisi ruang tunggu | `AntrianCRO.exe --tv` | Papan nomor besar, dibaca dari seberang ruangan | ya | tidak |
-| Anjungan ambil nomor | `AntrianCRO.exe --kios` | Pilih layanan, cetak tiket, ringkasan antrian berlangsung | tidak | tidak |
-| Anjungan berdiri (totem 1080×1920) | `AntrianCRO.exe --kios-totem` | Tiga pita tegak: iklan, pilih layanan, papan loket mini | tidak | tidak |
-| Komputer loket (3–5 unit) | `AntrianCRO.exe` | Memanggil dan melayani antrian | tidak | ya |
+| Bagian | Perangkat | Tugas | Login |
+|---|---|---|---|
+| **Anjungan** | Tablet Android + printer USB | Pengunjung memilih layanan, nomor dicetak | tidak |
+| **Layar antrian** | TV Android (Maxtor) — sementara `AntrianCRO.exe --tv` | Menampilkan dan membunyikan panggilan | tidak |
+| **Aplikasi server** | 1 PC Windows berperan server | Database, API untuk anjungan/layar antrian, backup, Layanan Anjungan | ya |
+| **Aplikasi petugas** | PC Windows di tiap loket | Memanggil dan melayani; admin mengelola data | ya |
 
-Ketiga mesin publik berjalan **tanpa login**. Komputer yang menghadap publik
-dan tidak diawasi tidak boleh menyimpan kata sandi petugas — atau lebih
-buruk, memaksa seseorang mengetikkannya setiap pagi sampai sandi itu
-tertempel di bawah keyboard. Keduanya juga membuka layar penuh tanpa bilah
-atas, tanpa menu navigasi, dan tanpa bilah status: pengunjung tidak melihat
-nama petugas, lokasi database, maupun tombol "Keluar" yang hanya mengundang
-orang menutup aplikasi antrian.
+Anjungan tidak lagi berjalan di Windows. Layar antrian Windows (`--tv`)
+tetap ada sampai aplikasi layar antrian Android siap, lalu ikut dihapus.
 
-**Anjungan diam secara bawaan.** Bila anjungan ikut bersuara sementara
-televisi juga bersuara, pengunjung mendengar dua pengumuman yang saling
-menyusul — keduanya menyegarkan sendiri tiap dua detik dan tidak akan
-pernah sinkron. Pemasangan satu-mesin yang anjungannya merangkap papan
-nomor menyalakannya kembali dengan `ANTRIAN_SUARA=1`.
+Layar antrian berjalan **tanpa login**: komputer yang menghadap publik dan
+tidak diawasi tidak boleh menyimpan kata sandi petugas. Ia membuka layar
+penuh tanpa bilah atas, menu navigasi, maupun bilah status.
 
-**Anjungan tidak menampilkan kartu loket.** Pengunjung yang berdiri di
-sana belum memegang nomor sama sekali, sehingga "loket mana yang kosong"
-bukan pertanyaannya — itu urusan orang yang sudah punya tiket, dan
-televisi ruang tunggu yang menjawabnya. Yang ditampilkan sebagai
-gantinya cuma satu angka, **jumlah antrian yang sedang berlangsung**
-(masih menunggu ditambah yang sedang dilayani, keduanya sama-sama belum
-selesai), dan daftar **Menunggu Giliran** yang sama seperti di televisi —
-mendapat porsi jauh lebih besar karena ruang yang dulu dipakai kartu
-loket kini kosong.
+**Anjungan hanya mengambil nomor.** Ia tidak menampilkan kartu loket,
+jumlah yang menunggu, maupun daftar nomor — di layar maupun di struk. Itu
+urusan layar antrian.
 
 Jeda `kiosk.cooldown_seconds` menahan satu orang menekan tombol ambil nomor
 berulang kali. Akun berperan `DISPLAY` tetap ada dan tetap membuka papan
@@ -318,7 +304,7 @@ setiap kali status berubah — itulah yang menentukan bentuk kisi tombolnya.
 | `SUPERVISOR` | Pengaduan · Ringkasan Harian · Hasil Survey |
 | `ADMIN` | Pengaduan · Data Master · Pengaturan · Backup · Tutup Hari |
 | `DISPLAY` | Layar Antrian |
-| `KIOSK` | Anjungan Ambil Nomor (papan nomor + ambil nomor, tanpa login) |
+| `KIOSK` | Tidak ada layar Windows; sesi API untuk anjungan Android |
 
 **Status antrian:**
 
@@ -671,56 +657,26 @@ di `logs/app.log`, karena `AntrianCRO.exe` berjendela dan tidak punya
 terminal untuk menampilkannya.
 
 Saat dibuka tanpa argumen, aplikasi menanyakan layar mana yang akan
-dipakai: **Layar Antrian**, **Anjungan Ambil Nomor**, **Anjungan Berdiri**
-(ketiganya tanpa login), atau **Layar Petugas** (wajib masuk).
+dipakai: **Layar Antrian** (tanpa login) atau **Layar Petugas** (wajib
+masuk). Anjungan adalah tablet Android, bukan pilihan di sini.
 
-Mesin publik sebaiknya **melewati dialog itu**, supaya mati listrik siang
-hari tidak meninggalkan papan nomor kosong sampai ada yang mengklik:
+Televisi ruang tunggu sebaiknya **melewati dialog itu**, supaya mati
+listrik siang hari tidak meninggalkan papan nomor kosong sampai ada yang
+mengklik:
 
 ```powershell
 .\.venv\Scripts\python.exe -m app.main --tv          # televisi ruang tunggu
-.\.venv\Scripts\python.exe -m app.main --kios        # anjungan ambil nomor
-.\.venv\Scripts\python.exe -m app.main --kios-totem  # anjungan berdiri (totem)
 ```
 
-Pasang perintah yang sama pada pintasan Startup Windows, atau pada
-`AntrianCRO.exe --tv` / `AntrianCRO.exe --kios` / `AntrianCRO.exe
---kios-totem` di komputer yang sudah di-build. `--layar` adalah nama lama
-`--kios` dan masih berlaku, supaya pintasan yang sudah terpasang tidak mati
-saat aplikasi diperbarui.
+Pasang perintah yang sama pada pintasan Startup Windows, atau
+`AntrianCRO.exe --tv` di komputer yang sudah di-build. `--jendela`
+membukanya sebagai jendela biasa untuk diuji di laptop. Pintasan lama
+`--kios`, `--kios-totem`, dan `--layar` kini membuka dialog pilihan biasa.
 
-### Memasang anjungan berdiri (totem)
-
-Tata letak totem dirancang untuk kaca tegak 1080×1920. Periksa hal-hal ini
-di mesinnya sendiri, bukan di laptop:
-
-1. **Settings → Display → Display orientation: Portrait.** Windows harus
-   melaporkan layarnya tegak. Totem yang dilaporkan mendatar dikira laptop
-   dan dibuka sebagai jendela pratinjau kecil — dan setelah mati listrik,
-   ia kembali menjadi jendela kecil lagi.
-2. **Settings → Display → Scale: 100%.** Pada 100% setiap pita setinggi
-   640 piksel, persis ukuran rancangannya.
-3. **Pintasan Startup:** `AntrianCRO.exe --kios-totem`, tanpa `--jendela`.
-4. **Uji di mesinnya:** printer thermal, respons layar sentuh, dan media
-   iklan. Bidang iklan totem berbentuk sekitar 2:1 (anjungan biasa 3:1);
-   gambar atau video yang disiapkan untuk 3:1 tampil berbingkai.
-
-**Menguji totem di laptop.** Laptop berlayar mendatar otomatis membuka
-totem sebagai miniatur tegak — juga bila dipilih lewat dialog. Ukurannya
-sebesar yang muat di layar, paling besar 50%; `--jendela=PERSEN` memilih
-sendiri, misalnya 40% supaya layar antrian muat di sebelahnya:
-
-```powershell
-.\.venv\Scripts\python.exe -m app.main --kios-totem --jendela=40
-```
-
-Miniatur ini untuk memeriksa susunan dan alur, bukan keterbacaan dari jarak
-berdiri: di laptop 14 inci ukurannya kira-kira seperlima kaca totem 43 inci.
-
-Jeda antar-pengambilan nomor di kios diatur lewat `kiosk.cooldown_seconds`
-(bawaan 10 detik). Jeda ini **hanya** berlaku pada sesi kios — meja
-pendaftaran melayani rombongan yang datang bersamaan dan tidak ikut
-diperlambat.
+Jeda antar-pengambilan nomor di anjungan diatur lewat
+`kiosk.cooldown_seconds` (bawaan 10 detik). Jeda ini **hanya** berlaku pada
+anjungan — meja pendaftaran melayani rombongan yang datang bersamaan dan
+tidak ikut diperlambat.
 
 ---
 
@@ -818,7 +774,7 @@ menimpanya **hanya di mesin yang bersangkutan**:
 | `ANTRIAN_SUARA` | `1` / `0` | Mesin yang harus bersuara, atau harus diam |
 
 ```powershell
-# Anjungan: mencetak tiket, tetapi diam (televisi yang mengumumkan)
+# Meja pendaftaran: mencetak tiket ke printer Windows
 setx ANTRIAN_PRINTER "system"
 
 # Komputer loket: tidak punya pencetak tiket dan tidak perlu bersuara
@@ -826,45 +782,33 @@ setx ANTRIAN_PRINTER "none"
 ```
 
 Keduanya boleh dikosongkan. Mesin yang tidak menyebut apa-apa mengikuti
-pengaturan bersama — kecuali suara pada anjungan, yang memang diam secara
-bawaan. Nilai yang salah ketik diperlakukan seperti tidak diisi, bukan
+pengaturan bersama. Nilai yang salah ketik diperlakukan seperti tidak diisi, bukan
 sebagai "tidak": satu huruf keliru tidak boleh mendiamkan panggilan tanpa
 jejak.
 
-### User PostgreSQL terbatas untuk mesin publik
+### User PostgreSQL terbatas untuk layar antrian
 
-Anjungan dan televisi ruang tunggu menghadap publik. Connection string-nya
-tetap ada di mesin itu, jadi **jangan** memakai user `antrian` yang sama
-dengan petugas — user itu dapat membaca tabel `app_user` (hash kata sandi
-seluruh petugas).
+Televisi ruang tunggu menghadap publik. Connection string-nya tetap ada di
+mesin itu, jadi **jangan** memakai user `antrian` yang sama dengan petugas —
+user itu dapat membaca tabel `app_user` (hash kata sandi seluruh petugas).
 
-1. Buat user terpisah, lalu jalankan skripnya sebagai superuser pada
-   database `antrian`:
-   [kios-grant.sql](docs/sql/kios-grant.sql) untuk anjungan,
-   [layar-grant.sql](docs/sql/layar-grant.sql) untuk televisi.
-2. Di komputer yang bersangkutan, arahkan ke user itu:
+1. Buat user terpisah, lalu jalankan
+   [layar-grant.sql](docs/sql/layar-grant.sql) sebagai superuser pada
+   database `antrian`.
+2. Di komputer televisi, arahkan ke user itu:
 
 ```powershell
-# Anjungan ambil nomor
-setx ANTRIAN_DB_URL "postgresql+psycopg://antrian_kios:ganti-kata-sandi-kios@192.168.1.10:5432/antrian"
-
-# Televisi ruang tunggu
 setx ANTRIAN_DB_URL "postgresql+psycopg://antrian_layar:ganti-kata-sandi-layar@192.168.1.10:5432/antrian"
 ```
 
-3. Tambah baris `pg_hba.conf` untuk keduanya, tetap dibatasi jaringan
-   kantor:
+3. Tambah baris `pg_hba.conf`, tetap dibatasi jaringan kantor:
 
 ```
-host    antrian    antrian_kios     192.168.1.0/24    scram-sha-256
 host    antrian    antrian_layar    192.168.1.0/24    scram-sha-256
 ```
 
-Keduanya tidak punya hak apa pun pada `app_user`. Anjungan boleh
-menerbitkan nomor, membaca papan antrian, dan menulis jejak audit;
-televisi **hanya membaca** — tidak ada seorang pun yang berdiri di depannya
-untuk mengambil nomor, sehingga hak menulis di sana murni kelebihan yang
-tidak pernah dipakai.
+Televisi **hanya membaca**. Anjungan Android tidak menyambung ke database
+sama sekali; ia lewat API aplikasi server.
 
 ### Backup dijalankan di komputer server
 

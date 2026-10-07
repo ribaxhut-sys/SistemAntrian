@@ -60,8 +60,6 @@ from app.core.mesin import (
 )
 from app.core.peran import (
     ADMIN as PERAN_ADMIN,
-    ANJUNGAN as PERAN_ANJUNGAN,
-    ANJUNGAN_TOTEM as PERAN_ANJUNGAN_TOTEM,
     BAWAAN,
     LABEL,
     PAPAN_MEMANJANG,
@@ -85,8 +83,6 @@ NAMA_PERAN: tuple[tuple[str, str], ...] = (
         for kode in (
             PERAN_PETUGAS,
             PERAN_ADMIN,
-            PERAN_ANJUNGAN,
-            PERAN_ANJUNGAN_TOTEM,
             TELEVISI,
             PAPAN_MEMANJANG,
         )

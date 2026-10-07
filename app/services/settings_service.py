@@ -22,11 +22,6 @@ from app.services.permissions import Permission
 
 logger = get_logger("settings")
 
-#: Posisi panel anjungan. Iklan di atas adalah bawaan: kartu layanan
-#: setinggi tangan orang berdiri, iklan di atas kepala untuk antrean.
-URUTAN_PANEL_IKLAN_ATAS = "iklan-atas"
-URUTAN_PANEL_LAYANAN_ATAS = "layanan-atas"
-
 #: Bentuk layar yang menghadap pengunjung. Yang dipilih adalah RUPA layar,
 #: bukan resolusinya: orang yang memasang televisi mengenali layarnya dari
 #: bentuknya, dan tidak seorang pun menghafal rasio aspek perangkat yang
@@ -64,8 +59,6 @@ BAWAAN: dict[str, str] = {
     "kiosk.welcome_text": "",
     "kiosk.welcome_file": "",
     "kiosk.welcome_slide_seconds": "10",
-    "kiosk.info_ratio": "3",
-    "kiosk.panel_order": "iklan-atas",
     "display.screen_shape": "auto",
     "display.theme": "kaca",
     "display.title": "ANTRIAN PELAYANAN CRO",
@@ -417,43 +410,6 @@ SKEMA: tuple[Pengaturan, ...] = (
         kelompok="Antrian",
     ),
     Pengaturan(
-        "kiosk.info_ratio",
-        "Bentuk panel informasi anjungan",
-        "Perbandingan lebar dan tinggi panel besar di atas tombol A/B/C. "
-        "Gambar atau video sambutan yang perbandingannya sama akan memenuhi "
-        "panel tanpa bidang kosong di tepinya. Ditetapkan di sini supaya "
-        "bentuknya TIDAK ikut berubah ketika jenis layanan bertambah — yang "
-        "mengalah kartu A/B/C, bukan panelnya. "
-        "Diambil sedekat yang disanggupi layarnya. Panel tidak akan "
-        "memendek melewati ukuran terbesar kartu layanan (sisanya hanya "
-        "akan jadi bidang kosong di bawah kartu), dan tidak akan meninggi "
-        "sampai kartunya kehabisan tempat. Pada layar 1920x1080 dengan "
-        "tiga layanan, yang benar-benar bisa dicapai berkisar 2,6:1 "
-        "sampai 3,4:1.",
-        PILIHAN,
-        pilihan=(
-            ("2.5", "2,5 : 1 — panel setinggi mungkin"),
-            ("3", "3 : 1 (disarankan)"),
-            ("3.5", "3,5 : 1 — kartu layanan selapang mungkin"),
-        ),
-        kelompok="Antrian",
-    ),
-    Pengaturan(
-        "kiosk.panel_order",
-        "Posisi iklan dan kartu layanan",
-        "Anjungan berdiri membagi layar dua: panel iklan/informasi dan "
-        "kartu ambil nomor. Bawaan menaruh iklan di atas — kartu tetap "
-        "setinggi tangan, iklan terbaca antrean di belakang. Tukar bila "
-        "layarnya digantung rendah, supaya kartu tidak ada di lutut. "
-        "Pintasan Ctrl+Shift+T di anjungan menulis nilai yang sama.",
-        PILIHAN,
-        pilihan=(
-            (URUTAN_PANEL_IKLAN_ATAS, "Iklan di atas, layanan di bawah"),
-            (URUTAN_PANEL_LAYANAN_ATAS, "Layanan di atas, iklan di bawah"),
-        ),
-        kelompok="Antrian",
-    ),
-    Pengaturan(
         "survey.enabled",
         "Aktifkan survey kepuasan",
         "Bila dimatikan, layar survey dan tombol Minta Survey ikut padam.",
@@ -668,25 +624,3 @@ class SettingsService:
                 nilai=value,
             )
         logger.info("Pengaturan %s diubah", key)
-
-    def tukar_urutan_panel_kios(self) -> str:
-        """
-        Anjungan menukar posisi iklan dan kartu layanan.
-
-        Mesin kios tidak punya CONFIG_MANAGE — komputernya publik — tetapi
-        menukar tata letak adalah perbuatan mesin itu sendiri, sama seperti
-        mengambil nomor. Hak QUEUE_CREATE cukup, dan nilainya satu untuk
-        seluruh sistem: kantor ini punya satu anjungan berdiri.
-        """
-        sekarang = self.get("kiosk.panel_order", URUTAN_PANEL_IKLAN_ATAS)
-        baru = (
-            URUTAN_PANEL_LAYANAN_ATAS
-            if sekarang != URUTAN_PANEL_LAYANAN_ATAS
-            else URUTAN_PANEL_IKLAN_ATAS
-        )
-        self.set(
-            "kiosk.panel_order",
-            baru,
-            permission=Permission.QUEUE_CREATE,
-        )
-        return baru

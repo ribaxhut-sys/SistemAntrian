@@ -231,11 +231,11 @@ def test_peran_televisi_mematikan_pencetak(mesin_berperan):
     assert cfg.bentuk_layar == ""
 
 
-def test_peran_anjungan_mendiamkan_mesinnya(mesin_berperan):
+def test_peran_anjungan_lama_diabaikan(mesin_berperan):
+    """Anjungan sekarang tablet Android; berkas lama tidak mengubah apa pun."""
     cfg = mesin_berperan(peran="anjungan")
 
-    assert cfg.suara is False
-    # Anjungan memang mencetak, tetapi caranya keputusan seluruh kantor.
+    assert cfg.suara is None
     assert cfg.printer == ""
 
 

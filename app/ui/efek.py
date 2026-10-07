@@ -1,13 +1,11 @@
 """
 Sakelar efek grafis — bayangan dan pudar — untuk seluruh aplikasi.
 
-Hanya ada satu keadaan yang menuntutnya: pratinjau totem `--jendela`.
-Pratinjau itu membungkus halaman anjungan dalam QGraphicsProxyWidget
-supaya kaca 1080×1920 dapat diperkecil utuh ke layar laptop, dan Qt tidak
-menggambar QGraphicsEffect dengan benar pada widget di dalam proxy:
-kartu layanan yang berbayangan tidak tergambar SAMA SEKALI, dan label
-berefek pudar tergambar di tempat dan ukuran yang salah. Pratinjau yang
-tanpa kartu layanan tidak bisa dipakai menyimulasikan apa pun.
+Dahulu dimatikan untuk pratinjau totem anjungan Windows, yang membungkus
+halamannya dalam QGraphicsProxyWidget — dan Qt tidak menggambar
+QGraphicsEffect dengan benar di dalam proxy. Anjungan Windows sudah
+dihapus (docs/istilah.md), jadi sakelarnya kini selalu menyala; titik
+pemasangan tunggal `pasang_efek` tetap dipertahankan.
 
 Efeknya tetap DIPASANG, hanya dinonaktifkan. Kode lain memegang efek itu:
 animasi pudar menganimasikan opacity-nya, dan panel sambutan melepas lalu
@@ -45,8 +43,7 @@ def pasang_efek(widget: QWidget, efek: QGraphicsEffect) -> QGraphicsEffect:
     Pasang `efek` pada `widget`, dan nonaktifkan bila sakelarnya mati.
 
     Satu-satunya jalan memasang efek grafis di aplikasi ini. Efek yang
-    dipasang langsung dengan `setGraphicsEffect` lolos dari sakelar, dan
-    kartunya kembali hilang dari pratinjau totem.
+    dipasang langsung dengan `setGraphicsEffect` lolos dari sakelar.
     """
     widget.setGraphicsEffect(efek)
     efek.setEnabled(_aktif)

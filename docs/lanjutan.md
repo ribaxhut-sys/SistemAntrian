@@ -3,6 +3,12 @@
 Dokumen serah terima. Berisi tujuan, keadaan sekarang, apa yang belum
 selesai, dan hal-hal yang **jangan** diubah beserta alasannya.
 
+> **Catatan Oktober 2026:** anjungan tidak lagi berjalan di Windows. Peran
+> dan mode `anjungan`/`anjungan-totem` (`--kios`, `--kios-totem`, `--layar`)
+> sudah dihapus; anjungan adalah tablet Android. Lihat
+> [istilah.md](istilah.md). Bagian dokumen ini yang menyebut anjungan
+> Windows adalah catatan sejarah.
+
 ---
 
 ## 1. Apa yang sedang dibangun
@@ -380,7 +386,6 @@ docker compose down -v          # menghentikan container uji
 # Jalankan aplikasi
 .\.venv\Scripts\python.exe -m app.main
 .\.venv\Scripts\python.exe -m app.main --tv           # televisi ruang tunggu
-.\.venv\Scripts\python.exe -m app.main --kios         # anjungan ambil nomor
 .\.venv\Scripts\python.exe -m app.main --init-only    # periksa pemasangan
 
 # Build .exe (menjalankan test dan memverifikasi .exe di folder bersih)

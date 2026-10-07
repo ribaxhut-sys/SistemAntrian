@@ -281,7 +281,6 @@ Argumen mesin yang umum:
 ```powershell
 .\.venv\Scripts\python.exe -m app.main --admin
 .\.venv\Scripts\python.exe -m app.main --tv
-.\.venv\Scripts\python.exe -m app.main --kios-totem
 .\.venv\Scripts\python.exe -m app.main --setup
 .\.venv\Scripts\python.exe -m app.main --kios-api
 ```

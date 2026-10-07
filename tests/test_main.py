@@ -53,27 +53,22 @@ def test_tanpa_argumen_mode_ditanyakan() -> None:
 
 def test_argumen_membuka_mesin_yang_sesuai() -> None:
     from app.main import mode_dari_argumen
-    from app.ui.login.mode_dialog import ANJUNGAN, ANJUNGAN_TOTEM, LAYAR_ADMIN, LAYAR_ANTRIAN, LAYAR_PETUGAS
+    from app.ui.login.mode_dialog import LAYAR_ADMIN, LAYAR_ANTRIAN, LAYAR_PETUGAS
 
     assert mode_dari_argumen(["--tv"]) == LAYAR_ANTRIAN
-    assert mode_dari_argumen(["--kios"]) == ANJUNGAN
-    assert mode_dari_argumen(["--kios-totem"]) == ANJUNGAN_TOTEM
     assert mode_dari_argumen(["--admin"]) == LAYAR_ADMIN
     assert mode_dari_argumen(["--petugas"]) == LAYAR_PETUGAS
 
 
-def test_pintasan_lama_layar_tetap_membuka_anjungan() -> None:
+def test_anjungan_tidak_lagi_dibuka_di_windows() -> None:
     """
-    `--layar` sudah terpasang pada shortcut Startup komputer anjungan.
-
-    Memutusnya saat aplikasi diperbarui berarti mesin itu berhenti di
-    dialog pilihan setiap mati listrik — tepat keadaan yang argumen ini
-    diciptakan untuk mencegah.
+    Anjungan adalah tablet Android (docs/istilah.md). Pintasan lama yang
+    masih memakai --kios, --kios-totem, atau --layar membuka dialog biasa.
     """
     from app.main import mode_dari_argumen
-    from app.ui.login.mode_dialog import ANJUNGAN
 
-    assert mode_dari_argumen(["--layar"]) == ANJUNGAN
+    for argumen in (["--kios"], ["--kios-totem"], ["--layar"]):
+        assert mode_dari_argumen(argumen) is None
 
 
 def test_layar_antrian_didahulukan_bila_dua_argumen_tertulis() -> None:
@@ -92,10 +87,10 @@ def test_layar_antrian_didahulukan_bila_dua_argumen_tertulis() -> None:
 def test_jendela_bukan_mode_mesin() -> None:
     """`--jendela` hanya meniadakan layar penuh, tidak memilih mesin."""
     from app.main import mode_dari_argumen
-    from app.ui.login.mode_dialog import ANJUNGAN_TOTEM
+    from app.ui.login.mode_dialog import LAYAR_ANTRIAN
 
     assert mode_dari_argumen(["--jendela"]) is None
-    assert mode_dari_argumen(["--kios-totem", "--jendela"]) == ANJUNGAN_TOTEM
+    assert mode_dari_argumen(["--tv", "--jendela"]) == LAYAR_ANTRIAN
 
 
 # ---------------------------------------------------------------------
@@ -188,22 +183,14 @@ def test_sapuan_yang_gagal_tidak_dicoba_ulang_sepanjang_hari(monkeypatch) -> Non
     assert len(percobaan) == 1
 
 
-def test_jendela_dibaca_dengan_dan_tanpa_persen() -> None:
-    """Tanpa --jendela berarti jendela memilih sendiri, bukan layar penuh."""
-    from app.main import pratinjau_dari_argumen
+def test_jendela_dibaca() -> None:
+    from app.main import berjendela_dari_argumen
 
-    assert pratinjau_dari_argumen([]) == (None, None)
-    assert pratinjau_dari_argumen(["--kios-totem"]) == (None, None)
-    assert pratinjau_dari_argumen(["--jendela"]) == (True, None)
-    assert pratinjau_dari_argumen(["--kios-totem", "--jendela=40"]) == (True, 40)
-    assert pratinjau_dari_argumen(["--jendela=45%"]) == (True, 45)
-
-
-def test_persen_jendela_rusak_tidak_menggagalkan_peluncuran() -> None:
-    """Salah ketik di pintasan tetap membuka pratinjau, dengan ukuran bawaan."""
-    from app.main import pratinjau_dari_argumen
-
-    assert pratinjau_dari_argumen(["--jendela=empat puluh"]) == (True, None)
+    assert berjendela_dari_argumen([]) is False
+    assert berjendela_dari_argumen(["--tv"]) is False
+    assert berjendela_dari_argumen(["--jendela"]) is True
+    # Bentuk lama --jendela=PERSEN tetap dibaca sebagai --jendela.
+    assert berjendela_dari_argumen(["--tv", "--jendela=40"]) is True
 
 
 # ---------------------------------------------------------------------
@@ -234,14 +221,13 @@ def test_setup_awal_pada_exe_baru(tmp_path, monkeypatch) -> None:
     assert perlu_setup_awal([], tmp_path / "queue.db", sedang_uji=False) is True
 
 
-def test_setup_awal_tidak_menghalangi_anjungan_setelah_mati_listrik(
+def test_setup_awal_tidak_menghalangi_layar_antrian_setelah_mati_listrik(
     tmp_path, monkeypatch
 ) -> None:
     from app.main import perlu_setup_awal
 
     monkeypatch.setattr("app.main.lewati_login_pengembang", lambda: False)
     monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
-    assert perlu_setup_awal(["--kios"], tmp_path / "queue.db", sedang_uji=False) is False
     assert perlu_setup_awal(["--tv"], tmp_path / "queue.db", sedang_uji=False) is False
 
 
@@ -350,8 +336,9 @@ def test_berkas_peran_rusak_kembali_ke_dialog(tmp_path, monkeypatch):
     [
         ("televisi", True),
         ("papan-memanjang", True),
-        ("anjungan", True),
-        ("anjungan-totem", True),
+        # Peran lama dari berkas sebelum anjungan pindah ke Android.
+        ("anjungan", False),
+        ("anjungan-totem", False),
         ("petugas", False),
         ("admin", False),
     ],

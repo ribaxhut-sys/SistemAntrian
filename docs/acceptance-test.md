@@ -180,10 +180,9 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| L1 | Buka aplikasi tanpa argumen | Dialog pilihan **Layar Antrian** / **Anjungan Ambil Nomor** / **Layar Petugas** | |
-| L2 | Pilih Anjungan Ambil Nomor | Langsung layar penuh; papan nomor + tombol ambil nomor; tanpa login, tanpa bilah status | |
-| L3 | Buka dengan `AntrianCRO.exe --kios` | Dialog dilewati; anjungan terbuka sendiri | |
-| L3b | Buka dengan `AntrianCRO.exe --layar` (pintasan lama) | Sama seperti `--kios`; pintasan lama tidak mati | |
+| L1 | Buka aplikasi tanpa argumen | Dialog pilihan hanya **Layar Antrian** / **Layar Petugas**; tidak ada pilihan anjungan | |
+| L2 | Ambil nomor di tablet anjungan Android | Pilih layanan → nomor terbit di server → tiket tercetak; layar tidak menampilkan antrian maupun jumlah menunggu | |
+| L3 | Buka dengan `AntrianCRO.exe --kios` (pintasan lama) | Dialog pilihan biasa; anjungan Windows sudah tidak ada | |
 | L4 | Sentuh satu jenis layanan | Nomor terbit (mis. `A-001`); tiket tercetak (bila printer aktif) | |
 | L5 | Sentuh lagi segera setelahnya | Tombol mati dan ada keterangan menunggu; nomor kedua belum terbit | |
 | L6 | Tunggu jeda selesai, ambil nomor lagi | Nomor berikutnya terbit | |

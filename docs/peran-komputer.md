@@ -4,6 +4,12 @@ Dokumen rancangan, belum ada kodenya. Berisi masalah yang dipecahkan,
 bentuk yang diusulkan, dan hal-hal yang sengaja **tidak** dikerjakan
 beserta alasannya.
 
+> **Catatan Oktober 2026:** anjungan tidak lagi berjalan di Windows. Peran
+> dan mode `anjungan`/`anjungan-totem` (`--kios`, `--kios-totem`, `--layar`)
+> sudah dihapus; anjungan adalah tablet Android. Lihat
+> [istilah.md](istilah.md). Bagian dokumen ini yang menyebut anjungan
+> Windows adalah catatan sejarah.
+
 Ditujukan untuk pemasangan sebenarnya: 5 komputer loket, 1 anjungan ambil
 nomor, 1 televisi ruang tunggu, dan — bila jadi dipasang — 1 papan LED
 memanjang di atas pintu.

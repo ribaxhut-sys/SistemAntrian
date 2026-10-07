@@ -8,8 +8,6 @@ import pytest
 
 from app.core.peran import (
     ADMIN,
-    ANJUNGAN,
-    ANJUNGAN_TOTEM,
     BAWAAN,
     PAPAN_MEMANJANG,
     PERAN_SAH,
@@ -36,21 +34,9 @@ def test_mode_setiap_peran_sama_dengan_yang_dikenali_dialog():
     peran yang menunjuk mode tidak dikenali akan membuka dialog
     pilih-mode di depan pengunjung, justru yang hendak dihindari.
     """
-    from app.ui.login.mode_dialog import (
-        ANJUNGAN as DIALOG_ANJUNGAN,
-        ANJUNGAN_TOTEM as DIALOG_TOTEM,
-        LAYAR_ADMIN,
-        LAYAR_ANTRIAN,
-        LAYAR_PETUGAS,
-    )
+    from app.ui.login.mode_dialog import LAYAR_ADMIN, LAYAR_ANTRIAN, LAYAR_PETUGAS
 
-    sah = {
-        LAYAR_PETUGAS,
-        LAYAR_ADMIN,
-        DIALOG_ANJUNGAN,
-        DIALOG_TOTEM,
-        LAYAR_ANTRIAN,
-    }
+    sah = {LAYAR_PETUGAS, LAYAR_ADMIN, LAYAR_ANTRIAN}
 
     assert {b.mode for b in BAWAAN.values()} <= sah
 
@@ -66,18 +52,19 @@ def test_loket_tidak_mencetak():
         assert PeranKomputer(peran=kode).printer_efektif == TIDAK_MENCETAK
 
 
-def test_anjungan_tidak_menebak_cara_mencetak():
+def test_anjungan_bukan_peran_komputer_windows():
     """
-    Anjungan memang mencetak, tetapi BAGAIMANA mencetak adalah keputusan
-    seluruh kantor lewat `ticket.printer`. Peran yang menebaknya akan
-    menimpa pilihan yang bukan miliknya.
+    Anjungan adalah tablet Android (docs/istilah.md). Berkas lama yang masih
+    menyebutnya diperlakukan seperti belum ditetapkan.
     """
-    for kode in (ANJUNGAN, ANJUNGAN_TOTEM):
-        assert PeranKomputer(peran=kode).printer_efektif == ""
+    assert "anjungan" not in PERAN_SAH
+    assert "anjungan-totem" not in PERAN_SAH
+    assert dari_dict({"peran": "anjungan"}).peran == ""
+    assert dari_dict({"peran": "anjungan-totem"}).peran == ""
 
 
-@pytest.mark.parametrize("kode", [ANJUNGAN, ANJUNGAN_TOTEM, PAPAN_MEMANJANG])
-def test_anjungan_dan_papan_memanjang_diam(kode):
+@pytest.mark.parametrize("kode", [PAPAN_MEMANJANG])
+def test_papan_memanjang_diam(kode):
     """
     Dua pengeras suara yang memanggil nomor yang sama dengan selisih
     setengah detik terdengar seperti kerusakan, bukan seperti pengumuman.
@@ -123,7 +110,7 @@ def test_belum_ditetapkan_tidak_menuntut_apa_pun():
 
 
 def test_isian_yang_diisi_mengalahkan_bawaan_perannya():
-    pilihan = PeranKomputer(peran=ANJUNGAN, suara=True)
+    pilihan = PeranKomputer(peran=TELEVISI, suara=True)
 
     assert pilihan.suara_efektif is True
     assert pilihan.disesuaikan
@@ -131,11 +118,11 @@ def test_isian_yang_diisi_mengalahkan_bawaan_perannya():
 
 def test_menyimpang_ke_nilai_yang_kebetulan_sama_tetap_terbaca_menyimpang():
     """
-    Orang yang memilih "diam" untuk anjungan sedang menyatakan kehendak,
+    Orang yang memilih "diam" untuk papan memanjang sedang menyatakan kehendak,
     bukan sekadar menyetujui bawaannya. Kehendak itu tidak boleh hilang
     hanya karena tabel simpulan kebetulan setuju hari ini.
     """
-    pilihan = PeranKomputer(peran=ANJUNGAN, suara=False)
+    pilihan = PeranKomputer(peran=PAPAN_MEMANJANG, suara=False)
 
     assert pilihan.suara_efektif is False
     assert pilihan.disesuaikan
@@ -173,11 +160,11 @@ def test_berkas_pulang_pergi_utuh(tmp_path):
 def test_berkas_ditulis_dalam_bentuk_yang_enak_disunting(tmp_path):
     """Lima komputer loket disalin lewat Notepad; berkasnya harus terbaca."""
     path = tmp_path / "peran.json"
-    tulis_peran(path, PeranKomputer(peran=ANJUNGAN_TOTEM))
+    tulis_peran(path, PeranKomputer(peran=PAPAN_MEMANJANG))
 
     teks = path.read_text(encoding="utf-8")
 
-    assert '"peran": "anjungan-totem"' in teks
+    assert '"peran": "papan-memanjang"' in teks
     assert teks.endswith("\n")
     assert json.loads(teks)["printer"] is None
 
@@ -227,7 +214,7 @@ def test_isian_boolean_menerima_tulisan_manusia():
 
 
 def test_huruf_besar_kecil_tidak_menjadi_soal():
-    assert dari_dict({"peran": "  Anjungan-Totem "}).peran == ANJUNGAN_TOTEM
+    assert dari_dict({"peran": "  Papan-Memanjang "}).peran == PAPAN_MEMANJANG
 
 
 # ---------------------------------------------------------------------
