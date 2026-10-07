@@ -115,6 +115,7 @@ class _Ticket:
             category_name=queue_info.category_name,
             office_name="Kantor Pelayanan",
             issued_at=queue_info.created_at,
+            sisa_antrian=2,
         )
 
 
@@ -192,7 +193,12 @@ def test_api_returns_active_categories_and_ticket_lines():
     )
     assert ticket.status_code == 200
     assert ticket.json()["queue_number"] == "A-001"
-    assert ticket.json()["ahead_count"] == 2
+    # Anjungan Android tidak menyebut jumlah yang menunggu, di layar maupun di struk.
+    assert "ahead_count" not in ticket.json()
+    assert not any("sisa antrian" in baris.lower() for baris in ticket.json()["ticket_lines"])
+    assert not any(
+        "sisa antrian" in row["text"].lower() for row in ticket.json()["ticket_layout"]["rows"]
+    )
     assert "NOMOR ANTRIAN" in ticket.json()["ticket_lines"]
     layout = ticket.json()["ticket_layout"]
     assert layout["width_mm"] == 72

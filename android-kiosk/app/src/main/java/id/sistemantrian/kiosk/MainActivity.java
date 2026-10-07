@@ -756,8 +756,7 @@ public final class MainActivity extends Activity {
                     List<String> receipt = new ArrayList<>();
                     for (int i = 0; i < lines.length(); i++) receipt.add(lines.getString(i));
                     JSONObject layout = ticket.optJSONObject("ticket_layout");
-                    long ahead = ticket.optLong("ahead_count", -1);
-                    showResult(number, issued.name, ahead, cooldownSeconds);
+                    showResult(number, issued.name, cooldownSeconds);
                     updateAvailability();
                     UsbEscPosPrinter.print(this, number, receipt, layout, message -> {
                         if (hint != null && showingResult) {
@@ -783,7 +782,7 @@ public final class MainActivity extends Activity {
         contentSlot.addView(retry);
     }
 
-    private void showResult(String number, String service, long ahead, int cooldown) {
+    private void showResult(String number, String service, int cooldown) {
         showingConfirmation = false;
         showingResult = true;
         boolean testTicket = number.startsWith("UJI-");
@@ -803,13 +802,6 @@ public final class MainActivity extends Activity {
         TextView serviceView = text(service, 20, INK, true);
         serviceView.setGravity(Gravity.CENTER);
         result.addView(serviceView);
-        if (ahead >= 0) {
-            String remaining = ahead == 0 ? "Anda berikutnya"
-                    : ahead + " nomor menunggu di depan Anda";
-            TextView remainingView = text(remaining, 15, MUTED, true);
-            remainingView.setGravity(Gravity.CENTER);
-            result.addView(remainingView);
-        }
         contentSlot.removeAllViews();
         contentSlot.addView(result);
         setHint("Nomor sudah terbit. Tiket sedang dicetak…", "hasil");
@@ -1060,7 +1052,7 @@ public final class MainActivity extends Activity {
                 .setMessage("Aplikasi akan menampilkan dan mencetak tiket contoh UJI-001. Nomor ini tidak dikirim ke server, tidak disimpan, dan tidak mengubah urutan nomor resmi.")
                 .setNegativeButton("Batal", null)
                 .setPositiveButton("Tampilkan & cetak", (dialog, which) -> {
-                    showResult("UJI-001", "CONTOH PELAYANAN", -1, 8);
+                    showResult("UJI-001", "CONTOH PELAYANAN", 8);
                     setHint("Tiket uji dicetak tanpa mengubah antrean resmi.", "konfirmasi");
                     UsbEscPosPrinter.printTest(this, message -> {
                         Toast.makeText(this, message, Toast.LENGTH_LONG).show();

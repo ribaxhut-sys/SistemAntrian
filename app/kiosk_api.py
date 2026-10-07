@@ -8,6 +8,7 @@ import mimetypes
 import os
 import socket
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
@@ -270,7 +271,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             ticket_warning = None
             ticket_layout = None
             try:
-                ticket = services.ticket.susun(queue_info)
+                # Anjungan Android hanya mengambil nomor: tiketnya tidak
+                # menyebut berapa yang menunggu. Baris itu tetap ada pada
+                # tiket yang dicetak dari Windows.
+                ticket = replace(services.ticket.susun(queue_info), sisa_antrian=None)
                 ticket_lines = ticket.baris_teks()
                 ticket_layout = tata_letak_tiket_anjungan(ticket)
                 issued_at = ticket.issued_at.isoformat()
@@ -286,23 +290,11 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 ]
                 issued_at = queue_info.created_at.isoformat()
                 ticket_warning = "Nomor terbit; rincian tiket tidak lengkap."
-            try:
-                ahead_count = services.queue.ringkasan_tiket(
-                    queue_info
-                ).sisa_antrian
-            except Exception:
-                logger.warning(
-                    "Sisa antrian untuk %s tidak terbaca",
-                    queue_info.queue_number,
-                    exc_info=True,
-                )
-                ahead_count = None
             response = {
                 "request_id": str(request.request_id),
                 "queue_number": queue_info.queue_number,
                 "category_name": queue_info.category_name,
                 "issued_at": issued_at,
-                "ahead_count": ahead_count,
                 "ticket_lines": ticket_lines,
                 "ticket_layout": ticket_layout,
                 "ticket_warning": ticket_warning,
