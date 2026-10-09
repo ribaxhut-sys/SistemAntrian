@@ -57,6 +57,8 @@ BAWAAN: dict[str, str] = {
     "kiosk.cooldown_seconds": "10",
     "kiosk.welcome_kind": "teks",
     "kiosk.welcome_text": "",
+    "kiosk.judul": "",
+    "kiosk.subjudul": "",
     "kiosk.welcome_file": "",
     "kiosk.welcome_slide_seconds": "10",
     "kiosk.posisi_loket": "otomatis",
@@ -383,6 +385,25 @@ SKEMA: tuple[Pengaturan, ...] = (
             ("teks", "Teks sambutan"),
             ("media", "Folder media (gambar & video bergantian)"),
         ),
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.judul",
+        "Judul anjungan",
+        "Tulisan di bagian atas tablet anjungan, misalnya \"Selamat datang di "
+        "Bapenda DKI Jakarta\". Kosongkan untuk memakai Judul layar antrian. "
+        "Tablet dapat menimpanya di Pengaturan tablet.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.subjudul",
+        "Subjudul anjungan",
+        "Satu baris kecil di bawah judul, misalnya nama kantor atau jam "
+        "layanan. Kosongkan bila tidak perlu.",
+        TEKS,
+        boleh_kosong=True,
         kelompok="Antrian",
     ),
     Pengaturan(

@@ -562,8 +562,12 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         """
         media = welcome_media_paths()
         apk = info_apk(folder_apk(base_dir()))
+        judul = (services.settings.get("kiosk.judul", "") or "").strip()
         return {
-            "title": services.settings.get("display.title", "ANTRIAN PELAYANAN CRO"),
+            # Judul anjungan sendiri; kosong berarti ikut judul layar antrian.
+            "title": judul
+            or services.settings.get("display.title", "ANTRIAN PELAYANAN CRO"),
+            "subtitle": (services.settings.get("kiosk.subjudul", "") or "").strip(),
             "welcome_text": services.settings.get(
                 "kiosk.welcome_text",
                 "Sentuh salah satu layanan di bawah untuk mengambil nomor.",

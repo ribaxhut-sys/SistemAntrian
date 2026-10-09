@@ -89,6 +89,15 @@ loops without a black gap; a file that fails is skipped, and only when every
 file fails does the panel fall back to text (retried every two minutes).
 Video sound follows **Suara video anjungan** (off by default).
 
+### Judul anjungan (mulai APK 2.4.11)
+
+**Pengaturan → Antrian → Judul anjungan** mengganti tulisan di atas tablet
+tanpa mengubah judul TV; kosong berarti ikut **Judul layar antrian**.
+**Subjudul anjungan** menambah satu baris kecil di bawahnya (nama kantor,
+jam layanan). ⚙ Pengaturan tablet → **Judul tablet ini** menimpa judul untuk
+satu tablet dan langsung berlaku. Judul dan subjudul selalu satu baris;
+hurufnya mengecil bila teksnya panjang.
+
 ### Tema anjungan (mulai APK 2.4.6)
 
 **Pengaturan → Antrian → Tema anjungan**: *Biru instansi* (bawaan), *Hijau

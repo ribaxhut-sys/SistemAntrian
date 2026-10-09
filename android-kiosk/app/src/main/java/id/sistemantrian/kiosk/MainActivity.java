@@ -117,6 +117,10 @@ public final class MainActivity extends Activity {
     private String temaAktif = "";
     private String temaServer = "biru";
     private String judulServer = "";
+    private String subjudulServer = "";
+    /** Judul khusus tablet ini; kosong berarti ikut judul dari server. */
+    private static final String JUDUL_TABLET = "judul";
+    private TextView subtitleLabel;
 
     /** Satu set warna tampilan anjungan. */
     private static final class Tema {
@@ -211,6 +215,25 @@ public final class MainActivity extends Activity {
         HASIL = t.hasil;
         TEKS_TOMBOL = t.teksTombol;
         WARNA_LAYANAN = t.chip;
+    }
+
+    /** Judul tablet ini bila diisi, lalu judul server, lalu bawaan. */
+    private String judulBerlaku() {
+        String tablet = preferences == null ? "" : preferences.getString(JUDUL_TABLET, "").trim();
+        if (!tablet.isEmpty()) return tablet;
+        return judulServer.isEmpty() ? "ANTRIAN PELAYANAN CRO" : judulServer;
+    }
+
+    private void perbaruiJudul() {
+        if (displayTitle != null && !displayTitle.getText().toString().equals(judulBerlaku())) {
+            displayTitle.setText(judulBerlaku());
+        }
+        if (subtitleLabel != null) {
+            if (!subtitleLabel.getText().toString().equals(subjudulServer)) {
+                subtitleLabel.setText(subjudulServer);
+            }
+            subtitleLabel.setVisibility(subjudulServer.isEmpty() ? View.GONE : View.VISIBLE);
+        }
     }
 
     /** Pilihan tablet bila diatur, selain itu tema dari server. */
@@ -622,16 +645,21 @@ public final class MainActivity extends Activity {
         infoPanel.setPadding(dp(18), dp(12), dp(18), dp(12));
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setGravity(Gravity.CENTER);
-        displayTitle = text(judulServer.isEmpty() ? "ANTRIAN PELAYANAN CRO" : judulServer,
-                18, INK, true);
+        displayTitle = text(judulBerlaku(), 18, INK, true);
         displayTitle.setTypeface(huruf(800));
         displayTitle.setGravity(Gravity.CENTER);
+        pasangSatuBaris(displayTitle, 10, 18);
         titleRow.addView(displayTitle, new LinearLayout.LayoutParams(0, -2, 1));
         Button settings = smallButton("⚙");
         settings.setContentDescription("Pengaturan server");
         settings.setOnClickListener(v -> showSettings());
         titleRow.addView(settings, new LinearLayout.LayoutParams(dp(42), dp(38)));
         infoPanel.addView(titleRow);
+        subtitleLabel = text(subjudulServer, 13, MUTED, true);
+        subtitleLabel.setGravity(Gravity.CENTER);
+        pasangSatuBaris(subtitleLabel, 9, 13);
+        subtitleLabel.setVisibility(subjudulServer.isEmpty() ? View.GONE : View.VISIBLE);
+        infoPanel.addView(subtitleLabel, new LinearLayout.LayoutParams(-1, -2));
         timeLabel = text("", 14, MUTED, false);
         timeLabel.setGravity(Gravity.CENTER);
         infoPanel.addView(timeLabel);
@@ -762,10 +790,9 @@ public final class MainActivity extends Activity {
             tampilkanStatusKoneksi("Terhubung ke server", Color.rgb(6, 95, 70),
                     Color.rgb(209, 250, 229));
             String title = display.optString("title", "").trim();
-            if (!title.isEmpty()) {
-                judulServer = title;
-                displayTitle.setText(title);
-            }
+            if (!title.isEmpty()) judulServer = title;
+            subjudulServer = display.optString("subtitle", "").trim();
+            perbaruiJudul();
             temaServer = display.optString("theme", "biru");
             terapkanTemaBilaBerubah();
             JSONArray mediaRows = display.optJSONArray("welcome_media");
@@ -2479,6 +2506,24 @@ public final class MainActivity extends Activity {
 
         LinearLayout tampilan = bagianPengaturan(fields, "Tampilan anjungan",
                 "Berlaku seketika untuk tablet ini, tanpa tombol Simpan.");
+        EditText judulTablet = isianPengaturan(tampilan, "Judul tablet ini",
+                "Kosongkan untuk mengikuti judul dari server");
+        judulTablet.setText(preferences.getString(JUDUL_TABLET, ""));
+        judulTablet.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence teks, int awal, int jumlah, int sesudah) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence teks, int awal, int sebelum, int jumlah) {
+            }
+
+            @Override
+            public void afterTextChanged(android.text.Editable teks) {
+                preferences.edit().putString(JUDUL_TABLET, teks.toString().trim()).apply();
+                perbaruiJudul();
+            }
+        });
         tampilan.addView(labelPengaturan("Sumber media sambutan"));
         RadioGroup sumber = new RadioGroup(this);
         RadioButton dariServer = radioPengaturan("Daftar putar server (disalin ke tablet)");

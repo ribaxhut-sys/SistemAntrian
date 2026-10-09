@@ -120,6 +120,8 @@ class _Settings:
         }.get(key, default)
     posisi_loket = "otomatis"
     tema = "biru"
+    judul = ""
+    subjudul = ""
     tema_agustus = False
     daftar_putar = ""
 
@@ -137,6 +139,8 @@ class _Settings:
             "kiosk.welcome_file": "",
             "kiosk.posisi_loket": self.posisi_loket,
             "kiosk.tema": self.tema,
+            "kiosk.judul": self.judul,
+            "kiosk.subjudul": self.subjudul,
             "kiosk.daftar_putar": self.daftar_putar,
         }
         return values.get(key, default)
@@ -261,6 +265,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
     assert abs(isi.pop("server_time_ms") - time.time() * 1000) < 5000
     assert isi == {
         "title": "KANTOR PELAYANAN",
+        "subtitle": "",
         "welcome_text": "Selamat datang",
         "welcome_kind": "teks",
         "welcome_slide_seconds": 10,
@@ -313,6 +318,21 @@ def test_display_sends_counter_position(tersimpan, dikirim):
     ).json()
 
     assert isi["counter_position"] == dikirim
+
+
+def test_display_memakai_judul_anjungan_sendiri():
+    from app.kiosk_api import create_app
+
+    services = _Services()
+    services.settings.judul = "  Selamat datang di Bapenda  "
+    services.settings.subjudul = " UPPRD Menteng · 08.00–15.00 "
+    client = TestClient(create_app(TOKEN, services))
+    isi = client.get(
+        "/v1/kiosk/display", headers={"Authorization": f"Bearer {TOKEN}"}
+    ).json()
+
+    assert isi["title"] == "Selamat datang di Bapenda"
+    assert isi["subtitle"] == "UPPRD Menteng · 08.00–15.00"
 
 
 @pytest.mark.parametrize(
