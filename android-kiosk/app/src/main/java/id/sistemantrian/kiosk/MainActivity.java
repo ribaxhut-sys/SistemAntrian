@@ -483,6 +483,7 @@ public final class MainActivity extends Activity {
     /** Media sambutan ada di daftar, tetapi gagal dimuat di tablet ini. */
     private boolean mediaGagal;
     private String tampilanLoket = "";
+    private boolean menungguUkuranPanel;
     /** Nomor terakhir tiap loket, untuk menyorot loket yang baru memanggil. */
     private final Map<String, String> nomorLoketTerakhir = new HashMap<>();
     private boolean nomorLoketPernahTampil;
@@ -1589,47 +1590,54 @@ public final class MainActivity extends Activity {
         invitation.setText("Pilih layanan");
         contentSlot.removeAllViews();
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        // Tanpa gulir: kartu disusun dalam baris berbobot yang membagi
+        // seluruh tinggi panel. Jumlah kolom dan ukuran huruf dihitung dari
+        // ukuran panel, sehingga semua layanan selalu terlihat sekaligus.
+        if (contentSlot.getHeight() <= 0 && !menungguUkuranPanel) {
+            menungguUkuranPanel = true;
+            contentSlot.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+                @Override
+                public void onLayoutChange(View v, int kiri, int atas, int kanan, int bawah,
+                                           int kiriLama, int atasLama, int kananLama,
+                                           int bawahLama) {
+                    if (bawah - atas <= 0) return;
+                    contentSlot.removeOnLayoutChangeListener(this);
+                    menungguUkuranPanel = false;
+                    contentSlot.post(() -> {
+                        if (!showingConfirmation && !updating && !updateRequired) {
+                            showCategories(showingResult);
+                        }
+                    });
+                }
+            });
+        }
+        Integer parent = path.isEmpty() ? null : path.get(path.size() - 1).id;
+        List<Category> visible = new ArrayList<>();
+        for (Category item : categories) {
+            if (Objects.equals(item.parentId, parent)) visible.add(item);
+        }
+        int jumlahKartu = visible.size() + (path.isEmpty() ? 0 : 1);
+        int[] susunan = susunanKartu(jumlahKartu, visible);
+        int columns = susunan[0];
+        int tinggiKartu = susunan[1];
+
+        List<View> kartuList = new ArrayList<>();
+        if (!path.isEmpty()) {
+            kartuList.add(buatKartu("‹", "Kembali", null, new int[]{ABU_LEMBUT, MUTED}, () -> {
+                path.remove(path.size() - 1);
+                showCategories();
+            }, tinggiKartu));
+        }
+        for (Category item : visible) {
+            View kartu = buatKartuLayanan(item, tinggiKartu);
+            kartuList.add(kartu);
+            if (!item.group) ticketChoices.add(kartu);
+        }
+
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER);
-        int kolomLayar = Math.max(1, Math.min(3,
-                Math.round(getResources().getDisplayMetrics().widthPixels
-                        / getResources().getDisplayMetrics().density / 118f)));
-        // Nama layanan selalu satu baris. Nama yang panjang mendapat kartu
-        // lebih lebar (kolom lebih sedikit) supaya hurufnya tidak mengecil
-        // sampai sulit dibaca.
-        Integer induk = path.isEmpty() ? null : path.get(path.size() - 1).id;
-        int terpanjang = 0;
-        for (Category item : categories) {
-            if (Objects.equals(item.parentId, induk)) {
-                terpanjang = Math.max(terpanjang, item.name.length());
-            }
-        }
-        int columns = terpanjang > 30 ? 1
-                : terpanjang > 18 ? Math.min(kolomLayar, 2) : kolomLayar;
-        GridLayout grid = new GridLayout(this);
-        grid.setColumnCount(columns);
-        grid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
-        grid.setUseDefaultMargins(false);
-        grid.setPadding(dp(2), dp(2), dp(2), dp(2));
-
-        List<Category> visible = new ArrayList<>();
-        Integer parent = path.isEmpty() ? null : path.get(path.size() - 1).id;
-        if (!path.isEmpty()) {
-            addCard(grid, "‹", "Kembali", null, new int[]{ABU_LEMBUT, MUTED}, () -> {
-                path.remove(path.size() - 1);
-                showCategories();
-            }, columns);
-        }
-        for (Category item : categories) {
-            if (Objects.equals(item.parentId, parent)) {
-                visible.add(item);
-                addCategoryCard(grid, item, columns);
-            }
-        }
+        content.setPadding(dp(2), dp(2), dp(2), dp(2));
         if (visible.isEmpty()) {
             TextView empty = text(
                     categoriesLoaded ? "Tidak ada layanan aktif."
@@ -1642,21 +1650,37 @@ public final class MainActivity extends Activity {
             } else {
                 setHint("Server belum mengirim daftar layanan.", "tunggu");
             }
-        } else if (path.isEmpty()) {
-            setHint(visible.size() == 1
-                    ? "Sentuh tombol di bawah untuk mengambil nomor"
-                    : "Sentuh jenis layanan yang Anda butuhkan", "ajak");
         } else {
-            Category selected = path.get(path.size() - 1);
-            setHint(selected.name + " — pilih layanan, atau sentuh Kembali", "ajak");
+            if (path.isEmpty()) {
+                setHint(visible.size() == 1
+                        ? "Sentuh tombol di bawah untuk mengambil nomor"
+                        : "Sentuh jenis layanan yang Anda butuhkan", "ajak");
+            } else {
+                Category selected = path.get(path.size() - 1);
+                setHint(selected.name + " — pilih layanan, atau sentuh Kembali", "ajak");
+            }
+            int baris = (kartuList.size() + columns - 1) / columns;
+            for (int r = 0; r < baris; r++) {
+                LinearLayout deret = new LinearLayout(this);
+                deret.setOrientation(LinearLayout.HORIZONTAL);
+                for (int c = 0; c < columns; c++) {
+                    int i = r * columns + c;
+                    LinearLayout.LayoutParams sel = new LinearLayout.LayoutParams(0, -1, 1f);
+                    sel.setMargins(dp(4), dp(4), dp(4), dp(4));
+                    // Sel kosong di deret terakhir menjaga lebar kartu tetap sama.
+                    deret.addView(i < kartuList.size() ? kartuList.get(i) : new View(this), sel);
+                }
+                // Tinggi deret dibatasi supaya kartu tidak raksasa bila layanannya sedikit.
+                LinearLayout.LayoutParams ukuranDeret = tinggiKartu > 0
+                        ? new LinearLayout.LayoutParams(-1, tinggiKartu + dp(8))
+                        : new LinearLayout.LayoutParams(-1, 0, 1f);
+                content.addView(deret, ukuranDeret);
+            }
         }
-        content.addView(grid);
-        scroll.addView(content);
-        contentSlot.addView(scroll);
-        scroll.post(() -> fitCategoryCards(scroll, grid, columns));
+        contentSlot.addView(content, new FrameLayout.LayoutParams(-1, -1));
         // Kartu masuk satu per satu: memudar dan naik sedikit.
-        for (int i = 0; i < grid.getChildCount(); i++) {
-            View kartu = grid.getChildAt(i);
+        for (int i = 0; i < kartuList.size(); i++) {
+            View kartu = kartuList.get(i);
             kartu.setAlpha(0f);
             kartu.setTranslationY(dp(14));
             kartu.animate().alpha(1f).translationY(0f)
@@ -1667,7 +1691,38 @@ public final class MainActivity extends Activity {
         updateAvailability();
     }
 
+    /**
+     * Pilih jumlah kolom dan tinggi kartu supaya SEMUA kartu muat di panel.
+     *
+     * Kolom awal dari lebar layar dan nama terpanjang (nama panjang butuh
+     * kartu lebar). Bila kartunya jadi terlalu pendek, kolom ditambah
+     * selama kartu masih cukup lebar. Mengembalikan {kolom, tinggi kartu px};
+     * tinggi 0 berarti ukuran panel belum diketahui.
+     */
+    private int[] susunanKartu(int jumlah, List<Category> visible) {
+        float satuan = getResources().getDisplayMetrics().density * uiScale;
+        int lebarPanel = contentSlot.getWidth();
+        int tinggiPanel = contentSlot.getHeight() - dp(4);
+        int kolomLayar = Math.max(1, Math.min(3,
+                Math.round(getResources().getDisplayMetrics().widthPixels
+                        / getResources().getDisplayMetrics().density / 118f)));
+        int terpanjang = 0;
+        for (Category item : visible) terpanjang = Math.max(terpanjang, item.name.length());
+        int kolom = terpanjang > 30 ? 1 : terpanjang > 18 ? Math.min(kolomLayar, 2) : kolomLayar;
+        kolom = Math.max(1, Math.min(kolom, Math.max(1, jumlah)));
+        if (tinggiPanel <= 0 || lebarPanel <= 0 || jumlah == 0) return new int[]{kolom, 0};
+
+        int tinggi = tinggiPanel / ((jumlah + kolom - 1) / kolom) - dp(8);
+        while (tinggi < dp(72) && kolom < Math.min(4, jumlah)
+                && lebarPanel / (kolom + 1) >= Math.round(96 * satuan)) {
+            kolom++;
+            tinggi = tinggiPanel / ((jumlah + kolom - 1) / kolom) - dp(8);
+        }
+        return new int[]{kolom, Math.max(dp(32), Math.min(dp(128), tinggi))};
+    }
+
     // -----------------------------------------------------------------
+    // Baris "SEDANG DILAYANI": di panel atas atau bawah    // -----------------------------------------------------------------
     // Baris "SEDANG DILAYANI": di panel atas atau bawah
     // -----------------------------------------------------------------
 
@@ -2101,27 +2156,6 @@ public final class MainActivity extends Activity {
         return params;
     }
 
-    private void fitCategoryCards(ScrollView scroll, GridLayout grid, int columns) {
-        int count = grid.getChildCount();
-        int rows = (count + columns - 1) / columns;
-        if (rows < 1 || contentSlot.getHeight() <= 0) return;
-
-        int rowGap = dp(8);
-        int availablePerRow = (contentSlot.getHeight() - dp(8)) / rows;
-        int preferredHeight = availablePerRow - rowGap;
-        // Kode di atas dan nama di bawah butuh kartu lebih tinggi.
-        int minimumHeight = dp(88);
-        int cardHeight = Math.max(minimumHeight, Math.min(dp(132), preferredHeight));
-        scroll.setVerticalScrollBarEnabled(preferredHeight < minimumHeight);
-
-        for (int i = 0; i < count; i++) {
-            View child = grid.getChildAt(i);
-            GridLayout.LayoutParams params = (GridLayout.LayoutParams) child.getLayoutParams();
-            params.height = cardHeight;
-            child.setLayoutParams(params);
-        }
-    }
-
     /** Warna kapsul tetap untuk tiap awalan, supaya A selalu biru, B selalu hijau. */
     private int[] warnaLayanan(String kunci) {
         int indeks = kunci.isEmpty() ? 0 : Character.toUpperCase(kunci.charAt(0)) - 'A';
@@ -2133,8 +2167,8 @@ public final class MainActivity extends Activity {
         return item.name.isEmpty() ? "•" : item.name.substring(0, 1).toUpperCase(Locale.ROOT);
     }
 
-    private void addCategoryCard(GridLayout grid, Category item, int columns) {
-        addCard(grid, item.group ? "›" : awalanLayanan(item), item.name,
+    private View buatKartuLayanan(Category item, int tinggiKartu) {
+        return buatKartu(item.group ? "›" : awalanLayanan(item), item.name,
                 item.group ? "Lihat pilihan layanan" : null,
                 item.group ? new int[]{LEMBUT, INK} : warnaLayanan(awalanLayanan(item)), () -> {
                     if (item.group) {
@@ -2144,77 +2178,99 @@ public final class MainActivity extends Activity {
                         pendingCategory = item;
                         showConfirmation();
                     }
-                }, columns);
-        if (!item.group) ticketChoices.add(grid.getChildAt(grid.getChildCount() - 1));
+                }, tinggiKartu);
     }
 
     /**
-     * Kartu layanan tegak: kode layanan besar di kapsul berwarna di atas,
-     * nama layanan selebar kartu di bawahnya, satu baris.
+     * Kartu layanan: latar lembut berwarna layanan, kode kecil di pojok
+     * kiri atas, dan nama layanan besar di tengah kartu, satu baris. Kartu
+     * yang pendek menaruh kode di kiri nama supaya keduanya tetap muat.
+     * Ukuran huruf mengikuti tinggi kartu, sehingga tidak pernah perlu gulir.
      *
-     * Teks kode diletakkan di FrameLayout dan ditengahkan sebagai kotak,
-     * bukan lewat gravity teks: TextView satu baris tidak selalu
-     * menengahkan tulisannya secara tegak.
+     * Teks diletakkan sebagai kotak yang ditengahkan oleh FrameLayout, bukan
+     * lewat gravity teks: TextView satu baris tidak selalu menengahkan
+     * tulisannya secara tegak.
      */
-    private void addCard(
-            GridLayout grid, String awalan, String label, String keterangan,
-            int[] warna, Runnable action, int columns) {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.CENTER);
-        card.setPadding(dp(10), dp(8), dp(10), dp(8));
-        card.setBackground(latarKartu());
+    private View buatKartu(String awalan, String label, String keterangan,
+                           int[] warna, Runnable action, int tinggiKartu) {
+        // Tinggi kartu dalam satuan dp anjungan (sudah termasuk skala layar).
+        float tinggi = tinggiKartu > 0
+                ? tinggiKartu / (getResources().getDisplayMetrics().density * uiScale) : 96f;
+        boolean lega = tinggi >= 80f;
+        int kodeSp = Math.round(Math.max(11f, Math.min(14f, tinggi * 0.13f)));
+        int namaSp = Math.round(Math.max(12f, Math.min(22f, tinggi * (lega ? 0.22f : 0.26f))));
+        boolean adaKeterangan = keterangan != null && tinggi >= 88f;
+
+        FrameLayout card = new FrameLayout(this);
+        card.setPadding(dp(8), dp(6), dp(8), dp(6));
+        // Kontras tinggi tetap putih: tulisan hitam harus setajam mungkin.
+        int latar = "kontras".equals(temaAktif) ? KARTU : campur(KARTU, warna[0], 0.45f);
+        card.setBackground(latarKartu(latar));
         card.setElevation(dp(2));
 
         FrameLayout kapsul = new FrameLayout(this);
-        kapsul.setBackground(rounded(warna[0], dp(16)));
-        kapsul.setMinimumWidth(dp(68));
-        kapsul.setPadding(dp(14), 0, dp(14), 0);
-        TextView kode = text(awalan, 30, warna[1], true);
+        kapsul.setBackground(rounded(warna[0], dp(8)));
+        kapsul.setPadding(dp(8), dp(2), dp(8), dp(2));
+        TextView kode = text(awalan, kodeSp, warna[1], true);
         kode.setTypeface(huruf(800));
-        kode.setFontFeatureSettings("tnum");
-        pasangSatuBaris(kode, 12, 30);
+        kode.setSingleLine(true);
+        kode.setIncludeFontPadding(false);
         kapsul.addView(kode, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
-        card.addView(kapsul, new LinearLayout.LayoutParams(-2, 0, 1.15f));
 
-        TextView nama = text(label, 18, INK, true);
-        nama.setGravity(Gravity.CENTER_HORIZONTAL);
-        pasangSatuBaris(nama, 9, 19);
-        LinearLayout.LayoutParams namaParams = new LinearLayout.LayoutParams(-1, -2);
-        namaParams.topMargin = dp(6);
-        card.addView(nama, namaParams);
-        if (keterangan != null) {
-            TextView ket = text(keterangan, 11, MUTED, false);
-            ket.setGravity(Gravity.CENTER_HORIZONTAL);
-            pasangSatuBaris(ket, 8, 11);
-            card.addView(ket, new LinearLayout.LayoutParams(-1, -2));
+        TextView nama = text(label, namaSp, INK, true);
+        nama.setTypeface(huruf(800));
+        pasangSatuBaris(nama, 9, namaSp);
+
+        if (lega) {
+            card.addView(kapsul, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START));
+            LinearLayout tengah = new LinearLayout(this);
+            tengah.setOrientation(LinearLayout.VERTICAL);
+            tengah.setGravity(Gravity.CENTER_HORIZONTAL);
+            nama.setGravity(Gravity.CENTER_HORIZONTAL);
+            tengah.addView(nama, new LinearLayout.LayoutParams(-1, -2));
+            if (adaKeterangan) {
+                TextView ket = text(keterangan, 11, MUTED, false);
+                ket.setGravity(Gravity.CENTER_HORIZONTAL);
+                pasangSatuBaris(ket, 8, 11);
+                tengah.addView(ket, new LinearLayout.LayoutParams(-1, -2));
+            }
+            // Ruang yang sama di atas dan bawah setinggi kapsul kode, supaya
+            // nama tetap di tengah kartu tanpa menabrak kode di pojok.
+            int ruang = Math.round(kodeSp * uiScale
+                    * getResources().getDisplayMetrics().scaledDensity * 1.25f) + dp(6);
+            tengah.setPadding(0, ruang, 0, ruang);
+            card.addView(tengah, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
+        } else {
+            LinearLayout baris = new LinearLayout(this);
+            baris.setGravity(Gravity.CENTER_VERTICAL);
+            baris.addView(kapsul, new LinearLayout.LayoutParams(-2, -2));
+            nama.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+            LinearLayout.LayoutParams namaParams = new LinearLayout.LayoutParams(0, -2, 1f);
+            namaParams.leftMargin = dp(8);
+            baris.addView(nama, namaParams);
+            card.addView(baris, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
         }
-        int widthDp = Math.round(getResources().getDisplayMetrics().widthPixels
-                / getResources().getDisplayMetrics().density);
-        int cellWidth = Math.max(1, (widthDp - 46) / columns);
-        GridLayout.LayoutParams params = new GridLayout.LayoutParams();
-        params.width = 0;
-        params.height = dp(Math.min(132, Math.max(96, cellWidth * 8 / 10)));
-        // Tanpa FILL, GridLayout dapat menyelaraskan baseline TextView.
-        // Kartu dua atau tiga baris lalu tampak lebih rendah daripada kartu
-        // satu baris pada baris grid yang sama.
-        params.rowSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
-        params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
-        params.setGravity(Gravity.FILL);
-        params.setMargins(dp(4), dp(4), dp(4), dp(4));
-        grid.addView(card, params);
         pasangEfekSentuh(card);
         card.setOnClickListener(v -> {
             v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
             action.run();
         });
+        return card;
     }
 
-    private StateListDrawable latarKartu() {
+    /** Campuran dua warna; `porsi` 0 = warna pertama, 1 = warna kedua. */
+    private static int campur(int satu, int dua, float porsi) {
+        return Color.rgb(
+                Math.round(Color.red(satu) + (Color.red(dua) - Color.red(satu)) * porsi),
+                Math.round(Color.green(satu) + (Color.green(dua) - Color.green(satu)) * porsi),
+                Math.round(Color.blue(satu) + (Color.blue(dua) - Color.blue(satu)) * porsi));
+    }
+
+    private StateListDrawable latarKartu(int latar) {
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[]{android.R.attr.state_pressed},
                 roundedOutline(LEMBUT, UTAMA, dp(20), dp(2)));
-        states.addState(new int[]{}, roundedOutline(KARTU, GARIS, dp(20), dp(1)));
+        states.addState(new int[]{}, roundedOutline(latar, GARIS, dp(20), dp(1)));
         return states;
     }
 
