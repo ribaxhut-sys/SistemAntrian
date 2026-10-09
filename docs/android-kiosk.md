@@ -91,6 +91,13 @@ Video sound follows **Suara video anjungan** (off by default).
 
 ### Animasi (APK 2.4.12–2.4.13)
 
+Daftar nomor menunggu (2.4.14): halaman berganti dengan ubin berbalik
+seperti papan jadwal; nomor yang dipanggil mengecil lalu hilang dan ubin lain
+bergeser mengisi; nomor yang baru diambil di tablet itu memakai warna utama
+dan berdenyut ±10 detik, dan daftar membuka halamannya; titik di bawah
+daftar menggantikan "1/3" dan terisi sampai halaman berganti. Daftar tidak
+digambar ulang bila isinya tidak berubah.
+
 Kartu layanan masuk berurutan; loket yang memanggil nomor baru berdenyut
 dan angkanya bergulir; gambar iklan berganti dengan memudar (video tetap
 diganti langsung); layar "Nomor Anda" menggambar tanda centang; nomor

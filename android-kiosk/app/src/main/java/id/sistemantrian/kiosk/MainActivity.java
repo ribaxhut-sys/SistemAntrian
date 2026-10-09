@@ -256,6 +256,7 @@ public final class MainActivity extends Activity {
     }
 
     private void bangunUlangTampilan() {
+        lepasDaftarMenunggu();
         // Potret layar lama (setengah resolusi, hemat memori) ditumpuk di atas
         // layar baru lalu dipudarkan: tema berganti tanpa berkedip.
         Bitmap potret = null;
@@ -489,6 +490,19 @@ public final class MainActivity extends Activity {
     private final Set<String> nomorMenungguTerakhir = new HashSet<>();
     private int halamanMenungguTerakhir = -1;
     private boolean menungguPernahTampil;
+    /** Ubin nomor yang sedang tampil, untuk animasi keluar dan geser. */
+    private final Map<String, View> ubinTampil = new HashMap<>();
+    private final Map<String, int[]> posisiUbinLama = new HashMap<>();
+    private boolean sedangMengeluarkan;
+    /** Tanda isi daftar terakhir; sama berarti tidak perlu digambar ulang. */
+    private String tandaMenunggu = "";
+    private long halamanMulaiMillis;
+    private static final long LAMA_HALAMAN_MENUNGGU_MS = 4500L;
+    /** Nomor yang baru diambil di tablet ini, disorot sebentar di daftar. */
+    private String nomorSaya = "";
+    private long batasSorotMillis;
+    private boolean sorotDidenyutkan;
+    private boolean sorotDitunjukkan;
     private android.animation.ObjectAnimator denyutAjakan;
     /** Panel bawah sedang memakai latar gelap layar "Nomor Anda". */
     private boolean panelHasilGelap;
@@ -671,7 +685,7 @@ public final class MainActivity extends Activity {
                 waitingPage = (waitingPage + 1) % halaman;
                 tampilkanNomorMenunggu();
             }
-            handler.postDelayed(this, 4500);
+            handler.postDelayed(this, LAMA_HALAMAN_MENUNGGU_MS);
         }
     };
 
@@ -843,7 +857,7 @@ public final class MainActivity extends Activity {
         handler.removeCallbacks(displayRefresh);
         handler.postDelayed(displayRefresh, 5000);
         handler.removeCallbacks(waitingPageRotation);
-        handler.postDelayed(waitingPageRotation, 4500);
+        handler.postDelayed(waitingPageRotation, LAMA_HALAMAN_MENUNGGU_MS);
     }
 
     private LinearLayout panel() {
@@ -1849,20 +1863,80 @@ public final class MainActivity extends Activity {
                 / nomorPerHalaman());
     }
 
-    /** Daftar baca-saja seluruh nomor yang masih menunggu pada hari ini. */
+    private boolean sorotAktif() {
+        return !nomorSaya.isEmpty() && System.currentTimeMillis() < batasSorotMillis;
+    }
+
+    /** Lupakan ubin yang tampil; dipanggil saat panel bawah dipakai isi lain. */
+    private void lepasDaftarMenunggu() {
+        ubinTampil.clear();
+        posisiUbinLama.clear();
+        tandaMenunggu = "";
+    }
+
+    /**
+     * Daftar baca-saja seluruh nomor yang masih menunggu pada hari ini.
+     *
+     * Animasinya: nomor yang dipanggil loket mengecil dan hilang lalu ubin
+     * lain bergeser mengisi; halaman berganti dengan ubin berbalik satu per
+     * satu seperti papan jadwal; nomor baru muncul dengan "pop"; nomor milik
+     * pengunjung tablet ini memakai warna utama dan berdenyut sebentar.
+     */
     private void tampilkanNomorMenunggu() {
-        if (resultSlot == null) return;
-        resultSlot.removeAllViews();
+        if (resultSlot == null || sedangMengeluarkan) return;
+        // Langsung ke halaman yang memuat nomor milik pengunjung.
+        if (sorotAktif() && !sorotDitunjukkan) {
+            int letak = waitingQueueNumbers.indexOf(nomorSaya);
+            if (letak >= 0) {
+                waitingPage = letak / nomorPerHalaman();
+                sorotDitunjukkan = true;
+            }
+        }
         int halaman = jumlahHalamanMenunggu();
         waitingPage = Math.min(waitingPage, halaman - 1);
-        if (resultTitle != null) {
-            resultTitle.setText("Nomor menunggu"
-                    + (halaman > 1 ? "  " + (waitingPage + 1) + "/" + halaman : ""));
+        boolean halamanBerganti = waitingPage != halamanMenungguTerakhir;
+        String tanda = TextUtils.join(",", waitingQueueNumbers) + "|" + waitingPage
+                + "|" + barisMenunggu + "|" + sorotAktif() + "|" + temaAktif;
+        if (tanda.equals(tandaMenunggu) && resultSlot.getChildCount() > 0) return;
+
+        // Nomor yang dipanggil keluar dulu, baru daftar disusun ulang.
+        if (menungguPernahTampil && !halamanBerganti && !ubinTampil.isEmpty()) {
+            List<View> keluar = new ArrayList<>();
+            for (Map.Entry<String, View> ubin : ubinTampil.entrySet()) {
+                if (!waitingQueueNumbers.contains(ubin.getKey())) keluar.add(ubin.getValue());
+            }
+            if (!keluar.isEmpty()) {
+                posisiUbinLama.clear();
+                for (Map.Entry<String, View> ubin : ubinTampil.entrySet()) {
+                    int[] xy = new int[2];
+                    ubin.getValue().getLocationOnScreen(xy);
+                    posisiUbinLama.put(ubin.getKey(), xy);
+                }
+                sedangMengeluarkan = true;
+                for (View v : keluar) {
+                    v.animate().scaleX(0.5f).scaleY(0.5f).alpha(0f).setDuration(260)
+                            .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                            .start();
+                }
+                handler.postDelayed(() -> {
+                    sedangMengeluarkan = false;
+                    tandaMenunggu = "";
+                    if (!showingResult) tampilkanNomorMenunggu();
+                }, 280);
+                return;
+            }
         }
+
+        tandaMenunggu = tanda;
+        resultSlot.removeAllViews();
+        ubinTampil.clear();
+        if (resultTitle != null) resultTitle.setText("Nomor menunggu");
+        if (halamanBerganti) halamanMulaiMillis = System.currentTimeMillis();
 
         if (waitingQueueNumbers.isEmpty()) {
             menungguPernahTampil = true;
             nomorMenungguTerakhir.clear();
+            halamanMenungguTerakhir = waitingPage;
             TextView kosong = text("Belum ada nomor yang menunggu.", 16, MUTED, false);
             kosong.setGravity(Gravity.CENTER);
             kosong.setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -1870,6 +1944,8 @@ public final class MainActivity extends Activity {
             return;
         }
 
+        LinearLayout wadah = new LinearLayout(this);
+        wadah.setOrientation(LinearLayout.VERTICAL);
         // Baris LinearLayout berbobot, bukan GridLayout: GridLayout yang
         // dibungkus wrap_content membagi lebar 0 ke kolom berbobot, sehingga
         // ubin nomor selebar nol dan daftarnya tampak kosong.
@@ -1877,9 +1953,13 @@ public final class MainActivity extends Activity {
         page.setOrientation(LinearLayout.VERTICAL);
         page.setGravity(Gravity.CENTER_VERTICAL);
         page.setPadding(dp(2), dp(2), dp(2), dp(2));
+        wadah.addView(page, new LinearLayout.LayoutParams(-1, 0, 1));
 
+        boolean sorot = sorotAktif();
+        float kamera = 8000f * getResources().getDisplayMetrics().density;
         int awal = waitingPage * nomorPerHalaman();
         int akhir = Math.min(awal + nomorPerHalaman(), waitingQueueNumbers.size());
+        List<View> ubinBaru = new ArrayList<>();
         LinearLayout baris = null;
         for (int index = awal; index < akhir; index++) {
             if ((index - awal) % KOLOM_NOMOR_MENUNGGU == 0) {
@@ -1887,17 +1967,30 @@ public final class MainActivity extends Activity {
                 baris.setOrientation(LinearLayout.HORIZONTAL);
                 page.addView(baris, new LinearLayout.LayoutParams(-1, -2));
             }
-            TextView nomor = text(waitingQueueNumbers.get(index), 19, INK, true);
+            String isi = waitingQueueNumbers.get(index);
+            boolean milikSaya = sorot && isi.equals(nomorSaya);
+            TextView nomor = text(isi, 19, milikSaya ? TEKS_TOMBOL : INK, true);
             nomor.setTypeface(huruf(800));
             nomor.setFontFeatureSettings("tnum");
             nomor.setGravity(Gravity.CENTER);
             nomor.setPadding(dp(4), dp(4), dp(4), dp(4));
-            nomor.setBackground(rounded(LEMBUT, dp(16)));
+            nomor.setBackground(rounded(milikSaya ? UTAMA : LEMBUT, dp(16)));
+            nomor.setCameraDistance(kamera);
             pasangSatuBaris(nomor, 10, 20);
             baris.addView(nomor, selNomorMenunggu());
-            // Nomor yang baru diambil muncul dengan "pop" kecil.
-            if (menungguPernahTampil
-                    && !nomorMenungguTerakhir.contains(waitingQueueNumbers.get(index))) {
+            ubinTampil.put(isi, nomor);
+            ubinBaru.add(nomor);
+            int urutan = index - awal;
+            if (halamanBerganti && menungguPernahTampil) {
+                // Papan balik: ubin berbalik satu per satu.
+                nomor.setRotationX(90f);
+                nomor.setAlpha(0.3f);
+                nomor.animate().rotationX(0f).alpha(1f).setStartDelay(45L * urutan)
+                        .setDuration(360)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                        .start();
+            } else if (menungguPernahTampil && !nomorMenungguTerakhir.contains(isi)) {
+                // Nomor yang baru diambil muncul dengan "pop" kecil.
                 nomor.setAlpha(0f);
                 nomor.setScaleX(0.6f);
                 nomor.setScaleY(0.6f);
@@ -1905,20 +1998,85 @@ public final class MainActivity extends Activity {
                         .setInterpolator(new android.view.animation.OvershootInterpolator(2f))
                         .start();
             }
+            if (milikSaya && !sorotDidenyutkan) {
+                sorotDidenyutkan = true;
+                android.animation.ObjectAnimator denyut =
+                        android.animation.ObjectAnimator.ofPropertyValuesHolder(nomor,
+                                android.animation.PropertyValuesHolder.ofFloat(
+                                        View.SCALE_X, 1f, 1.08f),
+                                android.animation.PropertyValuesHolder.ofFloat(
+                                        View.SCALE_Y, 1f, 1.08f));
+                denyut.setDuration(320);
+                denyut.setRepeatCount(5);
+                denyut.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+                denyut.setStartDelay(400);
+                denyut.start();
+            }
         }
         // Baris terakhir diisi sel kosong supaya ubinnya tetap selebar ubin lain.
         int sisa = (akhir - awal) % KOLOM_NOMOR_MENUNGGU;
         for (int i = 0; baris != null && sisa > 0 && i < KOLOM_NOMOR_MENUNGGU - sisa; i++) {
             baris.addView(new View(this), selNomorMenunggu());
         }
-        resultSlot.addView(page, new FrameLayout.LayoutParams(-1, -1));
-        // Halaman berikutnya bergeser masuk dari kanan.
-        if (menungguPernahTampil && waitingPage != halamanMenungguTerakhir) {
-            page.setAlpha(0f);
-            page.setTranslationX(dp(40));
-            page.animate().alpha(1f).translationX(0f).setDuration(300)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                    .start();
+
+        // Titik halaman: titik aktif memanjang dan terisi sampai halaman berganti.
+        if (halaman > 1) {
+            LinearLayout titik = new LinearLayout(this);
+            titik.setGravity(Gravity.CENTER);
+            titik.setPadding(0, dp(6), 0, 0);
+            for (int i = 0; i < halaman; i++) {
+                boolean aktif = i == waitingPage;
+                FrameLayout satu = new FrameLayout(this);
+                satu.setBackground(rounded(GARIS, dp(3)));
+                LinearLayout.LayoutParams ukuran =
+                        new LinearLayout.LayoutParams(dp(aktif ? 28 : 6), dp(6));
+                ukuran.leftMargin = dp(3);
+                ukuran.rightMargin = dp(3);
+                titik.addView(satu, ukuran);
+                if (aktif) {
+                    View isian = new View(this);
+                    isian.setBackground(rounded(UTAMA, dp(3)));
+                    satu.addView(isian, new FrameLayout.LayoutParams(-1, -1));
+                    float sudah = Math.min(1f, (System.currentTimeMillis() - halamanMulaiMillis)
+                            / (float) LAMA_HALAMAN_MENUNGGU_MS);
+                    isian.setPivotX(0f);
+                    isian.setScaleX(sudah);
+                    isian.animate().scaleX(1f)
+                            .setDuration(Math.max(0L, (long) ((1f - sudah)
+                                    * LAMA_HALAMAN_MENUNGGU_MS)))
+                            .setInterpolator(new android.view.animation.LinearInterpolator())
+                            .start();
+                }
+            }
+            wadah.addView(titik, new LinearLayout.LayoutParams(-1, -2));
+        }
+        resultSlot.addView(wadah, new FrameLayout.LayoutParams(-1, -1));
+
+        // Sesudah nomor dipanggil: ubin yang tersisa bergeser dari tempat lamanya.
+        if (!posisiUbinLama.isEmpty()) {
+            Map<String, int[]> lama = new HashMap<>(posisiUbinLama);
+            posisiUbinLama.clear();
+            page.post(() -> {
+                for (Map.Entry<String, View> ubin : ubinTampil.entrySet()) {
+                    View v = ubin.getValue();
+                    int[] dulu = lama.get(ubin.getKey());
+                    if (dulu == null) {
+                        if (v.getAlpha() == 1f) {
+                            v.setAlpha(0f);
+                            v.animate().alpha(1f).setDuration(300).start();
+                        }
+                        continue;
+                    }
+                    int[] kini = new int[2];
+                    v.getLocationOnScreen(kini);
+                    if (dulu[0] == kini[0] && dulu[1] == kini[1]) continue;
+                    v.setTranslationX(dulu[0] - kini[0]);
+                    v.setTranslationY(dulu[1] - kini[1]);
+                    v.animate().translationX(0f).translationY(0f).setDuration(320)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                            .start();
+                }
+            });
         }
         halamanMenungguTerakhir = waitingPage;
         nomorMenungguTerakhir.clear();
@@ -2211,6 +2369,10 @@ public final class MainActivity extends Activity {
                     for (int i = 0; i < lines.length(); i++) receipt.add(lines.getString(i));
                     JSONObject layout = ticket.optJSONObject("ticket_layout");
                     JSONObject raster = ticket.optJSONObject("ticket_raster");
+                    nomorSaya = number;
+                    batasSorotMillis = System.currentTimeMillis() + LAMA_HASIL_MS + 10_000L;
+                    sorotDidenyutkan = false;
+                    sorotDitunjukkan = false;
                     showResult(number, issued.name);
                     updateAvailability();
                     UsbEscPosPrinter.print(this, number, receipt, layout, raster, message -> {
@@ -2232,6 +2394,7 @@ public final class MainActivity extends Activity {
     private void showRetry() {
         kembalikanPanelHasil();
         if (resultTitle != null) resultTitle.setText("Permintaan tiket belum selesai");
+        lepasDaftarMenunggu();
         resultSlot.removeAllViews();
         LinearLayout retry = new LinearLayout(this);
         retry.setGravity(Gravity.CENTER);
@@ -2297,6 +2460,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams jalurParams = new LinearLayout.LayoutParams(dp(160), dp(5));
         jalurParams.gravity = Gravity.CENTER;
         result.addView(jalur, jalurParams);
+        lepasDaftarMenunggu();
         resultSlot.removeAllViews();
         resultSlot.addView(result, new FrameLayout.LayoutParams(-1, -1));
         tiket.setAlpha(0f);
