@@ -1429,9 +1429,21 @@ public final class MainActivity extends Activity {
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER);
-        int columns = Math.max(1, Math.min(3,
+        int kolomLayar = Math.max(1, Math.min(3,
                 Math.round(getResources().getDisplayMetrics().widthPixels
                         / getResources().getDisplayMetrics().density / 118f)));
+        // Nama layanan selalu satu baris. Nama yang panjang mendapat kartu
+        // lebih lebar (kolom lebih sedikit) supaya hurufnya tidak mengecil
+        // sampai sulit dibaca.
+        Integer induk = path.isEmpty() ? null : path.get(path.size() - 1).id;
+        int terpanjang = 0;
+        for (Category item : categories) {
+            if (Objects.equals(item.parentId, induk)) {
+                terpanjang = Math.max(terpanjang, item.name.length());
+            }
+        }
+        int columns = terpanjang > 30 ? 1
+                : terpanjang > 18 ? Math.min(kolomLayar, 2) : kolomLayar;
         GridLayout grid = new GridLayout(this);
         grid.setColumnCount(columns);
         grid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
@@ -1758,26 +1770,29 @@ public final class MainActivity extends Activity {
         card.setPadding(dp(12), dp(8), dp(12), dp(8));
         card.setBackground(latarKartu());
         card.setElevation(dp(2));
-        TextView chip = text(awalan, 24, warna[1], true);
+        // Kapsul awalan kecil (A, RS, HT, ...): nama layanan yang dibaca,
+        // awalannya cukup sebagai penanda warna.
+        TextView chip = text(awalan, 16, warna[1], true);
         chip.setTypeface(huruf(800));
         chip.setGravity(Gravity.CENTER);
-        chip.setBackground(rounded(warna[0], dp(16)));
-        pasangAutoFit(chip, 12, 24, 1);
-        card.addView(chip, new LinearLayout.LayoutParams(dp(50), dp(50)));
+        chip.setPadding(dp(3), 0, dp(3), 0);
+        chip.setBackground(rounded(warna[0], dp(11)));
+        pasangSatuBaris(chip, 8, 16);
+        card.addView(chip, new LinearLayout.LayoutParams(dp(36), dp(36)));
         LinearLayout tulisan = new LinearLayout(this);
         tulisan.setOrientation(LinearLayout.VERTICAL);
         tulisan.setGravity(Gravity.CENTER_VERTICAL);
         TextView nama = text(label, 19, INK, true);
         nama.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        pasangAutoFit(nama, 10, 21, 3);
+        pasangSatuBaris(nama, 8, 21);
         tulisan.addView(nama, new LinearLayout.LayoutParams(-1, 0, 1));
         if (keterangan != null) {
             TextView ket = text(keterangan, 12, MUTED, false);
-            pasangAutoFit(ket, 9, 12, 1);
+            pasangSatuBaris(ket, 8, 12);
             tulisan.addView(ket, new LinearLayout.LayoutParams(-1, -2));
         }
         LinearLayout.LayoutParams tulisanParams = new LinearLayout.LayoutParams(0, -1, 1);
-        tulisanParams.leftMargin = dp(10);
+        tulisanParams.leftMargin = dp(8);
         card.addView(tulisan, tulisanParams);
         int widthDp = Math.round(getResources().getDisplayMetrics().widthPixels
                 / getResources().getDisplayMetrics().density);
@@ -1860,12 +1875,13 @@ public final class MainActivity extends Activity {
         identity.setPadding(dp(14), dp(12), dp(14), dp(12));
         identity.setBackground(roundedOutline(KARTU, GARIS, dp(24), dp(1)));
         int[] warna = warnaLayanan(awalanLayanan(pendingCategory));
-        TextView prefix = text(awalanLayanan(pendingCategory), 32, warna[1], true);
+        TextView prefix = text(awalanLayanan(pendingCategory), 22, warna[1], true);
         prefix.setTypeface(huruf(800));
         prefix.setGravity(Gravity.CENTER);
-        prefix.setBackground(rounded(warna[0], dp(22)));
-        pasangAutoFit(prefix, 14, 32, 1);
-        identity.addView(prefix, new LinearLayout.LayoutParams(dp(68), dp(68)));
+        prefix.setPadding(dp(4), 0, dp(4), 0);
+        prefix.setBackground(rounded(warna[0], dp(16)));
+        pasangSatuBaris(prefix, 10, 22);
+        identity.addView(prefix, new LinearLayout.LayoutParams(dp(52), dp(52)));
         LinearLayout namaLayanan = new LinearLayout(this);
         namaLayanan.setOrientation(LinearLayout.VERTICAL);
         namaLayanan.setPadding(dp(14), 0, 0, 0);
