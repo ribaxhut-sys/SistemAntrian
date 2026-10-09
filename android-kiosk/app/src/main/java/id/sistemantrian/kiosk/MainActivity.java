@@ -256,7 +256,45 @@ public final class MainActivity extends Activity {
     }
 
     private void bangunUlangTampilan() {
+        // Potret layar lama (setengah resolusi, hemat memori) ditumpuk di atas
+        // layar baru lalu dipudarkan: tema berganti tanpa berkedip.
+        Bitmap potret = null;
+        View lama = rootLayout;
+        if (lama != null && lama.getWidth() > 0 && lama.getHeight() > 0) {
+            try {
+                potret = Bitmap.createBitmap(Math.max(1, lama.getWidth() / 2),
+                        Math.max(1, lama.getHeight() / 2), Bitmap.Config.RGB_565);
+                android.graphics.Canvas kanvas = new android.graphics.Canvas(potret);
+                kanvas.scale(0.5f, 0.5f);
+                lama.draw(kanvas);
+            } catch (RuntimeException | OutOfMemoryError e) {
+                potret = null;  // tanpa peralihan pun tetap benar
+            }
+        }
+        int lebarLama = lama == null ? 0 : lama.getWidth();
+        int tinggiLama = lama == null ? 0 : lama.getHeight();
+        hentikanDenyutAjakan();
         buildHome();
+        if (potret != null) {
+            android.graphics.drawable.BitmapDrawable tumpukan =
+                    new android.graphics.drawable.BitmapDrawable(getResources(), potret);
+            tumpukan.setBounds(0, 0, lebarLama, tinggiLama);
+            View baru = rootLayout;
+            baru.getOverlay().add(tumpukan);
+            android.animation.ValueAnimator pudar =
+                    android.animation.ValueAnimator.ofInt(255, 0);
+            pudar.setDuration(400);
+            pudar.addUpdateListener(a -> tumpukan.setAlpha((int) a.getAnimatedValue()));
+            Bitmap dilepas = potret;
+            pudar.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(android.animation.Animator animasi) {
+                    baru.getOverlay().remove(tumpukan);
+                    dilepas.recycle();
+                }
+            });
+            pudar.start();
+        }
         mediaSignature = "";
         displayedWelcomeText = "";
         tampilanLoket = "";
@@ -447,6 +485,11 @@ public final class MainActivity extends Activity {
     /** Nomor terakhir tiap loket, untuk menyorot loket yang baru memanggil. */
     private final Map<String, String> nomorLoketTerakhir = new HashMap<>();
     private boolean nomorLoketPernahTampil;
+    /** Nomor menunggu dan halaman yang terakhir tampil, untuk animasi perubahan. */
+    private final Set<String> nomorMenungguTerakhir = new HashSet<>();
+    private int halamanMenungguTerakhir = -1;
+    private boolean menungguPernahTampil;
+    private android.animation.ObjectAnimator denyutAjakan;
     /** Panel bawah sedang memakai latar gelap layar "Nomor Anda". */
     private boolean panelHasilGelap;
     private LinearLayout panelHasil;
@@ -1818,6 +1861,8 @@ public final class MainActivity extends Activity {
         }
 
         if (waitingQueueNumbers.isEmpty()) {
+            menungguPernahTampil = true;
+            nomorMenungguTerakhir.clear();
             TextView kosong = text("Belum ada nomor yang menunggu.", 16, MUTED, false);
             kosong.setGravity(Gravity.CENTER);
             kosong.setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -1850,6 +1895,16 @@ public final class MainActivity extends Activity {
             nomor.setBackground(rounded(LEMBUT, dp(16)));
             pasangSatuBaris(nomor, 10, 20);
             baris.addView(nomor, selNomorMenunggu());
+            // Nomor yang baru diambil muncul dengan "pop" kecil.
+            if (menungguPernahTampil
+                    && !nomorMenungguTerakhir.contains(waitingQueueNumbers.get(index))) {
+                nomor.setAlpha(0f);
+                nomor.setScaleX(0.6f);
+                nomor.setScaleY(0.6f);
+                nomor.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(320)
+                        .setInterpolator(new android.view.animation.OvershootInterpolator(2f))
+                        .start();
+            }
         }
         // Baris terakhir diisi sel kosong supaya ubinnya tetap selebar ubin lain.
         int sisa = (akhir - awal) % KOLOM_NOMOR_MENUNGGU;
@@ -1857,6 +1912,18 @@ public final class MainActivity extends Activity {
             baris.addView(new View(this), selNomorMenunggu());
         }
         resultSlot.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        // Halaman berikutnya bergeser masuk dari kanan.
+        if (menungguPernahTampil && waitingPage != halamanMenungguTerakhir) {
+            page.setAlpha(0f);
+            page.setTranslationX(dp(40));
+            page.animate().alpha(1f).translationX(0f).setDuration(300)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .start();
+        }
+        halamanMenungguTerakhir = waitingPage;
+        nomorMenungguTerakhir.clear();
+        nomorMenungguTerakhir.addAll(waitingQueueNumbers);
+        menungguPernahTampil = true;
     }
 
     private LinearLayout.LayoutParams selNomorMenunggu() {
@@ -2054,10 +2121,11 @@ public final class MainActivity extends Activity {
         Button cancel = actionButton("Kembali", false);
         cancel.setOnClickListener(v -> {
             v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+            v.setEnabled(false);
             showingConfirmation = false;
             pendingCategory = null;
             pendingRequestId = null;
-            showCategories();
+            keluarDariKonfirmasi(null);
         });
         actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(58), 2));
         Button yes = actionButton("Ya, ambil nomor", true);
@@ -2092,12 +2160,30 @@ public final class MainActivity extends Activity {
 
     private final Runnable confirmTimeout = () -> {
         if (showingConfirmation) {
+            showingConfirmation = false;
             pendingCategory = null;
             pendingRequestId = null;
-            showCategories();
-            setHint("Pilihan dibatalkan karena tidak ada aktivitas.", "ajak");
+            keluarDariKonfirmasi("Pilihan dibatalkan karena tidak ada aktivitas.");
         }
     };
+
+    /** Layar konfirmasi meluncur keluar ke kanan, lalu menu layanan tampil. */
+    private void keluarDariKonfirmasi(String pesan) {
+        handler.removeCallbacks(confirmTimeout);
+        View halaman = contentSlot == null ? null : contentSlot.getChildAt(0);
+        Runnable kembali = () -> {
+            if (showingConfirmation || showingResult || requestInFlight) return;
+            showCategories();
+            if (pesan != null) setHint(pesan, "ajak");
+        };
+        if (halaman == null) {
+            kembali.run();
+            return;
+        }
+        halaman.animate().alpha(0f).translationX(dp(28)).setDuration(180)
+                .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                .withEndAction(kembali).start();
+    }
 
     private void issueTicket() {
         if (pendingCategory == null || requestInFlight) return;
@@ -2279,6 +2365,40 @@ public final class MainActivity extends Activity {
         }
         hint.setTextColor(fg);
         hint.setBackground(rounded(bg, dp(24)));
+        if ("ajak".equals(tone)) {
+            mulaiDenyutAjakan();
+        } else {
+            hentikanDenyutAjakan();
+        }
+    }
+
+    /**
+     * Petunjuk "Sentuh jenis layanan…" berdenyut sangat pelan selama
+     * anjungan menunggu pengunjung; berhenti begitu ada yang memilih.
+     */
+    private void mulaiDenyutAjakan() {
+        if (denyutAjakan != null && denyutAjakan.getTarget() == hint) return;
+        hentikanDenyutAjakan();
+        denyutAjakan = android.animation.ObjectAnimator.ofPropertyValuesHolder(hint,
+                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.04f),
+                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.04f));
+        denyutAjakan.setDuration(1400);
+        denyutAjakan.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        denyutAjakan.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        denyutAjakan.setInterpolator(
+                new android.view.animation.AccelerateDecelerateInterpolator());
+        denyutAjakan.start();
+    }
+
+    private void hentikanDenyutAjakan() {
+        if (denyutAjakan == null) return;
+        denyutAjakan.cancel();
+        Object sasaran = denyutAjakan.getTarget();
+        if (sasaran instanceof View) {
+            ((View) sasaran).setScaleX(1f);
+            ((View) sasaran).setScaleY(1f);
+        }
+        denyutAjakan = null;
     }
 
     private void request(
@@ -3327,6 +3447,7 @@ public final class MainActivity extends Activity {
             // Belum terdaftar.
         }
         handler.removeCallbacksAndMessages(null);
+        hentikanDenyutAjakan();
         worker.shutdownNow();
         pengunduh.shutdownNow();
         super.onDestroy();

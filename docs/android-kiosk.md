@@ -89,6 +89,17 @@ loops without a black gap; a file that fails is skipped, and only when every
 file fails does the panel fall back to text (retried every two minutes).
 Video sound follows **Suara video anjungan** (off by default).
 
+### Animasi (APK 2.4.12–2.4.13)
+
+Kartu layanan masuk berurutan; loket yang memanggil nomor baru berdenyut
+dan angkanya bergulir; gambar iklan berganti dengan memudar (video tetap
+diganti langsung); layar "Nomor Anda" menggambar tanda centang; nomor
+menunggu yang baru muncul dengan "pop" dan halamannya bergeser; petunjuk
+"Sentuh jenis layanan…" berdenyut pelan selama anjungan menganggur;
+konfirmasi meluncur keluar saat Kembali; tema berganti dengan memudar.
+Semua memakai animator Android, jadi ikut mati bila opsi pengembang
+**Skala durasi animator** dimatikan.
+
 ### Judul anjungan (mulai APK 2.4.11)
 
 **Pengaturan → Antrian → Judul anjungan** mengganti tulisan di atas tablet
