@@ -1778,8 +1778,8 @@ public final class MainActivity extends Activity {
      * kartunya berdenyut tiga kali supaya pengunjung melihat perubahannya.
      */
     private void sorotLoket(View kartu) {
-        if (kartu instanceof LinearLayout && ((LinearLayout) kartu).getChildCount() > 1) {
-            View nomor = ((LinearLayout) kartu).getChildAt(1);
+        View nomor = kartu.findViewWithTag("nomor");
+        if (nomor != null) {
             nomor.setAlpha(0f);
             nomor.setTranslationY(-dp(18));
             nomor.animate().alpha(1f).translationY(0f).setDuration(380)
@@ -1803,18 +1803,17 @@ public final class MainActivity extends Activity {
         return params;
     }
 
+    /**
+     * Kartu satu loket. Nomornya selalu tepat di tengah kartu, mendatar dan
+     * tegak: kartu berupa FrameLayout, nomor mengisi seluruh kartu dengan
+     * jarak atas dan bawah yang SAMA, sedangkan nama loket (atas) dan nama
+     * layanan (bawah) menempel di tepinya tanpa ikut menggeser nomor.
+     */
     private View kartuLoket(Loket loket, boolean besar) {
-        LinearLayout kartu = new LinearLayout(this);
-        kartu.setOrientation(LinearLayout.VERTICAL);
-        kartu.setGravity(Gravity.CENTER);
-        kartu.setPadding(dp(4), dp(2), dp(4), dp(2));
+        FrameLayout kartu = new FrameLayout(this);
+        kartu.setPadding(dp(4), dp(3), dp(4), dp(3));
         boolean melayani = !loket.nomor.isEmpty();
         kartu.setBackground(rounded(melayani ? LEMBUT : ABU_LEMBUT, dp(16)));
-
-        TextView nama = text(loket.nama, besar ? 15 : 11, MUTED, true);
-        nama.setGravity(Gravity.CENTER);
-        pasangSatuBaris(nama, 8, besar ? 15 : 11);
-        kartu.addView(nama, new LinearLayout.LayoutParams(-1, -2));
 
         String isi = melayani ? loket.nomor
                 : "ISTIRAHAT".equals(loket.status) ? "Istirahat" : "—";
@@ -1824,15 +1823,27 @@ public final class MainActivity extends Activity {
             nomor.setTypeface(huruf(800));
             nomor.setFontFeatureSettings("tnum");
         }
-        nomor.setGravity(Gravity.CENTER);
+        nomor.setTag("nomor");
         pasangSatuBaris(nomor, 9, maks);
-        kartu.addView(nomor, new LinearLayout.LayoutParams(-1, 0, 1));
+        nomor.setGravity(Gravity.CENTER);
+        // Kotak nomor setinggi tulisannya, diletakkan tepat di tengah kartu
+        // oleh FrameLayout. Selebar kartu dikurangi ruang yang sama di kiri
+        // dan kanan, supaya pengukur huruf tahu lebar yang tersedia.
+        FrameLayout.LayoutParams letakNomor = new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER);
+        kartu.addView(nomor, letakNomor);
+
+        TextView nama = text(loket.nama, besar ? 15 : 11, MUTED, true);
+        nama.setGravity(Gravity.CENTER);
+        pasangSatuBaris(nama, 8, besar ? 15 : 11);
+        kartu.addView(nama, new FrameLayout.LayoutParams(-1, -2,
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL));
 
         if (besar && melayani && !loket.layanan.isEmpty()) {
             TextView layanan = text(loket.layanan, 13, UTAMA, false);
             layanan.setGravity(Gravity.CENTER);
             pasangSatuBaris(layanan, 8, 13);
-            kartu.addView(layanan, new LinearLayout.LayoutParams(-1, -2));
+            kartu.addView(layanan, new FrameLayout.LayoutParams(-1, -2,
+                    Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
         }
         return kartu;
     }
@@ -2098,7 +2109,8 @@ public final class MainActivity extends Activity {
         int rowGap = dp(8);
         int availablePerRow = (contentSlot.getHeight() - dp(8)) / rows;
         int preferredHeight = availablePerRow - rowGap;
-        int minimumHeight = dp(56);
+        // Kode di atas dan nama di bawah butuh kartu lebih tinggi.
+        int minimumHeight = dp(88);
         int cardHeight = Math.max(minimumHeight, Math.min(dp(132), preferredHeight));
         scroll.setVerticalScrollBarEnabled(preferredHeight < minimumHeight);
 
@@ -2136,46 +2148,53 @@ public final class MainActivity extends Activity {
         if (!item.group) ticketChoices.add(grid.getChildAt(grid.getChildCount() - 1));
     }
 
-    /** Kartu layanan: kapsul huruf awalan berwarna, lalu nama layanan. */
+    /**
+     * Kartu layanan tegak: kode layanan besar di kapsul berwarna di atas,
+     * nama layanan selebar kartu di bawahnya, satu baris.
+     *
+     * Teks kode diletakkan di FrameLayout dan ditengahkan sebagai kotak,
+     * bukan lewat gravity teks: TextView satu baris tidak selalu
+     * menengahkan tulisannya secara tegak.
+     */
     private void addCard(
             GridLayout grid, String awalan, String label, String keterangan,
             int[] warna, Runnable action, int columns) {
         LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setPadding(dp(12), dp(8), dp(12), dp(8));
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER);
+        card.setPadding(dp(10), dp(8), dp(10), dp(8));
         card.setBackground(latarKartu());
         card.setElevation(dp(2));
-        // Kapsul awalan kecil (A, RS, HT, ...): nama layanan yang dibaca,
-        // awalannya cukup sebagai penanda warna.
-        TextView chip = text(awalan, 16, warna[1], true);
-        chip.setTypeface(huruf(800));
-        chip.setGravity(Gravity.CENTER);
-        chip.setPadding(dp(3), 0, dp(3), 0);
-        chip.setBackground(rounded(warna[0], dp(11)));
-        pasangSatuBaris(chip, 8, 16);
-        card.addView(chip, new LinearLayout.LayoutParams(dp(36), dp(36)));
-        LinearLayout tulisan = new LinearLayout(this);
-        tulisan.setOrientation(LinearLayout.VERTICAL);
-        tulisan.setGravity(Gravity.CENTER_VERTICAL);
-        TextView nama = text(label, 19, INK, true);
-        nama.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        pasangSatuBaris(nama, 8, 21);
-        tulisan.addView(nama, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        FrameLayout kapsul = new FrameLayout(this);
+        kapsul.setBackground(rounded(warna[0], dp(16)));
+        kapsul.setMinimumWidth(dp(68));
+        kapsul.setPadding(dp(14), 0, dp(14), 0);
+        TextView kode = text(awalan, 30, warna[1], true);
+        kode.setTypeface(huruf(800));
+        kode.setFontFeatureSettings("tnum");
+        pasangSatuBaris(kode, 12, 30);
+        kapsul.addView(kode, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        card.addView(kapsul, new LinearLayout.LayoutParams(-2, 0, 1.15f));
+
+        TextView nama = text(label, 18, INK, true);
+        nama.setGravity(Gravity.CENTER_HORIZONTAL);
+        pasangSatuBaris(nama, 9, 19);
+        LinearLayout.LayoutParams namaParams = new LinearLayout.LayoutParams(-1, -2);
+        namaParams.topMargin = dp(6);
+        card.addView(nama, namaParams);
         if (keterangan != null) {
-            TextView ket = text(keterangan, 12, MUTED, false);
-            pasangSatuBaris(ket, 8, 12);
-            tulisan.addView(ket, new LinearLayout.LayoutParams(-1, -2));
+            TextView ket = text(keterangan, 11, MUTED, false);
+            ket.setGravity(Gravity.CENTER_HORIZONTAL);
+            pasangSatuBaris(ket, 8, 11);
+            card.addView(ket, new LinearLayout.LayoutParams(-1, -2));
         }
-        LinearLayout.LayoutParams tulisanParams = new LinearLayout.LayoutParams(0, -1, 1);
-        tulisanParams.leftMargin = dp(8);
-        card.addView(tulisan, tulisanParams);
         int widthDp = Math.round(getResources().getDisplayMetrics().widthPixels
                 / getResources().getDisplayMetrics().density);
         int cellWidth = Math.max(1, (widthDp - 46) / columns);
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = 0;
-        params.height = dp(Math.min(110, Math.max(72, cellWidth * 7 / 10)));
+        params.height = dp(Math.min(132, Math.max(96, cellWidth * 8 / 10)));
         // Tanpa FILL, GridLayout dapat menyelaraskan baseline TextView.
         // Kartu dua atau tiga baris lalu tampak lebih rendah daripada kartu
         // satu baris pada baris grid yang sama.
@@ -3490,6 +3509,13 @@ public final class MainActivity extends Activity {
             float perlu = ukur.measureText(view.getText().toString());
             float ukuran = perlu <= lebar ? maksPx
                     : Math.max(minPx, (float) Math.floor(maksPx * lebar / perlu * 0.97f));
+            // Lebar huruf tidak persis sebanding ukurannya: periksa lagi.
+            String isi = view.getText().toString();
+            while (ukuran > minPx) {
+                ukur.setTextSize(ukuran);
+                if (ukur.measureText(isi) <= lebar) break;
+                ukuran -= 1f;
+            }
             if (Math.abs(view.getTextSize() - ukuran) > 0.5f) {
                 view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ukuran);
             }
