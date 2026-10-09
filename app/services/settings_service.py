@@ -84,6 +84,7 @@ BAWAAN: dict[str, str] = {
     "ticket.footer": "Silakan menunggu nomor Anda dipanggil.",
     "ticket.printer": "pdf",
     "ticket.geser_atas_mm": "0",
+    "ticket.turun_anjungan_mm": "4",
 }
 
 _BENAR = {"true", "1", "ya", "yes", "on"}
@@ -184,6 +185,20 @@ SKEMA: tuple[Pengaturan, ...] = (
         maksimum=6,
         satuan="mm",
         nilai_khusus="Tidak digeser",
+        kelompok="Tiket",
+    ),
+    Pengaturan(
+        "ticket.turun_anjungan_mm",
+        "Turunkan isi tiket anjungan",
+        "Hanya untuk tiket dari tablet anjungan Android. Tablet mencetak "
+        "langsung tanpa driver POS80, jadi tidak mendapat ruang kosong di "
+        "kepala kertas seperti tiket Windows. Naikkan bila judul terlalu "
+        "mepet ke atas.",
+        ANGKA,
+        minimum=0,
+        maksimum=15,
+        satuan="mm",
+        nilai_khusus="Tidak diturunkan",
         kelompok="Tiket",
     ),
     Pengaturan(

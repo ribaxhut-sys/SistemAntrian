@@ -130,6 +130,8 @@ _SETTINGS: list[tuple[str, str, str]] = [
      "Cara mencetak tiket: pdf, system, atau none"),
     ("ticket.geser_atas_mm", "0",
      "Geser isi tiket ke atas pada pencetak Windows, dalam milimeter"),
+    ("ticket.turun_anjungan_mm", "4",
+     "Turunkan isi tiket anjungan Android, dalam milimeter"),
 ]
 
 

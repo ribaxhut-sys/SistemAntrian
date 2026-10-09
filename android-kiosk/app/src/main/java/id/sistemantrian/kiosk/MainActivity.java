@@ -318,6 +318,37 @@ public final class MainActivity extends Activity {
                 : android.R.style.Theme_Material_Light_Dialog_Alert);
     }
 
+    /** Panah tebal (› atau ‹) untuk kartu kelompok dan Kembali. */
+    private static final class TandaPanah extends View {
+        private final android.graphics.Paint cat =
+                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Path jalur = new android.graphics.Path();
+        private final boolean kanan;
+
+        TandaPanah(Context context, boolean kanan, int warna) {
+            super(context);
+            this.kanan = kanan;
+            cat.setColor(warna);
+            cat.setStyle(android.graphics.Paint.Style.STROKE);
+            cat.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+            cat.setStrokeJoin(android.graphics.Paint.Join.ROUND);
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            float w = getWidth();
+            float h = getHeight();
+            cat.setStrokeWidth(Math.max(3f, w * 0.15f));
+            float dekat = kanan ? 0.36f : 0.64f;
+            float jauh = kanan ? 0.66f : 0.34f;
+            jalur.reset();
+            jalur.moveTo(w * dekat, h * 0.2f);
+            jalur.lineTo(w * jauh, h * 0.5f);
+            jalur.lineTo(w * dekat, h * 0.8f);
+            canvas.drawPath(jalur, cat);
+        }
+    }
+
     /** Lingkaran hijau yang membesar, lalu centang putih yang tergambar. */
     private static final class TandaCentang extends View {
         private final android.graphics.Paint lingkaran =
@@ -2220,6 +2251,37 @@ public final class MainActivity extends Activity {
         TextView nama = text(label, namaSp, INK, true);
         nama.setTypeface(huruf(800));
         pasangSatuBaris(nama, 9, namaSp);
+
+        // Kartu kelompok (›) dan Kembali (‹): panah besar yang digambar di
+        // sisi arahnya, bukan karakter kecil di kapsul kode.
+        boolean panahKanan = "›".equals(awalan);
+        if (panahKanan || "‹".equals(awalan)) {
+            int ukuran = Math.round(Math.max(22f, Math.min(40f, tinggi * 0.38f))
+                    * getResources().getDisplayMetrics().density * uiScale);
+            TandaPanah panah = new TandaPanah(this, panahKanan, panahKanan ? UTAMA : warna[1]);
+            card.addView(panah, new FrameLayout.LayoutParams(ukuran, ukuran,
+                    Gravity.CENTER_VERTICAL | (panahKanan ? Gravity.END : Gravity.START)));
+            LinearLayout tengah = new LinearLayout(this);
+            tengah.setOrientation(LinearLayout.VERTICAL);
+            tengah.setGravity(Gravity.CENTER_HORIZONTAL);
+            nama.setGravity(Gravity.CENTER_HORIZONTAL);
+            tengah.addView(nama, new LinearLayout.LayoutParams(-1, -2));
+            if (adaKeterangan) {
+                TextView ket = text(keterangan, 11, MUTED, false);
+                ket.setGravity(Gravity.CENTER_HORIZONTAL);
+                pasangSatuBaris(ket, 8, 11);
+                tengah.addView(ket, new LinearLayout.LayoutParams(-1, -2));
+            }
+            // Ruang yang sama di kiri dan kanan, supaya nama tetap di tengah.
+            tengah.setPadding(ukuran + dp(6), 0, ukuran + dp(6), 0);
+            card.addView(tengah, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
+            pasangEfekSentuh(card);
+            card.setOnClickListener(v -> {
+                v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+                action.run();
+            });
+            return card;
+        }
 
         if (lega) {
             card.addView(kapsul, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START));

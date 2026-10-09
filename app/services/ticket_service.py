@@ -118,6 +118,9 @@ class TicketData:
     #: Geseran ke atas pada pencetak Windows asli, dalam milimeter.
     #: 0 berarti tidak digeser. PDF mengabaikannya.
     geser_atas_mm: int = 0
+    #: Turunkan isi tiket anjungan Android, dalam milimeter. Tablet mencetak
+    #: tanpa driver, jadi tidak mendapat ruang kosong di kepala kertas.
+    turun_anjungan_mm: int = 0
 
     @property
     def tanggal(self) -> str:
@@ -401,7 +404,7 @@ def raster_tiket_anjungan(data: TicketData) -> dict | None:
     gambar = Image.new("L", (lebar, tinggi), 255)
     pena = ImageDraw.Draw(gambar)
     pena.fontmode = "1"  # tanpa anti-alias: tepi huruf tegas seperti driver
-    geser = max(0, data.geser_atas_mm) * titik_per_mm
+    geser = (max(0, data.geser_atas_mm) - max(0, data.turun_anjungan_mm)) * titik_per_mm
     for baris in _tata_letak(data, pas, ukuran_nomor=44):
         y = baris.y_mm * titik_per_mm - geser
         if baris.garis:
@@ -870,6 +873,7 @@ class TicketService:
             counter_name=antrian.counter_name,
             sisa_antrian=ringkasan.sisa_antrian if ringkasan else None,
             geser_atas_mm=self.settings.get_int("ticket.geser_atas_mm", 0),
+            turun_anjungan_mm=self.settings.get_int("ticket.turun_anjungan_mm", 4),
         )
 
     def _ringkasan(self, antrian: QueueInfo):

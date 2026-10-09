@@ -540,6 +540,10 @@ def test_ticket_raster_matches_windows_geometry():
     terangkat = raster_tiket_anjungan(replace(data, geser_atas_mm=2))
     assert _baris_hitam_pertama(terangkat) < atas
 
+    # turun_anjungan_mm menurunkan isi tiket anjungan, 8 titik per mm.
+    turun = raster_tiket_anjungan(replace(data, turun_anjungan_mm=4))
+    assert _baris_hitam_pertama(turun) - atas == 32
+
 
 def test_api_sends_ticket_raster_and_sample():
     from app.kiosk_api import create_app
