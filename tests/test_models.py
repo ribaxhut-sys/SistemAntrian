@@ -126,6 +126,38 @@ def test_status_awal_antrian_adalah_waiting(master):
         assert s.get(Queue, queue_id).status is QueueStatus.WAITING
 
 
+def test_satu_loket_hanya_boleh_memegang_satu_nomor_aktif(master):
+    """Pertahanan DB bila dua komputer memanggil lewat loket yang sama."""
+    with session_scope() as s:
+        s.add(
+            Queue(
+                branch_id=master["branch_id"],
+                category_id=master["category_id"],
+                queue_date=clock.today(),
+                queue_number="A-001",
+                sequence_number=1,
+                status=QueueStatus.CALLED,
+                counter_id=master["counter_id"],
+                called_at=clock.now(),
+            )
+        )
+
+    with pytest.raises(sa.exc.IntegrityError):
+        with session_scope() as s:
+            s.add(
+                Queue(
+                    branch_id=master["branch_id"],
+                    category_id=master["category_id"],
+                    queue_date=clock.today(),
+                    queue_number="A-002",
+                    sequence_number=2,
+                    status=QueueStatus.CALLED,
+                    counter_id=master["counter_id"],
+                    called_at=clock.now(),
+                )
+            )
+
+
 def test_sequence_number_harus_positif(master):
     with pytest.raises(sa.exc.IntegrityError):
         _buat_antrian(master, "A-000", 0)

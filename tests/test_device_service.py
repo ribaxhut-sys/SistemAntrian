@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -249,7 +250,22 @@ def test_layar_antrian_hanya_menerima_token_layar(layanan, antrian_siap):
     tv = _pasang(klien, layanan, "tv-0000-0000-0001", "layar_antrian")
     tablet = _pasang(klien, layanan, "tablet-000-0000-01", "anjungan")
 
-    assert klien.get("/v1/layar/state", headers={"Authorization": f"Bearer {tv}"}).status_code == 200
+    assert klien.get(
+        "/v1/layar/state", headers={"Authorization": f"Bearer {tv}"}
+    ).status_code == 200
+    kepala_tv = {
+        "Authorization": f"Bearer {tv}",
+        "X-App-Version-Code": "5",
+    }
+    assert klien.get("/v1/kiosk/categories", headers=kepala_tv).status_code == 401
+    assert klien.post(
+        "/v1/kiosk/tickets",
+        headers=kepala_tv,
+        json={
+            "category_id": antrian_siap["kategori"]["A"],
+            "request_id": str(uuid4()),
+        },
+    ).status_code == 401
     for token in (tablet, TOKEN):
         jawab = klien.get("/v1/layar/state", headers={"Authorization": f"Bearer {token}"})
         assert jawab.status_code == 401

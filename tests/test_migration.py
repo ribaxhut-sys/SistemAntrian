@@ -55,3 +55,29 @@ def test_skema_hasil_migrasi_sama_dengan_model(database):
         actual = {c["name"] for c in inspector.get_columns(table_name)}
         expected = {c.name for c in table.columns}
         assert actual == expected, f"kolom tabel {table_name} tidak cocok"
+
+
+def test_skema_menjaga_satu_nomor_aktif_per_loket(database):
+    engine = get_engine()
+    if engine.dialect.name == "sqlite":
+        # SQLAlchemy 2.0 belum selalu merefleksikan indeks parsial SQLite,
+        # jadi baca katalog aslinya. Perilaku uniknya diuji di test_models.
+        with engine.connect() as conn:
+            sql = conn.scalar(
+                sa.text(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type = 'index' AND name = :nama"
+                ),
+                {"nama": "uq_queue_active_counter_date"},
+            )
+        assert sql is not None
+        assert "UNIQUE INDEX" in sql.upper()
+        assert "WHERE" in sql.upper()
+        return
+
+    indeks = {item["name"]: item for item in sa.inspect(engine).get_indexes("queue")}
+    assert indeks["uq_queue_active_counter_date"]["unique"]
+    assert indeks["uq_queue_active_counter_date"]["column_names"] == [
+        "counter_id",
+        "queue_date",
+    ]

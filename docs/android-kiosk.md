@@ -6,11 +6,17 @@ controls to its available screen space. The existing Windows application
 continues to own the database and issue queue numbers. The Android tablet
 connects to the Windows server over the same trusted private Wi-Fi network
 and prints receipts to a USB thermal printer using ESC/POS.
-Ticket content, row order, spacing, font sizes, and separator positions are
-provided by the Windows API. Android renders the shared layout as a
-monochrome ESC/POS image to follow the Windows 72 mm thermal layout, rather
-than printing a separate plain-text design. Small differences can remain
-because of printer font rasterization and physical feed calibration.
+Mulai anjungan 2.4.4 tiket digambar di **server**, bukan di tablet:
+`ticket_raster` pada jawaban `POST /v1/kiosk/tickets` adalah bitmap 1-bit
+576 × 704 titik (72 × 88 mm, 203 DPI) yang memakai huruf Arial, ukuran pt,
+penengahan, dan **Geser atas** tiket yang sama dengan pencetak Windows.
+Tablet hanya mengirimnya ke printer (ESC/POS `GS v 0`). APK lama, atau
+server tanpa Arial/Pillow, kembali ke `ticket_layout` yang digambar tablet
+sendiri dengan Roboto — hasilnya lebih kecil dan tipis. **Uji cetak** di
+tablet kini mencetak tiket contoh `UJI-000` dari `GET /v1/kiosk/ticket-sample`
+sehingga sama dengan tiket sungguhan; tanpa server ia kembali ke tiket teks.
+Sisa perbedaan dengan Windows hanya umpan kertas dan potongan, yang di
+Windows diatur driver POS80.
 
 ## Server Windows
 

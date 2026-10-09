@@ -18,6 +18,7 @@ import android.hardware.usb.UsbEndpoint;
 import android.hardware.usb.UsbInterface;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
+import android.util.Base64;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.Charset;
@@ -51,13 +52,34 @@ final class UsbEscPosPrinter {
     }
 
     static void print(Activity activity, String number, List<String> lines, Consumer<String> done) {
-        print(activity, number, lines, null, false, done);
+        print(activity, number, lines, null, null, false, done);
     }
 
     static void print(
             Activity activity, String number, List<String> lines,
             JSONObject layout, Consumer<String> done) {
-        print(activity, number, lines, layout, false, done);
+        print(activity, number, lines, layout, null, false, done);
+    }
+
+    /**
+     * Cetak tiket; `raster` (gambar jadi dari server, sama dengan tiket
+     * Windows) didahulukan, lalu `layout`, lalu baris teks biasa.
+     */
+    static void print(
+            Activity activity, String number, List<String> lines,
+            JSONObject layout, JSONObject raster, Consumer<String> done) {
+        print(activity, number, lines, layout, raster, false, done);
+    }
+
+    /** Uji cetak memakai tiket contoh dari server, bila server memberikannya. */
+    static void printTest(Activity activity, JSONObject sample, Consumer<String> done) {
+        if (sample == null) {
+            printTest(activity, done);
+            return;
+        }
+        print(activity, "UJI-000", List.of("UJI-000"),
+                sample.optJSONObject("ticket_layout"),
+                sample.optJSONObject("ticket_raster"), true, done);
     }
 
     static void printTest(Activity activity, Consumer<String> done) {
@@ -71,12 +93,12 @@ final class UsbEscPosPrinter {
                 "",
                 "Periksa hasil cetak dan potongan kertas."
         );
-        print(activity, "UJI-001", lines, null, true, done);
+        print(activity, "UJI-001", lines, null, null, true, done);
     }
 
     private static void print(
             Activity activity, String number, List<String> lines,
-            JSONObject layout, boolean test, Consumer<String> done) {
+            JSONObject layout, JSONObject raster, boolean test, Consumer<String> done) {
         UsbManager manager = (UsbManager) activity.getSystemService(Context.USB_SERVICE);
         UsbDevice device = findPrinter(manager);
         if (device == null) {
@@ -86,7 +108,7 @@ final class UsbEscPosPrinter {
             return;
         }
         if (manager.hasPermission(device)) {
-            printGranted(manager, device, activity, number, lines, layout, test, done);
+            printGranted(manager, device, activity, number, lines, layout, raster, test, done);
             return;
         }
 
@@ -105,7 +127,7 @@ final class UsbEscPosPrinter {
                 if (granted && grantedDevice != null) {
                     printGranted(
                             manager, grantedDevice, activity, number, lines,
-                            layout, test, done);
+                            layout, raster, test, done);
                 } else {
                     done.accept(test
                             ? "Izin akses printer USB ditolak."
@@ -162,7 +184,7 @@ final class UsbEscPosPrinter {
     private static void printGranted(
             UsbManager manager, UsbDevice device, Activity activity,
             String number, List<String> lines, JSONObject layout,
-            boolean test, Consumer<String> done) {
+            JSONObject raster, boolean test, Consumer<String> done) {
         new Thread(() -> {
             String message;
             UsbDeviceConnection connection = manager.openDevice(device);
@@ -180,8 +202,8 @@ final class UsbEscPosPrinter {
                             : "Nomor " + number + " terbit, tetapi antarmuka printer USB tidak didukung.";
                 } else {
                     try {
-                        byte[] receipt = layout == null
-                                ? format(number, lines) : format(layout);
+                        byte[] receipt = raster != null ? formatRaster(raster)
+                                : layout != null ? format(layout) : format(number, lines);
                         boolean sent = true;
                         for (int offset = 0; offset < receipt.length; offset += 2048) {
                             int length = Math.min(2048, receipt.length - offset);
@@ -236,6 +258,36 @@ final class UsbEscPosPrinter {
         output.write(0x1d); output.write('!'); output.write(0);
         output.write('\n'); output.write('\n'); output.write('\n');
         output.write(0x1d); output.write('V'); output.write(1);
+        return output.toByteArray();
+    }
+
+    /** Bitmap 1-bit dari server (bit 1 = hitam), dikirim apa adanya. */
+    private static byte[] formatRaster(JSONObject raster) throws JSONException {
+        int width = raster.getInt("width_px");
+        int height = raster.getInt("height_px");
+        int rowBytes = (width + 7) / 8;
+        byte[] bits = Base64.decode(raster.getString("data"), Base64.DEFAULT);
+        if (width <= 0 || height <= 0 || bits.length != rowBytes * height) {
+            throw new JSONException("Ukuran gambar tiket tidak cocok.");
+        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(0x1b);
+        output.write('@');
+        output.write(0x1d);
+        output.write('v');
+        output.write('0');
+        output.write(0);
+        output.write(rowBytes & 0xff);
+        output.write((rowBytes >> 8) & 0xff);
+        output.write(height & 0xff);
+        output.write((height >> 8) & 0xff);
+        output.write(bits, 0, bits.length);
+        output.write('\n');
+        output.write('\n');
+        output.write('\n');
+        output.write(0x1d);
+        output.write('V');
+        output.write(1);
         return output.toByteArray();
     }
 

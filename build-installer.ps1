@@ -4,7 +4,7 @@ param(
 )
 
 <#
-    Build installer Windows Sistem Antrian CRO 1.0.0.
+    Build installer Windows Sistem Antrian CRO 1.0.2.
 
         .\build-installer.ps1
 

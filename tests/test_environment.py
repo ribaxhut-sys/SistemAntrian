@@ -244,6 +244,23 @@ def test_android_kiosk_api_dependencies_available():
     assert uvicorn.__version__
 
 
+def test_versi_rilis_desktop_seragam():
+    """Versi paket, API, installer, skrip build, dan panduan harus sama."""
+    from app import __version__
+    from app.kiosk_api import create_app
+
+    root = Path(__file__).resolve().parent.parent
+    installer = (root / "installer.iss").read_text(encoding="utf-8")
+    build = (root / "build-installer.ps1").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+
+    assert f'#define MyAppVersion "{__version__}"' in installer
+    assert f"AntrianCRO-Setup-{__version__}" in installer
+    assert f"AntrianCRO-Setup-{__version__}.exe" in build
+    assert f"AntrianCRO-Setup-{__version__}.exe" in readme
+    assert create_app("token-rilis-panjang", object()).version == __version__
+
+
 # ---------------------------------------------------------------------
 # 8. Alembic
 # ---------------------------------------------------------------------

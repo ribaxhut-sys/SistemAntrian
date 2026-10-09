@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime
 import json
 import time
@@ -447,3 +448,61 @@ def test_apk_belum_ada_dijawab_404(tmp_path, monkeypatch):
         "/v1/kiosk/app/apk", headers={"Authorization": f"Bearer {TOKEN}"}
     )
     assert response.status_code == 404
+
+
+def _baris_hitam_pertama(raster) -> int:
+    import base64
+
+    data = base64.b64decode(raster["data"])
+    per_baris = raster["width_px"] // 8
+    for y in range(raster["height_px"]):
+        if any(data[y * per_baris:(y + 1) * per_baris]):
+            return y
+    return -1
+
+
+def test_ticket_raster_matches_windows_geometry():
+    import base64
+
+    from app.services.ticket_service import raster_tiket_anjungan
+
+    data = TicketData(
+        queue_number="A-001",
+        category_name="Pajak Kendaraan",
+        office_name="Kantor Pelayanan",
+        issued_at=datetime(2026, 10, 6, 9, 0),
+        header="BAPENDA DKI JAKARTA",
+    )
+    raster = raster_tiket_anjungan(data)
+
+    assert raster is not None
+    # 72 mm x 88 mm pada 8 titik/mm, 1 bit per titik.
+    assert (raster["width_px"], raster["height_px"]) == (576, 704)
+    assert len(base64.b64decode(raster["data"])) == 576 // 8 * 704
+    atas = _baris_hitam_pertama(raster)
+    assert atas >= 0
+
+    # geser_atas_mm mengangkat isi tiket seperti di Windows.
+    terangkat = raster_tiket_anjungan(replace(data, geser_atas_mm=2))
+    assert _baris_hitam_pertama(terangkat) < atas
+
+
+def test_api_sends_ticket_raster_and_sample():
+    from app.kiosk_api import create_app
+
+    client = TestClient(create_app(TOKEN, _Services()))
+    headers = {"Authorization": f"Bearer {TOKEN}", **VERSI_APK}
+
+    ticket = client.post(
+        "/v1/kiosk/tickets",
+        headers=headers,
+        json={"category_id": 10, "request_id": str(uuid4())},
+    ).json()
+    assert ticket["ticket_raster"]["width_px"] == 576
+
+    contoh = client.get("/v1/kiosk/ticket-sample", headers=headers)
+    assert contoh.status_code == 200
+    assert contoh.json()["ticket_raster"]["height_px"] == 704
+    assert any(
+        row["text"] == "UJI-000" for row in contoh.json()["ticket_layout"]["rows"]
+    )

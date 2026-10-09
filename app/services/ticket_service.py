@@ -327,6 +327,102 @@ def tata_letak_tiket_anjungan(data: TicketData) -> dict:
     }
 
 
+#: Kepala cetak printer struk 80 mm: 576 titik pada 203 DPI (8 titik/mm).
+TITIK_PER_MM_ANJUNGAN = 8.0
+LEBAR_TITIK_ANJUNGAN = 576
+
+
+def _huruf_arial(tebal: bool) -> Path | None:
+    """Berkas Arial yang juga dipakai QtTicketPrinter di Windows."""
+    import os
+
+    folder = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    calon = [folder / ("arialbd.ttf" if tebal else "arial.ttf")]
+    try:
+        import reportlab
+
+        # Cadangan di luar Windows (mis. test di Linux): Vera ikut reportlab.
+        fonts = Path(reportlab.__file__).parent / "fonts"
+        calon.append(fonts / ("VeraBd.ttf" if tebal else "Vera.ttf"))
+    except ImportError:
+        pass
+    return next((path for path in calon if path.is_file()), None)
+
+
+def raster_tiket_anjungan(data: TicketData) -> dict | None:
+    """
+    Gambar tiket anjungan Android sebagai bitmap 1-bit siap kirim ke printer.
+
+    Dulu tablet menggambar sendiri dari `tata_letak_tiket_anjungan` dengan
+    huruf Roboto dan tepi huruf yang dibuang saat dijadikan hitam-putih,
+    tanpa `geser_atas_mm` — hasilnya lebih kecil, lebih tipis, dan lebih
+    turun daripada tiket Windows. Di sini tiket digambar seperti
+    QtTicketPrinter: Arial, ukuran pt pada 203 DPI, ditengahkan menurut
+    lebar huruf sungguhan, tanpa anti-alias, dan diangkat sebesar
+    `geser_atas_mm`.
+
+    Mengembalikan None bila Arial atau Pillow tidak tersedia; tablet lalu
+    memakai tata letak lama.
+    """
+    import base64
+
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return None
+    berkas_biasa, berkas_tebal = _huruf_arial(False), _huruf_arial(True)
+    if berkas_biasa is None or berkas_tebal is None:
+        return None
+
+    titik_per_mm = TITIK_PER_MM_ANJUNGAN
+    lebar = LEBAR_TITIK_ANJUNGAN
+    tinggi = round(PdfTicketPrinter.TINGGI_MM * titik_per_mm)
+    lebar_isi = lebar - 2 * TEPI_MM * titik_per_mm
+    simpanan: dict[tuple[int, bool], ImageFont.FreeTypeFont] = {}
+
+    def huruf(pt: int, tebal: bool) -> ImageFont.FreeTypeFont:
+        kunci = (pt, tebal)
+        if kunci not in simpanan:
+            # Ukuran pt seperti QFont di printer: pt / 72 inci pada 203,2 DPI.
+            piksel = round(pt * titik_per_mm * 25.4 / 72)
+            simpanan[kunci] = ImageFont.truetype(
+                str(berkas_tebal if tebal else berkas_biasa), piksel
+            )
+        return simpanan[kunci]
+
+    def pas(isi: str, ukuran: int, tebal: bool, maks_baris: int = 1):
+        return _pas_lebar(
+            isi,
+            lambda teks, pt: huruf(pt, tebal).getlength(teks) <= lebar_isi,
+            ukuran,
+            maks_baris,
+        )
+
+    gambar = Image.new("L", (lebar, tinggi), 255)
+    pena = ImageDraw.Draw(gambar)
+    pena.fontmode = "1"  # tanpa anti-alias: tepi huruf tegas seperti driver
+    geser = max(0, data.geser_atas_mm) * titik_per_mm
+    for baris in _tata_letak(data, pas, ukuran_nomor=44):
+        y = baris.y_mm * titik_per_mm - geser
+        if baris.garis:
+            tebal_garis = max(1, round(0.35 * titik_per_mm))
+            tepi = TEPI_MM * titik_per_mm
+            pena.line([(tepi, y), (lebar - tepi, y)], fill=0, width=tebal_garis)
+            continue
+        pena.text(
+            (lebar / 2, y), baris.teks, fill=0,
+            font=huruf(baris.ukuran, baris.tebal), anchor="ms",
+        )
+
+    # ESC/POS GS v 0: bit 1 = titik hitam, bit tertinggi di kiri.
+    hitam = gambar.point(lambda v: 255 if v < 128 else 0, mode="1")
+    return {
+        "width_px": lebar,
+        "height_px": tinggi,
+        "data": base64.b64encode(hitam.tobytes()).decode("ascii"),
+    }
+
+
 class QtTicketPrinter:
     """
     Mencetak ke printer Windows lewat Qt.

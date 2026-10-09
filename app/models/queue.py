@@ -41,6 +41,21 @@ class Queue(TimestampMixin, Base):
             "branch_id", "queue_date", "queue_number", name="uq_queue_date_number"
         ),
         sa.Index("ix_queue_date_status", "branch_id", "queue_date", "status"),
+        # Satu loket hanya boleh memegang satu nomor aktif per hari. Indeks
+        # parsial menjaga invariant ini juga bila dua proses lolos dari
+        # pemeriksaan aplikasi pada saat yang persis bersamaan.
+        sa.Index(
+            "uq_queue_active_counter_date",
+            "counter_id",
+            "queue_date",
+            unique=True,
+            sqlite_where=sa.text(
+                "counter_id IS NOT NULL AND status IN ('CALLED', 'SERVING', 'PAUSED')"
+            ),
+            postgresql_where=sa.text(
+                "counter_id IS NOT NULL AND status IN ('CALLED', 'SERVING', 'PAUSED')"
+            ),
+        ),
         sa.CheckConstraint("sequence_number > 0", name="sequence_positive"),
     )
 

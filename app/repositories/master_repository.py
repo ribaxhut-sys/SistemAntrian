@@ -38,8 +38,22 @@ class CounterRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def get_by_id(self, counter_id: int) -> Counter | None:
-        return self.session.get(Counter, counter_id)
+    def get_by_id(
+        self, counter_id: int, *, for_update: bool = False
+    ) -> Counter | None:
+        """
+        Ambil loket, dan bila diminta kunci barisnya sampai transaksi selesai.
+
+        Kunci dipakai saat memanggil nomor: dua komputer dapat memilih loket
+        yang sama, tetapi hanya satu yang boleh memutuskan loket itu masih
+        kosong. SQLite mengabaikan ``FOR UPDATE`` dan memang hanya didukung
+        untuk satu komputer; indeks unik pada tabel antrian tetap menjadi
+        pertahanan terakhir pada kedua dialect.
+        """
+        stmt = sa.select(Counter).where(Counter.id == counter_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        return self.session.scalar(stmt)
 
     def get_by_code(self, branch_id: int, code: str) -> Counter | None:
         return self.session.scalar(

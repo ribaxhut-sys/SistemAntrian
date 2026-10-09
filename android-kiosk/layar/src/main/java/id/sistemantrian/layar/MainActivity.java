@@ -1125,16 +1125,25 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 Iterator<String> keys = clips.keys();
                 while (keys.hasNext()) {
                     String file = clips.getString(keys.next());
-                    if (!file.matches("[A-Za-z0-9_.-]+")) continue;
+                    if (!file.matches("[A-Za-z0-9_.-]+")) {
+                        throw new IOException("nama klip paket tidak sah");
+                    }
                     HttpURLConnection clip = open("/v1/layar/sound/"
                             + URLEncoder.encode(file, "UTF-8"), 15000);
                     try {
-                        if (clip.getResponseCode() != 200) continue;
+                        if (clip.getResponseCode() != 200) {
+                            throw new IOException("klip paket tidak lengkap: " + file);
+                        }
+                        long expected = clip.getContentLengthLong();
                         try (InputStream input = clip.getInputStream();
                              OutputStream output = new FileOutputStream(new File(staging, file))) {
                             byte[] buffer = new byte[16 * 1024];
                             int length;
                             while ((length = input.read(buffer)) != -1) output.write(buffer, 0, length);
+                        }
+                        File downloaded = new File(staging, file);
+                        if (expected >= 0 && downloaded.length() != expected) {
+                            throw new IOException("unduhan klip terputus: " + file);
                         }
                     } finally {
                         clip.disconnect();

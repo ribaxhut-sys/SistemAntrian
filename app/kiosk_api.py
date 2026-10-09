@@ -11,6 +11,7 @@ import threading
 import time
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated
 from uuid import UUID
 
@@ -20,6 +21,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
+from app import __version__
+from app.core import clock
 from app.core.config import TIMEZONE, base_dir, get_config
 from app.core.database import dispose_engine
 from app.core.errors import (
@@ -49,6 +52,7 @@ from app.services.settings_service import SettingsService
 from app.services.ticket_service import (
     NullTicketPrinter,
     TicketService,
+    raster_tiket_anjungan,
     tata_letak_tiket_anjungan,
 )
 
@@ -173,7 +177,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
     restart_terakhir: list[float] = [time.monotonic()]
     app = FastAPI(
         title="Sistem Antrian CRO Kiosk API",
-        version="1.0.0",
+        version=__version__,
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -234,7 +238,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         if perangkat is not None:
             pemilik = perangkat.perangkat_dari_token(diberikan)
             if pemilik is not None:
-                if pemilik.dicabut:
+                # Token perangkat tidak dapat dipindahkan antar-tugas.
+                # Layar antrian mempunyai endpoint baca sendiri di /v1/layar;
+                # ia tidak boleh menerbitkan nomor atau mengubah keadaan kios.
+                if pemilik.dicabut or pemilik.jenis != "anjungan":
                     raise tolak()
                 catat_kontak(request, pemilik.device_id)
                 request.state.perangkat_terpasang = True
@@ -589,6 +596,32 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "app_latest_version_name": apk.nama_versi if apk else None,
         }
 
+    @app.get("/v1/kiosk/ticket-sample", dependencies=[Depends(require_token)])
+    def ticket_sample():
+        """
+        Tiket contoh untuk tombol Uji cetak di tablet.
+
+        Digambar dengan pengaturan tiket yang sama dengan tiket sungguhan
+        (judul, nama kantor, catatan kaki tidak, geseran ya), supaya uji
+        cetak menunjukkan hasil yang benar-benar akan keluar. Nomornya
+        sengaja tidak menyerupai nomor sungguhan.
+        """
+        contoh = SimpleNamespace(
+            queue_number="UJI-000",
+            category_name="Uji Cetak",
+            created_at=clock.now(),
+            counter_name=None,
+        )
+        ticket = replace(
+            services.ticket.susun(contoh),
+            sisa_antrian=None,
+            footer="Tiket contoh untuk menguji pencetak. Bukan nomor antrian.",
+        )
+        return {
+            "ticket_layout": tata_letak_tiket_anjungan(ticket),
+            "ticket_raster": raster_tiket_anjungan(ticket),
+        }
+
     @app.post("/v1/kiosk/restart-api")
     def restart_api(device_id: str = Depends(perangkat_terpercaya)):  # noqa: B008
         """
@@ -706,6 +739,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             )
             ticket_warning = None
             ticket_layout = None
+            ticket_raster = None
             try:
                 # Anjungan Android hanya mengambil nomor: tiketnya tidak
                 # menyebut berapa yang menunggu. Baris itu tetap ada pada
@@ -714,6 +748,12 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 ticket_lines = ticket.baris_teks()
                 ticket_layout = tata_letak_tiket_anjungan(ticket)
                 issued_at = ticket.issued_at.isoformat()
+                try:
+                    # Tiket yang sudah digambar seperti di Windows; APK lama
+                    # mengabaikannya dan tetap memakai ticket_layout.
+                    ticket_raster = raster_tiket_anjungan(ticket)
+                except Exception:
+                    logger.exception("Gambar tiket %s gagal disusun", queue_info.queue_number)
             except Exception:
                 logger.exception(
                     "Tiket %s terbit, tetapi isi struk gagal disusun",
@@ -733,6 +773,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 "issued_at": issued_at,
                 "ticket_lines": ticket_lines,
                 "ticket_layout": ticket_layout,
+                "ticket_raster": ticket_raster,
                 "ticket_warning": ticket_warning,
                 "cooldown_seconds": services.settings.get_int(
                     "kiosk.cooldown_seconds", 10

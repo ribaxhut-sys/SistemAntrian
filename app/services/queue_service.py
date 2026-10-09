@@ -812,7 +812,9 @@ class QueueService:
         sesi = self.auth.require_permission(Permission.QUEUE_CALL)
 
         with session_scope() as session:
-            loket = self._pastikan_loket_aktif(session, counter_id, sesi.branch_id)
+            loket = self._pastikan_loket_aktif(
+                session, counter_id, sesi.branch_id, kunci=True
+            )
             if loket.on_break is istirahat:
                 return
             loket.on_break = istirahat
@@ -842,7 +844,12 @@ class QueueService:
         hari = clock.today()
 
         with session_scope() as session:
-            loket = self._pastikan_loket_aktif(session, counter_id, sesi.branch_id)
+            # Kunci loket sebelum memeriksa apakah ia sedang menangani nomor.
+            # Tanpa ini dua komputer dapat sama-sama melihat loket kosong,
+            # lalu masing-masing mengklaim nomor yang berbeda.
+            loket = self._pastikan_loket_aktif(
+                session, counter_id, sesi.branch_id, kunci=True
+            )
             if loket.on_break:
                 raise BusinessRuleError(
                     f"Loket {loket.name!r} sedang istirahat. Akhiri istirahat "
@@ -903,6 +910,17 @@ class QueueService:
             # pada data yang dikembalikan ke UI.
             antrian.counter = loket
             antrian.called_at = clock.now()
+
+            try:
+                # Memaksa indeks unik loket aktif diperiksa sebelum riwayat
+                # dan audit ditambahkan. Bila proses lain menang lebih dulu,
+                # seluruh klaim transaksi ini dibatalkan oleh session_scope.
+                session.flush()
+            except sa.exc.IntegrityError as exc:
+                raise BusinessRuleError(
+                    f"Loket {loket.name!r} baru saja memanggil nomor dari "
+                    "komputer lain. Muat ulang sebelum mencoba lagi."
+                ) from exc
 
             repo.catat_pemanggilan(
                 queue_id=antrian.id, counter_id=counter_id, user_id=sesi.user_id
@@ -1258,8 +1276,12 @@ class QueueService:
         return antrian
 
     @staticmethod
-    def _pastikan_loket_aktif(session, counter_id: int, branch_id: int) -> Counter:
-        loket = CounterRepository(session).get_by_id(counter_id)
+    def _pastikan_loket_aktif(
+        session, counter_id: int, branch_id: int, *, kunci: bool = False
+    ) -> Counter:
+        loket = CounterRepository(session).get_by_id(
+            counter_id, for_update=kunci
+        )
         if loket is None or loket.branch_id != branch_id:
             raise NotFoundError("Loket tidak ditemukan.")
         if loket.status is not RecordStatus.ACTIVE:

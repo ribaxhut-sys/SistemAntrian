@@ -1588,9 +1588,10 @@ public final class MainActivity extends Activity {
                     List<String> receipt = new ArrayList<>();
                     for (int i = 0; i < lines.length(); i++) receipt.add(lines.getString(i));
                     JSONObject layout = ticket.optJSONObject("ticket_layout");
+                    JSONObject raster = ticket.optJSONObject("ticket_raster");
                     showResult(number, issued.name);
                     updateAvailability();
-                    UsbEscPosPrinter.print(this, number, receipt, layout, message -> {
+                    UsbEscPosPrinter.print(this, number, receipt, layout, raster, message -> {
                         boolean printed = message.contains("tercetak");
                         reportPrinter(printed, message);
                         if (hint != null && showingResult) {
@@ -2422,17 +2423,28 @@ public final class MainActivity extends Activity {
     private void confirmTestTicket() {
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Mode uji — bukan antrean resmi")
-                .setMessage("Aplikasi akan menampilkan dan mencetak tiket contoh UJI-001. Nomor ini tidak dikirim ke server, tidak disimpan, dan tidak mengubah urutan nomor resmi.")
+                .setMessage("Aplikasi akan menampilkan dan mencetak tiket contoh UJI-000 "
+                        + "dengan tampilan tiket dari server. Nomor ini tidak disimpan dan "
+                        + "tidak mengubah urutan nomor resmi.")
                 .setNegativeButton("Batal", null)
                 .setPositiveButton("Tampilkan & cetak", (clickedDialog, which) -> {
-                    showResult("UJI-001", "CONTOH PELAYANAN");
+                    showResult("UJI-000", "CONTOH PELAYANAN");
                     setHint("Tiket uji dicetak tanpa mengubah antrean resmi.", "konfirmasi");
-                    UsbEscPosPrinter.printTest(this, message -> {
+                    Consumer<String> selesai = message -> {
                         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
                         if (showingResult) {
                             setHint(message, message.contains("berhasil") ? "hasil" : "gagal");
                         }
-                    });
+                    };
+                    if (!hasServerConfig()) {
+                        UsbEscPosPrinter.printTest(this, selesai);
+                        return;
+                    }
+                    // Server lama atau mati: tetap uji printer dengan tiket teks.
+                    request("GET", "/v1/kiosk/ticket-sample", null,
+                            json -> UsbEscPosPrinter.printTest(
+                                    this, json.getJSONObject("data"), selesai),
+                            error -> UsbEscPosPrinter.printTest(this, selesai));
                 })
                 .create();
         dialog.setOnShowListener(ignored -> rapikanTombolDialog(dialog));
