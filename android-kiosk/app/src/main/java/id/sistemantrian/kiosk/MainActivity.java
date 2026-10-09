@@ -279,6 +279,62 @@ public final class MainActivity extends Activity {
                 : android.R.style.Theme_Material_Light_Dialog_Alert);
     }
 
+    /** Lingkaran hijau yang membesar, lalu centang putih yang tergambar. */
+    private static final class TandaCentang extends View {
+        private final android.graphics.Paint lingkaran =
+                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint garis =
+                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Path centang = new android.graphics.Path();
+        private final android.graphics.Path potongan = new android.graphics.Path();
+        private android.graphics.PathMeasure ukur;
+        private float kemajuan;
+
+        TandaCentang(Context context, int warna) {
+            super(context);
+            lingkaran.setColor(warna);
+            garis.setColor(Color.WHITE);
+            garis.setStyle(android.graphics.Paint.Style.STROKE);
+            garis.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+            garis.setStrokeJoin(android.graphics.Paint.Join.ROUND);
+        }
+
+        void gambar(long tunda) {
+            android.animation.ValueAnimator animasi =
+                    android.animation.ValueAnimator.ofFloat(0f, 1f);
+            animasi.setDuration(600);
+            animasi.setStartDelay(tunda);
+            animasi.setInterpolator(new android.view.animation.DecelerateInterpolator());
+            animasi.addUpdateListener(a -> {
+                kemajuan = (float) a.getAnimatedValue();
+                invalidate();
+            });
+            animasi.start();
+        }
+
+        @Override
+        protected void onSizeChanged(int lebar, int tinggi, int lebarLama, int tinggiLama) {
+            centang.reset();
+            centang.moveTo(lebar * 0.28f, tinggi * 0.52f);
+            centang.lineTo(lebar * 0.44f, tinggi * 0.67f);
+            centang.lineTo(lebar * 0.73f, tinggi * 0.36f);
+            ukur = new android.graphics.PathMeasure(centang, false);
+            garis.setStrokeWidth(Math.max(2f, lebar * 0.11f));
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            float jari = Math.min(getWidth(), getHeight()) / 2f
+                    * Math.min(1f, kemajuan * 2.2f);
+            canvas.drawCircle(getWidth() / 2f, getHeight() / 2f, jari, lingkaran);
+            if (ukur == null) return;
+            float bagian = Math.max(0f, (kemajuan - 0.4f) / 0.6f);
+            potongan.reset();
+            ukur.getSegment(0f, ukur.getLength() * bagian, potongan, true);
+            canvas.drawPath(potongan, garis);
+        }
+    }
+
     /** Latar sambutan tema merah putih: pita merah berisi ucapan, lalu putih. */
     private static final class LatarBendera extends android.graphics.drawable.Drawable {
         private final android.graphics.Paint merah =
@@ -388,6 +444,9 @@ public final class MainActivity extends Activity {
     /** Media sambutan ada di daftar, tetapi gagal dimuat di tablet ini. */
     private boolean mediaGagal;
     private String tampilanLoket = "";
+    /** Nomor terakhir tiap loket, untuk menyorot loket yang baru memanggil. */
+    private final Map<String, String> nomorLoketTerakhir = new HashMap<>();
+    private boolean nomorLoketPernahTampil;
     /** Panel bawah sedang memakai latar gelap layar "Nomor Anda". */
     private boolean panelHasilGelap;
     private LinearLayout panelHasil;
@@ -1023,12 +1082,14 @@ public final class MainActivity extends Activity {
         handler.removeCallbacks(nextSlide);
         pemutarVideo = null;
         videoLewatJaringan = null;
-        mediaSlot.removeAllViews();
         String url = mediaUrl(filename);
         // Folder tablet: selalu berkas lokal. Server: salinan bila sudah
         // lengkap, bila belum diputar langsung lewat jaringan.
         File lokal = berkasMedia(filename);
         if (isVideo(filename)) {
+            // Video digambar di permukaan tersendiri yang tidak dapat
+            // dipudarkan; yang lama langsung diganti.
+            mediaSlot.removeAllViews();
             VideoView video = new VideoView(this);
             video.setBackgroundColor(Color.BLACK);
             mediaSlot.addView(video, new FrameLayout.LayoutParams(-1, -1));
@@ -1052,9 +1113,16 @@ public final class MainActivity extends Activity {
                 video.setVideoURI(Uri.parse(url), authHeaders());
             }
         } else {
+            // Gambar baru memudar di atas tampilan lama, lalu yang lama dibuang:
+            // tidak ada kilatan kosong saat gambar berikutnya dimuat.
+            for (int i = 0; i < mediaSlot.getChildCount(); i++) {
+                View lama = mediaSlot.getChildAt(i);
+                if (lama instanceof VideoView) ((VideoView) lama).stopPlayback();
+            }
             ImageView image = new ImageView(this);
             image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            image.setBackgroundColor(Color.rgb(248, 250, 252));
+            image.setBackgroundColor(KARTU);
+            image.setAlpha(0f);
             mediaSlot.addView(image, new FrameLayout.LayoutParams(-1, -1));
             worker.execute(() -> {
                 try {
@@ -1065,9 +1133,12 @@ public final class MainActivity extends Activity {
                     }
                     runOnUiThread(() -> {
                         if (!isCurrentMedia(signature, filename)) {
+                            mediaSlot.removeView(image);
                             return;
                         }
                         image.setImageBitmap(bitmap);
+                        image.animate().alpha(1f).setDuration(500)
+                                .withEndAction(() -> buangSelain(image)).start();
                         mediaBerhasilDiputar(filename);
                         // Satu gambar saja tampil terus, tidak diunduh ulang.
                         if (welcomeMedia.size() > 1) {
@@ -1075,9 +1146,20 @@ public final class MainActivity extends Activity {
                         }
                     });
                 } catch (Exception e) {
-                    runOnUiThread(() -> mediaGagalDiputar(signature, filename));
+                    runOnUiThread(() -> {
+                        mediaSlot.removeView(image);
+                        mediaGagalDiputar(signature, filename);
+                    });
                 }
             });
+        }
+    }
+
+    /** Buang isi panel media selain tampilan yang sedang tampil. */
+    private void buangSelain(View tetap) {
+        if (tetap.getParent() != mediaSlot) return;
+        for (int i = mediaSlot.getChildCount() - 1; i >= 0; i--) {
+            if (mediaSlot.getChildAt(i) != tetap) mediaSlot.removeViewAt(i);
         }
     }
 
@@ -1515,6 +1597,16 @@ public final class MainActivity extends Activity {
         scroll.addView(content);
         contentSlot.addView(scroll);
         scroll.post(() -> fitCategoryCards(scroll, grid, columns));
+        // Kartu masuk satu per satu: memudar dan naik sedikit.
+        for (int i = 0; i < grid.getChildCount(); i++) {
+            View kartu = grid.getChildAt(i);
+            kartu.setAlpha(0f);
+            kartu.setTranslationY(dp(14));
+            kartu.animate().alpha(1f).translationY(0f)
+                    .setStartDelay(40L * i).setDuration(260)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .start();
+        }
         updateAvailability();
     }
 
@@ -1596,6 +1688,7 @@ public final class MainActivity extends Activity {
         strip.addView(judul, new LinearLayout.LayoutParams(-1, -2));
 
         int jumlah = loketList.size();
+        boolean sorotPerubahan = nomorLoketPernahTampil;
         // Ringkas: selalu satu deret. Besar: paling banyak dua deret.
         int kolom = besar && jumlah > 4 ? (jumlah + 1) / 2 : jumlah;
         LinearLayout deret = null;
@@ -1607,13 +1700,44 @@ public final class MainActivity extends Activity {
                         ? new LinearLayout.LayoutParams(-1, 0, 1)
                         : new LinearLayout.LayoutParams(-1, dp(54)));
             }
-            deret.addView(kartuLoket(loketList.get(i), besar), selLoket());
+            Loket loket = loketList.get(i);
+            View kartu = kartuLoket(loket, besar);
+            deret.addView(kartu, selLoket());
+            String lama = nomorLoketTerakhir.put(loket.nama, loket.nomor);
+            if (sorotPerubahan && !loket.nomor.isEmpty() && !loket.nomor.equals(lama)) {
+                sorotLoket(kartu);
+            }
         }
+        nomorLoketPernahTampil = true;
         // Deret terakhir yang tidak penuh diisi sel kosong agar kartunya sama lebar.
         int sisa = jumlah % kolom;
         for (int i = 0; sisa > 0 && i < kolom - sisa; i++) {
             deret.addView(new View(this), selLoket());
         }
+    }
+
+    /**
+     * Loket yang baru memanggil: angkanya bergulir masuk dari atas, lalu
+     * kartunya berdenyut tiga kali supaya pengunjung melihat perubahannya.
+     */
+    private void sorotLoket(View kartu) {
+        if (kartu instanceof LinearLayout && ((LinearLayout) kartu).getChildCount() > 1) {
+            View nomor = ((LinearLayout) kartu).getChildAt(1);
+            nomor.setAlpha(0f);
+            nomor.setTranslationY(-dp(18));
+            nomor.animate().alpha(1f).translationY(0f).setDuration(380)
+                    .setInterpolator(new android.view.animation.OvershootInterpolator(1.4f))
+                    .start();
+        }
+        android.animation.ObjectAnimator denyut =
+                android.animation.ObjectAnimator.ofPropertyValuesHolder(kartu,
+                        android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.06f),
+                        android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.06f));
+        denyut.setDuration(220);
+        denyut.setRepeatCount(5);
+        denyut.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        denyut.setStartDelay(200);
+        denyut.start();
     }
 
     private LinearLayout.LayoutParams selLoket() {
@@ -2070,10 +2194,15 @@ public final class MainActivity extends Activity {
         tiketParams.leftMargin = dp(28);
         tiketParams.rightMargin = dp(28);
         result.addView(tiket, tiketParams);
+        LinearLayout ambilBaris = new LinearLayout(this);
+        ambilBaris.setGravity(Gravity.CENTER);
+        ambilBaris.setPadding(0, dp(8), 0, dp(6));
+        TandaCentang centang = new TandaCentang(this, GREEN);
+        ambilBaris.addView(centang, new LinearLayout.LayoutParams(dp(22), dp(22)));
         TextView ambil = text("Silakan ambil tiket Anda", 14, Color.argb(225, 255, 255, 255), true);
-        ambil.setGravity(Gravity.CENTER);
-        ambil.setPadding(0, dp(8), 0, dp(6));
-        result.addView(ambil);
+        ambil.setPadding(dp(8), 0, 0, 0);
+        ambilBaris.addView(ambil);
+        result.addView(ambilBaris);
         FrameLayout jalur = new FrameLayout(this);
         jalur.setBackground(rounded(UTAMA, dp(4)));
         View isiJalur = new View(this);
@@ -2088,6 +2217,7 @@ public final class MainActivity extends Activity {
         tiket.setTranslationY(dp(36));
         tiket.animate().alpha(1f).translationY(0f).setDuration(420)
                 .setInterpolator(new android.view.animation.OvershootInterpolator(1.1f)).start();
+        centang.gambar(180L);
         isiJalur.setPivotX(0f);
         isiJalur.animate().scaleX(0f).setDuration(LAMA_HASIL_MS)
                 .setInterpolator(new android.view.animation.LinearInterpolator()).start();

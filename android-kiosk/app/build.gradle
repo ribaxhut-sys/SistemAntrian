@@ -10,7 +10,7 @@ android {
         applicationId "id.sistemantrian.kiosk"
         minSdk 24
         targetSdk 35
-        versionCode 27
-        versionName "2.4.11"
+        versionCode 28
+        versionName "2.4.12"
     }
 }
