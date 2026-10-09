@@ -286,7 +286,13 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     ("tersimpan", "dikirim"),
-    [("atas", "atas"), ("bawah", "bawah"), ("otomatis", "otomatis"), ("ngawur", "otomatis")],
+    [
+        ("atas", "atas"),
+        ("bawah", "bawah"),
+        ("otomatis", "otomatis"),
+        ("sembunyi", "sembunyi"),
+        ("ngawur", "otomatis"),
+    ],
 )
 def test_display_sends_counter_position(tersimpan, dikirim):
     from app.kiosk_api import create_app

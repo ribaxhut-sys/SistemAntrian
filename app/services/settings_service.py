@@ -437,13 +437,17 @@ SKEMA: tuple[Pengaturan, ...] = (
         "kiosk.posisi_loket",
         "Posisi baris loket di anjungan",
         "Letak baris SEDANG DILAYANI (nomor tiap loket) pada tablet "
-        "anjungan. Otomatis: di panel bawah bila panel atas memutar media, "
-        "di panel atas bila tidak ada media atau medianya gagal diputar.",
+        "anjungan. Otomatis: pindah ke panel bawah bila panel atas memutar "
+        "iklan, kembali ke panel atas bila tidak ada iklan atau iklannya "
+        "gagal diputar. Sembunyikan bila layar antrian TV sudah terlihat "
+        "dari depan anjungan. Tablet dapat menimpa pilihan ini di "
+        "Pengaturan tablet.",
         PILIHAN,
         pilihan=(
-            ("otomatis", "Otomatis (bawah bila ada media)"),
-            ("atas", "Selalu di panel atas"),
-            ("bawah", "Selalu di panel bawah"),
+            ("otomatis", "Otomatis mengikuti iklan (bawah bila ada iklan)"),
+            ("bawah", "Pindahkan loket ke panel bawah"),
+            ("atas", "Pindahkan loket ke panel atas"),
+            ("sembunyi", "Sembunyikan baris loket"),
         ),
         kelompok="Antrian",
     ),

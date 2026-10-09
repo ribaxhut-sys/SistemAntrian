@@ -165,6 +165,16 @@ public final class MainActivity extends Activity {
     private static final String SUMBER_SERVER = "server";
     private static final String SUMBER_TABLET = "tablet";
     private static final int PILIH_MEDIA_TABLET = 41;
+    // Letak baris loket khusus tablet ini; "server" = ikuti pengaturan server.
+    private static final String POSISI_LOKET_TABLET = "posisi_loket";
+    private static final String IKUTI_SERVER = "server";
+    private static final String[][] PILIHAN_POSISI_LOKET = {
+            {IKUTI_SERVER, "Ikuti pengaturan server"},
+            {"otomatis", "Otomatis mengikuti iklan (bawah bila ada iklan)"},
+            {"bawah", "Pindahkan loket ke panel bawah"},
+            {"atas", "Pindahkan loket ke panel atas"},
+            {"sembunyi", "Sembunyikan baris loket"},
+    };
     private static final long CADANGAN_RUANG_BYTES = 50L * 1024 * 1024;
     private static final long JEDA_UNDUH_ULANG_MS = 120_000L;
     // Unduhan media terpisah dari `worker`, supaya video besar tidak
@@ -1243,9 +1253,18 @@ public final class MainActivity extends Activity {
     }
 
     /** "atas", "bawah", atau "" bila tidak ada loket aktif. */
+    /** Pilihan tablet bila diatur, selain itu pilihan server. */
+    private String posisiLoketBerlaku() {
+        String tablet = preferences == null ? IKUTI_SERVER
+                : preferences.getString(POSISI_LOKET_TABLET, IKUTI_SERVER);
+        return IKUTI_SERVER.equals(tablet) ? posisiLoket : tablet;
+    }
+
     private String letakLoket() {
         if (loketList.isEmpty()) return "";
-        if ("atas".equals(posisiLoket) || "bawah".equals(posisiLoket)) return posisiLoket;
+        String posisi = posisiLoketBerlaku();
+        if ("sembunyi".equals(posisi)) return "";
+        if ("atas".equals(posisi) || "bawah".equals(posisi)) return posisi;
         // Otomatis: panel atas milik media bila media benar-benar berputar.
         return adaMediaSambutan && !mediaGagal ? "bawah" : "atas";
     }
@@ -2057,9 +2076,31 @@ public final class MainActivity extends Activity {
         fields.addView(sumber);
         TextView mediaStatus = text(ringkasanMedia(), 12, MUTED, false);
         fields.addView(mediaStatus);
+        TextView loketLabel = text("Posisi baris loket di tablet ini", 13, INK, true);
+        loketLabel.setPadding(0, dp(12), 0, 0);
+        RadioGroup posisi = new RadioGroup(this);
+        String posisiTersimpan = preferences.getString(POSISI_LOKET_TABLET, IKUTI_SERVER);
+        for (String[] pilihan : PILIHAN_POSISI_LOKET) {
+            RadioButton tombolPosisi = new RadioButton(this);
+            tombolPosisi.setId(View.generateViewId());
+            tombolPosisi.setText(pilihan[1]);
+            tombolPosisi.setTag(pilihan[0]);
+            posisi.addView(tombolPosisi);
+            if (pilihan[0].equals(posisiTersimpan)) posisi.check(tombolPosisi.getId());
+        }
+        if (posisi.getCheckedRadioButtonId() == -1) {
+            posisi.check(posisi.getChildAt(0).getId());
+        }
+        posisi.setOnCheckedChangeListener((group, checkedId) -> {
+            Object nilai = group.findViewById(checkedId).getTag();
+            preferences.edit().putString(POSISI_LOKET_TABLET, String.valueOf(nilai)).apply();
+            terapkanBarisLoket();
+        });
         Button kelolaMedia = smallButton("Kelola media tablet");
         kelolaMedia.setOnClickListener(v -> showMediaTablet());
         fields.addView(kelolaMedia);
+        fields.addView(loketLabel);
+        fields.addView(posisi);
         // Berlaku seketika, terpisah dari tombol Simpan: tidak menyentuh
         // alamat server atau token.
         sumber.setOnCheckedChangeListener((group, checkedId) -> {

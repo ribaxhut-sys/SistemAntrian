@@ -66,7 +66,7 @@ _MEDIA_EXTENSIONS = {
 }
 _MEDIA_KINDS = {"media", "gambar", "video"}
 #: Letak baris loket di anjungan; nilai lain dibaca sebagai "otomatis".
-POSISI_LOKET = ("otomatis", "atas", "bawah")
+POSISI_LOKET = ("otomatis", "atas", "bawah", "sembunyi")
 MIN_TOKEN_LENGTH = 8
 DISCOVERY_REQUEST = b"SISTEMANTRIAN_KIOSK_DISCOVER_V1"
 DISCOVERY_RESPONSE = "SISTEMANTRIAN_KIOSK_SERVER_V1"

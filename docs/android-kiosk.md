@@ -70,7 +70,11 @@ dan penerbitan tiket, ditambah daftar nomor yang menunggu dan nomor yang
 sedang dilayani tiap loket. Baris "SEDANG DILAYANI" diletakkan menurut
 pengaturan **Posisi baris loket di anjungan**: *Otomatis* menaruhnya di panel
 bawah bila panel atas memutar media, dan di panel atas bila tidak ada media
-atau semua berkasnya gagal diputar. Panggilan bersuara tetap urusan papan
+atau semua berkasnya gagal diputar; *Pindahkan ke panel bawah/atas* menetapkan
+letaknya; *Sembunyikan* menghilangkan barisnya (anjungan 2.4.3; APK lama
+membacanya sebagai Otomatis). Mulai 2.4.3, ⚙ Pengaturan tablet → **Posisi
+baris loket di tablet ini** dapat menimpa pilihan server untuk tablet itu
+saja; bawaannya *Ikuti pengaturan server*. Panggilan bersuara tetap urusan papan
 antrian televisi. Layarnya: panel informasi, kartu layanan
 dengan navigasi kelompok, konfirmasi pilihan, dan hasil tiket. The information panel uses the Windows
 kiosk welcome text or cycles the image/video files from `media\kiosk`
