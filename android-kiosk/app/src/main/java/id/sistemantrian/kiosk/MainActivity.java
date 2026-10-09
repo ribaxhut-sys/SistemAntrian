@@ -24,6 +24,8 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.text.InputType;
 import android.text.TextUtils;
+import android.transition.AutoTransition;
+import android.transition.TransitionManager;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -54,10 +56,12 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -80,9 +84,9 @@ public final class MainActivity extends Activity {
     private static final int GREY = Color.rgb(203, 213, 225);
     private static final int RED = Color.rgb(220, 38, 38);
     private static final int KOLOM_NOMOR_MENUNGGU = 4;
+    // Tiga baris nomor menunggu; dua bila baris loket ikut berada di panel bawah.
     private static final int BARIS_NOMOR_MENUNGGU = 3;
-    private static final int NOMOR_PER_HALAMAN =
-            KOLOM_NOMOR_MENUNGGU * BARIS_NOMOR_MENUNGGU;
+    private static final int BARIS_NOMOR_MENUNGGU_BERSAMA_LOKET = 2;
     // Lama layar "NOMOR ANDA" sebelum kembali ke menu layanan. Sengaja tidak
     // mengikuti jeda kios: jeda itu tetap berlaku lewat tombol yang mati dan
     // hitung mundur "Mohon tunggu", pengunjung tidak perlu menunggu di sini.
@@ -124,9 +128,43 @@ public final class MainActivity extends Activity {
     private String welcomeFallbackText = "";
     private String displayedWelcomeText = "";
     private final List<String> waitingQueueNumbers = new ArrayList<>();
+    private final List<Loket> loketList = new ArrayList<>();
+    private LinearLayout rootLayout;
+    private LinearLayout loketAtas;
+    private LinearLayout loketBawah;
+    /** Pengaturan server: otomatis, atas, atau bawah. */
+    private String posisiLoket = "otomatis";
+    private boolean adaMediaSambutan;
+    /** Media sambutan ada di daftar, tetapi gagal dimuat di tablet ini. */
+    private boolean mediaGagal;
+    private String tampilanLoket = "";
+    /** Pengaturan server: video anjungan bersuara atau tidak. */
+    private boolean suaraVideo;
+    private android.media.MediaPlayer pemutarVideo;
+    /** Berkas daftar putar yang gagal dimuat pada putaran ini. */
+    private final Set<String> berkasGagal = new HashSet<>();
+    private int barisMenunggu = BARIS_NOMOR_MENUNGGU;
     private int waitingPage;
     private int displayFailures;
     private long lastDisplaySuccessMillis;
+
+    private static final class Loket {
+        final String nama;
+        final String nomor;
+        final String layanan;
+        final String status;
+
+        Loket(JSONObject json) {
+            nama = json.optString("name", "");
+            nomor = json.isNull("queue_number") ? "" : json.optString("queue_number", "");
+            layanan = json.isNull("category") ? "" : json.optString("category", "");
+            status = json.optString("status", "KOSONG");
+        }
+
+        String tanda() {
+            return nama + "=" + nomor + "/" + layanan + "/" + status;
+        }
+    }
 
     private static final class Category {
         final int id;
@@ -232,7 +270,7 @@ public final class MainActivity extends Activity {
         @Override
         public void run() {
             if (!showingResult && !showingConfirmation
-                    && waitingQueueNumbers.size() > NOMOR_PER_HALAMAN) {
+                    && waitingQueueNumbers.size() > nomorPerHalaman()) {
                 int halaman = jumlahHalamanMenunggu();
                 waitingPage = (waitingPage + 1) % halaman;
                 tampilkanNomorMenunggu();
@@ -242,6 +280,16 @@ public final class MainActivity extends Activity {
     };
 
     private final Runnable nextSlide = () -> advanceSlide();
+    // Semua media gagal (server mati sebentar, berkas rusak): coba lagi
+    // berkala, supaya iklan kembali sendiri tanpa menyalakan ulang tablet.
+    private static final long COBA_MEDIA_LAGI_MS = 120_000L;
+    private final Runnable cobaMediaLagi = () -> {
+        if (!mediaGagal || welcomeMedia.isEmpty()) return;
+        berkasGagal.clear();
+        mediaGagal = false;
+        terapkanBarisLoket();
+        showWelcomeMedia(0);
+    };
 
     @Override
     protected void onCreate(Bundle state) {
@@ -288,6 +336,7 @@ public final class MainActivity extends Activity {
                 Math.min(widthDp / 360f, heightDp / 640f)));
 
         LinearLayout root = new LinearLayout(this);
+        rootLayout = root;
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.rgb(226, 232, 240));
         root.setPadding(dp(8), dp(6), dp(8), dp(6));
@@ -316,6 +365,8 @@ public final class MainActivity extends Activity {
         connectionParams.gravity = Gravity.CENTER;
         connectionParams.topMargin = dp(4);
         infoPanel.addView(connectionLabel, connectionParams);
+        loketAtas = barisLoketKosong();
+        infoPanel.addView(loketAtas, new LinearLayout.LayoutParams(-1, -2));
         mediaSlot = new FrameLayout(this);
         welcome = text(
                 "Sentuh salah satu layanan di bawah untuk mengambil nomor.",
@@ -364,6 +415,8 @@ public final class MainActivity extends Activity {
         resultTitle.setGravity(Gravity.CENTER);
         resultTitle.setLetterSpacing(0.06f);
         resultPanel.addView(resultTitle);
+        loketBawah = barisLoketKosong();
+        resultPanel.addView(loketBawah, new LinearLayout.LayoutParams(-1, -2));
         resultSlot = new FrameLayout(this);
         resultPanel.addView(resultSlot, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(resultPanel, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -435,8 +488,12 @@ public final class MainActivity extends Activity {
             String kind = display.optString("welcome_kind", "teks");
             String signature = kind + "|" + TextUtils.join("|", media);
             welcomeFallbackText = display.optString("welcome_text", "");
+            adaMediaSambutan = isMediaKind(kind) && !media.isEmpty();
             if (!signature.equals(mediaSignature)) {
                 mediaSignature = signature;
+                mediaGagal = false;
+                berkasGagal.clear();
+                handler.removeCallbacks(cobaMediaLagi);
                 welcomeMedia = media;
                 welcomeSlideSeconds = Math.max(
                         1, display.optInt("welcome_slide_seconds", 10));
@@ -464,6 +521,21 @@ public final class MainActivity extends Activity {
                 waitingQueueNumbers.addAll(terbaru);
                 waitingPage = 0;
             }
+            posisiLoket = display.optString("counter_position", "otomatis");
+            boolean suara = display.optBoolean("video_sound", false);
+            if (suara != suaraVideo) {
+                suaraVideo = suara;
+                aturSuaraVideo();
+            }
+            JSONArray loketRows = display.optJSONArray("counters");
+            loketList.clear();
+            if (loketRows != null) {
+                for (int i = 0; i < loketRows.length(); i++) {
+                    JSONObject row = loketRows.optJSONObject(i);
+                    if (row != null) loketList.add(new Loket(row));
+                }
+            }
+            terapkanBarisLoket();
             if (!showingResult && !showingConfirmation) tampilkanNomorMenunggu();
             minVersionCode = display.optInt("app_min_version_code", 0);
             latestVersionCode = display.optInt("app_latest_version_code", 0);
@@ -617,6 +689,7 @@ public final class MainActivity extends Activity {
                 && mediaSlot.getChildAt(0) == welcome) return;
         displayedWelcomeText = normalized;
         welcome.setText(normalized);
+        pemutarVideo = null;
         mediaSlot.removeAllViews();
         mediaSlot.addView(welcome, new FrameLayout.LayoutParams(-1, -1));
     }
@@ -627,6 +700,7 @@ public final class MainActivity extends Activity {
         String filename = welcomeMedia.get(index);
         String signature = mediaSignature + "|" + filename;
         handler.removeCallbacks(nextSlide);
+        pemutarVideo = null;
         mediaSlot.removeAllViews();
         String lower = filename.toLowerCase();
         String url = mediaUrl(filename);
@@ -637,10 +711,17 @@ public final class MainActivity extends Activity {
             mediaSlot.addView(video, new FrameLayout.LayoutParams(-1, -1));
             video.setOnCompletionListener(player -> advanceSlide());
             video.setOnErrorListener((player, what, extra) -> {
-                showMediaFallback(signature);
+                mediaGagalDiputar(signature, filename);
                 return true;
             });
-            video.setOnPreparedListener(player -> player.start());
+            video.setOnPreparedListener(player -> {
+                pemutarVideo = player;
+                aturSuaraVideo();
+                // Satu video saja: diulang oleh pemutar, tanpa layar hitam.
+                player.setLooping(welcomeMedia.size() == 1);
+                player.start();
+                mediaBerhasilDiputar(filename);
+            });
             video.setVideoURI(Uri.parse(url), authHeaders());
         } else {
             ImageView image = new ImageView(this);
@@ -659,12 +740,14 @@ public final class MainActivity extends Activity {
                             return;
                         }
                         image.setImageBitmap(bitmap);
-                        handler.postDelayed(nextSlide, welcomeSlideSeconds * 1000L);
+                        mediaBerhasilDiputar(filename);
+                        // Satu gambar saja tampil terus, tidak diunduh ulang.
+                        if (welcomeMedia.size() > 1) {
+                            handler.postDelayed(nextSlide, welcomeSlideSeconds * 1000L);
+                        }
                     });
                 } catch (Exception e) {
-                    runOnUiThread(() -> {
-                        showMediaFallback(signature);
-                    });
+                    runOnUiThread(() -> mediaGagalDiputar(signature, filename));
                 }
             });
         }
@@ -676,12 +759,50 @@ public final class MainActivity extends Activity {
                 && filename.equals(welcomeMedia.get(mediaIndex));
     }
 
+    /** Suara mengikuti pengaturan server, juga untuk video yang sedang berputar. */
+    private void aturSuaraVideo() {
+        if (pemutarVideo == null) return;
+        float volume = suaraVideo ? 1f : 0f;
+        try {
+            pemutarVideo.setVolume(volume, volume);
+        } catch (IllegalStateException e) {
+            pemutarVideo = null;  // video sudah diganti atau dilepas
+        }
+    }
+
+    private void mediaBerhasilDiputar(String filename) {
+        berkasGagal.remove(filename);
+        if (mediaGagal) {
+            mediaGagal = false;
+            terapkanBarisLoket();
+        }
+    }
+
+    /**
+     * Satu berkas gagal: lewati ke berkas berikutnya. Baru bila SEMUA berkas
+     * gagal, panel kembali ke teks sambutan dan dicoba lagi berkala.
+     */
+    private void mediaGagalDiputar(String signature, String filename) {
+        if (!isCurrentMedia(signature, filename)) return;
+        berkasGagal.add(filename);
+        if (berkasGagal.containsAll(welcomeMedia)) {
+            showMediaFallback(signature);
+            handler.removeCallbacks(cobaMediaLagi);
+            handler.postDelayed(cobaMediaLagi, COBA_MEDIA_LAGI_MS);
+        } else {
+            handler.removeCallbacks(nextSlide);
+            handler.postDelayed(nextSlide, 500L);
+        }
+    }
+
     private void showMediaFallback(String signature) {
         if (signature.equals(mediaSignature + "|"
                 + (mediaIndex >= 0 && mediaIndex < welcomeMedia.size()
                 ? welcomeMedia.get(mediaIndex) : ""))) {
             handler.removeCallbacks(nextSlide);
             applyWelcomeText(welcomeFallbackText);
+            mediaGagal = true;
+            terapkanBarisLoket();
         }
     }
 
@@ -820,13 +941,143 @@ public final class MainActivity extends Activity {
         updateAvailability();
     }
 
+    // -----------------------------------------------------------------
+    // Baris "SEDANG DILAYANI": di panel atas atau bawah
+    // -----------------------------------------------------------------
+
+    private LinearLayout barisLoketKosong() {
+        LinearLayout strip = new LinearLayout(this);
+        strip.setOrientation(LinearLayout.VERTICAL);
+        strip.setVisibility(View.GONE);
+        return strip;
+    }
+
+    /** "atas", "bawah", atau "" bila tidak ada loket aktif. */
+    private String letakLoket() {
+        if (loketList.isEmpty()) return "";
+        if ("atas".equals(posisiLoket) || "bawah".equals(posisiLoket)) return posisiLoket;
+        // Otomatis: panel atas milik media bila media benar-benar berputar.
+        return adaMediaSambutan && !mediaGagal ? "bawah" : "atas";
+    }
+
+    /**
+     * Pasang baris loket di panel yang sesuai.
+     *
+     * Ketiga panel anjungan berbobot sama, sehingga memindahkan baris ini
+     * tidak menggeser tombol layanan di panel tengah. Di panel atas tanpa
+     * media, baris loket mengambil seluruh ruang media dan kartunya besar.
+     */
+    private void terapkanBarisLoket() {
+        if (loketAtas == null || loketBawah == null) return;
+        String letak = letakLoket();
+        boolean besar = "atas".equals(letak) && !(adaMediaSambutan && !mediaGagal);
+        String susunan = letak + (besar ? "|besar|" : "|ringkas|");
+        StringBuilder tanda = new StringBuilder(susunan);
+        for (Loket loket : loketList) tanda.append(loket.tanda()).append(';');
+        if (tanda.toString().equals(tampilanLoket)) return;
+        if (!tampilanLoket.isEmpty() && !tampilanLoket.startsWith(susunan) && rootLayout != null) {
+            AutoTransition transisi = new AutoTransition();
+            transisi.setDuration(350);
+            TransitionManager.beginDelayedTransition(rootLayout, transisi);
+        }
+        tampilanLoket = tanda.toString();
+
+        loketAtas.removeAllViews();
+        loketBawah.removeAllViews();
+        loketAtas.setVisibility("atas".equals(letak) ? View.VISIBLE : View.GONE);
+        loketBawah.setVisibility("bawah".equals(letak) ? View.VISIBLE : View.GONE);
+        mediaSlot.setVisibility(besar ? View.GONE : View.VISIBLE);
+        loketAtas.setLayoutParams(besar
+                ? new LinearLayout.LayoutParams(-1, 0, 1)
+                : new LinearLayout.LayoutParams(-1, -2));
+        if (!letak.isEmpty()) {
+            isiBarisLoket("atas".equals(letak) ? loketAtas : loketBawah, besar);
+        }
+
+        int baris = "bawah".equals(letak)
+                ? BARIS_NOMOR_MENUNGGU_BERSAMA_LOKET : BARIS_NOMOR_MENUNGGU;
+        if (baris != barisMenunggu) {
+            barisMenunggu = baris;
+            if (!showingResult && !showingConfirmation) tampilkanNomorMenunggu();
+        }
+    }
+
+    private void isiBarisLoket(LinearLayout strip, boolean besar) {
+        strip.setPadding(0, dp(besar ? 8 : 4), 0, dp(4));
+        TextView judul = text("SEDANG DILAYANI", besar ? 14 : 12, MUTED, true);
+        judul.setGravity(Gravity.CENTER);
+        judul.setLetterSpacing(0.06f);
+        strip.addView(judul, new LinearLayout.LayoutParams(-1, -2));
+
+        int jumlah = loketList.size();
+        // Ringkas: selalu satu deret. Besar: paling banyak dua deret.
+        int kolom = besar && jumlah > 4 ? (jumlah + 1) / 2 : jumlah;
+        LinearLayout deret = null;
+        for (int i = 0; i < jumlah; i++) {
+            if (i % kolom == 0) {
+                deret = new LinearLayout(this);
+                deret.setOrientation(LinearLayout.HORIZONTAL);
+                strip.addView(deret, besar
+                        ? new LinearLayout.LayoutParams(-1, 0, 1)
+                        : new LinearLayout.LayoutParams(-1, dp(54)));
+            }
+            deret.addView(kartuLoket(loketList.get(i), besar), selLoket());
+        }
+        // Deret terakhir yang tidak penuh diisi sel kosong agar kartunya sama lebar.
+        int sisa = jumlah % kolom;
+        for (int i = 0; sisa > 0 && i < kolom - sisa; i++) {
+            deret.addView(new View(this), selLoket());
+        }
+    }
+
+    private LinearLayout.LayoutParams selLoket() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, 1f);
+        params.setMargins(dp(3), dp(3), dp(3), dp(3));
+        return params;
+    }
+
+    private View kartuLoket(Loket loket, boolean besar) {
+        LinearLayout kartu = new LinearLayout(this);
+        kartu.setOrientation(LinearLayout.VERTICAL);
+        kartu.setGravity(Gravity.CENTER);
+        kartu.setPadding(dp(4), dp(2), dp(4), dp(2));
+        boolean melayani = !loket.nomor.isEmpty();
+        kartu.setBackground(rounded(melayani
+                ? Color.rgb(204, 251, 241) : Color.rgb(241, 245, 249), dp(12)));
+
+        TextView nama = text(loket.nama, besar ? 15 : 11, MUTED, true);
+        nama.setGravity(Gravity.CENTER);
+        pasangAutoFit(nama, 9, besar ? 15 : 11, 1);
+        kartu.addView(nama, new LinearLayout.LayoutParams(-1, -2));
+
+        String isi = melayani ? loket.nomor
+                : "ISTIRAHAT".equals(loket.status) ? "ISTIRAHAT" : "—";
+        int maks = melayani ? (besar ? 40 : 18) : (besar ? 18 : 12);
+        TextView nomor = text(isi, maks, melayani ? INK : MUTED, true);
+        nomor.setGravity(Gravity.CENTER);
+        pasangAutoFit(nomor, 10, maks, 1);
+        kartu.addView(nomor, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        if (besar && melayani && !loket.layanan.isEmpty()) {
+            TextView layanan = text(loket.layanan, 13, TEAL, false);
+            layanan.setGravity(Gravity.CENTER);
+            pasangAutoFit(layanan, 9, 13, 1);
+            kartu.addView(layanan, new LinearLayout.LayoutParams(-1, -2));
+        }
+        return kartu;
+    }
+
     private void showIdleResult() {
         tampilkanNomorMenunggu();
     }
 
+    private int nomorPerHalaman() {
+        return KOLOM_NOMOR_MENUNGGU * barisMenunggu;
+    }
+
     private int jumlahHalamanMenunggu() {
-        return Math.max(1, (waitingQueueNumbers.size() + NOMOR_PER_HALAMAN - 1)
-                / NOMOR_PER_HALAMAN);
+        return Math.max(1, (waitingQueueNumbers.size() + nomorPerHalaman() - 1)
+                / nomorPerHalaman());
     }
 
     /** Daftar baca-saja seluruh nomor yang masih menunggu pada hari ini. */
@@ -856,8 +1107,8 @@ public final class MainActivity extends Activity {
         page.setGravity(Gravity.CENTER_VERTICAL);
         page.setPadding(dp(2), dp(2), dp(2), dp(2));
 
-        int awal = waitingPage * NOMOR_PER_HALAMAN;
-        int akhir = Math.min(awal + NOMOR_PER_HALAMAN, waitingQueueNumbers.size());
+        int awal = waitingPage * nomorPerHalaman();
+        int akhir = Math.min(awal + nomorPerHalaman(), waitingQueueNumbers.size());
         LinearLayout baris = null;
         for (int index = awal; index < akhir; index++) {
             if ((index - awal) % KOLOM_NOMOR_MENUNGGU == 0) {

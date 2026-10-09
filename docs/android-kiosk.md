@@ -66,11 +66,18 @@ kiosk on the same trusted LAN; the HTTP connection is not encrypted.
 
 Anjungan Android hanya mengambil nomor. API memberinya daftar layanan aktif,
 status pendaftaran (buka/tutup dan jeda antar-pengambilan), media sambutan,
-dan penerbitan tiket. Nomor yang sedang dilayani tiap loket tidak dikirim;
-itu urusan papan antrian televisi. Layarnya: panel informasi, kartu layanan
+dan penerbitan tiket, ditambah daftar nomor yang menunggu dan nomor yang
+sedang dilayani tiap loket. Baris "SEDANG DILAYANI" diletakkan menurut
+pengaturan **Posisi baris loket di anjungan**: *Otomatis* menaruhnya di panel
+bawah bila panel atas memutar media, dan di panel atas bila tidak ada media
+atau semua berkasnya gagal diputar. Panggilan bersuara tetap urusan papan
+antrian televisi. Layarnya: panel informasi, kartu layanan
 dengan navigasi kelompok, konfirmasi pilihan, dan hasil tiket. The information panel uses the Windows
-kiosk welcome text or cycles the configured image/video files from
-`media\kiosk`.
+kiosk welcome text or cycles the image/video files from `media\kiosk`
+that are checked in **Daftar putar media**, in that order. A single video
+loops without a black gap; a file that fails is skipped, and only when every
+file fails does the panel fall back to text (retried every two minutes).
+Video sound follows **Suara video anjungan** (off by default).
 
 If the tablet loses its connection after requesting a number, use **Ulangi
 permintaan tiket**. The APK reuses the same request ID, so the server returns

@@ -40,6 +40,7 @@ from app.services.apk_anjungan import (
     folder_apk,
     info_apk,
 )
+from app.services import daftar_putar
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
 from app.services.paket_suara import folder_paket, info_paket, token_pengumuman
@@ -64,6 +65,8 @@ _MEDIA_EXTENSIONS = {
     ".avi",
 }
 _MEDIA_KINDS = {"media", "gambar", "video"}
+#: Letak baris loket di anjungan; nilai lain dibaca sebagai "otomatis".
+POSISI_LOKET = ("otomatis", "atas", "bawah")
 MIN_TOKEN_LENGTH = 8
 DISCOVERY_REQUEST = b"SISTEMANTRIAN_KIOSK_DISCOVER_V1"
 DISCOVERY_RESPONSE = "SISTEMANTRIAN_KIOSK_SERVER_V1"
@@ -273,6 +276,26 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             return device_id
         return ""
 
+    def posisi_loket() -> str:
+        nilai = services.settings.get("kiosk.posisi_loket", "otomatis")
+        return nilai if nilai in POSISI_LOKET else "otomatis"
+
+    def isi_loket(state) -> list[dict]:
+        """Nomor tiap loket, sama untuk layar antrian dan anjungan."""
+        return [
+            {
+                "name": loket.counter_name,
+                "queue_number": loket.antrian.queue_number if loket.antrian else None,
+                "category": loket.antrian.category_name if loket.antrian else None,
+                "status": (
+                    loket.antrian.label_status
+                    if loket.antrian is not None
+                    else ("ISTIRAHAT" if loket.istirahat else "KOSONG")
+                ),
+            }
+            for loket in state.loket
+        ]
+
     def welcome_media_paths() -> list[Path]:
         kind = services.settings.get("kiosk.welcome_kind", "teks")
         if kind not in _MEDIA_KINDS:
@@ -291,6 +314,11 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 except ValueError:
                     continue
                 files.append(resolved)
+        nilai_daftar = services.settings.get(daftar_putar.KUNCI, "")
+        if daftar_putar.baca(nilai_daftar) is not None:
+            # Daftar putar yang sudah diatur berlaku apa adanya, juga bila
+            # semua berkas sengaja dimatikan: tidak ada media, bukan cadangan.
+            return daftar_putar.terapkan(files, nilai_daftar)
         if files:
             return files
         fallback_value = services.settings.get("kiosk.welcome_file", "").strip()
@@ -368,19 +396,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         return {
             "title": services.settings.get("display.title", "ANTRIAN PELAYANAN CRO"),
             "sound_enabled": services.settings.get_bool("display.sound_enabled", True),
-            "counters": [
-                {
-                    "name": loket.counter_name,
-                    "queue_number": loket.antrian.queue_number if loket.antrian else None,
-                    "category": loket.antrian.category_name if loket.antrian else None,
-                    "status": (
-                        loket.antrian.label_status
-                        if loket.antrian is not None
-                        else ("ISTIRAHAT" if loket.istirahat else "KOSONG")
-                    ),
-                }
-                for loket in state.loket
-            ],
+            "counters": isi_loket(state),
             "next": [q.queue_number for q in state.berikutnya],
             "total_waiting": state.total_menunggu,
             "server_time_ms": int(time.time() * 1000),
@@ -518,11 +534,12 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
     @app.get("/v1/kiosk/display")
     def display(device_id: str = Depends(perangkat_terpercaya)):  # noqa: B008
         """
-        Keadaan ringkas anjungan, termasuk daftar nomor yang masih menunggu.
+        Keadaan ringkas anjungan: daftar nomor yang masih menunggu dan nomor
+        yang sedang dilayani tiap loket.
 
-        Daftar ini hanya memuat nomor anonim berstatus WAITING pada hari ini.
-        Nomor yang sedang dipanggil atau dilayani tetap menjadi isi layar
-        antrian, bukan anjungan.
+        Keduanya hanya nomor anonim pada hari ini. Anjungan menampilkannya
+        sebagai satu baris ringkas "SEDANG DILAYANI"; panggilan bersuara dan
+        papan loket besar tetap urusan layar antrian.
         """
         media = welcome_media_paths()
         apk = info_apk(folder_apk(base_dir()))
@@ -541,6 +558,15 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "registration_open": services.queue.pendaftaran_dibuka(),
             "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(device_id),
             "waiting_queue_numbers": services.queue.nomor_menunggu_untuk_layar(),
+            # Baris "SEDANG DILAYANI". Posisinya (otomatis/atas/bawah) dipilih
+            # di server supaya semua tablet seragam; tablet sendiri yang
+            # memutuskan "otomatis", karena hanya tablet yang tahu apakah
+            # media iklannya benar-benar dapat diputar.
+            "counters": isi_loket(
+                services.queue.display_state(jumlah_berikutnya=0)
+            ),
+            "counter_position": posisi_loket(),
+            "video_sound": services.settings.get_bool("kiosk.suara_video", False),
             # Jam di layar anjungan memakai jam dan zona waktu SERVER, bukan
             # setelan tablet: tablet tanpa internet sering salah jam, dan
             # zona waktunya bisa terpasang di luar Indonesia.

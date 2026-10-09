@@ -1451,6 +1451,40 @@ def test_pengaturan_terisi_dari_nilai_tersimpan(halaman_pengaturan):
     assert halaman_pengaturan.baris["display.next_count"].nilai() == "3"
 
 
+def test_daftar_putar_tidak_berubah_hanya_karena_dibuka(
+    qtbot, admin_auth, seeded, tmp_path, monkeypatch
+):
+    from PySide6.QtCore import Qt
+
+    from app.services.settings_service import SettingsService
+    from app.ui.settings import settings_page
+
+    folder = tmp_path / "media" / "kiosk"
+    folder.mkdir(parents=True)
+    for nama in ("a.jpg", "b.mp4", "c.mp4"):
+        (folder / nama).write_bytes(b"isi")
+    monkeypatch.setattr(settings_page, "daftar_media_kios",
+                        lambda: sorted(folder.iterdir()))
+    halaman = settings_page.SettingsPage(SettingsService(admin_auth))
+    qtbot.addWidget(halaman)
+    baris = halaman.baris["kiosk.daftar_putar"]
+    daftar = baris.kontrol
+
+    # Belum diatur: semua tercentang, nilainya tetap kosong.
+    assert daftar.daftar.count() == 3
+    assert baris.nilai() == ""
+    assert not baris.sudah_berubah()
+
+    # Matikan b.mp4, lalu naikkan c.mp4 ke paling atas.
+    daftar.daftar.item(1).setCheckState(Qt.CheckState.Unchecked)
+    daftar.daftar.setCurrentRow(2)
+    daftar._geser(-1)
+    daftar._geser(-1)
+
+    assert baris.nilai() == '["c.mp4", "a.jpg"]'
+    assert baris.sudah_berubah()
+
+
 def test_pengaturan_berkas_anjungan_punya_tombol_pilih(halaman_pengaturan):
     from PySide6.QtWidgets import QPushButton
 

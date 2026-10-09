@@ -83,7 +83,9 @@ class _Queue:
                 SimpleNamespace(
                     counter_name="Loket 1",
                     antrian=SimpleNamespace(
-                        queue_number="A-001", label_status="DIPANGGIL"
+                        queue_number="A-001",
+                        category_name="Pajak Kendaraan",
+                        label_status="DIPANGGIL",
                     ),
                     istirahat=False,
                 ),
@@ -108,6 +110,12 @@ class _Queue:
 
 class _Settings:
     welcome_kind = "teks"
+    suara_video = False
+
+    def get_bool(self, key, default):
+        return {"kiosk.suara_video": self.suara_video}.get(key, default)
+    posisi_loket = "otomatis"
+    daftar_putar = ""
 
     def get_int(self, key, default):
         return {
@@ -121,6 +129,8 @@ class _Settings:
             "kiosk.welcome_text": "Selamat datang",
             "kiosk.welcome_kind": self.welcome_kind,
             "kiosk.welcome_file": "",
+            "kiosk.posisi_loket": self.posisi_loket,
+            "kiosk.daftar_putar": self.daftar_putar,
         }
         return values.get(key, default)
 
@@ -251,11 +261,73 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "registration_open": True,
         "cooldown_remaining_seconds": 0,
         "waiting_queue_numbers": ["A-002", "A-003"],
+        "counters": [
+            {
+                "name": "Loket 1",
+                "queue_number": "A-001",
+                "category": "Pajak Kendaraan",
+                "status": "DIPANGGIL",
+            },
+            {
+                "name": "Loket 2",
+                "queue_number": None,
+                "category": None,
+                "status": "ISTIRAHAT",
+            },
+        ],
+        "counter_position": "otomatis",
+        "video_sound": False,
         "app_min_version_code": VERSI_MINIMAL,
         "app_latest_version_code": None,
         "app_latest_version_name": None,
     }
-    assert "counters" not in isi
+
+
+@pytest.mark.parametrize(
+    ("tersimpan", "dikirim"),
+    [("atas", "atas"), ("bawah", "bawah"), ("otomatis", "otomatis"), ("ngawur", "otomatis")],
+)
+def test_display_sends_counter_position(tersimpan, dikirim):
+    from app.kiosk_api import create_app
+
+    services = _Services()
+    services.settings.posisi_loket = tersimpan
+    client = TestClient(create_app(TOKEN, services))
+    isi = client.get(
+        "/v1/kiosk/display", headers={"Authorization": f"Bearer {TOKEN}"}
+    ).json()
+
+    assert isi["counter_position"] == dikirim
+
+
+@pytest.mark.parametrize(
+    ("daftar", "harapan"),
+    [
+        ("", ["a.jpg", "b.mp4", "c.mp4"]),
+        ('["c.mp4", "a.jpg"]', ["c.mp4", "a.jpg"]),
+        ("[]", []),
+    ],
+)
+def test_display_follows_media_playlist(tmp_path, monkeypatch, daftar, harapan):
+    from app.kiosk_api import create_app
+
+    monkeypatch.setattr("app.kiosk_api.base_dir", lambda: tmp_path)
+    folder = tmp_path / "media" / "kiosk"
+    folder.mkdir(parents=True)
+    for nama in ("a.jpg", "b.mp4", "c.mp4"):
+        (folder / nama).write_bytes(b"isi")
+    services = _Services()
+    services.settings.welcome_kind = "media"
+    services.settings.daftar_putar = daftar
+    client = TestClient(create_app(TOKEN, services))
+    headers = {"Authorization": f"Bearer {TOKEN}", **VERSI_APK}
+
+    isi = client.get("/v1/kiosk/display", headers=headers).json()
+
+    assert isi["welcome_media"] == harapan
+    # Berkas yang tidak dicentang juga tidak dilayani.
+    for nama in {"a.jpg", "b.mp4", "c.mp4"} - set(harapan):
+        assert client.get(f"/v1/kiosk/media/{nama}", headers=headers).status_code == 404
 
 
 def test_api_serves_only_configured_kiosk_media(tmp_path, monkeypatch):

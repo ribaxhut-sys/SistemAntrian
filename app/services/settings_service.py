@@ -16,7 +16,7 @@ from app.core.database import session_scope
 from app.core.errors import NotFoundError, ValidationError
 from app.core.logger import get_logger
 from app.models import ApplicationSetting, AuditAction
-from app.services import audit_service
+from app.services import audit_service, daftar_putar
 from app.services.auth_service import AuthService
 from app.services.permissions import Permission
 
@@ -59,6 +59,9 @@ BAWAAN: dict[str, str] = {
     "kiosk.welcome_text": "",
     "kiosk.welcome_file": "",
     "kiosk.welcome_slide_seconds": "10",
+    "kiosk.posisi_loket": "otomatis",
+    "kiosk.daftar_putar": "",
+    "kiosk.suara_video": "false",
     "display.screen_shape": "auto",
     "display.theme": "kaca",
     "display.title": "ANTRIAN PELAYANAN CRO",
@@ -87,6 +90,7 @@ ANGKA = "angka"
 BOOLEAN = "boolean"
 PILIHAN = "pilihan"
 BERKAS = "berkas"
+DAFTAR_PUTAR = "daftar_putar"
 
 
 @dataclass(frozen=True)
@@ -369,9 +373,9 @@ SKEMA: tuple[Pengaturan, ...] = (
         "kiosk.welcome_kind",
         "Tampilan panel anjungan",
         "Isi panel besar di atas tombol A/B/C sebelum pengunjung memilih "
-        "layanan. Folder media memutar semua gambar dan video di "
-        "media/kiosk bergiliran menurut nama file. Bila foldernya kosong "
-        "atau berkasnya gagal, panel kembali ke teks.",
+        "layanan. Folder media memutar gambar dan video yang dicentang di "
+        "Daftar putar media, bergiliran. Bila tidak ada yang dapat diputar, "
+        "panel kembali ke teks.",
         PILIHAN,
         pilihan=(
             ("teks", "Teks sambutan"),
@@ -391,9 +395,9 @@ SKEMA: tuple[Pengaturan, ...] = (
     Pengaturan(
         "kiosk.welcome_file",
         "Tambah berkas ke folder anjungan",
-        "Berkas disalin ke media/kiosk. Semua gambar dan video di folder "
-        "itu diputar bergiliran (urut nama: 01_, 02_, …). Memilih berkas "
-        "juga mengganti tampilan panel ke folder media. Tetap klik Simpan.",
+        "Berkas disalin ke media/kiosk dan masuk ke ujung Daftar putar "
+        "media dalam keadaan dicentang. Memilih berkas juga mengganti "
+        "tampilan panel ke folder media. Tetap klik Simpan.",
         BERKAS,
         boleh_kosong=True,
         kelompok="Antrian",
@@ -407,6 +411,40 @@ SKEMA: tuple[Pengaturan, ...] = (
         minimum=3,
         maksimum=60,
         satuan="detik",
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.daftar_putar",
+        "Daftar putar media",
+        "Centang gambar atau video yang diputar di anjungan, lalu atur "
+        "urutannya dengan Naik/Turun. Video diputar sampai selesai; satu "
+        "video saja diulang terus. Yang tidak dicentang tetap "
+        "tersimpan di folder dan dapat dinyalakan lagi kapan saja.",
+        DAFTAR_PUTAR,
+        boleh_kosong=True,
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.suara_video",
+        "Suara video anjungan",
+        "Bila dimatikan, video di anjungan diputar tanpa suara. Sebaiknya "
+        "tetap mati bila anjungan dekat layar antrian, supaya suara iklan "
+        "tidak menutupi panggilan nomor.",
+        BOOLEAN,
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.posisi_loket",
+        "Posisi baris loket di anjungan",
+        "Letak baris SEDANG DILAYANI (nomor tiap loket) pada tablet "
+        "anjungan. Otomatis: di panel bawah bila panel atas memutar media, "
+        "di panel atas bila tidak ada media atau medianya gagal diputar.",
+        PILIHAN,
+        pilihan=(
+            ("otomatis", "Otomatis (bawah bila ada media)"),
+            ("atas", "Selalu di panel atas"),
+            ("bawah", "Selalu di panel bawah"),
+        ),
         kelompok="Antrian",
     ),
     Pengaturan(
@@ -529,6 +567,9 @@ def _validasi(kunci: str, nilai: str) -> str:
                 f"{butir.label} tidak boleh lebih dari {butir.maksimum}."
             )
         return str(angka)
+
+    if butir.jenis == DAFTAR_PUTAR:
+        return daftar_putar.baku(nilai)
 
     if not nilai and not butir.boleh_kosong:
         raise ValidationError(f"{butir.label} tidak boleh dikosongkan.")

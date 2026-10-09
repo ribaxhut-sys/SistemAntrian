@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QScrollArea,
     QSpinBox,
     QStackedWidget,
@@ -44,10 +45,12 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.logger import get_logger
+from app.services import daftar_putar
 from app.services.settings_service import (
     ANGKA,
     BERKAS,
     BOOLEAN,
+    DAFTAR_PUTAR,
     PILIHAN,
     Pengaturan,
     SettingsService,
@@ -56,7 +59,9 @@ from app.services.settings_service import (
 from app.ui.common import jalankan_aman, judul, keterangan, konfirmasi, tombol
 from app.ui.settings.dialogs import PemilihMediaLayanan
 from app.ui.kiosk.sambutan import (
+    EKSTENSI_VIDEO,
     FILTER_BERKAS_ANJUNGAN,
+    daftar_media_kios,
     folder_media_kios,
     jenis_sambutan_dari_berkas,
     salin_ke_media_kios,
@@ -142,6 +147,133 @@ class _PemilihBerkas(QWidget):
         tujuan = salin_ke_media_kios(Path(path))
         self.isian.setText(tujuan.name)
         self.berkasDipilih.emit(tujuan.name)
+
+
+class _DaftarPutar(QWidget):
+    """
+    Berkas di folder media/kiosk dengan centang (diputar) dan urutannya.
+
+    Nilainya larik JSON nama berkas yang dicentang, berurutan. Selama
+    pengguna belum menyentuhnya, nilai kosong dipertahankan: artinya
+    "belum diatur, putar semua menurut nama" — membuka halaman pengaturan
+    saja tidak boleh membuat baris ini tampak berubah.
+    """
+
+    diubah = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._belum_diatur = True
+        self._sedang_mengisi = False
+
+        susunan = QVBoxLayout(self)
+        susunan.setContentsMargins(0, 0, 0, 0)
+        susunan.setSpacing(6)
+
+        self.daftar = QListWidget()
+        self.daftar.setObjectName("daftarPutarMedia")
+        self.daftar.setMinimumHeight(150)
+        self.daftar.itemChanged.connect(self._pada_centang)
+        susunan.addWidget(self.daftar)
+
+        tombol_baris = QHBoxLayout()
+        tombol_baris.setSpacing(6)
+        naik = tombol("Naik")
+        naik.clicked.connect(lambda: self._geser(-1))
+        turun = tombol("Turun")
+        turun.clicked.connect(lambda: self._geser(1))
+        muat = tombol("Muat ulang")
+        muat.setToolTip("Baca ulang isi folder media/kiosk")
+        muat.clicked.connect(self.muat_ulang_folder)
+        for item in (naik, turun, muat):
+            tombol_baris.addWidget(item)
+        tombol_baris.addStretch()
+        susunan.addLayout(tombol_baris)
+
+    # -- antarmuka seperti QLineEdit, dipakai _BarisPengaturan ----------
+
+    def text(self) -> str:
+        if self._belum_diatur:
+            return ""
+        return daftar_putar.tulis(self._tercentang())
+
+    def setText(self, nilai: str) -> None:  # noqa: N802 - menyamai QLineEdit
+        urutan = daftar_putar.baca(nilai)
+        self._belum_diatur = urutan is None
+        self._isi(urutan)
+
+    # -------------------------------------------------------------------
+
+    def muat_ulang_folder(self) -> None:
+        """Baca ulang folder tanpa membuang centang dan urutan yang ada."""
+        self._isi(None if self._belum_diatur else self._tercentang())
+
+    def tambah(self, nama: str) -> None:
+        """Berkas yang baru disalin langsung ikut diputar di ujung daftar."""
+        if self._belum_diatur:
+            self.muat_ulang_folder()
+            return
+        urutan = [n for n in self._tercentang() if n != nama] + [nama]
+        self._isi(urutan)
+        self.diubah.emit()
+
+    def _tercentang(self) -> list[str]:
+        hasil = []
+        for baris in range(self.daftar.count()):
+            item = self.daftar.item(baris)
+            if item.checkState() == Qt.CheckState.Checked:
+                hasil.append(item.data(Qt.ItemDataRole.UserRole))
+        return hasil
+
+    def _isi(self, urutan: list[str] | None) -> None:
+        semua = [path.name for path in daftar_media_kios()]
+        if urutan is None:
+            tampil = [(nama, True) for nama in semua]
+        else:
+            ada = [nama for nama in urutan if nama in semua]
+            tampil = [(nama, True) for nama in ada]
+            tampil += [(nama, False) for nama in semua if nama not in ada]
+        self._sedang_mengisi = True
+        try:
+            self.daftar.clear()
+            for nama, aktif in tampil:
+                jenis = "video" if Path(nama).suffix.lower() in EKSTENSI_VIDEO else "gambar"
+                item = QListWidgetItem(f"{nama}   ·  {jenis}")
+                item.setData(Qt.ItemDataRole.UserRole, nama)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(
+                    Qt.CheckState.Checked if aktif else Qt.CheckState.Unchecked
+                )
+                self.daftar.addItem(item)
+            if not tampil:
+                kosong = QListWidgetItem("Folder media/kiosk masih kosong.")
+                kosong.setFlags(Qt.ItemFlag.NoItemFlags)
+                self.daftar.addItem(kosong)
+        finally:
+            self._sedang_mengisi = False
+
+    def _pada_centang(self, _item: QListWidgetItem) -> None:
+        if self._sedang_mengisi:
+            return
+        self._belum_diatur = False
+        self.diubah.emit()
+
+    def _geser(self, arah: int) -> None:
+        baris = self.daftar.currentRow()
+        tujuan = baris + arah
+        if baris < 0 or not 0 <= tujuan < self.daftar.count():
+            return
+        if self.daftar.item(baris).data(Qt.ItemDataRole.UserRole) is None:
+            return
+        self._sedang_mengisi = True
+        try:
+            item = self.daftar.takeItem(baris)
+            self.daftar.insertItem(tujuan, item)
+            self.daftar.setCurrentRow(tujuan)
+        finally:
+            self._sedang_mengisi = False
+        self._belum_diatur = False
+        self.diubah.emit()
 
 
 def _garis() -> QFrame:
@@ -236,6 +368,9 @@ class _BarisPengaturan(QFrame):
         if self.butir.jenis == BERKAS:
             return _PemilihBerkas()
 
+        if self.butir.jenis == DAFTAR_PUTAR:
+            return _DaftarPutar()
+
         return QLineEdit()
 
     def _bungkus(self, kontrol: QWidget) -> QWidget:
@@ -260,6 +395,8 @@ class _BarisPengaturan(QFrame):
             self.kontrol.valueChanged.connect(self._pada_ubah)
         elif self.butir.jenis == BERKAS:
             self.kontrol.isian.textChanged.connect(self._pada_ubah)
+        elif self.butir.jenis == DAFTAR_PUTAR:
+            self.kontrol.diubah.connect(self._pada_ubah)
         else:
             self.kontrol.textChanged.connect(self._pada_ubah)
 
@@ -375,6 +512,9 @@ class SettingsPage(QWidget):
         pemilih = self.baris.get("kiosk.welcome_file")
         if pemilih is not None and isinstance(pemilih.kontrol, _PemilihBerkas):
             pemilih.kontrol.berkasDipilih.connect(self._sesuaikan_jenis_sambutan)
+            daftar = self.baris.get(daftar_putar.KUNCI)
+            if daftar is not None and isinstance(daftar.kontrol, _DaftarPutar):
+                pemilih.kontrol.berkasDipilih.connect(daftar.kontrol.tambah)
 
     # -----------------------------------------------------------------
     # Tampilan
