@@ -2256,11 +2256,12 @@ public final class MainActivity extends Activity {
         // sisi arahnya, bukan karakter kecil di kapsul kode.
         boolean panahKanan = "›".equals(awalan);
         if (panahKanan || "‹".equals(awalan)) {
-            int ukuran = Math.round(Math.max(22f, Math.min(40f, tinggi * 0.38f))
+            // Panah dan nama berdampingan: nama memakai SEMUA sisa lebar di
+            // samping panah. Ruang kosong simetris di sisi seberang panah
+            // dulu membuat nama di kartu sempit mengecil lalu terpotong.
+            int ukuran = Math.round(Math.max(20f, Math.min(30f, tinggi * 0.30f))
                     * getResources().getDisplayMetrics().density * uiScale);
             TandaPanah panah = new TandaPanah(this, panahKanan, panahKanan ? UTAMA : warna[1]);
-            card.addView(panah, new FrameLayout.LayoutParams(ukuran, ukuran,
-                    Gravity.CENTER_VERTICAL | (panahKanan ? Gravity.END : Gravity.START)));
             LinearLayout tengah = new LinearLayout(this);
             tengah.setOrientation(LinearLayout.VERTICAL);
             tengah.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -2272,9 +2273,20 @@ public final class MainActivity extends Activity {
                 pasangSatuBaris(ket, 8, 11);
                 tengah.addView(ket, new LinearLayout.LayoutParams(-1, -2));
             }
-            // Ruang yang sama di kiri dan kanan, supaya nama tetap di tengah.
-            tengah.setPadding(ukuran + dp(6), 0, ukuran + dp(6), 0);
-            card.addView(tengah, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
+            LinearLayout baris = new LinearLayout(this);
+            baris.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams ukuranPanah = new LinearLayout.LayoutParams(ukuran, ukuran);
+            LinearLayout.LayoutParams ukuranTengah = new LinearLayout.LayoutParams(0, -2, 1f);
+            if (panahKanan) {
+                baris.addView(tengah, ukuranTengah);
+                ukuranPanah.leftMargin = dp(4);
+                baris.addView(panah, ukuranPanah);
+            } else {
+                ukuranPanah.rightMargin = dp(4);
+                baris.addView(panah, ukuranPanah);
+                baris.addView(tengah, ukuranTengah);
+            }
+            card.addView(baris, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
             pasangEfekSentuh(card);
             card.setOnClickListener(v -> {
                 v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
