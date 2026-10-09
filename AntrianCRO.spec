@@ -17,6 +17,8 @@ Yang wajib ikut dibundel dan tidak terdeteksi otomatis:
                              Asia/Jakarta.
 """
 
+import os
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 datas = [
@@ -62,7 +64,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=["app/runtime_hook_qt.py"],
     # Modul besar yang tidak dipakai sama sekali. Membuangnya memangkas
     # ukuran distribusi secara berarti.
     excludes=[
@@ -76,6 +78,16 @@ a = Analysis(
     ],
     noarchive=False,
 )
+
+# Qt6Core.dll mengimpor `icuuc.dll` milik Windows (System32, nama fungsi tanpa
+# sufiks versi). PyInstaller dapat menemukan icuuc.dll lain lebih dulu dan
+# membundelnya — mis. ICU 78 yang namanya bersufiks `_78`. Windows lalu
+# memuat salinan itu dan setiap `import PySide6.QtWidgets` gagal dengan
+# "The specified procedure could not be found". ICU harus selalu dari sistem.
+a.binaries = [
+    b for b in a.binaries
+    if not os.path.basename(b[0]).lower().startswith(("icuuc", "icuin", "icudt"))
+]
 
 pyz = PYZ(a.pure)
 

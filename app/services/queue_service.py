@@ -25,6 +25,7 @@ from app.repositories.master_repository import (
 )
 from app.repositories.queue_repository import (
     STATUS_BELUM_SELESAI,
+    KunciTiket,
     QueueRepository,
     terbitkan_nomor,
 )
@@ -267,10 +268,18 @@ class QueueService:
         # Tanpa sesi: pembacaan pengaturan memang tidak menuntut hak akses,
         # dan batas pemanggilan dibutuhkan setiap kali antrian dibaca.
         self.settings = settings or SettingsService(auth)
-        #: Waktu nomor terakhir terbit dari mesin ini. Disimpan di memori,
-        #: bukan di database: yang perlu ditahan adalah satu orang menekan
-        #: tombol berulang kali di satu kios, bukan lalu lintas antar mesin.
-        self._nomor_kios_terakhir: datetime | None = None
+        #: Waktu nomor terakhir terbit, per perangkat anjungan (device_id;
+        #: kosong = perangkat yang tidak menyebut dirinya). Satu tablet yang
+        #: baru menerbitkan nomor tidak boleh menahan tablet lain.
+        #:
+        #: Sengaja di memori, bukan di database. Jeda ini hanya beberapa
+        #: detik dan ditujukan pada satu orang yang menekan tombol berulang
+        #: kali; API yang dinyalakan ulang butuh waktu lebih lama dari jeda
+        #: itu, sehingga tidak ada yang hilang bila catatannya ikut hilang.
+        #: Hanya ada satu proses API, jadi tidak ada salinan lain yang perlu
+        #: diselaraskan. Perlindungan dari nomor ganda ada di database (lihat
+        #: KioskTicketRequest), bukan di sini.
+        self._nomor_kios_terakhir: dict[str, datetime] = {}
 
     def batas_panggilan(self) -> int:
         """
@@ -286,21 +295,56 @@ class QueueService:
     # Penerbitan nomor
     # =================================================================
 
-    def create_queue(self, category_id: int) -> QueueInfo:
+    def create_queue(
+        self,
+        category_id: int,
+        *,
+        perangkat: str = "",
+        request_id: str | None = None,
+        kunci_jeda: str | None = None,
+    ) -> QueueInfo:
         """
         Terbitkan nomor antrian baru untuk sebuah jenis layanan.
 
         Antrian bersifat anonim: tidak ada nama, NIK, maupun nomor telepon
         pengunjung yang disimpan.
+
+        `perangkat` adalah device_id anjungan pengirim. Jeda kios dihitung
+        per `kunci_jeda` (bawaannya `perangkat`); API mengisinya kosong bila
+        device_id tidak dapat dipercaya, yaitu pada token bersama yang
+        X-Device-Id-nya diisi pengirim sendiri. `request_id` membuat penerbitan idempoten: permintaan
+        ulang dengan pasangan (perangkat, request_id) yang sama menerima
+        nomor yang SAMA, bahkan sesudah API dinyalakan ulang. Permintaan
+        ulang diperiksa paling awal — sebelum pendaftaran ditutup dan
+        sebelum jeda — karena nomornya memang sudah terbit; menolaknya
+        membuat tablet kehilangan nomor yang sudah tercatat di antrian.
         """
         sesi = self.auth.require_permission(Permission.QUEUE_CREATE)
+        kunci = None if request_id is None else KunciTiket(perangkat, request_id)
+        if kunci_jeda is None:
+            kunci_jeda = perangkat
+        if kunci is not None:
+            sudah_terbit = self._tiket_anjungan_terbit(kunci, category_id)
+            if sudah_terbit is not None:
+                return sudah_terbit
+
         if not self.pendaftaran_dibuka():
             raise BusinessRuleError(
                 "Pendaftaran antrian baru sedang ditutup sementara. "
                 "Nomor yang sudah terbit tetap dapat dilayani."
             )
         if sesi.kios:
-            self._pastikan_jeda_kios()
+            try:
+                self._pastikan_jeda_kios(kunci_jeda)
+            except BusinessRuleError:
+                # Kembaran permintaan ini bisa saja commit di antara
+                # pemeriksaan di atas dan di sini, lalu memulai jedanya.
+                # Itu permintaan ulang, bukan pengambilan beruntun.
+                if kunci is not None:
+                    sudah_terbit = self._tiket_anjungan_terbit(kunci, category_id)
+                    if sudah_terbit is not None:
+                        return sudah_terbit
+                raise
 
         with session_scope() as session:
             repo_kategori = ServiceCategoryRepository(session)
@@ -327,9 +371,21 @@ class QueueService:
 
         # Di luar session_scope: penomoran memakai transaksinya sendiri agar
         # kunci tulis dipegang sesingkat mungkin.
-        terbit = terbitkan_nomor(
-            branch_id=branch_id, category_id=category_id, prefix=prefix
-        )
+        try:
+            terbit = terbitkan_nomor(
+                branch_id=branch_id, category_id=category_id, prefix=prefix, kunci=kunci
+            )
+        except sa.exc.IntegrityError:
+            # Permintaan kembar yang tiba bersamaan: yang lain sudah commit
+            # lebih dulu, constraint unik membatalkan transaksi ini
+            # seluruhnya (termasuk kenaikan nomor urutnya). Bila itu memang
+            # sebabnya, kembalikan tiket milik yang menang.
+            if kunci is None:
+                raise
+            sudah_terbit = self._tiket_anjungan_terbit(kunci, category_id)
+            if sudah_terbit is None:
+                raise
+            return sudah_terbit
 
         with session_scope() as session:
             audit_service.record(
@@ -342,9 +398,44 @@ class QueueService:
             )
             info = _as_info(QueueRepository(session).get_by_id(terbit.queue_id))
 
-        self._nomor_kios_terakhir = clock.now()
+        if sesi.kios:
+            self._catat_jeda_kios(kunci_jeda)
         logger.info("Nomor antrian terbit: %s", terbit.queue_number)
         return info
+
+    def _tiket_anjungan_terbit(
+        self, kunci: KunciTiket, category_id: int
+    ) -> QueueInfo | None:
+        """
+        Tiket yang sudah terbit untuk kunci ini, bila ada.
+
+        request_id yang sama dengan jenis layanan BERBEDA ditolak, bukan
+        dianggap permintaan ulang: tablet yang benar membuat UUID baru
+        untuk setiap pilihan layanan, jadi hal ini hanya terjadi karena
+        kesalahan di tablet. Menerbitkan nomor baru akan membuat satu UUID
+        mewakili dua nomor; mengembalikan nomor lama akan mencetak layanan
+        yang tidak dipilih pengunjung.
+        """
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            baris = repo.tiket_anjungan(kunci)
+            if baris is None:
+                return None
+            if baris.category_id != category_id:
+                raise BusinessRuleError(
+                    "Permintaan tiket ini sudah dipakai untuk jenis layanan "
+                    "lain. Ulangi pemilihan layanan dari awal."
+                )
+            # Kunci disimpan seminggu, tetapi nomor hanya berlaku pada hari
+            # terbitnya. Mengembalikan tiket kemarin berarti mencetak nomor
+            # yang tidak akan pernah dipanggil — dan melewati penutupan
+            # pendaftaran hari ini.
+            if baris.created_at.date() != clock.today():
+                raise BusinessRuleError(
+                    "Permintaan tiket ini sudah kedaluwarsa. Ulangi pemilihan "
+                    "layanan dari awal."
+                )
+            return _as_info(repo.get_by_id(baris.queue_id))
 
     def pendaftaran_dibuka(self) -> bool:
         """
@@ -404,14 +495,33 @@ class QueueService:
         """Jeda wajib antar-pengambilan nomor di mesin kios."""
         return self.settings.get_int("kiosk.cooldown_seconds", 10)
 
-    def sisa_jeda_kios(self) -> float:
-        """Detik yang masih harus ditunggu sebelum nomor berikutnya boleh diambil."""
-        if self._nomor_kios_terakhir is None:
+    def sisa_jeda_kios(self, perangkat: str = "") -> float:
+        """
+        Detik yang masih harus ditunggu perangkat ini sebelum nomor berikutnya.
+
+        `perangkat` adalah device_id anjungan; perangkat lain tidak ikut
+        tertahan oleh nomor yang baru terbit di sini.
+        """
+        terakhir = self._nomor_kios_terakhir.get(perangkat)
+        if terakhir is None:
             return 0.0
-        berlalu = (clock.now() - self._nomor_kios_terakhir).total_seconds()
+        berlalu = (clock.now() - terakhir).total_seconds()
         return max(0.0, self.jeda_kios_detik() - berlalu)
 
-    def _pastikan_jeda_kios(self) -> None:
+    def _catat_jeda_kios(self, perangkat: str) -> None:
+        sekarang = clock.now()
+        # Catatan yang jedanya sudah lama lewat tidak berarti apa-apa lagi.
+        # Dibuang sesekali supaya device_id tablet yang sudah dicabut tidak
+        # menumpuk selama API berjalan berbulan-bulan.
+        if len(self._nomor_kios_terakhir) > 256:
+            self._nomor_kios_terakhir = {
+                kunci: waktu
+                for kunci, waktu in self._nomor_kios_terakhir.items()
+                if (sekarang - waktu).total_seconds() < 3600
+            }
+        self._nomor_kios_terakhir[perangkat] = sekarang
+
+    def _pastikan_jeda_kios(self, perangkat: str = "") -> None:
         """
         Tahan pengambilan nomor beruntun pada mesin kios.
 
@@ -423,8 +533,11 @@ class QueueService:
 
         Sengaja HANYA berlaku pada sesi kios. Petugas pendaftaran melayani
         rombongan yang datang bersamaan dan tidak boleh ikut diperlambat.
+
+        Berlaku per perangkat: antrean di depan Tablet A tidak boleh
+        tertahan karena seseorang baru saja mengambil nomor di Tablet B.
         """
-        sisa = self.sisa_jeda_kios()
+        sisa = self.sisa_jeda_kios(perangkat)
         if sisa <= 0:
             return
         raise BusinessRuleError(
@@ -442,6 +555,12 @@ class QueueService:
                 sesi.branch_id, clock.today(), category_id=category_id
             )
             return [_as_info(r) for r in rows]
+
+    def nomor_menunggu_untuk_layar(self) -> list[str]:
+        """Nomor hari ini yang aman ditampilkan pada perangkat publik."""
+        sesi = self.auth.require_permission(Permission.DISPLAY_VIEW)
+        with session_scope() as session:
+            return QueueRepository(session).nomor_menunggu(sesi.branch_id, clock.today())
 
     def list_today(self, *, status: tuple[QueueStatus, ...] | None = None) -> list[QueueInfo]:
         sesi = self.auth.require_permission(Permission.QUEUE_VIEW)
@@ -746,12 +865,21 @@ class QueueService:
                     f"Loket {loket.name!r} tidak melayani jenis layanan itu."
                 )
 
-            antrian = repo.berikutnya_untuk_dipanggil(
+            # Calon dibaca tanpa kunci, lalu diklaim satu per satu dengan
+            # UPDATE bersyarat. Loket lain bisa saja mengambil calon pertama
+            # di antara pembacaan dan klaim; klaim itu gagal dan calon
+            # berikutnya dicoba. Nomor yang sudah diambil satu loket karena
+            # itu tidak pernah ikut dipanggil loket lain.
+            antrian = None
+            for calon in repo.list_menunggu(
                 sesi.branch_id,
                 hari,
                 category_id=category_id,
                 category_ids=diizinkan or None,
-            )
+            ):
+                if repo.klaim_untuk_dipanggil(calon.id):
+                    antrian = calon
+                    break
             if antrian is None:
                 # Pesannya membedakan "memang sepi" dari "ada yang menunggu
                 # tetapi bukan bagian loket ini". Tanpa pembedaan itu petugas

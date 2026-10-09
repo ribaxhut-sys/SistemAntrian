@@ -42,6 +42,7 @@ from app.ui.dashboard.survey_result_page import SurveyResultPage
 from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.settings.dialogs import LABEL_PERAN
 from app.ui.dashboard.report_page import LaporanPage
+from app.ui.indikator_anjungan import PitaAnjungan
 from app.ui.display.display_page import DisplayPage
 from app.ui.notes.note_page import NotePage
 from app.ui.queue.service_page import ServicePage
@@ -51,7 +52,7 @@ from app.ui.settings.backup_page import BackupPage
 from app.ui.settings.close_day_page import CloseDayPage
 from app.ui.settings.master_data_page import MasterDataPage
 from app.ui.settings.settings_page import SettingsPage
-from app.ui.style import DANGER, SUCCESS
+from app.ui.style import DANGER, SUCCESS, WARNING
 from app.ui.survey.survey_page import SurveyPage
 
 logger = get_logger("ui.main")
@@ -73,6 +74,34 @@ BAGIAN_LAYAR_MAKS = 0.9
 #: rapat agar petugas melihat server mati tanpa harus menekan F5.
 SELANG_PERIKSA_KONEKSI_MS = 10_000
 
+#: Selang pemeriksaan anjungan (API, Firewall, tablet). Lebih jarang dari uji
+#: database karena di komputer server ia ikut menjalankan PowerShell, dan
+#: kontak tablet sendiri hanya tercatat paling sering 30 detik sekali.
+SELANG_PERIKSA_ANJUNGAN_MS = 30_000
+
+#: Judul menu halaman Layanan Anjungan; juga dipakai pita peringatan untuk
+#: membuka halaman itu.
+MENU_LAYANAN_ANJUNGAN = "Layanan Anjungan"
+
+#: Utas pemeriksa yang masih berjalan saat jendelanya ditutup. Dilepas dari
+#: jendela dan disimpan di sini sampai selesai: QThread yang ikut dihapus
+#: bersama induknya selagi masih berjalan membuat Qt menghentikan proses.
+_UTAS_TERTINGGAL: set[QThread] = set()
+
+
+def _lepas_utas_berjalan(utas: QThread) -> None:
+    utas.setParent(None)
+    _UTAS_TERTINGGAL.add(utas)
+
+    def selesai() -> None:
+        _UTAS_TERTINGGAL.discard(utas)
+        utas.deleteLater()
+
+    utas.finished.connect(selesai)
+    # Bisa saja selesai di antara pemeriksaan dan penyambungan di atas.
+    if utas.isFinished():
+        selesai()
+
 
 class _PemeriksaKoneksi(QThread):
     """
@@ -89,6 +118,20 @@ class _PemeriksaKoneksi(QThread):
         from app.core.database import periksa_koneksi
 
         self.selesai.emit(periksa_koneksi())
+
+
+class _PemeriksaAnjungan(QThread):
+    """Pemeriksaan anjungan di utas sendiri: HTTP, PowerShell, dan database."""
+
+    selesai = Signal(object)
+
+    def run(self) -> None:
+        from app.services.status_anjungan import periksa_status_anjungan
+
+        try:
+            self.selesai.emit(periksa_status_anjungan())
+        except Exception:  # noqa: BLE001 - indikator tidak boleh menjatuhkan jendela
+            logger.warning("Pemeriksaan anjungan gagal", exc_info=True)
 
 
 @dataclass(frozen=True)
@@ -339,6 +382,16 @@ class MainWindow(QMainWindow):
         # publik mengundang orang menutupnya.
         if not self.mode_kios:
             susunan_utama.addWidget(self._bangun_kepala())
+            # Pita peringatan anjungan, tepat di bawah kepala. Tersembunyi
+            # selama semuanya normal; lihat _pasang_bilah_database.
+            boleh_buka_layanan = _komputer_server() and self.auth.has_permission(
+                Permission.CONFIG_MANAGE
+            )
+            self.pita_anjungan = PitaAnjungan(
+                self._jadwalkan_periksa_anjungan,
+                self._buka_layanan_anjungan if boleh_buka_layanan else None,
+            )
+            susunan_utama.addWidget(self.pita_anjungan)
 
         self.halaman = QStackedWidget()
         susunan_utama.addWidget(self.halaman, stretch=1)
@@ -463,7 +516,7 @@ class MainWindow(QMainWindow):
             # Hanya di komputer server: API anjungan berjalan di pemilik
             # database, dan anjungan Android hanya klien yang menyambung.
             _Menu(
-                "Layanan Anjungan",
+                MENU_LAYANAN_ANJUNGAN,
                 Permission.CONFIG_MANAGE,
                 lambda: LayananAnjunganPage(PerangkatService(self.auth)),
                 hanya_server=True,
@@ -708,17 +761,27 @@ class MainWindow(QMainWindow):
             self._label_peran.setObjectName("statusPeran")
             self.statusBar().addPermanentWidget(self._label_peran)
 
-        # API anjungan hanya di komputer server. Petugas di sana perlu
-        # tahu sekilas bila anjungan tidak dapat mengambil nomor, tanpa
-        # menunggu pengunjung datang mengeluh.
-        if _komputer_server():
-            self._label_api = QLabel()
+        # Anjungan Android hanya ada pada pemasangan PostgreSQL; API-nya
+        # berjalan di komputer server. Setiap petugas — di server maupun di
+        # loket — perlu tahu sekilas bila anjungan tidak dapat mengambil
+        # nomor, tanpa menunggu pengunjung datang mengeluh. Bilah status
+        # memberi ringkasannya, pita di bawah kepala memberi sarannya.
+        self._sedang_memeriksa_anjungan = False
+        self._pemeriksa_anjungan: _PemeriksaAnjungan | None = None
+        di_server = _komputer_server()
+        if di_server or not get_config().memakai_sqlite:
+            self._label_api = QLabel("API anjungan: memeriksa…")
             self._label_api.setObjectName("statusApiAnjungan")
             self.statusBar().addPermanentWidget(self._label_api)
-            self._periksa_api()
+            if di_server:
+                # Ketukan ke 127.0.0.1 ditolak seketika bila port tertutup,
+                # jadi aman di utas UI dan label langsung bermakna.
+                self._periksa_api()
+            # Pemeriksaan lengkap menunggu jendela selesai tampil.
+            QTimer.singleShot(1500, self._jadwalkan_periksa_anjungan)
             self._pewaktu_api = QTimer(self)
-            self._pewaktu_api.setInterval(SELANG_PERIKSA_KONEKSI_MS)
-            self._pewaktu_api.timeout.connect(self._periksa_api)
+            self._pewaktu_api.setInterval(SELANG_PERIKSA_ANJUNGAN_MS)
+            self._pewaktu_api.timeout.connect(self._jadwalkan_periksa_anjungan)
             self._pewaktu_api.start()
 
         self._label_database = QLabel()
@@ -769,6 +832,46 @@ class MainWindow(QMainWindow):
             label.setText("API anjungan: ● mati")
             label.setStyleSheet(f"color: {DANGER};")
 
+    def _jadwalkan_periksa_anjungan(self) -> None:
+        """Mulai pemeriksaan anjungan di utas sendiri, bila belum berjalan."""
+        if self.mode_kios or self._sedang_memeriksa_anjungan:
+            return
+        if getattr(self, "_label_api", None) is None:
+            return
+        self._sedang_memeriksa_anjungan = True
+        pemeriksa = _PemeriksaAnjungan(self)
+        pemeriksa.selesai.connect(self._tampilkan_status_anjungan)
+        pemeriksa.finished.connect(self._selesai_periksa_anjungan)
+        pemeriksa.start()
+        self._pemeriksa_anjungan = pemeriksa
+
+    def _selesai_periksa_anjungan(self) -> None:
+        self._sedang_memeriksa_anjungan = False
+        pemeriksa = self._pemeriksa_anjungan
+        self._pemeriksa_anjungan = None
+        if pemeriksa is not None:
+            pemeriksa.deleteLater()
+
+    def _tampilkan_status_anjungan(self, status) -> None:
+        from app.services.status_anjungan import MASALAH, NORMAL
+
+        label = getattr(self, "_label_api", None)
+        if label is None or status is None:
+            return
+        label.setText(status.ringkas)
+        warna = {NORMAL: SUCCESS, MASALAH: DANGER}.get(status.tingkat, WARNING)
+        label.setStyleSheet(f"color: {warna};")
+        label.setToolTip(status.judul)
+        pita = getattr(self, "pita_anjungan", None)
+        if pita is not None:
+            pita.tampilkan(status)
+
+    def _buka_layanan_anjungan(self) -> None:
+        for baris, butir in enumerate(self.menu_aktif):
+            if butir.judul == MENU_LAYANAN_ANJUNGAN:
+                self.navigasi.setCurrentRow(baris)
+                return
+
     def _tampilkan_status_database(self, terhubung: bool) -> None:
         label = getattr(self, "_label_database", None)
         if label is None:
@@ -813,15 +916,17 @@ class MainWindow(QMainWindow):
         pewaktu = getattr(self, "_pewaktu_db", None)
         if pewaktu is not None:
             pewaktu.stop()
-        pemeriksa = getattr(self, "_pemeriksa_db", None)
-        if pemeriksa is not None:
+        for nama, batas_ms in (("_pemeriksa_db", 400), ("_pemeriksa_anjungan", 3000)):
+            pemeriksa = getattr(self, nama, None)
+            if pemeriksa is None:
+                continue
             try:
                 pemeriksa.selesai.disconnect()
             except (RuntimeError, TypeError):
                 pass
             try:
-                if pemeriksa.isRunning():
-                    pemeriksa.wait(400)
+                if pemeriksa.isRunning() and not pemeriksa.wait(batas_ms):
+                    _lepas_utas_berjalan(pemeriksa)
             except RuntimeError:
                 pass
         if self.auth.is_authenticated:

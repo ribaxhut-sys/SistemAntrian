@@ -677,7 +677,9 @@ membukanya sebagai jendela biasa untuk diuji di laptop. Pintasan lama
 Jeda antar-pengambilan nomor di anjungan diatur lewat
 `kiosk.cooldown_seconds` (bawaan 10 detik). Jeda ini **hanya** berlaku pada
 anjungan — meja pendaftaran melayani rombongan yang datang bersamaan dan
-tidak ikut diperlambat.
+tidak ikut diperlambat — dan dihitung **per tablet**: nomor yang baru terbit
+di satu tablet tidak menahan tablet lain. Lihat `docs/android-kiosk.md`
+untuk idempotensi permintaan tiket.
 
 ---
 

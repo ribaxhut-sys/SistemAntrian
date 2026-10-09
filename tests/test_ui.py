@@ -1719,7 +1719,9 @@ def test_layanan_anjungan_hanya_di_komputer_server(qtbot, admin_auth, monkeypatc
     assert jendela._label_api.text() == "API anjungan: ● mati"
 
 
-def _status_palsu(monkeypatch, *, api=False, terdaftar=False, firewall=False, apk=None):
+def _status_palsu(
+    monkeypatch, *, api=False, terdaftar=False, firewall=False, apk=None, berjaga=True
+):
     from app.services.kiosk_server import StatusTugas, perintah_api
     from app.ui.settings import layanan_anjungan_page as halaman_modul
 
@@ -1729,7 +1731,7 @@ def _status_palsu(monkeypatch, *, api=False, terdaftar=False, firewall=False, ap
         "periksa_status",
         lambda: halaman_modul.StatusLayanan(
             api=api,
-            tugas=StatusTugas(terdaftar, program, " ".join(argumen)),
+            tugas=StatusTugas(terdaftar, program, " ".join(argumen), berjaga=berjaga),
             firewall=firewall,
             apk=apk,
         ),
@@ -1787,6 +1789,21 @@ def test_halaman_layanan_anjungan_normal_bila_semua_terpasang(
     assert halaman.hapus.isEnabled()
     assert halaman.catatan.isHidden()
     assert halaman.baris_tugas.lencana.text() == "Normal"
+
+
+def test_tugas_lama_tanpa_pemeriksa_berkala_diminta_pasang_ulang(
+    qtbot, monkeypatch, app_config
+):
+    """Tugas versi lama tidak menyalakan lagi API yang berhenti di tengah hari."""
+    _status_palsu(monkeypatch, api=True, terdaftar=True, firewall=True, berjaga=False)
+    from app.ui.settings.layanan_anjungan_page import LayananAnjunganPage
+
+    halaman = LayananAnjunganPage()
+    qtbot.addWidget(halaman)
+    qtbot.waitUntil(lambda: halaman._status is not None, timeout=3000)
+
+    assert halaman.baris_tugas.lencana.text() == "Belum"
+    assert "Pasang ulang" in halaman.baris_tugas.teks.text()
 
 
 def test_dialog_survey_menyimpan_penilaian(qtbot, auth, layani_sampai_selesai):

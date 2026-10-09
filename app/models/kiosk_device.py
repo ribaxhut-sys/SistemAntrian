@@ -67,3 +67,34 @@ class KioskPairingCode(TimestampMixin, Base):
     kode: Mapped[str] = mapped_column(sa.String(6), nullable=False, index=True)
     kedaluwarsa: Mapped[datetime] = mapped_column(sa.DateTime, nullable=False)
     dipakai_pada: Mapped[datetime | None] = mapped_column(sa.DateTime)
+
+
+class KioskTicketRequest(TimestampMixin, Base):
+    """
+    Kunci idempotensi satu permintaan tiket dari anjungan Android.
+
+    Tablet membuat `request_id` (UUID) sekali per tombol yang ditekan dan
+    mengirim ulang UUID yang sama bila jawaban API tidak sampai. Baris ini
+    disisipkan dalam TRANSAKSI YANG SAMA dengan baris antriannya (lihat
+    `terbitkan_nomor`), sehingga tidak pernah ada nomor terbit tanpa
+    kuncinya — termasuk bila API mati tepat sesudah commit. Permintaan
+    ulang menemukan baris ini dan menerima tiket yang sama.
+
+    Kuncinya pasangan (device_id, request_id): UUID hanya dijamin unik di
+    perangkat pembuatnya. `device_id` kosong berarti tablet lama dengan
+    token bersama yang tidak menyebut dirinya; semuanya berbagi satu ruang
+    kunci, yang tetap aman karena UUID acak praktis tidak pernah kembar.
+    """
+
+    __tablename__ = "kiosk_ticket_request"
+    __table_args__ = (sa.UniqueConstraint("device_id", "request_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[str] = mapped_column(sa.String(64), nullable=False, default="")
+    request_id: Mapped[str] = mapped_column(sa.String(36), nullable=False)
+    #: Jenis layanan yang diminta. UUID yang sama dengan jenis layanan lain
+    #: adalah kesalahan tablet, bukan permintaan ulang, dan ditolak.
+    category_id: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    queue_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("queue.id", ondelete="CASCADE"), nullable=False, index=True
+    )

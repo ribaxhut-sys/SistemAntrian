@@ -168,6 +168,24 @@ def test_sisa_jeda_menyusut_setelah_nomor_terbit(kios, antrian_siap):
     assert 0 < kios.sisa_jeda_kios() <= kios.jeda_kios_detik()
 
 
+def test_jeda_berlaku_per_perangkat(kios, antrian_siap):
+    """
+    Tablet A yang baru menerbitkan nomor tidak boleh menahan Tablet B.
+
+    Dulu jedanya satu untuk seluruh API: setiap nomor dari tablet mana pun
+    membuat semua tablet lain menolak pengunjung berikutnya.
+    """
+    kategori = antrian_siap["kategori"]["A"]
+    kios.create_queue(kategori, perangkat="tablet-a")
+
+    with pytest.raises(BusinessRuleError):
+        kios.create_queue(kategori, perangkat="tablet-a")
+
+    assert kios.sisa_jeda_kios("tablet-b") == 0
+    assert kios.create_queue(kategori, perangkat="tablet-b").queue_number == "A-002"
+    assert 0 < kios.sisa_jeda_kios("tablet-a") <= kios.jeda_kios_detik()
+
+
 def test_petugas_pendaftaran_tidak_ikut_diperlambat(reg_queue, antrian_siap):
     """
     Meja pendaftaran melayani rombongan yang datang bersamaan.

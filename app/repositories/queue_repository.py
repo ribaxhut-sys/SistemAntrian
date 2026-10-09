@@ -11,14 +11,20 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session, selectinload
 
 from app.core import clock
 from app.core.database import transaksi_tulis
-from app.models import Queue, QueueCall, QueueStatus, ServiceCategory
+from app.models import (
+    KioskTicketRequest,
+    Queue,
+    QueueCall,
+    QueueStatus,
+    ServiceCategory,
+)
 
 #: Status yang berarti loket sedang menangani seseorang.
 STATUS_SIBUK = (QueueStatus.CALLED, QueueStatus.SERVING, QueueStatus.PAUSED)
@@ -34,6 +40,20 @@ STATUS_BELUM_SELESAI = (QueueStatus.WAITING, *STATUS_SIBUK)
 AKHIR_HARI = time(23, 59, 59)
 
 
+#: Umur kunci idempotensi tiket anjungan sebelum boleh dibuang. Tablet
+#: mengulang permintaan dalam hitungan detik sampai menit; seminggu sudah
+#: jauh melampaui itu dan menjaga tabelnya tetap kecil.
+UMUR_KUNCI_TIKET = timedelta(days=7)
+
+
+@dataclass(frozen=True)
+class KunciTiket:
+    """Kunci idempotensi permintaan tiket: perangkat pengirim dan UUID-nya."""
+
+    device_id: str
+    request_id: str
+
+
 @dataclass(frozen=True)
 class NomorTerbit:
     """Hasil penerbitan satu nomor antrian."""
@@ -45,7 +65,12 @@ class NomorTerbit:
 
 
 def terbitkan_nomor(
-    *, branch_id: int, category_id: int, prefix: str, tanggal: date | None = None
+    *,
+    branch_id: int,
+    category_id: int,
+    prefix: str,
+    tanggal: date | None = None,
+    kunci: KunciTiket | None = None,
 ) -> NomorTerbit:
     """
     Terbitkan satu nomor antrian baru.
@@ -69,6 +94,11 @@ def terbitkan_nomor(
     Nomor dihitung per cabang, per tanggal, per jenis layanan, sehingga
     otomatis mulai dari 1 lagi setiap hari dan A-001 dapat hidup
     berdampingan dengan B-001.
+
+    `kunci` (permintaan dari anjungan Android) ikut disisipkan di transaksi
+    yang sama. Bila pasangan (device_id, request_id) itu sudah ada,
+    IntegrityError diangkat dan SELURUH transaksi batal — urutan nomor
+    tidak ikut naik, dan pemanggil mengembalikan tiket yang sudah terbit.
     """
     hari = tanggal or clock.today()
     sekarang = clock.now()
@@ -126,6 +156,27 @@ def terbitkan_nomor(
             },
         ).scalar_one()
 
+        if kunci is not None:
+            tabel = KioskTicketRequest.__table__
+            # Kunci kedaluwarsa cukup dibuang sekali sehari, pada nomor
+            # pertama jenis layanan ini — bukan di setiap tiket, karena
+            # transaksi ini memegang kunci penomoran yang ditunggu loket
+            # dan anjungan lain.
+            if urutan == 1:
+                conn.execute(
+                    tabel.delete().where(tabel.c.created_at < sekarang - UMUR_KUNCI_TIKET)
+                )
+            conn.execute(
+                tabel.insert().values(
+                    device_id=kunci.device_id,
+                    request_id=kunci.request_id,
+                    category_id=category_id,
+                    queue_id=queue_id,
+                    created_at=sekarang,
+                    updated_at=sekarang,
+                )
+            )
+
     return NomorTerbit(
         queue_id=queue_id, queue_number=nomor, sequence_number=urutan, queue_date=hari
     )
@@ -151,6 +202,15 @@ class QueueRepository:
     def get_by_id(self, queue_id: int) -> Queue | None:
         return self.session.scalar(
             self._dengan_relasi(sa.select(Queue).where(Queue.id == queue_id))
+        )
+
+    def tiket_anjungan(self, kunci: KunciTiket) -> KioskTicketRequest | None:
+        """Permintaan tiket anjungan yang sudah pernah diterbitkan, bila ada."""
+        return self.session.scalar(
+            sa.select(KioskTicketRequest).where(
+                KioskTicketRequest.device_id == kunci.device_id,
+                KioskTicketRequest.request_id == kunci.request_id,
+            )
         )
 
     def list_menunggu(
@@ -182,6 +242,20 @@ class QueueRepository:
         if category_ids is not None:
             stmt = stmt.where(Queue.category_id.in_(list(category_ids)))
         return list(self.session.scalars(self._dengan_relasi(stmt)))
+
+    def nomor_menunggu(self, branch_id: int, tanggal: date) -> list[str]:
+        """Nomor antrian yang belum dipanggil, urutan sama dengan `list_menunggu`."""
+        return list(
+            self.session.scalars(
+                sa.select(Queue.queue_number)
+                .where(
+                    Queue.branch_id == branch_id,
+                    Queue.queue_date == tanggal,
+                    Queue.status == QueueStatus.WAITING,
+                )
+                .order_by(Queue.created_at, Queue.id)
+            )
+        )
 
     def berikutnya_untuk_dipanggil(
         self,
@@ -430,6 +504,32 @@ class QueueRepository:
     # -----------------------------------------------------------------
     # Pemanggilan
     # -----------------------------------------------------------------
+
+    def klaim_untuk_dipanggil(self, queue_id: int) -> bool:
+        """
+        Ambil satu antrian WAITING untuk loket ini, atau gagal bila sudah diambil.
+
+        Satu UPDATE bersyarat, bukan baca-lalu-tulis. Dua loket dapat sama-
+        sama MELIHAT nomor yang sama menunggu, tetapi hanya satu UPDATE yang
+        menemukan statusnya masih WAITING:
+
+        * PostgreSQL: UPDATE kedua menunggu kunci baris milik yang pertama,
+          lalu menilai ulang WHERE sesudah yang pertama commit — dan tidak
+          menemukan apa pun.
+        * SQLite: penulis diantrekan oleh kunci tulis database; UPDATE
+          kedua berjalan sesudah yang pertama commit dan juga kosong.
+
+        Objek ORM di session sengaja tidak disinkronkan. Pemanggil tetap
+        memindahkan statusnya lewat `_pindah_status` supaya aturan transisi
+        dan kolom pendampingnya tetap ditulis di satu tempat.
+        """
+        hasil = self.session.execute(
+            sa.update(Queue)
+            .where(Queue.id == queue_id, Queue.status == QueueStatus.WAITING)
+            .values(status=QueueStatus.CALLED, updated_at=clock.now())
+            .execution_options(synchronize_session=False)
+        )
+        return hasil.rowcount == 1
 
     def jumlah_pemanggilan(self, queue_id: int) -> int:
         return (

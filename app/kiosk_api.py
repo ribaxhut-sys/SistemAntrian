@@ -131,6 +131,10 @@ BATAS_TEBAKAN_KODE = 10
 SELANG_TEBAKAN_DETIK = 600
 SELANG_TULIS_KONTAK_DETIK = 30
 
+#: Jarak minimal antar-restart API yang diminta tablet, juga umur minimal
+#: proses API sebelum boleh di-restart dari tablet.
+JEDA_RESTART_API_DETIK = 60
+
 
 class KioskServices:
     def __init__(self) -> None:
@@ -153,8 +157,17 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         )
 
     services = services or KioskServices()
+    # Pengaman tambahan saja: menerbitkan satu tiket pada satu waktu di
+    # proses ini, sehingga dua sentuhan beruntun dari tablet yang sama
+    # tidak lolos jeda bersamaan. Perlindungan dari nomor ganda ada di
+    # database (constraint unik device_id + request_id), yang tetap
+    # berlaku walau proses API dinyalakan ulang.
     ticket_lock = threading.Lock()
-    ticket_responses: dict[UUID, dict] = {}
+    #: Waktu (monotonic) API ini mulai, lalu restart terakhir yang diterima.
+    #: Diisi sejak awal: restart mematikan proses ini, sehingga catatan
+    #: restart ikut hilang — yang tersisa sebagai pembatas adalah umur
+    #: proses yang baru menyala.
+    restart_terakhir: list[float] = [time.monotonic()]
     app = FastAPI(
         title="Sistem Antrian CRO Kiosk API",
         version="1.0.0",
@@ -221,6 +234,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 if pemilik.dicabut:
                     raise tolak()
                 catat_kontak(request, pemilik.device_id)
+                request.state.perangkat_terpasang = True
                 return pemilik.device_id
 
         if not hmac.compare_digest(diberikan, token):
@@ -239,6 +253,25 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                     raise tolak()
                 catat_kontak(request, device_id)
         return device_id
+
+    def perangkat_terpercaya(
+        request: Request, device_id: str = Depends(require_token)  # noqa: B008
+    ) -> str:
+        """
+        device_id yang dapat dipercaya, untuk jeda kios dan restart API.
+
+        Hanya device_id perangkat yang DIPASANGKAN yang dapat dipercaya:
+        token perangkat itu sendiri yang menyebut pemiliknya. Pada token
+        bersama, X-Device-Id diisi pengirim sendiri — memakainya sebagai
+        kunci jeda berarti cukup mengganti header untuk lolos dari jeda.
+        Karena itu semua pengguna token bersama berbagi satu kunci kosong.
+
+        Kunci idempotensi tiket tetap memakai X-Device-Id: mengubahnya hanya
+        memisahkan permintaan pengirim itu sendiri, tidak melonggarkan apa pun.
+        """
+        if getattr(request.state, "perangkat_terpasang", False):
+            return device_id
+        return ""
 
     def welcome_media_paths() -> list[Path]:
         kind = services.settings.get("kiosk.welcome_kind", "teks")
@@ -482,14 +515,14 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             for item in services.master.list_categories(only_active=True)
         ]
 
-    @app.get("/v1/kiosk/display", dependencies=[Depends(require_token)])
-    def display():
+    @app.get("/v1/kiosk/display")
+    def display(device_id: str = Depends(perangkat_terpercaya)):  # noqa: B008
         """
-        Keadaan yang dibutuhkan anjungan untuk menerbitkan tiket, tidak lebih.
+        Keadaan ringkas anjungan, termasuk daftar nomor yang masih menunggu.
 
-        Anjungan Android hanya mengambil nomor. Nomor yang sedang dilayani
-        tiap loket dan jumlah yang menunggu adalah urusan papan antrian,
-        sehingga sengaja tidak dikirim ke sini.
+        Daftar ini hanya memuat nomor anonim berstatus WAITING pada hari ini.
+        Nomor yang sedang dipanggil atau dilayani tetap menjadi isi layar
+        antrian, bukan anjungan.
         """
         media = welcome_media_paths()
         apk = info_apk(folder_apk(base_dir()))
@@ -506,7 +539,8 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             ),
             "welcome_media": [item.name for item in media],
             "registration_open": services.queue.pendaftaran_dibuka(),
-            "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(),
+            "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(device_id),
+            "waiting_queue_numbers": services.queue.nomor_menunggu_untuk_layar(),
             # Jam di layar anjungan memakai jam dan zona waktu SERVER, bukan
             # setelan tablet: tablet tanpa internet sering salah jam, dan
             # zona waktunya bisa terpasang di luar Indonesia.
@@ -518,6 +552,45 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "app_latest_version_code": apk.kode_versi if apk else None,
             "app_latest_version_name": apk.nama_versi if apk else None,
         }
+
+    @app.post("/v1/kiosk/restart-api")
+    def restart_api(device_id: str = Depends(perangkat_terpercaya)):  # noqa: B008
+        """
+        Minta restart layanan API dari tablet yang sudah dipasangkan.
+
+        Token bersama ditolak: siapa pun yang memegangnya dapat menyebut
+        dirinya perangkat apa saja. Restart juga dibatasi sekali per
+        JEDA_RESTART_API_DETIK, supaya tablet yang macet — atau orang iseng
+        di depan tablet — tidak dapat membuat API terus-menerus mati.
+        """
+        from app.services.kiosk_server import jadwalkan_mulai_ulang_layanan_api
+
+        if not device_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Restart API hanya untuk tablet yang dipasangkan dengan kode "
+                    "dari Layanan Anjungan."
+                ),
+            )
+        with ticket_lock:
+            sekarang = time.monotonic()
+            if sekarang - restart_terakhir[0] < JEDA_RESTART_API_DETIK:
+                sisa = int(JEDA_RESTART_API_DETIK - (sekarang - restart_terakhir[0])) + 1
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=f"API baru saja dinyalakan. Coba lagi {sisa} detik lagi.",
+                    headers={"Retry-After": str(sisa)},
+                )
+            try:
+                jadwalkan_mulai_ulang_layanan_api()
+            except RuntimeError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+                ) from exc
+            restart_terakhir[:] = [sekarang]
+        logger.warning("Restart API diminta oleh anjungan %s", device_id)
+        return {"status": "restarting", "retry_after_seconds": 5}
 
     @app.get(
         "/v1/kiosk/media/{filename}",
@@ -562,11 +635,22 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             filename=f"AntrianKiosk-{apk.nama_versi}.apk",
         )
 
-    @app.post("/v1/kiosk/tickets", dependencies=[Depends(require_token)])
+    @app.post("/v1/kiosk/tickets")
     def issue_ticket(
         request: TicketRequest,
+        device_id: str = Depends(require_token),  # noqa: B008
+        kunci_jeda: str = Depends(perangkat_terpercaya),  # noqa: B008
         x_app_version_code: Annotated[int | None, Header()] = None,
     ):
+        """
+        Terbitkan satu tiket, idempoten per (device_id, request_id).
+
+        Permintaan ulang dengan pasangan yang sama menerima nomor yang sama
+        — juga sesudah API dinyalakan ulang — dan tidak tertahan jeda
+        maupun penutupan pendaftaran, karena nomornya sudah terbit. Pasangan
+        yang sama dengan category_id lain ditolak 409. Lihat
+        `QueueService.create_queue`.
+        """
         # APK lama salah membaca jawaban API sekarang. Lebih baik nomor
         # tidak terbit sama sekali daripada terbit tanpa tercetak benar.
         if x_app_version_code is None or x_app_version_code < VERSI_MINIMAL:
@@ -578,11 +662,12 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 ),
             )
         with ticket_lock:
-            cached = ticket_responses.get(request.request_id)
-            if cached is not None:
-                return cached
-
-            queue_info = services.queue.create_queue(request.category_id)
+            queue_info = services.queue.create_queue(
+                request.category_id,
+                perangkat=device_id,
+                kunci_jeda=kunci_jeda,
+                request_id=str(request.request_id),
+            )
             ticket_warning = None
             ticket_layout = None
             try:
@@ -617,9 +702,6 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                     "kiosk.cooldown_seconds", 10
                 ),
             }
-            ticket_responses[request.request_id] = response
-            if len(ticket_responses) > 1000:
-                ticket_responses.pop(next(iter(ticket_responses)))
             return response
 
     return app

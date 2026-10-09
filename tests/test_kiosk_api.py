@@ -41,11 +41,21 @@ class _Master:
 class _Queue:
     def __init__(self):
         self.created = 0
+        self.terbit: dict[tuple[str, str | None], QueueInfo] = {}
 
-    def create_queue(self, category_id: int):
+    def create_queue(
+        self, category_id: int, *, perangkat="", request_id=None, kunci_jeda=None
+    ):
         if category_id != 10:
             raise BusinessRuleError("Layanan tidak tersedia.")
+        if (perangkat, request_id) in self.terbit:
+            return self.terbit[(perangkat, request_id)]
         self.created += 1
+        info = self._info()
+        self.terbit[(perangkat, request_id)] = info
+        return info
+
+    def _info(self):
         return QueueInfo(
             id=1,
             queue_number=f"A-{self.created:03}",
@@ -86,8 +96,11 @@ class _Queue:
     def pendaftaran_dibuka(self):
         return True
 
-    def sisa_jeda_kios(self):
+    def sisa_jeda_kios(self, perangkat=""):
         return 0
+
+    def nomor_menunggu_untuk_layar(self):
+        return ["A-002", "A-003"]
 
     def ringkasan_tiket(self, queue_info):
         return SimpleNamespace(sisa_antrian=2)
@@ -237,6 +250,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "welcome_media": [],
         "registration_open": True,
         "cooldown_remaining_seconds": 0,
+        "waiting_queue_numbers": ["A-002", "A-003"],
         "app_min_version_code": VERSI_MINIMAL,
         "app_latest_version_code": None,
         "app_latest_version_name": None,

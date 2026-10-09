@@ -111,6 +111,28 @@ def muat_token(db_path: Path | None = None) -> str:
     return token or muat_token_pengguna()
 
 
+def pastikan_berkas_token() -> str:
+    """
+    Pastikan token yang berlaku tertulis di berkas, lalu kembalikan token itu.
+
+    Tugas Task Scheduler berjalan sebagai SYSTEM dan HANYA membaca berkas:
+    environment dan registry milik akun petugas tidak terlihat olehnya.
+    Token yang datang dari `setx` lama tampak sah di layar Layanan Anjungan,
+    tetapi API yang dinyalakan Windows berhenti dengan "token belum
+    disiapkan". Token baru dibuat bila belum ada sama sekali.
+    """
+    token = muat_token()
+    try:
+        tertulis = path_berkas_token().read_text(encoding="utf-8").strip()
+    except OSError:
+        tertulis = ""
+    if len(token) < PANJANG_TOKEN_MINIMAL:
+        token = token_baru()
+    if tertulis != token:
+        simpan_token(token)
+    return token
+
+
 def muat_api_otomatis() -> bool:
     """
     Apakah aplikasi menyalakan API saat dibuka. Bawaannya YA.
@@ -240,6 +262,10 @@ def _ps_kutip(teks: str) -> str:
     return "'" + teks.replace("'", "''") + "'"
 
 
+#: Selang pemeriksa berkala tugas API, dalam menit.
+MENIT_JAGA_API = 5
+
+
 def _skrip_tugas_pasang(program: str, argumen: list[str], folder_kerja: str) -> str:
     """
     Daftarkan ulang tugas API lalu nyalakan.
@@ -248,7 +274,13 @@ def _skrip_tugas_pasang(program: str, argumen: list[str], folder_kerja: str) -> 
       PostgreSQL sudah menerima sambungan.
     - Batas waktu eksekusi dimatikan: bawaan Task Scheduler membunuh tugas
       sesudah 72 jam, dan server kantor bisa menyala berminggu-minggu.
-    - Dinyalakan ulang tiap menit bila berhenti karena galat.
+    - Dinyalakan ulang tiap menit bila gagal DIMULAI.
+    - Pemicu kedua berulang tiap MENIT_JAGA_API menit tanpa batas. Selama
+      API hidup pemicu itu diabaikan (MultipleInstances IgnoreNew); bila
+      API berhenti di tengah jalan, pemicu berikutnya menyalakannya lagi.
+      Tanpa ini Task Scheduler tidak pernah menyalakan ulang proses yang
+      keluar sesudah berjalan — "RestartCount" hanya berlaku bila tugas
+      gagal dimulai — dan API tetap mati sampai Windows dinyalakan ulang.
     """
     argumen_teks = " ".join(
         f'"{arg}"' if " " in arg else arg for arg in argumen
@@ -260,12 +292,14 @@ $aksi = New-ScheduledTaskAction -Execute {_ps_kutip(program)} `
     -Argument {_ps_kutip(argumen_teks)} -WorkingDirectory {_ps_kutip(folder_kerja)}
 $pemicu = New-ScheduledTaskTrigger -AtStartup
 $pemicu.Delay = 'PT30S'
+$jaga = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+    -RepetitionInterval (New-TimeSpan -Minutes {MENIT_JAGA_API})
 $pelaku = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $setelan = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
     -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
     -MultipleInstances IgnoreNew -StartWhenAvailable `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-Register-ScheduledTask -TaskName $nama -Action $aksi -Trigger $pemicu `
+Register-ScheduledTask -TaskName $nama -Action $aksi -Trigger @($pemicu, $jaga) `
     -Principal $pelaku -Settings $setelan -Force | Out-Null
 try {{
     $layanan = New-Object -ComObject 'Schedule.Service'
@@ -280,6 +314,24 @@ _SKRIP_TUGAS_HAPUS = f"""
 $nama = {_ps_kutip(NAMA_TUGAS)}
 Stop-ScheduledTask -TaskName $nama -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $nama -Confirm:$false -ErrorAction SilentlyContinue
+"""
+
+
+_SKRIP_TUGAS_MULAI_ULANG = f"""
+$nama = {_ps_kutip(NAMA_TUGAS)}
+$tugas = Get-ScheduledTask -TaskName $nama -ErrorAction SilentlyContinue
+if ($null -eq $tugas) {{
+    throw "Tugas '$nama' belum terpasang. Tekan Pasang & nyalakan terlebih dahulu."
+}}
+Stop-ScheduledTask -TaskName $nama -ErrorAction SilentlyContinue
+$batas = (Get-Date).AddSeconds(15)
+while ((Get-ScheduledTask -TaskName $nama).State -eq 'Running') {{
+    if ((Get-Date) -ge $batas) {{
+        throw "API belum berhenti setelah 15 detik."
+    }}
+    Start-Sleep -Milliseconds 250
+}}
+Start-ScheduledTask -TaskName $nama
 """
 
 
@@ -334,6 +386,9 @@ def pasang_layanan_api(folder_kerja: Path) -> None:
     ini juga cara memperbarui tugas sesudah aplikasi dipindah, dan cara
     menyalakan ulang API sesudah token diganti.
     """
+    # Sebelum tugasnya didaftarkan: tugas yang menyala tanpa berkas token
+    # langsung berhenti, dan Windows hanya mencatat kode keluar 2.
+    pastikan_berkas_token()
     program, argumen = perintah_api()
     _jalankan_terangkat(
         _SKRIP_FIREWALL_PASANG
@@ -355,6 +410,61 @@ def hapus_layanan_api() -> None:
     logger.info("Tugas Task Scheduler '%s' dihapus", NAMA_TUGAS)
 
 
+def mulai_ulang_layanan_api() -> None:
+    """Hentikan proses API aktif dan jalankan lagi tugas API yang terpasang."""
+    _jalankan_terangkat(
+        _SKRIP_TUGAS_MULAI_ULANG,
+        pesan_gagal="Izin Administrator ditolak atau API gagal dimulai ulang.",
+    )
+    logger.info("Tugas Task Scheduler '%s' dimulai ulang", NAMA_TUGAS)
+
+
+def jadwalkan_mulai_ulang_layanan_api() -> None:
+    """
+    Jadwalkan restart dari proses API setelah respons HTTP terkirim.
+
+    Hanya bila proses API ini memang dijalankan tugas Task Scheduler. API
+    yang dinyalakan aplikasi petugas sendiri (cadangan bila tugasnya gagal
+    dinyalakan) tidak terhenti oleh Stop-ScheduledTask, dan tugas yang lalu
+    dinyalakan tidak dapat membuka port yang masih dipakainya — tablet akan
+    menerima "berhasil" padahal tidak ada yang dimulai ulang.
+    """
+    try:
+        hasil = _jalankan_powershell(
+            f"(Get-ScheduledTask -TaskName {_ps_kutip(NAMA_TUGAS)} "
+            "-ErrorAction SilentlyContinue).State"
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("Keadaan tugas API tidak dapat dibaca.") from exc
+    keadaan = (hasil.stdout or "").strip()
+    if not keadaan:
+        raise RuntimeError("Tugas API belum terpasang di Task Scheduler.")
+    if keadaan != "Running":
+        raise RuntimeError(
+            "API ini tidak dijalankan oleh Task Scheduler. Mulai ulang dari "
+            "Layanan Anjungan di komputer server."
+        )
+    # Jeda dua detik memberi waktu jawaban HTTP sampai ke tablet sebelum
+    # proses ini dihentikan.
+    script = (
+        "$ErrorActionPreference = 'Stop'\nStart-Sleep -Seconds 2\n"
+        + _SKRIP_TUGAS_MULAI_ULANG
+    )
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
+             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    try:
+        subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+             "Bypass", "-EncodedCommand", encoded],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=flags, close_fds=True,
+        )
+    except OSError as exc:
+        raise RuntimeError("Restart API tidak dapat dijadwalkan.") from exc
+    logger.warning("Restart API anjungan dijadwalkan dari endpoint API")
+
+
 @dataclass(frozen=True)
 class StatusTugas:
     """Keadaan tugas Task Scheduler sebagaimana terbaca tanpa hak Administrator."""
@@ -363,6 +473,9 @@ class StatusTugas:
     terdaftar: bool | None
     program: str = ""
     argumen: str = ""
+    #: Punya pemicu berulang yang menyalakan lagi API yang berhenti.
+    #: Tugas yang dipasang versi lama belum memilikinya.
+    berjaga: bool = False
 
     def cocok_dengan(self, program: str, argumen: list[str]) -> bool:
         """Apakah tugas menunjuk aplikasi yang sedang berjalan ini."""
@@ -382,6 +495,8 @@ def status_tugas_api() -> StatusTugas:
         "if ($null -eq $t) { Write-Output 'TIDAK-ADA'; exit 0 }\n"
         "$a = $t.Actions | Select-Object -First 1\n"
         "Write-Output ('ADA|' + $a.Execute + '|' + $a.Arguments)\n"
+        "$j = @($t.Triggers | Where-Object { $_.Repetition.Interval }).Count\n"
+        "Write-Output ('JAGA|' + $j)\n"
     )
     try:
         result = _jalankan_powershell(script)
@@ -392,8 +507,14 @@ def status_tugas_api() -> StatusTugas:
         return StatusTugas(terdaftar=None)
     if keluaran == "TIDAK-ADA":
         return StatusTugas(terdaftar=False)
-    _, program, argumen = (keluaran.split("|", 2) + ["", ""])[:3]
-    return StatusTugas(terdaftar=True, program=program, argumen=argumen)
+    baris = keluaran.splitlines()
+    _, program, argumen = (baris[0].split("|", 2) + ["", ""])[:3]
+    berjaga = any(
+        b.startswith("JAGA|") and b[5:].strip() not in {"", "0"} for b in baris[1:]
+    )
+    return StatusTugas(
+        terdaftar=True, program=program, argumen=argumen.strip(), berjaga=berjaga
+    )
 
 
 def _nyalakan_tugas() -> bool:
@@ -436,6 +557,7 @@ def mulai_api_otomatis(
     if not muat_api_otomatis():
         logger.info("API anjungan tidak dinyalakan: dimatikan di Layanan Anjungan.")
         return False
+    token_dari_pemanggil = token
     token = (muat_token() if token is None else token).strip()
     if len(token) < PANJANG_TOKEN_MINIMAL:
         logger.warning(
@@ -450,6 +572,15 @@ def mulai_api_otomatis(
         return True
 
     status = status_tugas_api()
+    if status.terdaftar and token_dari_pemanggil is None:
+        # Tugas berjalan sebagai SYSTEM dan hanya membaca berkas token.
+        # Token dari `setx` lama tampak sah di sini, tetapi tugas yang
+        # dinyalakan tanpa berkasnya langsung berhenti ("token belum
+        # disiapkan"). Menulis berkas tidak butuh hak Administrator.
+        try:
+            pastikan_berkas_token()
+        except (OSError, ValueError):
+            logger.warning("Berkas token API anjungan gagal ditulis", exc_info=True)
     if status.terdaftar and _nyalakan_tugas():
         logger.info("API anjungan dinyalakan lewat Task Scheduler.")
         return True

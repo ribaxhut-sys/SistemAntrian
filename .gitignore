@@ -37,6 +37,9 @@ data/mesin.json
 # repositori: peran yang ikut ter-commit akan diwarisi setiap clone, dan
 # komputer berikutnya membuka layar milik komputer sebelumnya.
 data/peran.json
+# Token API anjungan. Rahasia; ditulis aplikasi untuk tugas SYSTEM.
+data/anjungan-token.txt
+data/anjungan-token.txt.tmp
 backup/*.db
 backup/*.zip
 tiket/

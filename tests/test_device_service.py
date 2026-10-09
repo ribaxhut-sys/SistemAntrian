@@ -97,6 +97,20 @@ def test_kontak_dan_printer_tercatat(layanan):
     assert "tidak ditemukan" in info.printer_pesan
 
 
+def test_daftar_anjungan_untuk_indikator_petugas(layanan):
+    """Hanya anjungan yang belum dicabut; layar antrian bukan urusannya."""
+    device_service.catat_kontak("tablet-pintu-01", nama="Pintu")
+    device_service.catat_kontak("tablet-lobi-002", nama="Lobi")
+    device_service.catat_kontak("tv-ruang-tunggu", nama="TV", jenis="layar_antrian")
+    lobi = next(p for p in layanan.daftar() if p.nama == "Lobi")
+    layanan.cabut(lobi.id)
+
+    daftar = device_service.daftar_anjungan()
+
+    assert [p.nama for p in daftar] == ["Pintu"]
+    assert daftar[0].terakhir_terlihat is not None
+
+
 def test_ganti_nama(layanan):
     device_service.catat_kontak(DEVICE, nama="Perangkat baru")
     (info,) = layanan.daftar()

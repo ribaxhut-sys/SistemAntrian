@@ -77,6 +77,34 @@ def test_api_otomatis_mendahulukan_task_scheduler(monkeypatch, tmp_path):
     )
 
 
+def test_api_otomatis_menulis_berkas_token_sebelum_menyalakan_tugas(
+    monkeypatch, tmp_path
+):
+    """
+    Aplikasi yang dibuka menyalakan tugas SYSTEM; tugas itu hanya membaca
+    berkas. Token dari `setx` lama harus sudah tertulis sebelum tugasnya
+    menyala, bukan baru saat petugas membuka Layanan Anjungan.
+    """
+    berkas = tmp_path / kiosk_server.NAMA_BERKAS_TOKEN
+    monkeypatch.setattr(kiosk_server, "_db_path_aktif", lambda: tmp_path / "queue.db")
+    monkeypatch.setenv("ANTRIAN_KIOS_API_TOKEN", "token-dari-setx-lama")
+    monkeypatch.setattr(kiosk_server, "muat_api_otomatis", lambda: True)
+    monkeypatch.setattr(kiosk_server, "api_sudah_berjalan", lambda port: False)
+    monkeypatch.setattr(
+        kiosk_server,
+        "status_tugas_api",
+        lambda: kiosk_server.StatusTugas(True, "python.exe", "-m app.main --kios-api"),
+    )
+
+    def nyalakan():
+        assert berkas.read_text(encoding="utf-8").strip() == "token-dari-setx-lama"
+        return True
+
+    monkeypatch.setattr(kiosk_server, "_nyalakan_tugas", nyalakan)
+
+    assert kiosk_server.mulai_api_otomatis(tmp_path, tmp_path / "logs")
+
+
 def test_api_otomatis_tanpa_token_mencatat_alasannya(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(kiosk_server, "muat_api_otomatis", lambda: True)
 
@@ -116,6 +144,39 @@ def test_token_pendek_ditolak(tmp_path):
         kiosk_server.simpan_token("pendek", tmp_path / "queue.db")
 
 
+def test_token_dari_environment_ditulis_ke_berkas_untuk_system(monkeypatch, tmp_path):
+    """
+    Token dari `setx` lama hanya terlihat oleh akun petugas.
+
+    Tugas Task Scheduler berjalan sebagai SYSTEM dan hanya membaca berkas;
+    tanpa berkas itu API berhenti dengan "token belum disiapkan" walau
+    layar Layanan Anjungan menampilkan token yang sah.
+    """
+    monkeypatch.setattr(kiosk_server, "_db_path_aktif", lambda: tmp_path / "queue.db")
+    monkeypatch.setenv("ANTRIAN_KIOS_API_TOKEN", "token-dari-setx-lama")
+
+    assert kiosk_server.pastikan_berkas_token() == "token-dari-setx-lama"
+
+    berkas = tmp_path / kiosk_server.NAMA_BERKAS_TOKEN
+    assert berkas.read_text(encoding="utf-8").strip() == "token-dari-setx-lama"
+
+
+def test_pasang_layanan_menulis_berkas_token_lebih_dulu(monkeypatch, tmp_path):
+    monkeypatch.setattr(kiosk_server, "_db_path_aktif", lambda: tmp_path / "queue.db")
+    monkeypatch.delenv("ANTRIAN_KIOS_API_TOKEN", raising=False)
+    monkeypatch.setattr(kiosk_server, "muat_token_pengguna", lambda: "")
+    monkeypatch.setattr(
+        kiosk_server.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 0),
+    )
+
+    kiosk_server.pasang_layanan_api(tmp_path)
+
+    token = (tmp_path / kiosk_server.NAMA_BERKAS_TOKEN).read_text(encoding="utf-8")
+    assert len(token.strip()) >= kiosk_server.PANJANG_TOKEN_MINIMAL
+
+
 def _skrip_terangkat(perintah: str) -> str:
     cocok = re.search(r"-EncodedCommand', '([^']+)'", perintah)
     assert cocok is not None
@@ -130,6 +191,7 @@ def test_pasang_layanan_mendaftarkan_tugas_saat_windows_menyala(monkeypatch, tmp
         return subprocess.CompletedProcess(args, 0)
 
     monkeypatch.setattr(kiosk_server.subprocess, "run", jalankan)
+    monkeypatch.setattr(kiosk_server, "_db_path_aktif", lambda: tmp_path / "queue.db")
 
     kiosk_server.pasang_layanan_api(tmp_path)
 
@@ -144,6 +206,10 @@ def test_pasang_layanan_mendaftarkan_tugas_saat_windows_menyala(monkeypatch, tmp
     assert str(tmp_path) in script
     assert "-Profile Private" in script
     assert "Start-ScheduledTask" in script
+    # Pemeriksa berkala: API yang berhenti di tengah jalan dinyalakan lagi.
+    assert "-RepetitionInterval (New-TimeSpan -Minutes 5)" in script
+    assert "-Trigger @($pemicu, $jaga)" in script
+    assert "-MultipleInstances IgnoreNew" in script
 
 
 def test_status_tugas_membaca_perintah_terdaftar(monkeypatch):
@@ -160,6 +226,61 @@ def test_status_tugas_membaca_perintah_terdaftar(monkeypatch):
     assert status.terdaftar is True
     assert status.cocok_dengan("C:\\App\\AntrianCRO.exe", ["--kios-api"])
     assert not status.cocok_dengan("D:\\Lain\\AntrianCRO.exe", ["--kios-api"])
+
+
+def test_status_tugas_mengenali_pemeriksa_berkala(monkeypatch):
+    def jalankan(keluaran):
+        monkeypatch.setattr(
+            kiosk_server.subprocess,
+            "run",
+            lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout=keluaran),
+        )
+        return kiosk_server.status_tugas_api()
+
+    baru = jalankan("ADA|C:\\App\\AntrianCRO.exe|--kios-api\nJAGA|1\n")
+    lama = jalankan("ADA|C:\\App\\AntrianCRO.exe|--kios-api\nJAGA|0\n")
+
+    assert baru.berjaga and baru.cocok_dengan("C:\\App\\AntrianCRO.exe", ["--kios-api"])
+    assert not lama.berjaga, "tugas versi lama harus diminta Pasang ulang"
+
+
+@pytest.mark.parametrize(
+    ("keadaan", "pesan"),
+    [("", "belum terpasang"), ("Ready", "tidak dijalankan oleh Task Scheduler")],
+)
+def test_restart_dari_tablet_hanya_untuk_api_milik_tugas(monkeypatch, keadaan, pesan):
+    """API yang dinyalakan aplikasi petugas tidak terhenti oleh Stop-ScheduledTask."""
+    monkeypatch.setattr(
+        kiosk_server.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout=keadaan),
+    )
+    dijalankan = []
+    monkeypatch.setattr(
+        kiosk_server.subprocess, "Popen", lambda *a, **k: dijalankan.append(a)
+    )
+
+    with pytest.raises(RuntimeError, match=pesan):
+        kiosk_server.jadwalkan_mulai_ulang_layanan_api()
+    assert dijalankan == []
+
+
+def test_restart_dari_tablet_memakai_skrip_mulai_ulang_yang_sama(monkeypatch):
+    monkeypatch.setattr(
+        kiosk_server.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout="Running\n"),
+    )
+    dijalankan = []
+    monkeypatch.setattr(
+        kiosk_server.subprocess, "Popen", lambda args, **k: dijalankan.append(args)
+    )
+
+    kiosk_server.jadwalkan_mulai_ulang_layanan_api()
+
+    skrip = base64.b64decode(dijalankan[0][-1]).decode("utf-16le")
+    assert skrip.startswith("$ErrorActionPreference = 'Stop'\nStart-Sleep -Seconds 2\n")
+    assert skrip.endswith(kiosk_server._SKRIP_TUGAS_MULAI_ULANG)
 
 
 def test_status_tugas_tidak_ada(monkeypatch):

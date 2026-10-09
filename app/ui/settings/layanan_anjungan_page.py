@@ -40,13 +40,16 @@ from app.services.apk_anjungan import (
     info_apk,
 )
 from app.services.kiosk_server import (
+    MENIT_JAGA_API,
     StatusTugas,
     _firewall_sudah_siap,
     api_sudah_berjalan,
     hapus_layanan_api,
+    mulai_ulang_layanan_api,
     muat_api_otomatis,
     muat_token,
     pasang_layanan_api,
+    pastikan_berkas_token,
     perintah_api,
     port_api,
     simpan_api_otomatis,
@@ -267,16 +270,15 @@ class LayananAnjunganPage(QWidget):
         grid_tablet.addLayout(baris_alamat, 0, 2)
 
         grid_tablet.addWidget(QLabel("Token"), 1, 0)
-        # Token yang belum ada langsung dibuat DAN disimpan. Token yang
-        # hanya ditampilkan tetapi belum tersimpan membuat API saat Windows
-        # menyala berhenti dengan "token belum disiapkan".
-        token = muat_token()
-        if len(token) < 8:
-            token = token_baru()
-            try:
-                simpan_token(token)
-            except (OSError, ValueError):
-                pass
+        # Token yang belum ada langsung dibuat DAN disimpan ke berkas — juga
+        # token lama dari `setx` yang hanya ada di environment akun ini.
+        # Token yang hanya ditampilkan tetapi belum tertulis di berkas
+        # membuat API saat Windows menyala (akun SYSTEM) berhenti dengan
+        # "token belum disiapkan".
+        try:
+            token = pastikan_berkas_token()
+        except (OSError, ValueError):
+            token = muat_token()
         self.token = QLineEdit(token)
         self.token.setReadOnly(True)
         self.token.setEchoMode(QLineEdit.EchoMode.Password)
@@ -313,9 +315,12 @@ class LayananAnjunganPage(QWidget):
         tindakan = QHBoxLayout()
         self.pasang = tombol(_teks_tombol(LABEL_PASANG), variant="primary")
         self.pasang.clicked.connect(self._pasang)
+        self.mulai_ulang = tombol("Restart API")
+        self.mulai_ulang.clicked.connect(self._mulai_ulang)
         self.hapus = tombol("Hapus dari Task Scheduler", variant="danger")
         self.hapus.clicked.connect(self._hapus)
         tindakan.addWidget(self.pasang)
+        tindakan.addWidget(self.mulai_ulang)
         tindakan.addWidget(self.hapus)
         tindakan.addStretch()
         layout.addLayout(tindakan)
@@ -370,9 +375,17 @@ class LayananAnjunganPage(QWidget):
                 _TINDAKAN,
                 f"Menunjuk lokasi lain ({tugas.program}) — tekan Pasang ulang",
             )
+        elif not tugas.berjaga:
+            self.baris_tugas.setel(
+                _BELUM,
+                "Terdaftar tanpa pemeriksa berkala — tekan Pasang ulang agar "
+                "API yang berhenti dinyalakan lagi",
+            )
         else:
             self.baris_tugas.setel(
-                _NORMAL, "Terdaftar — menyala sendiri 30 detik setelah Windows menyala"
+                _NORMAL,
+                "Terdaftar — menyala 30 detik setelah Windows menyala, "
+                f"dinyalakan lagi bila mati (diperiksa tiap {MENIT_JAGA_API} menit)",
             )
 
         if status.firewall:
@@ -430,6 +443,7 @@ class LayananAnjunganPage(QWidget):
         terpasang = bool(tugas.terdaftar)
         label_pasang = LABEL_PASANG_ULANG if terpasang else LABEL_PASANG
         self.pasang.setText(_teks_tombol(label_pasang))
+        self.mulai_ulang.setEnabled(terpasang)
         self.hapus.setEnabled(terpasang)
         perlu = not (status.api and terpasang and status.firewall)
         self.catatan.setVisible(perlu)
@@ -446,6 +460,7 @@ class LayananAnjunganPage(QWidget):
         """Satu pekerja baru per tugas, supaya hasil tugas lama tidak tertukar."""
         self._sibuk = True
         self.pasang.setEnabled(False)
+        self.mulai_ulang.setEnabled(False)
         self.hapus.setEnabled(False)
         pekerja = _Pekerja(self)
         self._pekerja = pekerja
@@ -453,11 +468,13 @@ class LayananAnjunganPage(QWidget):
         def selesai(hasil: object) -> None:
             self._sibuk = False
             self.pasang.setEnabled(True)
+            self.mulai_ulang.setEnabled(True)
             sesudah(hasil)
 
         def gagal(exc: object) -> None:
             self._sibuk = False
             self.pasang.setEnabled(True)
+            self.mulai_ulang.setEnabled(True)
             tampilkan_peringatan(self, str(exc), "Layanan Anjungan")
             self.muat_ulang()
 
@@ -481,6 +498,28 @@ class LayananAnjunganPage(QWidget):
 
         for baris in (self.baris_api, self.baris_tugas, self.baris_firewall):
             baris.setel(_MEMERIKSA, "Menunggu izin Administrator…")
+        self._jalankan(kerja, self._tampilkan_status)
+
+    def _mulai_ulang(self) -> None:
+        def kerja() -> StatusLayanan:
+            mulai_ulang_layanan_api()
+            # Tugas baru perlu waktu singkat untuk membuka port API sebelum
+            # statusnya dibaca kembali.
+            import time
+
+            for _ in range(20):
+                if api_sudah_berjalan(port_api()):
+                    break
+                time.sleep(0.5)
+            status = periksa_status()
+            if not status.api:
+                raise RuntimeError(
+                    "API sudah dimulai ulang, tetapi belum merespons. "
+                    "Periksa logs\\kiosk-api.log."
+                )
+            return status
+
+        self.baris_api.setel(_MEMERIKSA, "Memulai ulang API…")
         self._jalankan(kerja, self._tampilkan_status)
 
     def _buat_paket_suara(self) -> None:

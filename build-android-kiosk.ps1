@@ -49,8 +49,13 @@ if (-not (Test-Path $gradleWrapper)) {
 
 Push-Location (Join-Path $PSScriptRoot "android-kiosk")
 try {
-    & $gradleWrapper --no-daemon clean assembleDebug
-    if ($LASTEXITCODE -ne 0) { throw "Build APK gagal." }
+    # Gradle/javac menulis peringatan biasa ke stderr. Dengan "Stop", PowerShell 5.1
+    # menganggapnya error bila keluaran dialirkan ke pipa; yang menentukan hanya kode keluar.
+    $ErrorActionPreference = "Continue"
+    & $gradleWrapper --no-daemon clean assembleDebug 2>&1 | ForEach-Object { "$_" }
+    $gradleExit = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
+    if ($gradleExit -ne 0) { throw "Build APK gagal (kode $gradleExit)." }
 }
 finally {
     Pop-Location

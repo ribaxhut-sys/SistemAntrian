@@ -180,6 +180,26 @@ def catat_kontak(
         baris.versi_kode = int(versi_kode or 0)
 
 
+def daftar_anjungan() -> list[PerangkatInfo]:
+    """
+    Anjungan yang belum dicabut, untuk indikator di jendela petugas.
+
+    Tanpa hak akses: setiap petugas berhak tahu tablet di depan pintu
+    sedang tersambung atau tidak. Isinya hanya nama dan waktu terakhir
+    terlihat — token tidak pernah ikut keluar dari sini.
+    """
+    with session_scope() as session:
+        return [
+            _info(baris)
+            for baris in session.scalars(
+                sa.select(KioskDevice).where(
+                    KioskDevice.jenis == JENIS_ANJUNGAN,
+                    KioskDevice.dicabut_pada.is_(None),
+                )
+            )
+        ]
+
+
 def catat_printer(device_id: str, ok: bool, pesan: str = "") -> None:
     with session_scope() as session:
         baris = session.scalar(sa.select(KioskDevice).where(KioskDevice.device_id == device_id))

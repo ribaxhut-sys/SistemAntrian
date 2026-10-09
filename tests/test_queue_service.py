@@ -1209,3 +1209,113 @@ def test_peran_tanpa_hak_tidak_dapat_menutup_pendaftaran(auth, antrian_siap, per
 
     with pytest.raises(AuthorizationError):
         QueueService(auth).tutup_pendaftaran()
+
+
+# ---------------------------------------------------------------------
+# Pemanggilan bersamaan dari beberapa loket
+# ---------------------------------------------------------------------
+
+def _riwayat_panggilan() -> dict[int, list[int]]:
+    """queue_id -> daftar loket yang tercatat memanggilnya."""
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import QueueCall
+
+    riwayat: dict[int, list[int]] = {}
+    with session_scope() as s:
+        for baris in s.scalars(sa.select(QueueCall)):
+            riwayat.setdefault(baris.queue_id, []).append(baris.counter_id)
+    return riwayat
+
+
+def test_loket_lain_yang_menyela_tidak_membuat_nomor_dipanggil_dua_kali(
+    cro_queue, antrian_siap, terbitkan, monkeypatch
+):
+    """
+    Celah yang dulu ada di PostgreSQL, dibuat terjadi dengan pasti.
+
+    Loket A sudah membaca A-001 sebagai calon. Tepat sebelum A mengklaimnya,
+    loket B memanggil dan mendapat A-001. Klaim A harus gagal dan jatuh ke
+    A-002 — bukan memanggil A-001 untuk kedua kalinya.
+    """
+    from app.repositories.queue_repository import QueueRepository
+
+    terbitkan("A", 2)
+    loket_a, loket_b = antrian_siap["loket"][:2]
+
+    asli = QueueRepository.list_menunggu
+    hasil_b = []
+
+    def dibaca_lalu_disela(self, *args, **kwargs):
+        calon = asli(self, *args, **kwargs)
+        if not hasil_b:
+            hasil_b.append(None)
+            hasil_b[0] = cro_queue.call_next(loket_b)
+        return calon
+
+    monkeypatch.setattr(QueueRepository, "list_menunggu", dibaca_lalu_disela)
+
+    hasil_a = cro_queue.call_next(loket_a)
+
+    assert hasil_b[0].queue_number == "A-001"
+    assert hasil_a.queue_number == "A-002"
+    assert _riwayat_panggilan() == {hasil_b[0].id: [loket_b], hasil_a.id: [loket_a]}
+
+
+def test_klaim_kalah_tanpa_calon_lain_menjawab_tidak_ada_antrian(
+    cro_queue, antrian_siap, terbitkan, monkeypatch
+):
+    from app.repositories.queue_repository import QueueRepository
+
+    terbitkan("A", 1)
+    loket_a, loket_b = antrian_siap["loket"][:2]
+
+    asli = QueueRepository.list_menunggu
+    disela = []
+
+    def dibaca_lalu_disela(self, *args, **kwargs):
+        calon = asli(self, *args, **kwargs)
+        if not disela:
+            disela.append(None)  # dipasang dulu: panggilan B juga lewat sini
+            disela[0] = cro_queue.call_next(loket_b)
+        return calon
+
+    monkeypatch.setattr(QueueRepository, "list_menunggu", dibaca_lalu_disela)
+
+    with pytest.raises(BusinessRuleError, match="Tidak ada antrian"):
+        cro_queue.call_next(loket_a)
+
+    assert _riwayat_panggilan() == {disela[0].id: [loket_b]}
+
+
+def test_loket_memanggil_bersamaan_mendapat_nomor_berbeda(
+    cro_queue, antrian_siap, terbitkan
+):
+    """Tiga loket menekan "Panggil Berikutnya" pada saat yang sama, berulang kali."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    putaran = 4
+    loket = antrian_siap["loket"][:3]
+    terbitkan("A", len(loket) * putaran)
+
+    for _ in range(putaran):
+        serentak = threading.Barrier(len(loket))
+
+        def panggil(counter_id: int):
+            serentak.wait()
+            return cro_queue.call_next(counter_id)
+
+        with ThreadPoolExecutor(max_workers=len(loket)) as pool:
+            hasil = list(pool.map(panggil, loket))
+
+        assert len({info.id for info in hasil}) == len(loket)
+        # Selesaikan supaya loket boleh memanggil lagi di putaran berikutnya.
+        for info in hasil:
+            cro_queue.start_service(info.id)
+            cro_queue.complete(info.id)
+
+    riwayat = _riwayat_panggilan()
+    assert len(riwayat) == len(loket) * putaran
+    assert all(len(pemanggil) == 1 for pemanggil in riwayat.values())

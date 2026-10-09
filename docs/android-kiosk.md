@@ -73,8 +73,36 @@ kiosk welcome text or cycles the configured image/video files from
 `media\kiosk`.
 
 If the tablet loses its connection after requesting a number, use **Ulangi
-permintaan tiket**. The APK reuses the same request ID, so the running server
-returns the existing ticket instead of issuing a second number.
+permintaan tiket**. The APK reuses the same request ID, so the server returns
+the existing ticket instead of issuing a second number.
+
+### Idempotensi `POST /v1/kiosk/tickets`
+
+* Kuncinya pasangan **(`device_id`, `request_id`)**, disimpan di tabel
+  `kiosk_ticket_request` dengan constraint unik. `device_id` diambil dari
+  token perangkat hasil pasang; untuk token bersama lama, dari header
+  `X-Device-Id` (kosong bila tidak dikirim — semua perangkat tanpa
+  identitas berbagi satu ruang kunci).
+* Kunci disisipkan **dalam transaksi yang sama** dengan baris antriannya.
+  Nomor tidak pernah terbit tanpa kuncinya, sehingga permintaan ulang tetap
+  menerima nomor yang sama sesudah API dinyalakan ulang.
+* Permintaan ulang diperiksa sebelum jeda dan sebelum status pendaftaran:
+  nomornya sudah terbit, jadi tetap dijawab 200 dengan tiket yang sama.
+* `request_id` yang sama dengan **`category_id` berbeda** ditolak
+  **409** ("Permintaan tiket ini sudah dipakai untuk jenis layanan lain").
+  Tablet harus membuat `request_id` baru untuk setiap pilihan layanan.
+* Permintaan kembar yang tiba bersamaan: yang kalah membentur constraint
+  unik, transaksinya batal seluruhnya (nomor urut tidak ikut naik), lalu
+  menerima tiket milik yang menang.
+* Kunci yang berumur lebih dari 7 hari dibuang saat tiket baru terbit.
+
+### Jeda antar-pengambilan
+
+`kiosk.cooldown_seconds` berlaku **per perangkat** (`device_id`): nomor yang
+baru terbit di Tablet A tidak menahan Tablet B. `cooldown_remaining_seconds`
+pada `GET /v1/kiosk/display` juga dihitung untuk perangkat penanya. Catatan
+jeda disimpan di memori API, bukan di database — jedanya hanya beberapa
+detik dan API yang dinyalakan ulang butuh waktu lebih lama dari itu.
 
 ## Memasangkan tablet dengan kode
 

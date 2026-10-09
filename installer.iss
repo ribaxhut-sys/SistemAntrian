@@ -1,5 +1,5 @@
 #define MyAppName "Sistem Antrian CRO"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Sistem Antrian CRO"
 #define MyAppExeName "AntrianCRO.exe"
 #define SourceDir GetEnv("ANTRIAN_SOURCE_DIR")
@@ -18,7 +18,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 OutputDir={#OutputDir}
-OutputBaseFilename=AntrianCRO-Setup-1.0.0
+OutputBaseFilename=AntrianCRO-Setup-1.0.2
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2
 SolidCompression=yes
@@ -30,6 +30,11 @@ Name: "desktopicon"; Description: "Buat ikon di Desktop"; GroupDescription: "Iko
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+; DLL PySide6/Qt lama dapat tertinggal ketika versi aplikasi diperbarui dan
+; membuat QtWidgets gagal dimuat bersama DLL dari versi lain.
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Icons]
 Name: "{group}\Sistem Antrian CRO"; Filename: "{app}\{#MyAppExeName}"

@@ -81,6 +81,13 @@ try {
         $exe = Join-Path $bundle "AntrianCRO.exe"
         if (-not (Test-Path $exe)) { throw "AntrianCRO.exe tidak ditemukan di hasil build." }
 
+        # Qt6Core.dll wajib memakai icuuc.dll milik Windows. Salinan ICU lain
+        # di dalam bundel membuat PySide6.QtWidgets gagal dimuat.
+        $icuAsing = Get-ChildItem -Path $bundle -Recurse -Include "icuuc*.dll", "icuin*.dll", "icudt*.dll"
+        if ($icuAsing) {
+            throw "Bundel berisi DLL ICU yang bentrok dengan Qt: $($icuAsing.FullName -join ', ')"
+        }
+
         # APK anjungan ikut terpasang di sebelah .exe, supaya server hasil
         # installer dapat langsung membagikannya ke tablet.
         $apkSource = Join-Path $PSScriptRoot "apk"
@@ -122,7 +129,7 @@ finally {
     Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$installer = Join-Path $output "AntrianCRO-Setup-1.0.0.exe"
+$installer = Join-Path $output "AntrianCRO-Setup-1.0.2.exe"
 if (-not (Test-Path $installer)) { throw "Installer tidak ditemukan: $installer" }
 
 Write-Host ""

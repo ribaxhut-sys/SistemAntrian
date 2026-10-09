@@ -79,6 +79,14 @@ public final class MainActivity extends Activity {
     private static final int GREEN = Color.rgb(5, 150, 105);
     private static final int GREY = Color.rgb(203, 213, 225);
     private static final int RED = Color.rgb(220, 38, 38);
+    private static final int KOLOM_NOMOR_MENUNGGU = 4;
+    private static final int BARIS_NOMOR_MENUNGGU = 3;
+    private static final int NOMOR_PER_HALAMAN =
+            KOLOM_NOMOR_MENUNGGU * BARIS_NOMOR_MENUNGGU;
+    // Lama layar "NOMOR ANDA" sebelum kembali ke menu layanan. Sengaja tidak
+    // mengikuti jeda kios: jeda itu tetap berlaku lewat tombol yang mati dan
+    // hitung mundur "Mohon tunggu", pengunjung tidak perlu menunggu di sini.
+    private static final long LAMA_HASIL_MS = 4000L;
     private static final int DISCOVERY_PORT = 8766;
     private static final String DISCOVERY_REQUEST = "SISTEMANTRIAN_KIOSK_DISCOVER_V1";
     private static final String DISCOVERY_RESPONSE = "SISTEMANTRIAN_KIOSK_SERVER_V1";
@@ -91,8 +99,11 @@ public final class MainActivity extends Activity {
     private final List<View> ticketChoices = new ArrayList<>();
     private SharedPreferences preferences;
     private FrameLayout contentSlot;
+    private FrameLayout resultSlot;
+    private TextView resultTitle;
     private TextView displayTitle;
     private TextView timeLabel;
+    private TextView connectionLabel;
     private TextView welcome;
     private FrameLayout mediaSlot;
     private TextView invitation;
@@ -112,6 +123,10 @@ public final class MainActivity extends Activity {
     private int mediaIndex;
     private String welcomeFallbackText = "";
     private String displayedWelcomeText = "";
+    private final List<String> waitingQueueNumbers = new ArrayList<>();
+    private int waitingPage;
+    private int displayFailures;
+    private long lastDisplaySuccessMillis;
 
     private static final class Category {
         final int id;
@@ -213,6 +228,19 @@ public final class MainActivity extends Activity {
         }
     };
 
+    private final Runnable waitingPageRotation = new Runnable() {
+        @Override
+        public void run() {
+            if (!showingResult && !showingConfirmation
+                    && waitingQueueNumbers.size() > NOMOR_PER_HALAMAN) {
+                int halaman = jumlahHalamanMenunggu();
+                waitingPage = (waitingPage + 1) % halaman;
+                tampilkanNomorMenunggu();
+            }
+            handler.postDelayed(this, 4500);
+        }
+    };
+
     private final Runnable nextSlide = () -> advanceSlide();
 
     @Override
@@ -279,6 +307,15 @@ public final class MainActivity extends Activity {
         timeLabel = text("", 14, MUTED, false);
         timeLabel.setGravity(Gravity.CENTER);
         infoPanel.addView(timeLabel);
+        connectionLabel = text("● Server belum diatur", 12, MUTED, true);
+        connectionLabel.setGravity(Gravity.CENTER);
+        connectionLabel.setPadding(dp(12), dp(4), dp(12), dp(4));
+        connectionLabel.setBackground(rounded(Color.rgb(226, 232, 240), dp(16)));
+        LinearLayout.LayoutParams connectionParams =
+                new LinearLayout.LayoutParams(-2, -2);
+        connectionParams.gravity = Gravity.CENTER;
+        connectionParams.topMargin = dp(4);
+        infoPanel.addView(connectionLabel, connectionParams);
         mediaSlot = new FrameLayout(this);
         welcome = text(
                 "Sentuh salah satu layanan di bawah untuk mengambil nomor.",
@@ -315,12 +352,30 @@ public final class MainActivity extends Activity {
         kioskPanel.addView(contentSlot, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(kioskPanel, new LinearLayout.LayoutParams(-1, 0, 1));
 
+        // Tiga bagian yang setara membuat pilihan layanan berada tepat di
+        // tengah layar, sehingga mudah dijangkau pada tablet yang dipasang
+        // tegak. Hasil nomor mendapat ruang sendiri di bagian bawah.
+        LinearLayout resultPanel = panel();
+        resultPanel.setPadding(dp(14), dp(10), dp(14), dp(12));
+        resultPanel.setBackground(roundedGradient(
+                Color.rgb(255, 255, 255), Color.rgb(240, 253, 250),
+                dp(18), GREEN, dp(3)));
+        resultTitle = text("DAFTAR NOMOR MENUNGGU", 17, INK, true);
+        resultTitle.setGravity(Gravity.CENTER);
+        resultTitle.setLetterSpacing(0.06f);
+        resultPanel.addView(resultTitle);
+        resultSlot = new FrameLayout(this);
+        resultPanel.addView(resultSlot, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(resultPanel, new LinearLayout.LayoutParams(-1, 0, 1));
+
         setContentView(root);
         showCategories();
         handler.removeCallbacks(clock);
         handler.post(clock);
         handler.removeCallbacks(displayRefresh);
         handler.postDelayed(displayRefresh, 5000);
+        handler.removeCallbacks(waitingPageRotation);
+        handler.postDelayed(waitingPageRotation, 4500);
     }
 
     private LinearLayout panel() {
@@ -353,9 +408,21 @@ public final class MainActivity extends Activity {
     }
 
     private void loadDisplay() {
-        if (!hasServerConfig()) return;
+        if (!hasServerConfig()) {
+            tampilkanStatusKoneksi("Server belum diatur", Color.rgb(100, 116, 139),
+                    Color.rgb(226, 232, 240));
+            return;
+        }
+        if (lastDisplaySuccessMillis == 0L) {
+            tampilkanStatusKoneksi("Menghubungkan…", Color.rgb(30, 64, 175),
+                    Color.rgb(219, 234, 254));
+        }
         request("GET", "/v1/kiosk/display", null, json -> {
             JSONObject display = json.getJSONObject("data");
+            displayFailures = 0;
+            lastDisplaySuccessMillis = System.currentTimeMillis();
+            tampilkanStatusKoneksi("Terhubung ke server", Color.rgb(6, 95, 70),
+                    Color.rgb(209, 250, 229));
             String title = display.optString("title", "").trim();
             if (!title.isEmpty()) displayTitle.setText(title);
             JSONArray mediaRows = display.optJSONArray("welcome_media");
@@ -384,6 +451,20 @@ public final class MainActivity extends Activity {
                 applyWelcomeText(welcomeFallbackText);
             }
             registrationOpen = display.optBoolean("registration_open", true);
+            JSONArray waitingRows = display.optJSONArray("waiting_queue_numbers");
+            List<String> terbaru = new ArrayList<>();
+            if (waitingRows != null) {
+                for (int i = 0; i < waitingRows.length(); i++) {
+                    String nomor = waitingRows.optString(i, "").trim();
+                    if (!nomor.isEmpty()) terbaru.add(nomor);
+                }
+            }
+            if (!waitingQueueNumbers.equals(terbaru)) {
+                waitingQueueNumbers.clear();
+                waitingQueueNumbers.addAll(terbaru);
+                waitingPage = 0;
+            }
+            if (!showingResult && !showingConfirmation) tampilkanNomorMenunggu();
             minVersionCode = display.optInt("app_min_version_code", 0);
             latestVersionCode = display.optInt("app_latest_version_code", 0);
             latestVersionName = display.isNull("app_latest_version_name")
@@ -411,10 +492,32 @@ public final class MainActivity extends Activity {
             }
             updateAvailability();
         }, message -> {
+            displayFailures++;
+            if (displayFailures >= 2) {
+                String terakhir = lastDisplaySuccessMillis == 0L ? ""
+                        : " · terakhir " + jamLokal(lastDisplaySuccessMillis);
+                tampilkanStatusKoneksi("Server tidak terhubung" + terakhir,
+                        Color.rgb(153, 27, 27), Color.rgb(254, 226, 226));
+            } else {
+                tampilkanStatusKoneksi("Menghubungkan…", Color.rgb(30, 64, 175),
+                        Color.rgb(219, 234, 254));
+            }
             if (hint != null && !showingConfirmation && !showingResult) {
                 setHint("Server tidak merespons. Periksa jaringan atau Pengaturan.", "salah");
             }
         });
+    }
+
+    private String jamLokal(long waktu) {
+        SimpleDateFormat format = new SimpleDateFormat("HH:mm:ss", new Locale("id", "ID"));
+        return format.format(new Date(waktu));
+    }
+
+    private void tampilkanStatusKoneksi(String status, int warnaTeks, int warnaLatar) {
+        if (connectionLabel == null) return;
+        connectionLabel.setText("● " + status);
+        connectionLabel.setTextColor(warnaTeks);
+        connectionLabel.setBackground(rounded(warnaLatar, dp(16)));
     }
 
     private boolean hasServerConfig() {
@@ -425,6 +528,8 @@ public final class MainActivity extends Activity {
 
     private void showServerPlaceholder(String message) {
         if (contentSlot == null) return;
+        tampilkanStatusKoneksi("Server belum diatur", Color.rgb(100, 116, 139),
+                Color.rgb(226, 232, 240));
         showingConfirmation = false;
         showingResult = false;
         ticketChoices.clear();
@@ -640,6 +745,10 @@ public final class MainActivity extends Activity {
     }
 
     private void showCategories() {
+        showCategories(false);
+    }
+
+    private void showCategories(boolean keepResult) {
         // Panel unduhan tidak boleh tertimpa penyegaran daftar layanan.
         if (updating) return;
         if (updateRequired) {
@@ -647,7 +756,10 @@ public final class MainActivity extends Activity {
             return;
         }
         showingConfirmation = false;
-        showingResult = false;
+        if (!keepResult) {
+            showingResult = false;
+            showIdleResult();
+        }
         ticketChoices.clear();
         invitation.setText("AMBIL NOMOR ANTRIAN ANDA");
         contentSlot.removeAllViews();
@@ -708,6 +820,72 @@ public final class MainActivity extends Activity {
         updateAvailability();
     }
 
+    private void showIdleResult() {
+        tampilkanNomorMenunggu();
+    }
+
+    private int jumlahHalamanMenunggu() {
+        return Math.max(1, (waitingQueueNumbers.size() + NOMOR_PER_HALAMAN - 1)
+                / NOMOR_PER_HALAMAN);
+    }
+
+    /** Daftar baca-saja seluruh nomor yang masih menunggu pada hari ini. */
+    private void tampilkanNomorMenunggu() {
+        if (resultSlot == null) return;
+        resultSlot.removeAllViews();
+        int halaman = jumlahHalamanMenunggu();
+        waitingPage = Math.min(waitingPage, halaman - 1);
+        if (resultTitle != null) {
+            resultTitle.setText("DAFTAR NOMOR MENUNGGU"
+                    + (halaman > 1 ? "  " + (waitingPage + 1) + "/" + halaman : ""));
+        }
+
+        if (waitingQueueNumbers.isEmpty()) {
+            TextView kosong = text("Belum ada nomor yang menunggu.", 16, MUTED, false);
+            kosong.setGravity(Gravity.CENTER);
+            kosong.setPadding(dp(12), dp(8), dp(12), dp(8));
+            resultSlot.addView(kosong, new FrameLayout.LayoutParams(-1, -1));
+            return;
+        }
+
+        // Baris LinearLayout berbobot, bukan GridLayout: GridLayout yang
+        // dibungkus wrap_content membagi lebar 0 ke kolom berbobot, sehingga
+        // ubin nomor selebar nol dan daftarnya tampak kosong.
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setGravity(Gravity.CENTER_VERTICAL);
+        page.setPadding(dp(2), dp(2), dp(2), dp(2));
+
+        int awal = waitingPage * NOMOR_PER_HALAMAN;
+        int akhir = Math.min(awal + NOMOR_PER_HALAMAN, waitingQueueNumbers.size());
+        LinearLayout baris = null;
+        for (int index = awal; index < akhir; index++) {
+            if ((index - awal) % KOLOM_NOMOR_MENUNGGU == 0) {
+                baris = new LinearLayout(this);
+                baris.setOrientation(LinearLayout.HORIZONTAL);
+                page.addView(baris, new LinearLayout.LayoutParams(-1, -2));
+            }
+            TextView nomor = text(waitingQueueNumbers.get(index), 19, INK, true);
+            nomor.setGravity(Gravity.CENTER);
+            nomor.setPadding(dp(4), dp(4), dp(4), dp(4));
+            nomor.setBackground(rounded(Color.rgb(226, 232, 240), dp(12)));
+            pasangAutoFit(nomor, 12, 20, 1);
+            baris.addView(nomor, selNomorMenunggu());
+        }
+        // Baris terakhir diisi sel kosong supaya ubinnya tetap selebar ubin lain.
+        int sisa = (akhir - awal) % KOLOM_NOMOR_MENUNGGU;
+        for (int i = 0; baris != null && sisa > 0 && i < KOLOM_NOMOR_MENUNGGU - sisa; i++) {
+            baris.addView(new View(this), selNomorMenunggu());
+        }
+        resultSlot.addView(page, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private LinearLayout.LayoutParams selNomorMenunggu() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        params.setMargins(dp(3), dp(3), dp(3), dp(3));
+        return params;
+    }
+
     private void fitCategoryCards(ScrollView scroll, GridLayout grid, int columns) {
         int count = grid.getChildCount();
         int rows = (count + columns - 1) / columns;
@@ -748,16 +926,8 @@ public final class MainActivity extends Activity {
             int textColor, Runnable action, int columns) {
         TextView card = text(label, 19, textColor, true);
         card.setGravity(Gravity.CENTER);
-        card.setMaxLines(3);
         card.setIncludeFontPadding(false);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            card.setAutoSizeTextTypeUniformWithConfiguration(
-                    12, 24, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
-        } else {
-            card.setTextSize(
-                    android.util.TypedValue.COMPLEX_UNIT_SP,
-                    Math.max(12f, Math.min(24f, 19f * uiScale)));
-        }
+        pasangAutoFit(card, 12, 24, 3);
         card.setPadding(dp(8), dp(6), dp(8), dp(6));
         card.setBackground(stateBackground(background, darker(background), dp(16)));
         card.setElevation(dp(3));
@@ -768,7 +938,12 @@ public final class MainActivity extends Activity {
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = 0;
         params.height = dp(Math.min(110, Math.max(72, cellWidth * 7 / 10)));
+        // Tanpa FILL, GridLayout dapat menyelaraskan baseline TextView.
+        // Kartu dua atau tiga baris lalu tampak lebih rendah daripada kartu
+        // satu baris pada baris grid yang sama.
+        params.rowSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
         params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
+        params.setGravity(Gravity.FILL);
         params.setMargins(dp(4), dp(4), dp(4), dp(4));
         grid.addView(card, params);
         card.setOnClickListener(v -> action.run());
@@ -853,7 +1028,7 @@ public final class MainActivity extends Activity {
                     List<String> receipt = new ArrayList<>();
                     for (int i = 0; i < lines.length(); i++) receipt.add(lines.getString(i));
                     JSONObject layout = ticket.optJSONObject("ticket_layout");
-                    showResult(number, issued.name, cooldownSeconds);
+                    showResult(number, issued.name);
                     updateAvailability();
                     UsbEscPosPrinter.print(this, number, receipt, layout, message -> {
                         boolean printed = message.contains("tercetak");
@@ -872,22 +1047,27 @@ public final class MainActivity extends Activity {
     }
 
     private void showRetry() {
-        contentSlot.removeAllViews();
+        if (resultTitle != null) resultTitle.setText("PERMINTAAN TIKET BELUM SELESAI");
+        resultSlot.removeAllViews();
         LinearLayout retry = new LinearLayout(this);
         retry.setGravity(Gravity.CENTER);
         Button button = actionButton("ULANGI PERMINTAAN TIKET", true);
         button.setOnClickListener(v -> issueTicket());
         retry.addView(button, new LinearLayout.LayoutParams(-1, dp(64)));
-        contentSlot.addView(retry);
+        resultSlot.addView(retry, new FrameLayout.LayoutParams(-1, -1));
     }
 
-    private void showResult(String number, String service, int cooldown) {
+    private void showResult(String number, String service) {
         showingConfirmation = false;
         showingResult = true;
         boolean testTicket = number.startsWith("UJI-");
-        invitation.setText(testTicket
-                ? "TIKET UJI — BUKAN NOMOR RESMI"
-                : "NOMOR ANDA SUDAH TERBIT");
+        // Daftar layanan tetap berada di panel tengah. Selama hasil tampil,
+        // tombolnya dinonaktifkan agar satu pengunjung tidak mengambil dua
+        // nomor sebelum tiket pertama selesai dicetak.
+        showCategories(true);
+        if (resultTitle != null) {
+            resultTitle.setText(testTicket ? "TIKET UJI" : "NOMOR ANDA SUDAH TERBIT");
+        }
         LinearLayout result = new LinearLayout(this);
         result.setOrientation(LinearLayout.VERTICAL);
         result.setGravity(Gravity.CENTER);
@@ -901,11 +1081,11 @@ public final class MainActivity extends Activity {
         TextView serviceView = text(service, 20, INK, true);
         serviceView.setGravity(Gravity.CENTER);
         result.addView(serviceView);
-        contentSlot.removeAllViews();
-        contentSlot.addView(result);
+        resultSlot.removeAllViews();
+        resultSlot.addView(result, new FrameLayout.LayoutParams(-1, -1));
         setHint("Nomor sudah terbit. Tiket sedang dicetak…", "hasil");
         handler.removeCallbacks(resultTimeout);
-        handler.postDelayed(resultTimeout, Math.max(8000L, cooldown * 1000L));
+        handler.postDelayed(resultTimeout, LAMA_HASIL_MS);
     }
 
     private final Runnable resultTimeout = () -> {
@@ -915,10 +1095,10 @@ public final class MainActivity extends Activity {
     };
 
     private void updateAvailability() {
-        if (ticketChoices.isEmpty() || showingConfirmation || showingResult) return;
+        if (ticketChoices.isEmpty() || showingConfirmation) return;
         long seconds = Math.max(0L,
                 (readyAtMillis - System.currentTimeMillis() + 999L) / 1000L);
-        boolean enabled = registrationOpen && seconds == 0 && !requestInFlight;
+        boolean enabled = registrationOpen && seconds == 0 && !requestInFlight && !showingResult;
         for (View choice : ticketChoices) {
             if (choice.isEnabled() == enabled) continue;
             choice.setEnabled(enabled);
@@ -929,6 +1109,7 @@ public final class MainActivity extends Activity {
             ((TextView) choice).setTextColor(
                     enabled ? Color.WHITE : Color.rgb(100, 116, 139));
         }
+        if (showingResult) return;
         if (!registrationOpen) {
             setHint("Pendaftaran nomor antrian sedang ditutup sementara.", "tunggu");
         } else if (seconds > 0) {
@@ -1319,6 +1500,11 @@ public final class MainActivity extends Activity {
         detectPrinter.setOnClickListener(v ->
                 printerStatus.setText(UsbEscPosPrinter.detect(this)));
         fields.addView(detectPrinter);
+        Button restartApi = smallButton("Restart API server");
+        restartApi.setEnabled(hasServerConfig());
+        restartApi.setOnClickListener(v -> confirmRestartApi(restartApi));
+        restartApi.setPadding(dp(8), dp(8), dp(8), dp(8));
+        fields.addView(restartApi);
         boolean newer = latestVersionCode > appVersionCode();
         TextView versionInfo = text("Versi aplikasi " + appVersionName()
                 + (newer ? " · versi " + latestVersionName + " tersedia di server"
@@ -1333,9 +1519,10 @@ public final class MainActivity extends Activity {
                 .setMessage("Pencarian server otomatis bekerja di jaringan lokal yang sama. Printer ESC/POS USB dideteksi otomatis; tidak perlu memasang driver Android terpisah.")
                 .setView(fields)
                 .setPositiveButton("Simpan", null)
-                .setNeutralButton("Uji terbitkan & cetak", null)
+                .setNeutralButton("Uji cetak", null)
                 .setNegativeButton("Batal", null).create();
         dialog.setOnShowListener(d -> {
+            rapikanTombolDialog(dialog);
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                     String address = server.getText().toString().trim();
                     String apiToken = token.getText().toString().trim();
@@ -1381,6 +1568,32 @@ public final class MainActivity extends Activity {
         dialog.show();
     }
 
+    private void confirmRestartApi(Button restartButton) {
+        new AlertDialog.Builder(this)
+                .setTitle("Restart API server?")
+                .setMessage("Anjungan akan terputus beberapa detik. Permintaan ini "
+                        + "hanya berlaku untuk tablet yang sudah terhubung ke server.")
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Restart API", (dialog, which) -> {
+                    restartButton.setEnabled(false);
+                    restartButton.setText("Memulai ulang API…");
+                    request("POST", "/v1/kiosk/restart-api", null, json -> {
+                        Toast.makeText(this, "API sedang dimulai ulang.", Toast.LENGTH_LONG).show();
+                        handler.postDelayed(() -> {
+                            restartButton.setEnabled(true);
+                            restartButton.setText("Restart API server");
+                            loadCategories();
+                            loadDisplay();
+                        }, 5500);
+                    }, error -> {
+                        restartButton.setEnabled(true);
+                        restartButton.setText("Restart API server");
+                        Toast.makeText(this, "Restart API gagal: " + error,
+                                Toast.LENGTH_LONG).show();
+                    });
+                }).show();
+    }
+
     private void discoverServer(Consumer<String> found, Consumer<String> failed) {
         worker.execute(() -> {
             try (DatagramSocket socket = new DatagramSocket()) {
@@ -1423,12 +1636,12 @@ public final class MainActivity extends Activity {
     }
 
     private void confirmTestTicket() {
-        new AlertDialog.Builder(this)
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Mode uji — bukan antrean resmi")
                 .setMessage("Aplikasi akan menampilkan dan mencetak tiket contoh UJI-001. Nomor ini tidak dikirim ke server, tidak disimpan, dan tidak mengubah urutan nomor resmi.")
                 .setNegativeButton("Batal", null)
-                .setPositiveButton("Tampilkan & cetak", (dialog, which) -> {
-                    showResult("UJI-001", "CONTOH PELAYANAN", 8);
+                .setPositiveButton("Tampilkan & cetak", (clickedDialog, which) -> {
+                    showResult("UJI-001", "CONTOH PELAYANAN");
                     setHint("Tiket uji dicetak tanpa mengubah antrean resmi.", "konfirmasi");
                     UsbEscPosPrinter.printTest(this, message -> {
                         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
@@ -1437,26 +1650,37 @@ public final class MainActivity extends Activity {
                         }
                     });
                 })
-                .show();
+                .create();
+        dialog.setOnShowListener(ignored -> rapikanTombolDialog(dialog));
+        dialog.show();
     }
 
     private Button smallButton(String value) {
         Button button = new Button(this);
         button.setText(value);
-        button.setTextSize(17 * uiScale);
         button.setTextColor(MUTED);
         button.setAllCaps(false);
-        button.setPadding(0, 0, 0, 0);
+        button.setGravity(Gravity.CENTER);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setPadding(dp(6), dp(3), dp(6), dp(3));
+        pasangAutoFit(button, 10, 17, 1);
         return button;
     }
 
     private Button actionButton(String label, boolean primary) {
         Button button = new Button(this);
         button.setText(label);
-        button.setTextSize((primary ? 17 : 15) * uiScale);
         button.setTextColor(primary ? Color.WHITE : MUTED);
         button.setAllCaps(false);
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setGravity(Gravity.CENTER);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setPadding(dp(12), dp(4), dp(12), dp(4));
+        pasangAutoFit(button, 12, primary ? 18 : 16, 2);
         button.setBackground(stateBackground(
                 primary ? GREEN : Color.WHITE,
                 primary ? Color.rgb(4, 120, 87) : Color.rgb(241, 245, 249),
@@ -1466,6 +1690,70 @@ public final class MainActivity extends Activity {
                     Color.rgb(148, 163, 184), dp(14), dp(2)));
         }
         return button;
+    }
+
+    private void rapikanTombolDialog(AlertDialog dialog) {
+        int[] tombol = {
+                AlertDialog.BUTTON_POSITIVE,
+                AlertDialog.BUTTON_NEGATIVE,
+                AlertDialog.BUTTON_NEUTRAL,
+        };
+        for (int id : tombol) {
+            Button button = dialog.getButton(id);
+            if (button == null) continue;
+            button.setAllCaps(false);
+            button.setGravity(Gravity.CENTER);
+            button.setPadding(dp(8), dp(4), dp(8), dp(4));
+            pasangAutoFit(button, 10, 14, 1);
+        }
+    }
+
+    /**
+     * Sesuaikan ukuran tulisan terhadap kotak tombol/kartu yang sebenarnya.
+     * Autosize bawaan tersedia mulai Android 8. Tablet Android 7 tetap
+     * didukung dengan fallback yang mengecilkan teks satu tingkat demi satu
+     * tingkat hanya bila tulisan lebih tinggi dari ruang yang tersedia.
+     */
+    private void pasangAutoFit(TextView view, int minimumSp, int maksimumSp, int maksimumBaris) {
+        view.setMaxLines(maksimumBaris);
+        view.setEllipsize(TextUtils.TruncateAt.END);
+        view.setIncludeFontPadding(false);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            int minimum = Math.max(1, Math.round(minimumSp * uiScale));
+            int maksimum = Math.max(minimum, Math.round(maksimumSp * uiScale));
+            view.setAutoSizeTextTypeUniformWithConfiguration(
+                    minimum, maksimum, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
+            return;
+        }
+
+        view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, maksimumSp * uiScale);
+        view.addOnLayoutChangeListener((changed, left, top, right, bottom,
+                                        oldLeft, oldTop, oldRight, oldBottom) ->
+                kecilkanTeksBilaPerlu(view, minimumSp, maksimumBaris));
+        view.post(() -> kecilkanTeksBilaPerlu(view, minimumSp, maksimumBaris));
+    }
+
+    private void kecilkanTeksBilaPerlu(TextView view, int minimumSp, int maksimumBaris) {
+        if (view.getWidth() <= 0 || view.getHeight() <= 0 || view.getLayout() == null) return;
+        android.text.Layout layout = view.getLayout();
+        int tinggiTersedia = view.getHeight() - view.getPaddingTop() - view.getPaddingBottom();
+        boolean terpotong = false;
+        for (int baris = 0; baris < layout.getLineCount(); baris++) {
+            if (layout.getEllipsisCount(baris) > 0) {
+                terpotong = true;
+                break;
+            }
+        }
+        boolean tidakMuat = layout.getLineCount() > maksimumBaris
+                || layout.getHeight() > tinggiTersedia || terpotong;
+        if (!tidakMuat) return;
+
+        float kepadatanFont = getResources().getDisplayMetrics().scaledDensity;
+        float minimumPx = minimumSp * uiScale * kepadatanFont;
+        float ukuranBerikutnya = Math.max(minimumPx, view.getTextSize() - kepadatanFont);
+        if (ukuranBerikutnya >= view.getTextSize()) return;
+        view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ukuranBerikutnya);
+        view.requestLayout();
     }
 
     private TextView text(String value, int size, int color, boolean bold) {
