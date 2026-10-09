@@ -258,6 +258,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "welcome_kind": "teks",
         "welcome_slide_seconds": 10,
         "welcome_media": [],
+        "welcome_media_files": [],
         "registration_open": True,
         "cooldown_remaining_seconds": 0,
         "waiting_queue_numbers": ["A-002", "A-003"],
@@ -325,6 +326,11 @@ def test_display_follows_media_playlist(tmp_path, monkeypatch, daftar, harapan):
     isi = client.get("/v1/kiosk/display", headers=headers).json()
 
     assert isi["welcome_media"] == harapan
+    assert [berkas["name"] for berkas in isi["welcome_media_files"]] == harapan
+    for berkas in isi["welcome_media_files"]:
+        info = (folder / berkas["name"]).stat()
+        assert berkas["size"] == 3
+        assert berkas["modified_ms"] == int(info.st_mtime * 1000)
     # Berkas yang tidak dicentang juga tidak dilayani.
     for nama in {"a.jpg", "b.mp4", "c.mp4"} - set(harapan):
         assert client.get(f"/v1/kiosk/media/{nama}", headers=headers).status_code == 404

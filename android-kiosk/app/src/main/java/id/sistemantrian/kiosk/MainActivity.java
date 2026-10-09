@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
+import android.database.Cursor;
 import android.content.pm.PackageInstaller;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
@@ -21,6 +22,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -35,6 +37,8 @@ import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -45,6 +49,9 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.DatagramPacket;
@@ -56,9 +63,11 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.TimeZone;
 import java.util.Objects;
 import java.util.Set;
@@ -147,6 +156,29 @@ public final class MainActivity extends Activity {
     private int waitingPage;
     private int displayFailures;
     private long lastDisplaySuccessMillis;
+
+    // Sumber media sambutan, dipilih per tablet di Pengaturan. "server":
+    // daftar putar dari server, disalin ke tablet dan diputar dari salinan
+    // itu (sebelum salinannya lengkap, diputar langsung lewat jaringan).
+    // "tablet": berkas di folder media tablet ini sendiri, tanpa jaringan.
+    private static final String SUMBER_MEDIA = "sumber_media";
+    private static final String SUMBER_SERVER = "server";
+    private static final String SUMBER_TABLET = "tablet";
+    private static final int PILIH_MEDIA_TABLET = 41;
+    private static final long CADANGAN_RUANG_BYTES = 50L * 1024 * 1024;
+    private static final long JEDA_UNDUH_ULANG_MS = 120_000L;
+    // Unduhan media terpisah dari `worker`, supaya video besar tidak
+    // menahan permintaan API (tiket, display) di belakangnya.
+    private final ExecutorService pengunduh = Executors.newSingleThreadExecutor();
+    private String serverKind = "teks";
+    private List<String> serverMedia = new ArrayList<>();
+    /** Nama berkas server -> nama salinannya (ukuran-waktu-nama). */
+    private final Map<String, String> kunciSalinan = new HashMap<>();
+    /** Kunci salinan yang sedang diunduh; hanya disentuh di thread UI. */
+    private final Set<String> sedangDiunduh = new HashSet<>();
+    private final Map<String, Long> unduhGagalPada = new HashMap<>();
+    /** Video yang sedang diputar langsung dari server, belum dari salinan. */
+    private String videoLewatJaringan;
 
     private static final class Loket {
         final String nama;
@@ -261,7 +293,13 @@ public final class MainActivity extends Activity {
     private final Runnable displayRefresh = new Runnable() {
         @Override
         public void run() {
-            if (contentSlot != null && hasServerConfig()) loadDisplay();
+            if (contentSlot != null && hasServerConfig()) {
+                loadDisplay();
+            } else if (contentSlot != null && sumberTablet()) {
+                // Berkas yang baru disalin lewat USB ikut terbaca.
+                terapkanMediaSambutan();
+                terapkanBarisLoket();
+            }
             handler.postDelayed(this, 5000);
         }
     };
@@ -310,6 +348,10 @@ public final class MainActivity extends Activity {
             registerReceiver(installReceiver, installFilter);
         }
         buildHome();
+        if (sumberTablet()) {
+            terapkanMediaSambutan();
+            terapkanBarisLoket();
+        }
         if (hasServerConfig()) {
             loadCategories();
             loadDisplay();
@@ -485,28 +527,27 @@ public final class MainActivity extends Activity {
                     media.add(mediaRows.getString(i));
                 }
             }
-            String kind = display.optString("welcome_kind", "teks");
-            String signature = kind + "|" + TextUtils.join("|", media);
-            welcomeFallbackText = display.optString("welcome_text", "");
-            adaMediaSambutan = isMediaKind(kind) && !media.isEmpty();
-            if (!signature.equals(mediaSignature)) {
-                mediaSignature = signature;
-                mediaGagal = false;
-                berkasGagal.clear();
-                handler.removeCallbacks(cobaMediaLagi);
-                welcomeMedia = media;
-                welcomeSlideSeconds = Math.max(
-                        1, display.optInt("welcome_slide_seconds", 10));
-                mediaIndex = 0;
-                applyWelcomeText(welcomeFallbackText);
-                if (isMediaKind(kind) && !welcomeMedia.isEmpty()) {
-                    showWelcomeMedia(0);
-                } else {
-                    handler.removeCallbacks(nextSlide);
+            // Server lama tidak mengirim ukuran dan waktu ubah: tanpa itu
+            // salinan tidak dapat diperiksa, jadi media tetap diputar lewat
+            // jaringan seperti sebelumnya.
+            kunciSalinan.clear();
+            JSONArray infoRows = display.optJSONArray("welcome_media_files");
+            if (infoRows != null) {
+                for (int i = 0; i < infoRows.length(); i++) {
+                    JSONObject row = infoRows.optJSONObject(i);
+                    if (row == null) continue;
+                    String nama = row.optString("name", "");
+                    if (nama.isEmpty()) continue;
+                    kunciSalinan.put(nama, row.optLong("size", 0L) + "-"
+                            + row.optLong("modified_ms", 0L) + "-" + namaAman(nama));
                 }
-            } else if (!isMediaKind(kind) || welcomeMedia.isEmpty()) {
-                applyWelcomeText(welcomeFallbackText);
             }
+            serverKind = display.optString("welcome_kind", "teks");
+            serverMedia = media;
+            welcomeFallbackText = display.optString("welcome_text", "");
+            welcomeSlideSeconds = Math.max(1, display.optInt("welcome_slide_seconds", 10));
+            terapkanMediaSambutan();
+            if (!sumberTablet()) sinkronkanSalinan();
             registrationOpen = display.optBoolean("registration_open", true);
             JSONArray waitingRows = display.optJSONArray("waiting_queue_numbers");
             List<String> terbaru = new ArrayList<>();
@@ -576,6 +617,11 @@ public final class MainActivity extends Activity {
             }
             if (hint != null && !showingConfirmation && !showingResult) {
                 setHint("Server tidak merespons. Periksa jaringan atau Pengaturan.", "salah");
+            }
+            // Media di folder tablet tidak bergantung pada server.
+            if (sumberTablet()) {
+                terapkanMediaSambutan();
+                terapkanBarisLoket();
             }
         });
     }
@@ -701,11 +747,13 @@ public final class MainActivity extends Activity {
         String signature = mediaSignature + "|" + filename;
         handler.removeCallbacks(nextSlide);
         pemutarVideo = null;
+        videoLewatJaringan = null;
         mediaSlot.removeAllViews();
-        String lower = filename.toLowerCase();
         String url = mediaUrl(filename);
-        if (lower.endsWith(".mp4") || lower.endsWith(".mkv")
-                || lower.endsWith(".webm") || lower.endsWith(".avi")) {
+        // Folder tablet: selalu berkas lokal. Server: salinan bila sudah
+        // lengkap, bila belum diputar langsung lewat jaringan.
+        File lokal = berkasMedia(filename);
+        if (isVideo(filename)) {
             VideoView video = new VideoView(this);
             video.setBackgroundColor(Color.BLACK);
             mediaSlot.addView(video, new FrameLayout.LayoutParams(-1, -1));
@@ -722,7 +770,12 @@ public final class MainActivity extends Activity {
                 player.start();
                 mediaBerhasilDiputar(filename);
             });
-            video.setVideoURI(Uri.parse(url), authHeaders());
+            if (lokal != null) {
+                video.setVideoURI(Uri.fromFile(lokal));
+            } else {
+                videoLewatJaringan = filename;
+                video.setVideoURI(Uri.parse(url), authHeaders());
+            }
         } else {
             ImageView image = new ImageView(this);
             image.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -730,7 +783,7 @@ public final class MainActivity extends Activity {
             mediaSlot.addView(image, new FrameLayout.LayoutParams(-1, -1));
             worker.execute(() -> {
                 try {
-                    byte[] bytes = downloadMedia(url);
+                    byte[] bytes = lokal != null ? bacaBerkas(lokal) : downloadMedia(url);
                     Bitmap bitmap = decodeImage(bytes, mediaSlot.getWidth(), mediaSlot.getHeight());
                     if (bitmap == null) {
                         throw new IllegalStateException("Gambar sambutan tidak dapat dibaca.");
@@ -847,6 +900,243 @@ public final class MainActivity extends Activity {
         } finally {
             if (connection != null) connection.disconnect();
         }
+    }
+
+    private static final String[] EKSTENSI_VIDEO = {".mp4", ".mkv", ".webm", ".avi"};
+    private static final String[] EKSTENSI_MEDIA = {
+            ".mp4", ".mkv", ".webm", ".avi",
+            ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif"};
+
+    private static boolean berakhiran(String filename, String[] ekstensi) {
+        String lower = filename.toLowerCase(Locale.ROOT);
+        for (String item : ekstensi) {
+            if (lower.endsWith(item)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isVideo(String filename) {
+        return berakhiran(filename, EKSTENSI_VIDEO);
+    }
+
+    /** Nama berkas tanpa pemisah folder, untuk dipakai di folder tablet. */
+    private static String namaAman(String filename) {
+        String nama = filename.replaceAll("[\\\\/:*?\"<>|\\x00-\\x1f]", "_").trim();
+        return nama.isEmpty() || nama.startsWith(".") ? "_" + nama : nama;
+    }
+
+    private boolean sumberTablet() {
+        return preferences != null
+                && SUMBER_TABLET.equals(preferences.getString(SUMBER_MEDIA, SUMBER_SERVER));
+    }
+
+    /**
+     * Folder media milik tablet ini: Android/data/id.sistemantrian.kiosk/files/Media.
+     * Terlihat dari komputer lewat kabel USB (MTP) tanpa izin penyimpanan.
+     */
+    private File folderMediaTablet() {
+        File folder = getExternalFilesDir("Media");
+        if (folder == null) folder = new File(getFilesDir(), "media-tablet");
+        //noinspection ResultOfMethodCallIgnored
+        folder.mkdirs();
+        return folder;
+    }
+
+    /** Salinan media server; tersembunyi, diatur sepenuhnya oleh aplikasi. */
+    private File folderSalinan() {
+        File folder = new File(getFilesDir(), "media-server");
+        //noinspection ResultOfMethodCallIgnored
+        folder.mkdirs();
+        return folder;
+    }
+
+    /** Gambar dan video di folder tablet, urut nama seperti di Windows. */
+    private List<File> daftarMediaTablet() {
+        List<File> hasil = new ArrayList<>();
+        File[] isi = folderMediaTablet().listFiles();
+        if (isi == null) return hasil;
+        for (File item : isi) {
+            String nama = item.getName();
+            if (item.isFile() && !nama.startsWith(".") && berakhiran(nama, EKSTENSI_MEDIA)) {
+                hasil.add(item);
+            }
+        }
+        hasil.sort((a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+        return hasil;
+    }
+
+    /** Berkas lokal untuk diputar, atau null bila harus lewat jaringan. */
+    private File berkasMedia(String filename) {
+        if (sumberTablet()) return new File(folderMediaTablet(), filename);
+        String kunci = kunciSalinan.get(filename);
+        if (kunci == null) return null;
+        File salinan = new File(folderSalinan(), kunci);
+        return salinan.isFile() ? salinan : null;
+    }
+
+    /**
+     * Pilih daftar putar menurut sumber media, lalu mulai ulang putaran bila
+     * isinya berubah. Pemanggil yang lalu memanggil terapkanBarisLoket().
+     */
+    private void terapkanMediaSambutan() {
+        if (mediaSlot == null) return;
+        boolean tablet = sumberTablet();
+        List<String> media = new ArrayList<>();
+        String signature;
+        boolean putar;
+        if (tablet) {
+            StringBuilder tanda = new StringBuilder(SUMBER_TABLET);
+            for (File item : daftarMediaTablet()) {
+                media.add(item.getName());
+                tanda.append('|').append(item.getName()).append(':')
+                        .append(item.length()).append(':').append(item.lastModified());
+            }
+            signature = tanda.toString();
+            putar = !media.isEmpty();
+        } else {
+            media.addAll(serverMedia);
+            List<String> kunci = new ArrayList<>();
+            for (String nama : media) kunci.add(String.valueOf(kunciSalinan.get(nama)));
+            signature = serverKind + "|" + TextUtils.join("|", media)
+                    + "|" + TextUtils.join("|", kunci);
+            putar = isMediaKind(serverKind) && !media.isEmpty();
+        }
+        adaMediaSambutan = putar;
+        if (!signature.equals(mediaSignature)) {
+            mediaSignature = signature;
+            mediaGagal = false;
+            berkasGagal.clear();
+            handler.removeCallbacks(cobaMediaLagi);
+            welcomeMedia = media;
+            mediaIndex = 0;
+            applyWelcomeText(welcomeFallbackText);
+            if (putar) {
+                showWelcomeMedia(0);
+            } else {
+                handler.removeCallbacks(nextSlide);
+            }
+        } else if (!putar) {
+            applyWelcomeText(welcomeFallbackText);
+        }
+    }
+
+    /**
+     * Unduh media daftar putar server yang belum punya salinan, satu per
+     * satu, lalu buang salinan yang tidak lagi ada di daftar putar.
+     */
+    private void sinkronkanSalinan() {
+        Set<String> dipakai = new HashSet<>();
+        for (String nama : serverMedia) {
+            String kunci = kunciSalinan.get(nama);
+            if (kunci == null) continue;
+            dipakai.add(kunci);
+            if (sedangDiunduh.contains(kunci) || new File(folderSalinan(), kunci).isFile()) {
+                continue;
+            }
+            Long gagal = unduhGagalPada.get(kunci);
+            if (gagal != null
+                    && System.currentTimeMillis() - gagal < JEDA_UNDUH_ULANG_MS) {
+                continue;
+            }
+            sedangDiunduh.add(kunci);
+            String url = mediaUrl(nama);
+            pengunduh.execute(() -> {
+                boolean berhasil;
+                try {
+                    unduhSalinan(url, kunci);
+                    berhasil = true;
+                } catch (Exception e) {
+                    berhasil = false;
+                }
+                boolean selesai = berhasil;
+                runOnUiThread(() -> salinanSelesai(nama, kunci, selesai));
+            });
+        }
+        if (kunciSalinan.isEmpty() && !serverMedia.isEmpty()) return;  // server lama
+        // Antre di belakang unduhan, jadi tidak membuang berkas yang sedang ditulis.
+        pengunduh.execute(() -> {
+            File[] isi = folderSalinan().listFiles();
+            if (isi == null) return;
+            for (File item : isi) {
+                String nama = item.getName();
+                String kunci = nama.endsWith(".part")
+                        ? nama.substring(0, nama.length() - 5) : nama;
+                if (!dipakai.contains(kunci)) {
+                    //noinspection ResultOfMethodCallIgnored
+                    item.delete();
+                }
+            }
+        });
+    }
+
+    /** Berjalan di thread pengunduh. */
+    private void unduhSalinan(String url, String kunci) throws Exception {
+        File folder = folderSalinan();
+        File tujuan = new File(folder, kunci);
+        File sementara = new File(folder, kunci + ".part");
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(30000);
+            applyHeaders(connection);
+            if (connection.getResponseCode() >= 400) {
+                throw new IllegalStateException("Media tidak dapat diunduh.");
+            }
+            long panjang = connection.getContentLengthLong();
+            if (panjang > 0 && folder.getUsableSpace() < panjang + CADANGAN_RUANG_BYTES) {
+                throw new IllegalStateException("Ruang penyimpanan tablet tidak cukup.");
+            }
+            try (InputStream input = connection.getInputStream();
+                 OutputStream output = new FileOutputStream(sementara)) {
+                byte[] buffer = new byte[64 * 1024];
+                int length;
+                while ((length = input.read(buffer)) != -1) {
+                    output.write(buffer, 0, length);
+                }
+            }
+            if (panjang > 0 && sementara.length() != panjang) {
+                throw new IllegalStateException("Unduhan media terputus.");
+            }
+            if (!sementara.renameTo(tujuan)) {
+                throw new IllegalStateException("Salinan media tidak dapat disimpan.");
+            }
+        } finally {
+            if (connection != null) connection.disconnect();
+            if (sementara.exists()) {
+                //noinspection ResultOfMethodCallIgnored
+                sementara.delete();
+            }
+        }
+    }
+
+    private void salinanSelesai(String nama, String kunci, boolean berhasil) {
+        sedangDiunduh.remove(kunci);
+        if (!berhasil) {
+            unduhGagalPada.put(kunci, System.currentTimeMillis());
+            return;
+        }
+        unduhGagalPada.remove(kunci);
+        // Satu video yang diulang terus tidak pernah berganti berkas: pindahkan
+        // sekarang ke salinannya, supaya tidak lagi memakai jaringan.
+        if (!sumberTablet() && nama.equals(videoLewatJaringan)
+                && welcomeMedia.size() == 1 && isCurrentMedia(
+                        mediaSignature + "|" + nama, nama)) {
+            showWelcomeMedia(mediaIndex);
+        }
+    }
+
+    private static byte[] bacaBerkas(File berkas) throws Exception {
+        if (berkas.length() > 32L * 1024 * 1024) {
+            throw new IllegalStateException("Ukuran media melebihi 32 MB.");
+        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int length;
+        try (InputStream input = new FileInputStream(berkas)) {
+            while ((length = input.read(buffer)) != -1) output.write(buffer, 0, length);
+        }
+        return output.toByteArray();
     }
 
     private Bitmap decodeImage(byte[] bytes, int width, int height) {
@@ -1751,6 +2041,35 @@ public final class MainActivity extends Activity {
         detectPrinter.setOnClickListener(v ->
                 printerStatus.setText(UsbEscPosPrinter.detect(this)));
         fields.addView(detectPrinter);
+        TextView mediaLabel = text("Sumber media sambutan", 13, INK, true);
+        mediaLabel.setPadding(0, dp(12), 0, 0);
+        fields.addView(mediaLabel);
+        RadioGroup sumber = new RadioGroup(this);
+        RadioButton dariServer = new RadioButton(this);
+        dariServer.setId(View.generateViewId());
+        dariServer.setText("Daftar putar server (disalin ke tablet)");
+        RadioButton dariTablet = new RadioButton(this);
+        dariTablet.setId(View.generateViewId());
+        dariTablet.setText("Folder media di tablet ini");
+        sumber.addView(dariServer);
+        sumber.addView(dariTablet);
+        sumber.check(sumberTablet() ? dariTablet.getId() : dariServer.getId());
+        fields.addView(sumber);
+        TextView mediaStatus = text(ringkasanMedia(), 12, MUTED, false);
+        fields.addView(mediaStatus);
+        Button kelolaMedia = smallButton("Kelola media tablet");
+        kelolaMedia.setOnClickListener(v -> showMediaTablet());
+        fields.addView(kelolaMedia);
+        // Berlaku seketika, terpisah dari tombol Simpan: tidak menyentuh
+        // alamat server atau token.
+        sumber.setOnCheckedChangeListener((group, checkedId) -> {
+            preferences.edit().putString(SUMBER_MEDIA,
+                    checkedId == dariTablet.getId() ? SUMBER_TABLET : SUMBER_SERVER).apply();
+            terapkanMediaSambutan();
+            terapkanBarisLoket();
+            if (!sumberTablet() && hasServerConfig()) sinkronkanSalinan();
+            mediaStatus.setText(ringkasanMedia());
+        });
         Button restartApi = smallButton("Restart API server");
         restartApi.setEnabled(hasServerConfig());
         restartApi.setOnClickListener(v -> confirmRestartApi(restartApi));
@@ -1768,7 +2087,7 @@ public final class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Hubungkan ke server antrean")
                 .setMessage("Pencarian server otomatis bekerja di jaringan lokal yang sama. Printer ESC/POS USB dideteksi otomatis; tidak perlu memasang driver Android terpisah.")
-                .setView(fields)
+                .setView(gulungan(fields))
                 .setPositiveButton("Simpan", null)
                 .setNeutralButton("Uji cetak", null)
                 .setNegativeButton("Batal", null).create();
@@ -1817,6 +2136,179 @@ public final class MainActivity extends Activity {
             });
         });
         dialog.show();
+    }
+
+    /** Dialog pengaturan makin panjang; tablet kecil perlu menggulungnya. */
+    private ScrollView gulungan(View isi) {
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(isi);
+        return scroll;
+    }
+
+    private String ringkasanMedia() {
+        if (sumberTablet()) {
+            int jumlah = daftarMediaTablet().size();
+            return jumlah == 0
+                    ? "Folder media tablet masih kosong; panel menampilkan teks sambutan."
+                    : jumlah + " berkas di folder tablet, diputar urut nama berkas.";
+        }
+        if (serverMedia.isEmpty()) return "Daftar putar server kosong atau belum dimuat.";
+        if (kunciSalinan.isEmpty()) {
+            return "Server belum mengirim info berkas; media diputar lewat jaringan.";
+        }
+        int siap = 0;
+        for (String nama : serverMedia) {
+            String kunci = kunciSalinan.get(nama);
+            if (kunci != null && new File(folderSalinan(), kunci).isFile()) siap++;
+        }
+        return siap + " dari " + serverMedia.size()
+                + " berkas sudah tersimpan di tablet"
+                + (siap < serverMedia.size() ? "; sisanya diputar lewat jaringan sambil diunduh."
+                        : "; diputar tanpa jaringan.");
+    }
+
+    /** Daftar berkas di folder media tablet: tambah dari tablet, atau hapus. */
+    private void showMediaTablet() {
+        LinearLayout isi = new LinearLayout(this);
+        isi.setOrientation(LinearLayout.VERTICAL);
+        isi.setPadding(dp(20), dp(4), dp(20), 0);
+        TextView petunjuk = text(
+                "Dipakai bila sumber media sambutan = Folder media di tablet ini. "
+                        + "Salin gambar/video lewat kabel USB dari komputer ke folder:\n"
+                        + folderMediaTablet().getAbsolutePath()
+                        + "\natau tekan Tambah berkas. Urutan putar mengikuti nama berkas "
+                        + "(01_..., 02_...). Video paling aman MP4 (H.264).",
+                12, MUTED, false);
+        isi.addView(petunjuk);
+        List<File> berkas = daftarMediaTablet();
+        if (berkas.isEmpty()) {
+            TextView kosong = text("Folder masih kosong.", 14, INK, true);
+            kosong.setPadding(0, dp(10), 0, dp(4));
+            isi.addView(kosong);
+        }
+        AlertDialog[] dialog = new AlertDialog[1];
+        for (File item : berkas) {
+            LinearLayout baris = new LinearLayout(this);
+            baris.setGravity(Gravity.CENTER_VERTICAL);
+            baris.setPadding(0, dp(6), 0, 0);
+            String ukuran = String.format(Locale.ROOT, "%.1f MB", item.length() / 1048576.0);
+            TextView nama = text(item.getName() + "\n" + (isVideo(item.getName())
+                    ? "video" : "gambar") + " · " + ukuran, 13, INK, false);
+            baris.addView(nama, new LinearLayout.LayoutParams(0, -2, 1));
+            Button hapus = smallButton("Hapus");
+            hapus.setOnClickListener(v -> new AlertDialog.Builder(this)
+                    .setTitle("Hapus " + item.getName() + "?")
+                    .setMessage("Berkas dihapus dari tablet ini.")
+                    .setNegativeButton("Batal", null)
+                    .setPositiveButton("Hapus", (d, w) -> {
+                        //noinspection ResultOfMethodCallIgnored
+                        item.delete();
+                        terapkanMediaSambutan();
+                        terapkanBarisLoket();
+                        if (dialog[0] != null) dialog[0].dismiss();
+                        showMediaTablet();
+                    }).show());
+            baris.addView(hapus);
+            isi.addView(baris);
+        }
+        dialog[0] = new AlertDialog.Builder(this)
+                .setTitle("Media di tablet")
+                .setView(gulungan(isi))
+                .setPositiveButton("Tambah berkas", (d, w) -> pilihMediaTablet())
+                .setNegativeButton("Tutup", null)
+                .show();
+        rapikanTombolDialog(dialog[0]);
+    }
+
+    private void pilihMediaTablet() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {"image/*", "video/*"});
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        try {
+            startActivityForResult(intent, PILIH_MEDIA_TABLET);
+        } catch (Exception e) {
+            Toast.makeText(this, "Pemilih berkas tidak tersedia di tablet ini. "
+                    + "Salin berkas lewat kabel USB.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != PILIH_MEDIA_TABLET || resultCode != RESULT_OK || data == null) return;
+        List<Uri> pilihan = new ArrayList<>();
+        if (data.getClipData() != null) {
+            for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+                pilihan.add(data.getClipData().getItemAt(i).getUri());
+            }
+        } else if (data.getData() != null) {
+            pilihan.add(data.getData());
+        }
+        if (pilihan.isEmpty()) return;
+        Toast.makeText(this, "Menyalin " + pilihan.size() + " berkas…", Toast.LENGTH_SHORT).show();
+        File folder = folderMediaTablet();
+        pengunduh.execute(() -> {
+            int berhasil = 0;
+            List<String> ditolak = new ArrayList<>();
+            for (Uri uri : pilihan) {
+                String nama = namaDariUri(uri);
+                if (nama == null || !berakhiran(nama, EKSTENSI_MEDIA)) {
+                    ditolak.add(nama == null ? uri.getLastPathSegment() : nama);
+                    continue;
+                }
+                File tujuan = new File(folder, namaAman(nama));
+                File sementara = new File(folder, "." + tujuan.getName() + ".part");
+                try (InputStream input = getContentResolver().openInputStream(uri);
+                     OutputStream output = new FileOutputStream(sementara)) {
+                    if (input == null) throw new IllegalStateException("Berkas tidak terbaca.");
+                    byte[] buffer = new byte[64 * 1024];
+                    int length;
+                    while ((length = input.read(buffer)) != -1) output.write(buffer, 0, length);
+                } catch (Exception e) {
+                    //noinspection ResultOfMethodCallIgnored
+                    sementara.delete();
+                    ditolak.add(nama);
+                    continue;
+                }
+                //noinspection ResultOfMethodCallIgnored
+                tujuan.delete();  // berkas bernama sama diganti
+                if (sementara.renameTo(tujuan)) {
+                    berhasil++;
+                } else {
+                    //noinspection ResultOfMethodCallIgnored
+                    sementara.delete();
+                    ditolak.add(nama);
+                }
+            }
+            int jumlah = berhasil;
+            runOnUiThread(() -> {
+                String pesan = jumlah + " berkas ditambahkan ke folder tablet."
+                        + (ditolak.isEmpty() ? ""
+                        : " Gagal atau bukan gambar/video: " + TextUtils.join(", ", ditolak));
+                Toast.makeText(this, pesan, Toast.LENGTH_LONG).show();
+                terapkanMediaSambutan();
+                terapkanBarisLoket();
+                showMediaTablet();
+            });
+        });
+    }
+
+    private String namaDariUri(Uri uri) {
+        try (Cursor cursor = getContentResolver().query(
+                uri, new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                String nama = cursor.getString(0);
+                if (nama != null && !nama.trim().isEmpty()) return nama.trim();
+            }
+        } catch (Exception ignored) {
+            // Jatuh ke segmen terakhir URI.
+        }
+        String segmen = uri.getLastPathSegment();
+        if (segmen == null) return null;
+        int garis = segmen.lastIndexOf('/');
+        return garis >= 0 ? segmen.substring(garis + 1) : segmen;
     }
 
     private void confirmRestartApi(Button restartButton) {
@@ -2085,6 +2577,7 @@ public final class MainActivity extends Activity {
         }
         handler.removeCallbacksAndMessages(null);
         worker.shutdownNow();
+        pengunduh.shutdownNow();
         super.onDestroy();
     }
 }

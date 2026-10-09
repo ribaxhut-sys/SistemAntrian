@@ -79,6 +79,29 @@ loops without a black gap; a file that fails is skipped, and only when every
 file fails does the panel fall back to text (retried every two minutes).
 Video sound follows **Suara video anjungan** (off by default).
 
+### Sumber media sambutan (per tablet, mulai APK 2.4.2)
+
+Dipilih di ⚙ **Pengaturan** tablet → **Sumber media sambutan**, berlaku
+seketika tanpa tombol Simpan:
+
+* **Daftar putar server (disalin ke tablet)** — bawaan. Tablet mengikuti
+  Daftar putar media di server, mengunduh tiap berkas sekali ke penyimpanan
+  internalnya, lalu memutar dari salinan itu. Berkas yang belum selesai
+  diunduh diputar langsung lewat jaringan. Salinan diunduh ulang bila ukuran
+  atau waktu ubah berkas di server berubah (`welcome_media_files` pada
+  `GET /v1/kiosk/display`), dan dibuang bila berkasnya keluar dari daftar
+  putar. Unduhan yang gagal dicoba lagi setelah dua menit.
+* **Folder media di tablet ini** — memutar gambar/video di
+  `Android/data/id.sistemantrian.kiosk/files/Media`, urut nama berkas, tanpa
+  jaringan sama sekali. Isi folder lewat kabel USB dari komputer, atau
+  **Kelola media tablet → Tambah berkas** (pemilih berkas Android). Berkas
+  dapat dihapus dari dialog yang sama. Folder kosong = teks sambutan.
+  Folder ini ikut terhapus bila aplikasi di-uninstall (pembaruan APK tidak
+  menghapusnya).
+
+Lama tampil gambar, suara video, dan posisi baris loket tetap mengikuti
+pengaturan server pada kedua sumber.
+
 If the tablet loses its connection after requesting a number, use **Ulangi
 permintaan tiket**. The APK reuses the same request ID, so the server returns
 the existing ticket instead of issuing a second number.

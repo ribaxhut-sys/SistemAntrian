@@ -555,6 +555,16 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 "kiosk.welcome_slide_seconds", 10
             ),
             "welcome_media": [item.name for item in media],
+            # Ukuran dan waktu ubah tiap berkas: tablet menyimpan salinan
+            # media dan baru mengunduh ulang bila salah satunya berubah.
+            "welcome_media_files": [
+                {
+                    "name": item.name,
+                    "size": item.stat().st_size,
+                    "modified_ms": int(item.stat().st_mtime * 1000),
+                }
+                for item in media
+            ],
             "registration_open": services.queue.pendaftaran_dibuka(),
             "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(device_id),
             "waiting_queue_numbers": services.queue.nomor_menunggu_untuk_layar(),
