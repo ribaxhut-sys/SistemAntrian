@@ -89,6 +89,18 @@ loops without a black gap; a file that fails is skipped, and only when every
 file fails does the panel fall back to text (retried every two minutes).
 Video sound follows **Suara video anjungan** (off by default).
 
+### Tema anjungan (mulai APK 2.4.6)
+
+**Pengaturan → Antrian → Tema anjungan**: *Biru instansi* (bawaan), *Hijau
+segar*, *Kontras tinggi* (hitam-kuning, huruf 12% lebih besar), *Gelap
+elegan*, dan *Merah putih (perayaan)* dengan pita "Dirgahayu Republik
+Indonesia ke-N" di panel sambutan. **Merah putih otomatis setiap Agustus**
+(bawaan menyala) membuat server mengirim `merah_putih` selama Agustus lalu
+kembali ke tema pilihan pada 1 September. Tema dikirim sebagai `theme` pada
+`GET /v1/kiosk/display`; ⚙ Pengaturan tablet → **Tema tablet ini** dapat
+menimpanya untuk satu tablet. Pergantian tema membangun ulang layar, tetapi
+ditunda selama pengunjung sedang di layar konfirmasi atau hasil nomor.
+
 ### Sumber media sambutan (per tablet, mulai APK 2.4.2)
 
 Dipilih di ⚙ **Pengaturan** tablet → **Sumber media sambutan**, berlaku
@@ -187,7 +199,7 @@ pada baris **APK anjungan** di Layanan Anjungan.
 
 ## Android tablet and USB printer
 
-Install `AntrianKiosk-1.4.apk`, connect the tablet to the same Wi-Fi, and
+Install `antrianCRO-<versi>.apk`, connect the tablet to the same Wi-Fi, and
 connect the POS80/IWare IW-J200 II printer using a USB host/OTG adapter. At
 first launch the kiosk screen appears without requiring server details.
 The kiosk searches the local network automatically. If no server is found,
@@ -237,4 +249,4 @@ run from the repository root:
 .\build-android-kiosk.ps1
 ```
 
-The generated APK is `dist\AntrianKiosk-1.4.apk`.
+The generated APK is `dist\antrianCRO-<versi>.apk`.

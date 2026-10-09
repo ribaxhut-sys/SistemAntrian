@@ -85,13 +85,231 @@ public final class MainActivity extends Activity {
     // Jenis perangkat menurut docs/istilah.md: aplikasi ini adalah anjungan.
     private static final String DEVICE_KIND = "anjungan";
 
-    private static final int INK = Color.rgb(15, 23, 42);
-    private static final int MUTED = Color.rgb(71, 85, 105);
-    private static final int TEAL = Color.rgb(15, 118, 110);
-    private static final int GROUP = Color.rgb(21, 94, 117);
-    private static final int GREEN = Color.rgb(5, 150, 105);
-    private static final int GREY = Color.rgb(203, 213, 225);
+    // Warna tema aktif. Bukan konstanta: diisi terapkanPalet() setiap kali
+    // layar dibangun, sehingga mengganti tema cukup membangun ulang layar.
+    private int INK;
+    private int MUTED;
+    private int UTAMA;
+    private int LATAR;
+    private int KARTU;
+    private int GARIS;
+    private int LEMBUT;
+    private int EMAS;
+    private int ABU_LEMBUT;
+    private int HASIL;
+    private int TEKS_TOMBOL;
+    /** Kapsul huruf awalan per layanan: {latar, tulisan}, dipilih dari awalannya. */
+    private int[][] WARNA_LAYANAN;
+    private static final int GREEN = Color.rgb(22, 163, 74);
     private static final int RED = Color.rgb(220, 38, 38);
+
+    private static final String TEMA_TABLET = "tema";
+    private static final String IKUTI_SERVER_TEMA = "server";
+    private static final String[][] PILIHAN_TEMA = {
+            {IKUTI_SERVER_TEMA, "Ikuti pengaturan server"},
+            {"biru", "Biru instansi"},
+            {"hijau", "Hijau segar"},
+            {"kontras", "Kontras tinggi"},
+            {"gelap", "Gelap elegan"},
+            {"merah_putih", "Merah putih (perayaan)"},
+    };
+    private Tema temaWarna;
+    private String temaAktif = "";
+    private String temaServer = "biru";
+    private String judulServer = "";
+
+    /** Satu set warna tampilan anjungan. */
+    private static final class Tema {
+        final int latar, kartu, garis, ink, muted, utama, lembut, emas, abu, hasil, teksTombol;
+        final int[][] chip;
+        final float skala;
+        final boolean gelap;
+
+        Tema(int latar, int kartu, int garis, int ink, int muted, int utama, int lembut,
+             int emas, int abu, int hasil, int teksTombol, int[][] chip, float skala,
+             boolean gelap) {
+            this.latar = latar;
+            this.kartu = kartu;
+            this.garis = garis;
+            this.ink = ink;
+            this.muted = muted;
+            this.utama = utama;
+            this.lembut = lembut;
+            this.emas = emas;
+            this.abu = abu;
+            this.hasil = hasil;
+            this.teksTombol = teksTombol;
+            this.chip = chip;
+            this.skala = skala;
+            this.gelap = gelap;
+        }
+    }
+
+    private static int rgb(int r, int g, int b) {
+        return Color.rgb(r, g, b);
+    }
+
+    private static Tema tema(String kode) {
+        switch (kode) {
+            case "hijau":
+                return new Tema(rgb(242, 248, 244), Color.WHITE, rgb(214, 233, 221),
+                        rgb(13, 59, 42), rgb(85, 117, 102), rgb(17, 120, 90),
+                        rgb(220, 241, 230), rgb(233, 216, 74), rgb(238, 245, 240),
+                        rgb(13, 59, 42), Color.WHITE, new int[][]{
+                        {rgb(214, 241, 227), rgb(15, 107, 74)},
+                        {rgb(232, 245, 201), rgb(77, 122, 15)},
+                        {rgb(253, 236, 207), rgb(154, 91, 10)},
+                        {rgb(215, 238, 245), rgb(14, 106, 133)}}, 1f, false);
+            case "kontras":
+                // Hitam-kuning dan huruf 12% lebih besar: keterbacaan dulu.
+                return new Tema(Color.WHITE, Color.WHITE, Color.BLACK,
+                        Color.BLACK, rgb(31, 31, 31), Color.BLACK,
+                        rgb(255, 230, 0), rgb(255, 230, 0), rgb(235, 235, 235),
+                        Color.BLACK, rgb(255, 230, 0), new int[][]{
+                        {Color.BLACK, rgb(255, 230, 0)}}, 1.12f, false);
+            case "gelap":
+                return new Tema(rgb(11, 18, 32), rgb(20, 29, 48), rgb(36, 49, 77),
+                        rgb(238, 242, 251), rgb(147, 163, 196), rgb(91, 140, 255),
+                        rgb(28, 42, 71), rgb(245, 183, 42), rgb(26, 35, 56),
+                        rgb(0, 8, 20), Color.WHITE, new int[][]{
+                        {rgb(31, 53, 102), rgb(156, 188, 255)},
+                        {rgb(23, 63, 51), rgb(127, 224, 178)},
+                        {rgb(69, 53, 26), rgb(245, 200, 105)},
+                        {rgb(53, 35, 77), rgb(207, 166, 245)}}, 1f, true);
+            case "merah_putih":
+                return new Tema(rgb(255, 247, 246), Color.WHITE, rgb(243, 214, 211),
+                        rgb(92, 11, 11), rgb(138, 90, 87), rgb(200, 16, 46),
+                        rgb(253, 228, 225), Color.WHITE, rgb(250, 240, 239),
+                        rgb(200, 16, 46), Color.WHITE, new int[][]{
+                        {rgb(200, 16, 46), Color.WHITE},
+                        {rgb(253, 228, 225), rgb(200, 16, 46)}}, 1f, false);
+            default:
+                return new Tema(rgb(244, 247, 252), Color.WHITE, rgb(223, 230, 243),
+                        rgb(11, 42, 91), rgb(91, 107, 134), rgb(30, 79, 163),
+                        rgb(227, 235, 250), rgb(245, 183, 42), rgb(241, 245, 249),
+                        rgb(11, 42, 91), Color.WHITE, new int[][]{
+                        {rgb(219, 231, 255), rgb(30, 79, 163)},
+                        {rgb(220, 245, 232), rgb(15, 122, 74)},
+                        {rgb(253, 236, 207), rgb(161, 88, 10)},
+                        {rgb(240, 226, 251), rgb(123, 63, 176)},
+                        {rgb(207, 244, 244), rgb(14, 116, 120)},
+                        {rgb(253, 226, 221), rgb(176, 58, 36)}}, 1f, false);
+        }
+    }
+
+    private void terapkanPalet(Tema t) {
+        temaWarna = t;
+        INK = t.ink;
+        MUTED = t.muted;
+        UTAMA = t.utama;
+        LATAR = t.latar;
+        KARTU = t.kartu;
+        GARIS = t.garis;
+        LEMBUT = t.lembut;
+        EMAS = t.emas;
+        ABU_LEMBUT = t.abu;
+        HASIL = t.hasil;
+        TEKS_TOMBOL = t.teksTombol;
+        WARNA_LAYANAN = t.chip;
+    }
+
+    /** Pilihan tablet bila diatur, selain itu tema dari server. */
+    private String temaBerlaku() {
+        String tablet = preferences == null ? IKUTI_SERVER_TEMA
+                : preferences.getString(TEMA_TABLET, IKUTI_SERVER_TEMA);
+        return IKUTI_SERVER_TEMA.equals(tablet) ? temaServer : tablet;
+    }
+
+    /**
+     * Bangun ulang layar bila tema berubah. Ditunda selama pengunjung
+     * sedang memilih atau melihat nomornya; penyegaran 5 detik berikutnya
+     * mencobanya lagi.
+     */
+    private void terapkanTemaBilaBerubah() {
+        if (temaBerlaku().equals(temaAktif)) return;
+        if (showingConfirmation || showingResult || requestInFlight
+                || updating || updateRequired) return;
+        bangunUlangTampilan();
+    }
+
+    private void bangunUlangTampilan() {
+        buildHome();
+        mediaSignature = "";
+        displayedWelcomeText = "";
+        tampilanLoket = "";
+        terapkanMediaSambutan();
+        terapkanBarisLoket();
+        tampilkanNomorMenunggu();
+        if (lastDisplaySuccessMillis > 0L) {
+            tampilkanStatusKoneksi("Terhubung ke server", Color.rgb(6, 95, 70),
+                    Color.rgb(209, 250, 229));
+        }
+        if (!hasServerConfig()) {
+            showServerPlaceholder("Server belum diatur. Hubungkan melalui tombol Pengaturan.");
+        }
+    }
+
+    /** Dialog mengikuti terang/gelap tema, supaya judul dan tombolnya terbaca. */
+    private AlertDialog.Builder pembuatDialog() {
+        return new AlertDialog.Builder(this, temaWarna != null && temaWarna.gelap
+                ? android.R.style.Theme_Material_Dialog_Alert
+                : android.R.style.Theme_Material_Light_Dialog_Alert);
+    }
+
+    /** Latar sambutan tema merah putih: pita merah berisi ucapan, lalu putih. */
+    private static final class LatarBendera extends android.graphics.drawable.Drawable {
+        private final android.graphics.Paint merah =
+                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint putih =
+                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint tulisan =
+                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final float radius;
+        private final String ucapan;
+
+        LatarBendera(float radius, String ucapan) {
+            this.radius = radius;
+            this.ucapan = ucapan;
+            merah.setColor(rgb(200, 16, 46));
+            putih.setColor(Color.WHITE);
+            tulisan.setColor(Color.WHITE);
+            tulisan.setTextAlign(android.graphics.Paint.Align.CENTER);
+            tulisan.setTypeface(Typeface.create("sans-serif-black", Typeface.NORMAL));
+        }
+
+        @Override
+        public void draw(android.graphics.Canvas canvas) {
+            android.graphics.Rect b = getBounds();
+            if (b.isEmpty()) return;
+            android.graphics.Path bentuk = new android.graphics.Path();
+            bentuk.addRoundRect(new android.graphics.RectF(b), radius, radius,
+                    android.graphics.Path.Direction.CW);
+            canvas.save();
+            canvas.clipPath(bentuk);
+            float batas = b.top + b.height() * 0.42f;
+            canvas.drawRect(b.left, b.top, b.right, batas, merah);
+            canvas.drawRect(b.left, batas, b.right, b.bottom, putih);
+            float tinggiPita = batas - b.top;
+            tulisan.setTextSize(Math.min(tinggiPita * 0.34f,
+                    b.width() * 0.92f / Math.max(1, ucapan.length()) * 1.9f));
+            float y = b.top + tinggiPita / 2f - (tulisan.descent() + tulisan.ascent()) / 2f;
+            canvas.drawText(ucapan, b.exactCenterX(), y, tulisan);
+            canvas.restore();
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter filter) {
+        }
+
+        @Override
+        public int getOpacity() {
+            return android.graphics.PixelFormat.TRANSLUCENT;
+        }
+    }
     private static final int KOLOM_NOMOR_MENUNGGU = 4;
     // Tiga baris nomor menunggu; dua bila baris loket ikut berada di panel bawah.
     private static final int BARIS_NOMOR_MENUNGGU = 3;
@@ -147,6 +365,10 @@ public final class MainActivity extends Activity {
     /** Media sambutan ada di daftar, tetapi gagal dimuat di tablet ini. */
     private boolean mediaGagal;
     private String tampilanLoket = "";
+    /** Panel bawah sedang memakai latar gelap layar "Nomor Anda". */
+    private boolean panelHasilGelap;
+    private LinearLayout panelHasil;
+    private long batasKonfirmasiMillis;
     /** Pengaturan server: video anjungan bersuara atau tidak. */
     private boolean suaraVideo;
     private android.media.MediaPlayer pemutarVideo;
@@ -287,6 +509,7 @@ public final class MainActivity extends Activity {
         @Override
         public void run() {
             updateAvailability();
+            perbaruiHitungMundurKonfirmasi();
             if (timeLabel != null) {
                 SimpleDateFormat format = new SimpleDateFormat(
                         "EEEE, d MMM yyyy · HH:mm:ss",
@@ -384,20 +607,24 @@ public final class MainActivity extends Activity {
         float density = getResources().getDisplayMetrics().density;
         float widthDp = getResources().getDisplayMetrics().widthPixels / density;
         float heightDp = getResources().getDisplayMetrics().heightPixels / density;
+        temaAktif = temaBerlaku();
+        terapkanPalet(tema(temaAktif));
         uiScale = Math.max(0.8f, Math.min(2.2f,
-                Math.min(widthDp / 360f, heightDp / 640f)));
+                Math.min(widthDp / 360f, heightDp / 640f))) * temaWarna.skala;
 
         LinearLayout root = new LinearLayout(this);
         rootLayout = root;
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(226, 232, 240));
-        root.setPadding(dp(8), dp(6), dp(8), dp(6));
+        root.setBackgroundColor(LATAR);
+        root.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         LinearLayout infoPanel = panel();
         infoPanel.setPadding(dp(18), dp(12), dp(18), dp(12));
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setGravity(Gravity.CENTER);
-        displayTitle = text("ANTRIAN PELAYANAN CRO", 18, INK, true);
+        displayTitle = text(judulServer.isEmpty() ? "ANTRIAN PELAYANAN CRO" : judulServer,
+                18, INK, true);
+        displayTitle.setTypeface(huruf(800));
         displayTitle.setGravity(Gravity.CENTER);
         titleRow.addView(displayTitle, new LinearLayout.LayoutParams(0, -2, 1));
         Button settings = smallButton("⚙");
@@ -411,7 +638,7 @@ public final class MainActivity extends Activity {
         connectionLabel = text("● Server belum diatur", 12, MUTED, true);
         connectionLabel.setGravity(Gravity.CENTER);
         connectionLabel.setPadding(dp(12), dp(4), dp(12), dp(4));
-        connectionLabel.setBackground(rounded(Color.rgb(226, 232, 240), dp(16)));
+        connectionLabel.setBackground(rounded(ABU_LEMBUT, dp(16)));
         LinearLayout.LayoutParams connectionParams =
                 new LinearLayout.LayoutParams(-2, -2);
         connectionParams.gravity = Gravity.CENTER;
@@ -425,25 +652,33 @@ public final class MainActivity extends Activity {
                 24, INK, true);
         welcome.setGravity(Gravity.CENTER);
         welcome.setPadding(dp(12), dp(10), dp(12), dp(10));
+        pasangSatuBaris(welcome, 9, 24);
+        if ("merah_putih".equals(temaAktif)) {
+            java.util.Calendar kalender = java.util.Calendar.getInstance(
+                    TimeZone.getTimeZone(serverTimezone));
+            kalender.setTimeInMillis(System.currentTimeMillis() + serverOffsetMillis);
+            int ke = kalender.get(java.util.Calendar.YEAR) - 1945;
+            welcome.setBackground(new LatarBendera(dp(18),
+                    "Dirgahayu Republik Indonesia ke-" + ke));
+            welcome.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM);
+            welcome.setPadding(dp(12), dp(10), dp(12), dp(18));
+        }
         mediaSlot.addView(welcome, new FrameLayout.LayoutParams(-1, -1));
         infoPanel.addView(mediaSlot, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(infoPanel, new LinearLayout.LayoutParams(-1, 0, 1));
 
         LinearLayout kioskPanel = panel();
-        kioskPanel.setPadding(dp(14), dp(10), dp(14), dp(12));
-        kioskPanel.setBackground(roundedGradient(
-                Color.rgb(255, 255, 255), Color.rgb(233, 238, 245),
-                dp(18), TEAL, dp(3)));
-        invitation = text("AMBIL NOMOR ANTRIAN ANDA", 22, INK, true);
+        kioskPanel.setPadding(dp(14), dp(12), dp(14), dp(12));
+        invitation = text("Pilih layanan", 22, INK, true);
+        invitation.setTypeface(huruf(800));
         invitation.setGravity(Gravity.CENTER);
-        invitation.setLetterSpacing(0.08f);
         kioskPanel.addView(invitation);
 
         hint = text("Sentuh jenis layanan yang Anda butuhkan", 14,
                 MUTED, true);
         hint.setGravity(Gravity.CENTER);
         hint.setPadding(dp(12), dp(6), dp(12), dp(6));
-        hint.setBackground(rounded(Color.rgb(226, 232, 240), dp(24)));
+        hint.setBackground(rounded(LEMBUT, dp(24)));
         LinearLayout.LayoutParams hintParams =
                 new LinearLayout.LayoutParams(-2, -2);
         hintParams.gravity = Gravity.CENTER;
@@ -459,13 +694,11 @@ public final class MainActivity extends Activity {
         // tengah layar, sehingga mudah dijangkau pada tablet yang dipasang
         // tegak. Hasil nomor mendapat ruang sendiri di bagian bawah.
         LinearLayout resultPanel = panel();
-        resultPanel.setPadding(dp(14), dp(10), dp(14), dp(12));
-        resultPanel.setBackground(roundedGradient(
-                Color.rgb(255, 255, 255), Color.rgb(240, 253, 250),
-                dp(18), GREEN, dp(3)));
-        resultTitle = text("DAFTAR NOMOR MENUNGGU", 17, INK, true);
+        resultPanel.setPadding(dp(14), dp(12), dp(14), dp(12));
+        panelHasil = resultPanel;
+        resultTitle = text("Nomor menunggu", 17, INK, true);
+        resultTitle.setTypeface(huruf(800));
         resultTitle.setGravity(Gravity.CENTER);
-        resultTitle.setLetterSpacing(0.06f);
         resultPanel.addView(resultTitle);
         loketBawah = barisLoketKosong();
         resultPanel.addView(loketBawah, new LinearLayout.LayoutParams(-1, -2));
@@ -487,8 +720,8 @@ public final class MainActivity extends Activity {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setGravity(Gravity.CENTER);
-        layout.setBackground(rounded(Color.WHITE, dp(18)));
-        layout.setElevation(dp(3));
+        layout.setBackground(roundedOutline(KARTU, GARIS, dp(24), dp(1)));
+        layout.setElevation(dp(1));
         return layout;
     }
 
@@ -529,7 +762,12 @@ public final class MainActivity extends Activity {
             tampilkanStatusKoneksi("Terhubung ke server", Color.rgb(6, 95, 70),
                     Color.rgb(209, 250, 229));
             String title = display.optString("title", "").trim();
-            if (!title.isEmpty()) displayTitle.setText(title);
+            if (!title.isEmpty()) {
+                judulServer = title;
+                displayTitle.setText(title);
+            }
+            temaServer = display.optString("theme", "biru");
+            terapkanTemaBilaBerubah();
             JSONArray mediaRows = display.optJSONArray("welcome_media");
             List<String> media = new ArrayList<>();
             if (mediaRows != null) {
@@ -1182,7 +1420,7 @@ public final class MainActivity extends Activity {
             showIdleResult();
         }
         ticketChoices.clear();
-        invitation.setText("AMBIL NOMOR ANTRIAN ANDA");
+        invitation.setText("Pilih layanan");
         contentSlot.removeAllViews();
 
         ScrollView scroll = new ScrollView(this);
@@ -1203,7 +1441,7 @@ public final class MainActivity extends Activity {
         List<Category> visible = new ArrayList<>();
         Integer parent = path.isEmpty() ? null : path.get(path.size() - 1).id;
         if (!path.isEmpty()) {
-            addCard(grid, "‹  KEMBALI", false, GREY, RED, () -> {
+            addCard(grid, "‹", "Kembali", null, new int[]{ABU_LEMBUT, MUTED}, () -> {
                 path.remove(path.size() - 1);
                 showCategories();
             }, columns);
@@ -1232,7 +1470,7 @@ public final class MainActivity extends Activity {
                     : "Sentuh jenis layanan yang Anda butuhkan", "ajak");
         } else {
             Category selected = path.get(path.size() - 1);
-            setHint(selected.name + " — pilih layanan, atau sentuh KEMBALI", "ajak");
+            setHint(selected.name + " — pilih layanan, atau sentuh Kembali", "ajak");
         }
         content.addView(grid);
         scroll.addView(content);
@@ -1302,6 +1540,7 @@ public final class MainActivity extends Activity {
         if (!letak.isEmpty()) {
             isiBarisLoket("atas".equals(letak) ? loketAtas : loketBawah, besar);
         }
+        if (panelHasilGelap) loketBawah.setVisibility(View.GONE);
 
         int baris = "bawah".equals(letak)
                 ? BARIS_NOMOR_MENUNGGU_BERSAMA_LOKET : BARIS_NOMOR_MENUNGGU;
@@ -1313,9 +1552,8 @@ public final class MainActivity extends Activity {
 
     private void isiBarisLoket(LinearLayout strip, boolean besar) {
         strip.setPadding(0, dp(besar ? 8 : 4), 0, dp(4));
-        TextView judul = text("SEDANG DILAYANI", besar ? 14 : 12, MUTED, true);
+        TextView judul = text("Sedang dilayani", besar ? 14 : 12, MUTED, true);
         judul.setGravity(Gravity.CENTER);
-        judul.setLetterSpacing(0.06f);
         strip.addView(judul, new LinearLayout.LayoutParams(-1, -2));
 
         int jumlah = loketList.size();
@@ -1351,8 +1589,7 @@ public final class MainActivity extends Activity {
         kartu.setGravity(Gravity.CENTER);
         kartu.setPadding(dp(4), dp(2), dp(4), dp(2));
         boolean melayani = !loket.nomor.isEmpty();
-        kartu.setBackground(rounded(melayani
-                ? Color.rgb(204, 251, 241) : Color.rgb(241, 245, 249), dp(12)));
+        kartu.setBackground(rounded(melayani ? LEMBUT : ABU_LEMBUT, dp(16)));
 
         TextView nama = text(loket.nama, besar ? 15 : 11, MUTED, true);
         nama.setGravity(Gravity.CENTER);
@@ -1360,15 +1597,19 @@ public final class MainActivity extends Activity {
         kartu.addView(nama, new LinearLayout.LayoutParams(-1, -2));
 
         String isi = melayani ? loket.nomor
-                : "ISTIRAHAT".equals(loket.status) ? "ISTIRAHAT" : "—";
+                : "ISTIRAHAT".equals(loket.status) ? "Istirahat" : "—";
         int maks = melayani ? (besar ? 40 : 18) : (besar ? 18 : 12);
         TextView nomor = text(isi, maks, melayani ? INK : MUTED, true);
+        if (melayani) {
+            nomor.setTypeface(huruf(800));
+            nomor.setFontFeatureSettings("tnum");
+        }
         nomor.setGravity(Gravity.CENTER);
         pasangAutoFit(nomor, 10, maks, 1);
         kartu.addView(nomor, new LinearLayout.LayoutParams(-1, 0, 1));
 
         if (besar && melayani && !loket.layanan.isEmpty()) {
-            TextView layanan = text(loket.layanan, 13, TEAL, false);
+            TextView layanan = text(loket.layanan, 13, UTAMA, false);
             layanan.setGravity(Gravity.CENTER);
             pasangAutoFit(layanan, 9, 13, 1);
             kartu.addView(layanan, new LinearLayout.LayoutParams(-1, -2));
@@ -1377,7 +1618,20 @@ public final class MainActivity extends Activity {
     }
 
     private void showIdleResult() {
+        kembalikanPanelHasil();
         tampilkanNomorMenunggu();
+    }
+
+    /** Kembalikan panel bawah dari layar gelap "Nomor Anda" ke tampilan biasa. */
+    private void kembalikanPanelHasil() {
+        if (!panelHasilGelap) return;
+        panelHasilGelap = false;
+        if (panelHasil != null) {
+            panelHasil.setBackground(roundedOutline(KARTU, GARIS, dp(24), dp(1)));
+        }
+        if (resultTitle != null) resultTitle.setTextColor(INK);
+        tampilanLoket = "";  // paksa baris loket digambar ulang
+        terapkanBarisLoket();
     }
 
     private int nomorPerHalaman() {
@@ -1396,7 +1650,7 @@ public final class MainActivity extends Activity {
         int halaman = jumlahHalamanMenunggu();
         waitingPage = Math.min(waitingPage, halaman - 1);
         if (resultTitle != null) {
-            resultTitle.setText("DAFTAR NOMOR MENUNGGU"
+            resultTitle.setText("Nomor menunggu"
                     + (halaman > 1 ? "  " + (waitingPage + 1) + "/" + halaman : ""));
         }
 
@@ -1426,9 +1680,11 @@ public final class MainActivity extends Activity {
                 page.addView(baris, new LinearLayout.LayoutParams(-1, -2));
             }
             TextView nomor = text(waitingQueueNumbers.get(index), 19, INK, true);
+            nomor.setTypeface(huruf(800));
+            nomor.setFontFeatureSettings("tnum");
             nomor.setGravity(Gravity.CENTER);
             nomor.setPadding(dp(4), dp(4), dp(4), dp(4));
-            nomor.setBackground(rounded(Color.rgb(226, 232, 240), dp(12)));
+            nomor.setBackground(rounded(LEMBUT, dp(16)));
             pasangAutoFit(nomor, 12, 20, 1);
             baris.addView(nomor, selNomorMenunggu());
         }
@@ -1466,10 +1722,21 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /** Warna kapsul tetap untuk tiap awalan, supaya A selalu biru, B selalu hijau. */
+    private int[] warnaLayanan(String kunci) {
+        int indeks = kunci.isEmpty() ? 0 : Character.toUpperCase(kunci.charAt(0)) - 'A';
+        return WARNA_LAYANAN[Math.floorMod(indeks, WARNA_LAYANAN.length)];
+    }
+
+    private static String awalanLayanan(Category item) {
+        if (!item.prefix.isEmpty()) return item.prefix;
+        return item.name.isEmpty() ? "•" : item.name.substring(0, 1).toUpperCase(Locale.ROOT);
+    }
+
     private void addCategoryCard(GridLayout grid, Category item, int columns) {
-        int bg = item.group ? GROUP : TEAL;
-        addCard(grid, (item.group ? "›  " : "") + item.name, item.group,
-                bg, Color.WHITE, () -> {
+        addCard(grid, item.group ? "›" : awalanLayanan(item), item.name,
+                item.group ? "Lihat pilihan layanan" : null,
+                item.group ? new int[]{LEMBUT, INK} : warnaLayanan(awalanLayanan(item)), () -> {
                     if (item.group) {
                         path.add(item);
                         showCategories();
@@ -1481,17 +1748,37 @@ public final class MainActivity extends Activity {
         if (!item.group) ticketChoices.add(grid.getChildAt(grid.getChildCount() - 1));
     }
 
+    /** Kartu layanan: kapsul huruf awalan berwarna, lalu nama layanan. */
     private void addCard(
-            GridLayout grid, String label, boolean isGroup, int background,
-            int textColor, Runnable action, int columns) {
-        TextView card = text(label, 19, textColor, true);
-        card.setGravity(Gravity.CENTER);
-        card.setIncludeFontPadding(false);
-        pasangAutoFit(card, 12, 24, 3);
-        card.setPadding(dp(8), dp(6), dp(8), dp(6));
-        card.setBackground(stateBackground(background, darker(background), dp(16)));
-        card.setElevation(dp(3));
-        card.setTag(background);
+            GridLayout grid, String awalan, String label, String keterangan,
+            int[] warna, Runnable action, int columns) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(12), dp(8), dp(12), dp(8));
+        card.setBackground(latarKartu());
+        card.setElevation(dp(2));
+        TextView chip = text(awalan, 24, warna[1], true);
+        chip.setTypeface(huruf(800));
+        chip.setGravity(Gravity.CENTER);
+        chip.setBackground(rounded(warna[0], dp(16)));
+        pasangAutoFit(chip, 12, 24, 1);
+        card.addView(chip, new LinearLayout.LayoutParams(dp(50), dp(50)));
+        LinearLayout tulisan = new LinearLayout(this);
+        tulisan.setOrientation(LinearLayout.VERTICAL);
+        tulisan.setGravity(Gravity.CENTER_VERTICAL);
+        TextView nama = text(label, 19, INK, true);
+        nama.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        pasangAutoFit(nama, 10, 21, 3);
+        tulisan.addView(nama, new LinearLayout.LayoutParams(-1, 0, 1));
+        if (keterangan != null) {
+            TextView ket = text(keterangan, 12, MUTED, false);
+            pasangAutoFit(ket, 9, 12, 1);
+            tulisan.addView(ket, new LinearLayout.LayoutParams(-1, -2));
+        }
+        LinearLayout.LayoutParams tulisanParams = new LinearLayout.LayoutParams(0, -1, 1);
+        tulisanParams.leftMargin = dp(10);
+        card.addView(tulisan, tulisanParams);
         int widthDp = Math.round(getResources().getDisplayMetrics().widthPixels
                 / getResources().getDisplayMetrics().density);
         int cellWidth = Math.max(1, (widthDp - 46) / columns);
@@ -1506,52 +1793,134 @@ public final class MainActivity extends Activity {
         params.setGravity(Gravity.FILL);
         params.setMargins(dp(4), dp(4), dp(4), dp(4));
         grid.addView(card, params);
-        card.setOnClickListener(v -> action.run());
+        pasangEfekSentuh(card);
+        card.setOnClickListener(v -> {
+            v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+            action.run();
+        });
+    }
+
+    private StateListDrawable latarKartu() {
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_pressed},
+                roundedOutline(LEMBUT, UTAMA, dp(20), dp(2)));
+        states.addState(new int[]{}, roundedOutline(KARTU, GARIS, dp(20), dp(1)));
+        return states;
+    }
+
+    /** Mengecil sedikit saat disentuh dan memantul saat dilepas. */
+    private void pasangEfekSentuh(View view) {
+        view.setOnTouchListener((v, event) -> {
+            int aksi = event.getActionMasked();
+            if (aksi == android.view.MotionEvent.ACTION_DOWN && v.isEnabled()) {
+                v.animate().scaleX(0.96f).scaleY(0.96f).setDuration(90)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                        .start();
+            } else if (aksi == android.view.MotionEvent.ACTION_UP
+                    || aksi == android.view.MotionEvent.ACTION_CANCEL) {
+                v.animate().scaleX(1f).scaleY(1f).setDuration(280)
+                        .setInterpolator(new android.view.animation.OvershootInterpolator(2.2f))
+                        .start();
+            }
+            return false;
+        });
     }
 
     private void showConfirmation() {
         showingConfirmation = true;
         showingResult = false;
-        invitation.setText("PASTIKAN PILIHAN ANDA");
-        setHint("Pastikan pilihan Anda sudah benar", "konfirmasi");
+        invitation.setText("Pastikan pilihan Anda");
         contentSlot.removeAllViews();
 
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setGravity(Gravity.CENTER);
         page.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        // Penanda langkah: pilih layanan, pastikan, ambil tiket.
+        LinearLayout langkah = new LinearLayout(this);
+        langkah.setGravity(Gravity.CENTER_VERTICAL);
+        for (int i = 0; i < 3; i++) {
+            View bar = new View(this);
+            bar.setBackground(rounded(i < 2 ? UTAMA : GARIS, dp(4)));
+            LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(dp(28), dp(5));
+            barParams.rightMargin = dp(5);
+            langkah.addView(bar, barParams);
+        }
+        TextView langkahTeks = text("Langkah 2 dari 3", 12, MUTED, true);
+        langkahTeks.setPadding(dp(4), 0, 0, 0);
+        langkah.addView(langkahTeks);
+        LinearLayout.LayoutParams langkahParams = new LinearLayout.LayoutParams(-2, -2);
+        langkahParams.gravity = Gravity.CENTER;
+        langkahParams.bottomMargin = dp(10);
+        page.addView(langkah, langkahParams);
+
         LinearLayout identity = new LinearLayout(this);
-        identity.setGravity(Gravity.CENTER);
-        TextView prefix = text(pendingCategory.prefix, 26, Color.WHITE, true);
+        identity.setGravity(Gravity.CENTER_VERTICAL);
+        identity.setPadding(dp(14), dp(12), dp(14), dp(12));
+        identity.setBackground(roundedOutline(KARTU, GARIS, dp(24), dp(1)));
+        int[] warna = warnaLayanan(awalanLayanan(pendingCategory));
+        TextView prefix = text(awalanLayanan(pendingCategory), 32, warna[1], true);
+        prefix.setTypeface(huruf(800));
         prefix.setGravity(Gravity.CENTER);
-        prefix.setBackground(rounded(TEAL, dp(18)));
-        identity.addView(prefix, new LinearLayout.LayoutParams(dp(64), dp(64)));
+        prefix.setBackground(rounded(warna[0], dp(22)));
+        pasangAutoFit(prefix, 14, 32, 1);
+        identity.addView(prefix, new LinearLayout.LayoutParams(dp(68), dp(68)));
+        LinearLayout namaLayanan = new LinearLayout(this);
+        namaLayanan.setOrientation(LinearLayout.VERTICAL);
+        namaLayanan.setPadding(dp(14), 0, 0, 0);
         TextView serviceName = text(pendingCategory.name, 23, INK, true);
-        serviceName.setGravity(Gravity.CENTER_VERTICAL);
-        serviceName.setPadding(dp(12), 0, 0, 0);
-        identity.addView(serviceName, new LinearLayout.LayoutParams(0, -2, 1));
-        page.addView(identity);
+        serviceName.setTypeface(huruf(800));
+        namaLayanan.addView(serviceName);
+        if (!pendingCategory.info.trim().isEmpty()) {
+            TextView info = text(pendingCategory.info.trim(), 13, MUTED, false);
+            info.setMaxLines(2);
+            info.setEllipsize(TextUtils.TruncateAt.END);
+            namaLayanan.addView(info);
+        }
+        identity.addView(namaLayanan, new LinearLayout.LayoutParams(0, -2, 1));
+        page.addView(identity, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER);
-        actions.setPadding(0, dp(14), 0, 0);
-        Button cancel = actionButton("BATAL, PILIH LAGI", false);
+        actions.setPadding(0, dp(12), 0, 0);
+        Button cancel = actionButton("Kembali", false);
         cancel.setOnClickListener(v -> {
+            v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
             showingConfirmation = false;
             pendingCategory = null;
             pendingRequestId = null;
             showCategories();
         });
-        actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(54), 2));
-        Button yes = actionButton("YA, AMBIL NOMOR", true);
-        yes.setOnClickListener(v -> issueTicket());
-        LinearLayout.LayoutParams yesParams = new LinearLayout.LayoutParams(0, dp(54), 3);
-        yesParams.leftMargin = dp(8);
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(58), 2));
+        Button yes = actionButton("Ya, ambil nomor", true);
+        yes.setOnClickListener(v -> {
+            v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+            issueTicket();
+        });
+        pasangEfekSentuh(yes);
+        LinearLayout.LayoutParams yesParams = new LinearLayout.LayoutParams(0, dp(58), 3);
+        yesParams.leftMargin = dp(10);
         actions.addView(yes, yesParams);
-        page.addView(actions);
+        page.addView(actions, new LinearLayout.LayoutParams(-1, -2));
         contentSlot.addView(page);
+        page.setAlpha(0f);
+        page.setTranslationX(dp(24));
+        page.animate().alpha(1f).translationX(0f).setDuration(240)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
         handler.removeCallbacks(confirmTimeout);
         handler.postDelayed(confirmTimeout, 15000);
+        batasKonfirmasiMillis = System.currentTimeMillis() + 15000;
+        perbaruiHitungMundurKonfirmasi();
+    }
+
+    /** Sisa waktu sebelum pilihan dibatalkan sendiri, terlihat oleh pengunjung. */
+    private void perbaruiHitungMundurKonfirmasi() {
+        if (!showingConfirmation || requestInFlight) return;
+        long sisa = Math.max(0L,
+                (batasKonfirmasiMillis - System.currentTimeMillis() + 999L) / 1000L);
+        setHint("Sentuh Ya untuk mengambil nomor · kembali otomatis dalam "
+                + sisa + " detik", "konfirmasi");
     }
 
     private final Runnable confirmTimeout = () -> {
@@ -1608,11 +1977,12 @@ public final class MainActivity extends Activity {
     }
 
     private void showRetry() {
-        if (resultTitle != null) resultTitle.setText("PERMINTAAN TIKET BELUM SELESAI");
+        kembalikanPanelHasil();
+        if (resultTitle != null) resultTitle.setText("Permintaan tiket belum selesai");
         resultSlot.removeAllViews();
         LinearLayout retry = new LinearLayout(this);
         retry.setGravity(Gravity.CENTER);
-        Button button = actionButton("ULANGI PERMINTAAN TIKET", true);
+        Button button = actionButton("Ulangi permintaan tiket", true);
         button.setOnClickListener(v -> issueTicket());
         retry.addView(button, new LinearLayout.LayoutParams(-1, dp(64)));
         resultSlot.addView(retry, new FrameLayout.LayoutParams(-1, -1));
@@ -1626,24 +1996,58 @@ public final class MainActivity extends Activity {
         // tombolnya dinonaktifkan agar satu pengunjung tidak mengambil dua
         // nomor sebelum tiket pertama selesai dicetak.
         showCategories(true);
+        // Panel bawah berubah gelap dan tiket "keluar dari printer": nomor
+        // besar di kartu putih, lalu bilah yang menyusut sampai layar kembali.
+        panelHasilGelap = true;
+        if (panelHasil != null) panelHasil.setBackground(rounded(HASIL, dp(24)));
+        if (loketBawah != null) loketBawah.setVisibility(View.GONE);
         if (resultTitle != null) {
-            resultTitle.setText(testTicket ? "TIKET UJI" : "NOMOR ANDA SUDAH TERBIT");
+            resultTitle.setText(testTicket ? "Tiket uji" : "Nomor Anda");
+            resultTitle.setTextColor(Color.WHITE);
         }
         LinearLayout result = new LinearLayout(this);
         result.setOrientation(LinearLayout.VERTICAL);
         result.setGravity(Gravity.CENTER);
-        TextView title = text(testTicket ? "CONTOH TIKET" : "NOMOR ANDA",
-                16, INK, true);
-        title.setGravity(Gravity.CENTER);
-        result.addView(title);
-        TextView numberView = text(number, 48, INK, true);
-        numberView.setGravity(Gravity.CENTER);
-        result.addView(numberView);
-        TextView serviceView = text(service, 20, INK, true);
+        LinearLayout tiket = new LinearLayout(this);
+        tiket.setOrientation(LinearLayout.VERTICAL);
+        tiket.setGravity(Gravity.CENTER);
+        tiket.setPadding(dp(12), dp(10), dp(12), dp(10));
+        tiket.setBackground(rounded(KARTU, dp(22)));
+        TextView serviceView = text(testTicket ? "Contoh tiket" : service, 14, UTAMA, true);
         serviceView.setGravity(Gravity.CENTER);
-        result.addView(serviceView);
+        pasangAutoFit(serviceView, 10, 14, 1);
+        tiket.addView(serviceView, new LinearLayout.LayoutParams(-1, -2));
+        TextView numberView = text(number, 56, INK, true);
+        numberView.setTypeface(huruf(800));
+        numberView.setFontFeatureSettings("tnum");
+        numberView.setGravity(Gravity.CENTER);
+        pasangAutoFit(numberView, 24, 60, 1);
+        tiket.addView(numberView, new LinearLayout.LayoutParams(-1, dp(66)));
+        LinearLayout.LayoutParams tiketParams = new LinearLayout.LayoutParams(-1, -2);
+        tiketParams.leftMargin = dp(28);
+        tiketParams.rightMargin = dp(28);
+        result.addView(tiket, tiketParams);
+        TextView ambil = text("Silakan ambil tiket Anda", 14, Color.argb(225, 255, 255, 255), true);
+        ambil.setGravity(Gravity.CENTER);
+        ambil.setPadding(0, dp(8), 0, dp(6));
+        result.addView(ambil);
+        FrameLayout jalur = new FrameLayout(this);
+        jalur.setBackground(rounded(UTAMA, dp(4)));
+        View isiJalur = new View(this);
+        isiJalur.setBackground(rounded(EMAS, dp(4)));
+        jalur.addView(isiJalur, new FrameLayout.LayoutParams(-1, -1));
+        LinearLayout.LayoutParams jalurParams = new LinearLayout.LayoutParams(dp(160), dp(5));
+        jalurParams.gravity = Gravity.CENTER;
+        result.addView(jalur, jalurParams);
         resultSlot.removeAllViews();
         resultSlot.addView(result, new FrameLayout.LayoutParams(-1, -1));
+        tiket.setAlpha(0f);
+        tiket.setTranslationY(dp(36));
+        tiket.animate().alpha(1f).translationY(0f).setDuration(420)
+                .setInterpolator(new android.view.animation.OvershootInterpolator(1.1f)).start();
+        isiJalur.setPivotX(0f);
+        isiJalur.animate().scaleX(0f).setDuration(LAMA_HASIL_MS)
+                .setInterpolator(new android.view.animation.LinearInterpolator()).start();
         setHint("Nomor sudah terbit. Tiket sedang dicetak…", "hasil");
         handler.removeCallbacks(resultTimeout);
         handler.postDelayed(resultTimeout, LAMA_HASIL_MS);
@@ -1663,12 +2067,7 @@ public final class MainActivity extends Activity {
         for (View choice : ticketChoices) {
             if (choice.isEnabled() == enabled) continue;
             choice.setEnabled(enabled);
-            int background = (int) choice.getTag();
-            choice.setBackground(enabled
-                    ? stateBackground(background, darker(background), dp(16))
-                    : rounded(Color.rgb(226, 232, 240), dp(16)));
-            ((TextView) choice).setTextColor(
-                    enabled ? Color.WHITE : Color.rgb(100, 116, 139));
+            choice.animate().alpha(enabled ? 1f : 0.45f).setDuration(200).start();
         }
         if (showingResult) return;
         if (!registrationOpen) {
@@ -1680,7 +2079,7 @@ public final class MainActivity extends Activity {
             String message = path.isEmpty()
                     ? "Sentuh jenis layanan yang Anda butuhkan"
                     : path.get(path.size() - 1).name
-                            + " — pilih layanan, atau sentuh KEMBALI";
+                            + " — pilih layanan, atau sentuh Kembali";
             setHint(message, "ajak");
         }
     }
@@ -1688,17 +2087,17 @@ public final class MainActivity extends Activity {
     private void setHint(String message, String tone) {
         if (hint == null) return;
         hint.setText(message);
-        int bg = Color.rgb(226, 232, 240);
-        int fg = MUTED;
+        int bg = LEMBUT;
+        int fg = UTAMA;
         if ("konfirmasi".equals(tone)) {
-            bg = Color.rgb(224, 231, 255);
-            fg = Color.rgb(55, 48, 163);
+            bg = LEMBUT;
+            fg = INK;
         } else if ("tunggu".equals(tone)) {
             bg = Color.rgb(254, 243, 199);
             fg = Color.rgb(146, 64, 14);
         } else if ("hasil".equals(tone)) {
-            bg = Color.rgb(16, 185, 129);
-            fg = Color.rgb(4, 35, 26);
+            bg = Color.rgb(220, 245, 232);
+            fg = Color.rgb(15, 122, 74);
         } else if ("gagal".equals(tone) || "salah".equals(tone)) {
             bg = "gagal".equals(tone) ? Color.rgb(245, 158, 11)
                     : Color.rgb(254, 226, 226);
@@ -2005,13 +2404,16 @@ public final class MainActivity extends Activity {
 
     private void showSettings() {
         LinearLayout fields = new LinearLayout(this);
-        fields.setPadding(dp(20), dp(4), dp(20), 0);
+        fields.setPadding(dp(16), 0, dp(16), dp(8));
         fields.setOrientation(LinearLayout.VERTICAL);
-        EditText server = new EditText(this);
-        server.setHint("Alamat server, contoh http://192.168.1.10:8765");
-        server.setSingleLine(true);
+
+        LinearLayout koneksi = bagianPengaturan(fields, "Koneksi server",
+                "Pencarian otomatis bekerja di jaringan lokal yang sama.");
+        EditText server = isianPengaturan(koneksi, "Alamat server",
+                "http://192.168.1.10:8765");
         server.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         server.setText(preferences.getString(SERVER, ""));
+        koneksi.removeView(server);
         LinearLayout serverRow = new LinearLayout(this);
         serverRow.setGravity(Gravity.CENTER_VERTICAL);
         serverRow.addView(server, new LinearLayout.LayoutParams(0, -2, 1));
@@ -2031,60 +2433,55 @@ public final class MainActivity extends Activity {
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show();
             });
         });
-        serverRow.addView(findServer);
-        fields.addView(serverRow);
-        EditText token = new EditText(this);
-        token.setHint("Token API anjungan");
-        token.setSingleLine(true);
+        LinearLayout.LayoutParams cariParams = new LinearLayout.LayoutParams(-2, dp(44));
+        cariParams.leftMargin = dp(8);
+        serverRow.addView(findServer, cariParams);
+        koneksi.addView(serverRow);
+        EditText token = isianPengaturan(koneksi, "Token API anjungan", "Token API anjungan");
         token.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         token.setText(preferences.getString(TOKEN, DEFAULT_TOKEN));
-        fields.addView(token);
-        EditText name = new EditText(this);
-        name.setHint("Nama perangkat, contoh Anjungan Lobi");
-        name.setSingleLine(true);
+        EditText name = isianPengaturan(koneksi, "Nama perangkat", "Anjungan Lobi");
         name.setText(deviceName());
-        fields.addView(name);
-        EditText pairCode = new EditText(this);
-        pairCode.setHint("Kode pasang 6 angka dari Layanan Anjungan");
-        pairCode.setSingleLine(true);
+        EditText pairCode = isianPengaturan(koneksi, "Kode pasang",
+                "6 angka dari Layanan Anjungan");
         pairCode.setInputType(InputType.TYPE_CLASS_NUMBER);
-        fields.addView(pairCode);
         TextView pairHint = text(
                 "Isi kode pasang untuk mendapat token khusus tablet ini; token di atas tidak perlu diketik.",
                 12, MUTED, false);
-        fields.addView(pairHint);
-        TextView printerStatus = text(
-                UsbEscPosPrinter.detect(this), 13, MUTED, false);
-        printerStatus.setPadding(0, dp(6), 0, dp(2));
-        fields.addView(printerStatus);
+        pairHint.setPadding(dp(2), dp(6), 0, 0);
+        koneksi.addView(pairHint);
+
+        LinearLayout printer = bagianPengaturan(fields, "Printer tiket",
+                "Printer ESC/POS USB dideteksi otomatis, tanpa driver tambahan.");
+        TextView printerStatus = text(UsbEscPosPrinter.detect(this), 13, INK, false);
+        printerStatus.setPadding(dp(2), dp(6), 0, 0);
+        printer.addView(printerStatus);
         Button detectPrinter = smallButton("Deteksi printer USB");
         detectPrinter.setOnClickListener(v ->
                 printerStatus.setText(UsbEscPosPrinter.detect(this)));
-        fields.addView(detectPrinter);
-        TextView mediaLabel = text("Sumber media sambutan", 13, INK, true);
-        mediaLabel.setPadding(0, dp(12), 0, 0);
-        fields.addView(mediaLabel);
+        printer.addView(detectPrinter, tombolPengaturan());
+
+        LinearLayout tampilan = bagianPengaturan(fields, "Tampilan anjungan",
+                "Berlaku seketika untuk tablet ini, tanpa tombol Simpan.");
+        tampilan.addView(labelPengaturan("Sumber media sambutan"));
         RadioGroup sumber = new RadioGroup(this);
-        RadioButton dariServer = new RadioButton(this);
-        dariServer.setId(View.generateViewId());
-        dariServer.setText("Daftar putar server (disalin ke tablet)");
-        RadioButton dariTablet = new RadioButton(this);
-        dariTablet.setId(View.generateViewId());
-        dariTablet.setText("Folder media di tablet ini");
+        RadioButton dariServer = radioPengaturan("Daftar putar server (disalin ke tablet)");
+        RadioButton dariTablet = radioPengaturan("Folder media di tablet ini");
         sumber.addView(dariServer);
         sumber.addView(dariTablet);
         sumber.check(sumberTablet() ? dariTablet.getId() : dariServer.getId());
-        fields.addView(sumber);
+        tampilan.addView(sumber);
         TextView mediaStatus = text(ringkasanMedia(), 12, MUTED, false);
-        fields.addView(mediaStatus);
-        TextView loketLabel = text("Posisi baris loket di tablet ini", 13, INK, true);
-        loketLabel.setPadding(0, dp(12), 0, 0);
+        mediaStatus.setPadding(dp(2), dp(2), 0, 0);
+        tampilan.addView(mediaStatus);
+        Button kelolaMedia = smallButton("Kelola media tablet");
+        kelolaMedia.setOnClickListener(v -> showMediaTablet());
+        tampilan.addView(kelolaMedia, tombolPengaturan());
+        tampilan.addView(labelPengaturan("Posisi baris loket di tablet ini"));
         RadioGroup posisi = new RadioGroup(this);
         String posisiTersimpan = preferences.getString(POSISI_LOKET_TABLET, IKUTI_SERVER);
         for (String[] pilihan : PILIHAN_POSISI_LOKET) {
-            RadioButton tombolPosisi = new RadioButton(this);
-            tombolPosisi.setId(View.generateViewId());
-            tombolPosisi.setText(pilihan[1]);
+            RadioButton tombolPosisi = radioPengaturan(pilihan[1]);
             tombolPosisi.setTag(pilihan[0]);
             posisi.addView(tombolPosisi);
             if (pilihan[0].equals(posisiTersimpan)) posisi.check(tombolPosisi.getId());
@@ -2097,11 +2494,25 @@ public final class MainActivity extends Activity {
             preferences.edit().putString(POSISI_LOKET_TABLET, String.valueOf(nilai)).apply();
             terapkanBarisLoket();
         });
-        Button kelolaMedia = smallButton("Kelola media tablet");
-        kelolaMedia.setOnClickListener(v -> showMediaTablet());
-        fields.addView(kelolaMedia);
-        fields.addView(loketLabel);
-        fields.addView(posisi);
+        tampilan.addView(posisi);
+        tampilan.addView(labelPengaturan("Tema tablet ini"));
+        RadioGroup pilihanTema = new RadioGroup(this);
+        String temaTersimpan = preferences.getString(TEMA_TABLET, IKUTI_SERVER_TEMA);
+        for (String[] pilihan : PILIHAN_TEMA) {
+            RadioButton tombolTema = radioPengaturan(pilihan[1]);
+            tombolTema.setTag(pilihan[0]);
+            pilihanTema.addView(tombolTema);
+            if (pilihan[0].equals(temaTersimpan)) pilihanTema.check(tombolTema.getId());
+        }
+        if (pilihanTema.getCheckedRadioButtonId() == -1) {
+            pilihanTema.check(pilihanTema.getChildAt(0).getId());
+        }
+        pilihanTema.setOnCheckedChangeListener((group, checkedId) -> {
+            Object nilai = group.findViewById(checkedId).getTag();
+            preferences.edit().putString(TEMA_TABLET, String.valueOf(nilai)).apply();
+            terapkanTemaBilaBerubah();
+        });
+        tampilan.addView(pilihanTema);
         // Berlaku seketika, terpisah dari tombol Simpan: tidak menyentuh
         // alamat server atau token.
         sumber.setOnCheckedChangeListener((group, checkedId) -> {
@@ -2112,27 +2523,30 @@ public final class MainActivity extends Activity {
             if (!sumberTablet() && hasServerConfig()) sinkronkanSalinan();
             mediaStatus.setText(ringkasanMedia());
         });
-        Button restartApi = smallButton("Restart API server");
-        restartApi.setEnabled(hasServerConfig());
-        restartApi.setOnClickListener(v -> confirmRestartApi(restartApi));
-        restartApi.setPadding(dp(8), dp(8), dp(8), dp(8));
-        fields.addView(restartApi);
+
+        LinearLayout perawatan = bagianPengaturan(fields, "Aplikasi dan server", null);
         boolean newer = latestVersionCode > appVersionCode();
         TextView versionInfo = text("Versi aplikasi " + appVersionName()
                 + (newer ? " · versi " + latestVersionName + " tersedia di server"
                         : latestVersionCode > 0 ? " · terbaru" : ""),
-                13, newer ? Color.rgb(180, 83, 9) : MUTED, newer);
-        versionInfo.setPadding(0, dp(10), 0, dp(2));
-        fields.addView(versionInfo);
+                13, newer ? Color.rgb(180, 83, 9) : INK, newer);
+        versionInfo.setPadding(dp(2), dp(6), 0, 0);
+        perawatan.addView(versionInfo);
         Button updateButton = smallButton("Perbarui ke " + latestVersionName);
-        if (newer) fields.addView(updateButton);
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Hubungkan ke server antrean")
-                .setMessage("Pencarian server otomatis bekerja di jaringan lokal yang sama. Printer ESC/POS USB dideteksi otomatis; tidak perlu memasang driver Android terpisah.")
+        if (newer) perawatan.addView(updateButton, tombolPengaturan());
+        Button restartApi = smallButton("Restart API server");
+        restartApi.setEnabled(hasServerConfig());
+        restartApi.setOnClickListener(v -> confirmRestartApi(restartApi));
+        perawatan.addView(restartApi, tombolPengaturan());
+        AlertDialog dialog = pembuatDialog()
+                .setTitle("Pengaturan anjungan")
                 .setView(gulungan(fields))
                 .setPositiveButton("Simpan", null)
                 .setNeutralButton("Uji cetak", null)
                 .setNegativeButton("Batal", null).create();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(rounded(LATAR, dp(28)));
+        }
         dialog.setOnShowListener(d -> {
             rapikanTombolDialog(dialog);
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
@@ -2178,6 +2592,66 @@ public final class MainActivity extends Activity {
             });
         });
         dialog.show();
+    }
+
+    /** Kartu satu bagian di dialog pengaturan: judul, keterangan, lalu isinya. */
+    private LinearLayout bagianPengaturan(LinearLayout induk, String judul, String keterangan) {
+        LinearLayout kartu = new LinearLayout(this);
+        kartu.setOrientation(LinearLayout.VERTICAL);
+        kartu.setPadding(dp(14), dp(12), dp(14), dp(14));
+        kartu.setBackground(roundedOutline(KARTU, GARIS, dp(18), dp(1)));
+        TextView kepala = text(judul, 15, INK, true);
+        kepala.setTypeface(huruf(800));
+        kartu.addView(kepala);
+        if (keterangan != null) {
+            TextView ket = text(keterangan, 12, MUTED, false);
+            ket.setPadding(0, dp(2), 0, 0);
+            kartu.addView(ket);
+        }
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.topMargin = dp(10);
+        induk.addView(kartu, params);
+        return kartu;
+    }
+
+    private TextView labelPengaturan(String isi) {
+        TextView label = text(isi, 12, MUTED, true);
+        label.setPadding(dp(2), dp(12), 0, dp(2));
+        return label;
+    }
+
+    /** Kolom isian berlabel dengan latar lembut, ditambahkan ke bagian. */
+    private EditText isianPengaturan(LinearLayout bagian, String label, String petunjuk) {
+        TextView judul = labelPengaturan(label);
+        judul.setPadding(dp(2), dp(10), 0, dp(4));
+        bagian.addView(judul);
+        EditText isian = new EditText(this);
+        isian.setHint(petunjuk);
+        isian.setSingleLine(true);
+        isian.setTextColor(INK);
+        isian.setHintTextColor(Color.rgb(148, 163, 184));
+        isian.setTextSize(15 * uiScale);
+        isian.setPadding(dp(12), dp(10), dp(12), dp(10));
+        isian.setBackground(roundedOutline(LATAR, GARIS, dp(12), dp(1)));
+        bagian.addView(isian, new LinearLayout.LayoutParams(-1, -2));
+        return isian;
+    }
+
+    private RadioButton radioPengaturan(String isi) {
+        RadioButton tombol = new RadioButton(this);
+        tombol.setId(View.generateViewId());
+        tombol.setText(isi);
+        tombol.setTextColor(INK);
+        tombol.setTextSize(14 * uiScale);
+        tombol.setButtonTintList(android.content.res.ColorStateList.valueOf(UTAMA));
+        tombol.setPadding(dp(4), dp(6), 0, dp(6));
+        return tombol;
+    }
+
+    private LinearLayout.LayoutParams tombolPengaturan() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(44));
+        params.topMargin = dp(8);
+        return params;
     }
 
     /** Dialog pengaturan makin panjang; tablet kecil perlu menggulungnya. */
@@ -2238,7 +2712,7 @@ public final class MainActivity extends Activity {
                     ? "video" : "gambar") + " · " + ukuran, 13, INK, false);
             baris.addView(nama, new LinearLayout.LayoutParams(0, -2, 1));
             Button hapus = smallButton("Hapus");
-            hapus.setOnClickListener(v -> new AlertDialog.Builder(this)
+            hapus.setOnClickListener(v -> pembuatDialog()
                     .setTitle("Hapus " + item.getName() + "?")
                     .setMessage("Berkas dihapus dari tablet ini.")
                     .setNegativeButton("Batal", null)
@@ -2253,7 +2727,7 @@ public final class MainActivity extends Activity {
             baris.addView(hapus);
             isi.addView(baris);
         }
-        dialog[0] = new AlertDialog.Builder(this)
+        dialog[0] = pembuatDialog()
                 .setTitle("Media di tablet")
                 .setView(gulungan(isi))
                 .setPositiveButton("Tambah berkas", (d, w) -> pilihMediaTablet())
@@ -2354,7 +2828,7 @@ public final class MainActivity extends Activity {
     }
 
     private void confirmRestartApi(Button restartButton) {
-        new AlertDialog.Builder(this)
+        pembuatDialog()
                 .setTitle("Restart API server?")
                 .setMessage("Anjungan akan terputus beberapa detik. Permintaan ini "
                         + "hanya berlaku untuk tablet yang sudah terhubung ke server.")
@@ -2421,7 +2895,7 @@ public final class MainActivity extends Activity {
     }
 
     private void confirmTestTicket() {
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog dialog = pembuatDialog()
                 .setTitle("Mode uji — bukan antrean resmi")
                 .setMessage("Aplikasi akan menampilkan dan mencetak tiket contoh UJI-000 "
                         + "dengan tampilan tiket dari server. Nomor ini tidak disimpan dan "
@@ -2454,37 +2928,36 @@ public final class MainActivity extends Activity {
     private Button smallButton(String value) {
         Button button = new Button(this);
         button.setText(value);
-        button.setTextColor(MUTED);
+        button.setTextColor(UTAMA);
         button.setAllCaps(false);
+        button.setTypeface(huruf(700));
+        button.setBackground(stateOutline(KARTU, LEMBUT, dp(20)));
+        button.setStateListAnimator(null);
         button.setGravity(Gravity.CENTER);
         button.setMinWidth(0);
         button.setMinimumWidth(0);
         button.setMinHeight(0);
         button.setMinimumHeight(0);
-        button.setPadding(dp(6), dp(3), dp(6), dp(3));
-        pasangAutoFit(button, 10, 17, 1);
+        button.setPadding(dp(12), dp(6), dp(12), dp(6));
+        tulisanTombolUtuh(button, 15);
         return button;
     }
 
     private Button actionButton(String label, boolean primary) {
         Button button = new Button(this);
         button.setText(label);
-        button.setTextColor(primary ? Color.WHITE : MUTED);
+        button.setTextColor(primary ? TEKS_TOMBOL : INK);
         button.setAllCaps(false);
-        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setTypeface(huruf(800));
+        button.setStateListAnimator(null);
         button.setGravity(Gravity.CENTER);
         button.setMinHeight(0);
         button.setMinimumHeight(0);
         button.setPadding(dp(12), dp(4), dp(12), dp(4));
-        pasangAutoFit(button, 12, primary ? 18 : 16, 2);
-        button.setBackground(stateBackground(
-                primary ? GREEN : Color.WHITE,
-                primary ? Color.rgb(4, 120, 87) : Color.rgb(241, 245, 249),
-                dp(14)));
-        if (!primary) {
-            button.setBackground(roundedOutline(Color.WHITE,
-                    Color.rgb(148, 163, 184), dp(14), dp(2)));
-        }
+        pasangSatuBaris(button, 9, primary ? 18 : 16);
+        button.setBackground(primary
+                ? stateBackground(UTAMA, darker(UTAMA), dp(29))
+                : stateOutline(KARTU, LEMBUT, dp(29)));
         return button;
     }
 
@@ -2498,10 +2971,32 @@ public final class MainActivity extends Activity {
             Button button = dialog.getButton(id);
             if (button == null) continue;
             button.setAllCaps(false);
+            button.setTypeface(huruf(700));
+            button.setTextColor(id == AlertDialog.BUTTON_POSITIVE ? UTAMA : MUTED);
             button.setGravity(Gravity.CENTER);
             button.setPadding(dp(8), dp(4), dp(8), dp(4));
-            pasangAutoFit(button, 10, 14, 1);
+            tulisanTombolUtuh(button, 14);
         }
+    }
+
+    /**
+     * Label tombol yang lebarnya mengikuti isi: satu baris, ukuran tetap,
+     * tanpa "…". Tombolnya yang melebar, bukan tulisannya yang dipotong.
+     */
+    private void tulisanTombolUtuh(TextView view, int ukuranSp) {
+        view.setSingleLine(true);
+        view.setEllipsize(null);
+        view.setIncludeFontPadding(false);
+        view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, ukuranSp * uiScale);
+    }
+
+    /**
+     * Label satu baris di kotak berukuran tetap: huruf mengecil sampai
+     * seluruh tulisan muat, tidak pernah pecah dua baris atau terpotong "…".
+     */
+    private void pasangSatuBaris(TextView view, int minimumSp, int maksimumSp) {
+        pasangAutoFit(view, minimumSp, maksimumSp, 1);
+        view.setEllipsize(null);
     }
 
     /**
@@ -2540,8 +3035,11 @@ public final class MainActivity extends Activity {
                 break;
             }
         }
+        int lebarTersedia = view.getWidth() - view.getPaddingLeft() - view.getPaddingRight();
+        boolean terlaluLebar = maksimumBaris == 1
+                && view.getPaint().measureText(view.getText().toString()) > lebarTersedia;
         boolean tidakMuat = layout.getLineCount() > maksimumBaris
-                || layout.getHeight() > tinggiTersedia || terpotong;
+                || layout.getHeight() > tinggiTersedia || terpotong || terlaluLebar;
         if (!tidakMuat) return;
 
         float kepadatanFont = getResources().getDisplayMetrics().scaledDensity;
@@ -2557,8 +3055,19 @@ public final class MainActivity extends Activity {
         view.setText(value);
         view.setTextSize(size * uiScale);
         view.setTextColor(color);
-        if (bold) view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        view.setTypeface(huruf(bold ? 700 : 400));
         return view;
+    }
+
+    /**
+     * Satu-satunya tempat memilih huruf. Bila huruf merek (mis. Plus Jakarta
+     * Sans) dibundel di assets, cukup ganti isi fungsi ini.
+     */
+    private static Typeface huruf(int tebal) {
+        if (tebal >= 800) return Typeface.create("sans-serif-black", Typeface.NORMAL);
+        if (tebal >= 700) return Typeface.create("sans-serif", Typeface.BOLD);
+        if (tebal >= 500) return Typeface.create("sans-serif-medium", Typeface.NORMAL);
+        return Typeface.create("sans-serif", Typeface.NORMAL);
     }
 
     private int dp(int value) {
@@ -2586,6 +3095,14 @@ public final class MainActivity extends Activity {
         shape.setCornerRadius(radius);
         shape.setStroke(borderWidth, border);
         return shape;
+    }
+
+    private StateListDrawable stateOutline(int normal, int pressed, int radius) {
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_pressed},
+                roundedOutline(pressed, UTAMA, radius, dp(2)));
+        states.addState(new int[]{}, roundedOutline(normal, GARIS, radius, dp(2)));
+        return states;
     }
 
     private static StateListDrawable stateBackground(

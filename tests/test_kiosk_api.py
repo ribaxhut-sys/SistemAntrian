@@ -114,8 +114,13 @@ class _Settings:
     suara_video = False
 
     def get_bool(self, key, default):
-        return {"kiosk.suara_video": self.suara_video}.get(key, default)
+        return {
+            "kiosk.suara_video": self.suara_video,
+            "kiosk.tema_agustus": self.tema_agustus,
+        }.get(key, default)
     posisi_loket = "otomatis"
+    tema = "biru"
+    tema_agustus = False
     daftar_putar = ""
 
     def get_int(self, key, default):
@@ -131,6 +136,7 @@ class _Settings:
             "kiosk.welcome_kind": self.welcome_kind,
             "kiosk.welcome_file": "",
             "kiosk.posisi_loket": self.posisi_loket,
+            "kiosk.tema": self.tema,
             "kiosk.daftar_putar": self.daftar_putar,
         }
         return values.get(key, default)
@@ -278,6 +284,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
             },
         ],
         "counter_position": "otomatis",
+        "theme": "biru",
         "video_sound": False,
         "app_min_version_code": VERSI_MINIMAL,
         "app_latest_version_code": None,
@@ -306,6 +313,33 @@ def test_display_sends_counter_position(tersimpan, dikirim):
     ).json()
 
     assert isi["counter_position"] == dikirim
+
+
+@pytest.mark.parametrize(
+    ("tersimpan", "agustus", "bulan", "dikirim"),
+    [
+        ("gelap", False, 10, "gelap"),
+        ("ngawur", False, 10, "biru"),
+        ("hijau", True, 10, "hijau"),
+        ("hijau", True, 8, "merah_putih"),
+        ("hijau", False, 8, "hijau"),
+    ],
+)
+def test_display_sends_theme(monkeypatch, tersimpan, agustus, bulan, dikirim):
+    from app.kiosk_api import create_app
+
+    monkeypatch.setattr(
+        "app.kiosk_api.clock.today", lambda: datetime(2026, bulan, 15).date()
+    )
+    services = _Services()
+    services.settings.tema = tersimpan
+    services.settings.tema_agustus = agustus
+    client = TestClient(create_app(TOKEN, services))
+    isi = client.get(
+        "/v1/kiosk/display", headers={"Authorization": f"Bearer {TOKEN}"}
+    ).json()
+
+    assert isi["theme"] == dikirim
 
 
 @pytest.mark.parametrize(

@@ -62,6 +62,8 @@ BAWAAN: dict[str, str] = {
     "kiosk.posisi_loket": "otomatis",
     "kiosk.daftar_putar": "",
     "kiosk.suara_video": "false",
+    "kiosk.tema": "biru",
+    "kiosk.tema_agustus": "true",
     "display.screen_shape": "auto",
     "display.theme": "kaca",
     "display.title": "ANTRIAN PELAYANAN CRO",
@@ -449,6 +451,30 @@ SKEMA: tuple[Pengaturan, ...] = (
             ("atas", "Pindahkan loket ke panel atas"),
             ("sembunyi", "Sembunyikan baris loket"),
         ),
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.tema",
+        "Tema anjungan",
+        "Warna tampilan tablet anjungan. Kontras tinggi memakai hitam-kuning "
+        "dan huruf lebih besar untuk pengunjung lansia atau lobi yang silau. "
+        "Tablet dapat menimpa pilihan ini di Pengaturan tablet.",
+        PILIHAN,
+        pilihan=(
+            ("biru", "Biru instansi"),
+            ("hijau", "Hijau segar"),
+            ("kontras", "Kontras tinggi"),
+            ("gelap", "Gelap elegan"),
+            ("merah_putih", "Merah putih (perayaan)"),
+        ),
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.tema_agustus",
+        "Merah putih otomatis setiap Agustus",
+        "Selama bulan Agustus anjungan memakai tema merah putih, lalu "
+        "kembali ke tema di atas pada 1 September tanpa perlu diubah.",
+        BOOLEAN,
         kelompok="Antrian",
     ),
     Pengaturan(

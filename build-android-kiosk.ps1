@@ -71,7 +71,7 @@ $versionCode = [int]$Matches[1]
 if ($gradleText -notmatch 'versionName\s+"([^"]+)"') { throw "versionName tidak ditemukan di build.gradle." }
 $versionName = $Matches[1]
 
-$release = Join-Path $PSScriptRoot "dist\AntrianKiosk-$versionName.apk"
+$release = Join-Path $PSScriptRoot "dist\antrianCRO-$versionName.apk"
 New-Item -ItemType Directory -Path (Split-Path $release -Parent) -Force | Out-Null
 Copy-Item -LiteralPath $apk -Destination $release -Force
 

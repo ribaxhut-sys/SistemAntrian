@@ -71,6 +71,8 @@ _MEDIA_EXTENSIONS = {
 _MEDIA_KINDS = {"media", "gambar", "video"}
 #: Letak baris loket di anjungan; nilai lain dibaca sebagai "otomatis".
 POSISI_LOKET = ("otomatis", "atas", "bawah", "sembunyi")
+#: Tema warna anjungan Android; nilai lain dibaca sebagai "biru".
+TEMA_ANJUNGAN = ("biru", "hijau", "kontras", "gelap", "merah_putih")
 MIN_TOKEN_LENGTH = 8
 DISCOVERY_REQUEST = b"SISTEMANTRIAN_KIOSK_DISCOVER_V1"
 DISCOVERY_RESPONSE = "SISTEMANTRIAN_KIOSK_SERVER_V1"
@@ -286,6 +288,16 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
     def posisi_loket() -> str:
         nilai = services.settings.get("kiosk.posisi_loket", "otomatis")
         return nilai if nilai in POSISI_LOKET else "otomatis"
+
+    def tema_anjungan() -> str:
+        """Tema yang berlaku hari ini; Agustus boleh otomatis merah putih."""
+        if (
+            services.settings.get_bool("kiosk.tema_agustus", True)
+            and clock.today().month == 8
+        ):
+            return "merah_putih"
+        nilai = services.settings.get("kiosk.tema", "biru")
+        return nilai if nilai in TEMA_ANJUNGAN else "biru"
 
     def isi_loket(state) -> list[dict]:
         """Nomor tiap loket, sama untuk layar antrian dan anjungan."""
@@ -583,6 +595,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 services.queue.display_state(jumlah_berikutnya=0)
             ),
             "counter_position": posisi_loket(),
+            "theme": tema_anjungan(),
             "video_sound": services.settings.get_bool("kiosk.suara_video", False),
             # Jam di layar anjungan memakai jam dan zona waktu SERVER, bukan
             # setelan tablet: tablet tanpa internet sering salah jam, dan
@@ -701,7 +714,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         return FileResponse(
             apk.berkas,
             media_type=TIPE_APK,
-            filename=f"AntrianKiosk-{apk.nama_versi}.apk",
+            filename=f"antrianCRO-{apk.nama_versi}.apk",
         )
 
     @app.post("/v1/kiosk/tickets")
