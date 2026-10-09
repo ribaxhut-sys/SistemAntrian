@@ -1605,7 +1605,7 @@ public final class MainActivity extends Activity {
 
         TextView nama = text(loket.nama, besar ? 15 : 11, MUTED, true);
         nama.setGravity(Gravity.CENTER);
-        pasangAutoFit(nama, 9, besar ? 15 : 11, 1);
+        pasangSatuBaris(nama, 8, besar ? 15 : 11);
         kartu.addView(nama, new LinearLayout.LayoutParams(-1, -2));
 
         String isi = melayani ? loket.nomor
@@ -1617,13 +1617,13 @@ public final class MainActivity extends Activity {
             nomor.setFontFeatureSettings("tnum");
         }
         nomor.setGravity(Gravity.CENTER);
-        pasangAutoFit(nomor, 10, maks, 1);
+        pasangSatuBaris(nomor, 9, maks);
         kartu.addView(nomor, new LinearLayout.LayoutParams(-1, 0, 1));
 
         if (besar && melayani && !loket.layanan.isEmpty()) {
             TextView layanan = text(loket.layanan, 13, UTAMA, false);
             layanan.setGravity(Gravity.CENTER);
-            pasangAutoFit(layanan, 9, 13, 1);
+            pasangSatuBaris(layanan, 8, 13);
             kartu.addView(layanan, new LinearLayout.LayoutParams(-1, -2));
         }
         return kartu;
@@ -1697,7 +1697,7 @@ public final class MainActivity extends Activity {
             nomor.setGravity(Gravity.CENTER);
             nomor.setPadding(dp(4), dp(4), dp(4), dp(4));
             nomor.setBackground(rounded(LEMBUT, dp(16)));
-            pasangAutoFit(nomor, 12, 20, 1);
+            pasangSatuBaris(nomor, 10, 20);
             baris.addView(nomor, selNomorMenunggu());
         }
         // Baris terakhir diisi sel kosong supaya ubinnya tetap selebar ubin lain.
@@ -2031,13 +2031,13 @@ public final class MainActivity extends Activity {
         tiket.setBackground(rounded(KARTU, dp(22)));
         TextView serviceView = text(testTicket ? "Contoh tiket" : service, 14, UTAMA, true);
         serviceView.setGravity(Gravity.CENTER);
-        pasangAutoFit(serviceView, 10, 14, 1);
+        pasangSatuBaris(serviceView, 9, 14);
         tiket.addView(serviceView, new LinearLayout.LayoutParams(-1, -2));
         TextView numberView = text(number, 56, INK, true);
         numberView.setTypeface(huruf(800));
         numberView.setFontFeatureSettings("tnum");
         numberView.setGravity(Gravity.CENTER);
-        pasangAutoFit(numberView, 24, 60, 1);
+        pasangSatuBaris(numberView, 24, 60);
         tiket.addView(numberView, new LinearLayout.LayoutParams(-1, dp(66)));
         LinearLayout.LayoutParams tiketParams = new LinearLayout.LayoutParams(-1, -2);
         tiketParams.leftMargin = dp(28);
@@ -3007,63 +3007,53 @@ public final class MainActivity extends Activity {
     }
 
     /**
-     * Label satu baris di kotak berukuran tetap: huruf mengecil sampai
-     * seluruh tulisan muat, tidak pernah pecah dua baris atau terpotong "…".
+     * Label satu baris: huruf mengecil sampai seluruh tulisan muat selebar
+     * kotaknya, tidak pernah pecah dua baris atau terpotong "…".
+     *
+     * Lebar tulisan diukur sendiri, bukan lewat autosize Android: autosize
+     * diam saja pada teks yang tingginya wrap_content, dan teks itu lalu
+     * terbungkus ke baris kedua yang tersembunyi ("Lihat pilihan layanan"
+     * tampil "Lihat pilihan"). Cara ini juga sama di Android 7.
      */
     private void pasangSatuBaris(TextView view, int minimumSp, int maksimumSp) {
-        pasangAutoFit(view, minimumSp, maksimumSp, 1);
+        view.setSingleLine(true);
         view.setEllipsize(null);
-    }
-
-    /**
-     * Sesuaikan ukuran tulisan terhadap kotak tombol/kartu yang sebenarnya.
-     * Autosize bawaan tersedia mulai Android 8. Tablet Android 7 tetap
-     * didukung dengan fallback yang mengecilkan teks satu tingkat demi satu
-     * tingkat hanya bila tulisan lebih tinggi dari ruang yang tersedia.
-     */
-    private void pasangAutoFit(TextView view, int minimumSp, int maksimumSp, int maksimumBaris) {
-        view.setMaxLines(maksimumBaris);
-        view.setEllipsize(TextUtils.TruncateAt.END);
         view.setIncludeFontPadding(false);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            int minimum = Math.max(1, Math.round(minimumSp * uiScale));
-            int maksimum = Math.max(minimum, Math.round(maksimumSp * uiScale));
-            view.setAutoSizeTextTypeUniformWithConfiguration(
-                    minimum, maksimum, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
-            return;
-        }
-
-        view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, maksimumSp * uiScale);
-        view.addOnLayoutChangeListener((changed, left, top, right, bottom,
-                                        oldLeft, oldTop, oldRight, oldBottom) ->
-                kecilkanTeksBilaPerlu(view, minimumSp, maksimumBaris));
-        view.post(() -> kecilkanTeksBilaPerlu(view, minimumSp, maksimumBaris));
-    }
-
-    private void kecilkanTeksBilaPerlu(TextView view, int minimumSp, int maksimumBaris) {
-        if (view.getWidth() <= 0 || view.getHeight() <= 0 || view.getLayout() == null) return;
-        android.text.Layout layout = view.getLayout();
-        int tinggiTersedia = view.getHeight() - view.getPaddingTop() - view.getPaddingBottom();
-        boolean terpotong = false;
-        for (int baris = 0; baris < layout.getLineCount(); baris++) {
-            if (layout.getEllipsisCount(baris) > 0) {
-                terpotong = true;
-                break;
+        float kepadatan = getResources().getDisplayMetrics().scaledDensity;
+        float maksPx = maksimumSp * uiScale * kepadatan;
+        float minPx = minimumSp * uiScale * kepadatan;
+        view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, maksPx);
+        Runnable pas = () -> {
+            int lebar = view.getWidth() - view.getTotalPaddingLeft() - view.getTotalPaddingRight();
+            if (lebar <= 0) return;
+            android.text.TextPaint ukur = new android.text.TextPaint(view.getPaint());
+            ukur.setTextSize(maksPx);
+            float perlu = ukur.measureText(view.getText().toString());
+            float ukuran = perlu <= lebar ? maksPx
+                    : Math.max(minPx, (float) Math.floor(maksPx * lebar / perlu * 0.97f));
+            if (Math.abs(view.getTextSize() - ukuran) > 0.5f) {
+                view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ukuran);
             }
-        }
-        int lebarTersedia = view.getWidth() - view.getPaddingLeft() - view.getPaddingRight();
-        boolean terlaluLebar = maksimumBaris == 1
-                && view.getPaint().measureText(view.getText().toString()) > lebarTersedia;
-        boolean tidakMuat = layout.getLineCount() > maksimumBaris
-                || layout.getHeight() > tinggiTersedia || terpotong || terlaluLebar;
-        if (!tidakMuat) return;
+        };
+        view.addOnLayoutChangeListener((v, kiri, atas, kanan, bawah,
+                                        kiriLama, atasLama, kananLama, bawahLama) -> {
+            if (kanan - kiri != kananLama - kiriLama) v.post(pas);
+        });
+        view.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence teks, int awal, int jumlah, int sesudah) {
+            }
 
-        float kepadatanFont = getResources().getDisplayMetrics().scaledDensity;
-        float minimumPx = minimumSp * uiScale * kepadatanFont;
-        float ukuranBerikutnya = Math.max(minimumPx, view.getTextSize() - kepadatanFont);
-        if (ukuranBerikutnya >= view.getTextSize()) return;
-        view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, ukuranBerikutnya);
-        view.requestLayout();
+            @Override
+            public void onTextChanged(CharSequence teks, int awal, int sebelum, int jumlah) {
+            }
+
+            @Override
+            public void afterTextChanged(android.text.Editable teks) {
+                view.post(pas);
+            }
+        });
+        view.post(pas);
     }
 
     private TextView text(String value, int size, int color, boolean bold) {
