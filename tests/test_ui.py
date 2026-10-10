@@ -696,7 +696,12 @@ def test_form_admin_penuh_tanpa_scrollbar_form(qtbot, admin_auth, monkeypatch, s
         monkeypatch.setattr(
             "app.services.kiosk_server.api_sudah_berjalan", lambda port=8765: False
         )
-        _status_palsu(monkeypatch)
+        from app.services.paket_suara import InfoPaket
+
+        _status_palsu(
+            monkeypatch,
+            paket=InfoPaket("v1", "Microsoft David Desktop (en-US)", {"angka_1": "angka_1.wav"}),
+        )
         for nomor, (nama, jenis) in enumerate(
             [
                 ("Tablet Lobi", "anjungan"),
@@ -2091,7 +2096,8 @@ def test_layanan_anjungan_hanya_di_komputer_server(qtbot, admin_auth, monkeypatc
 
 
 def _status_palsu(
-    monkeypatch, *, api=False, terdaftar=False, firewall=False, apk=None, berjaga=True
+    monkeypatch, *, api=False, terdaftar=False, firewall=False, apk=None, berjaga=True,
+    paket=None,
 ):
     from app.services.kiosk_server import StatusTugas, perintah_api
     from app.ui.settings import layanan_anjungan_page as halaman_modul
@@ -2105,6 +2111,7 @@ def _status_palsu(
             tugas=StatusTugas(terdaftar, program, " ".join(argumen), berjaga=berjaga),
             firewall=firewall,
             apk=apk,
+            paket=paket,
         ),
     )
 
@@ -2949,7 +2956,10 @@ def test_kartu_perangkat_memilih_anjungan_bersuara(qtbot, admin_auth):
     assert pilihan == ["Tidak ada (anjungan diam)", "Anjungan Lobi"], (
         "layar antrian dan tablet bertoken bersama tidak dapat dipilih"
     )
-    assert kartu.pilih_suara.currentIndex() == 0
+    assert kartu.pilih_suara.currentIndex() == 1, "satu-satunya anjungan dipilih otomatis"
+
+    kartu._ubah_anjungan_bersuara(0)
+    assert device_service.anjungan_bersuara() == ""
 
     kartu.pilih_suara.setCurrentIndex(1)
     kartu._ubah_anjungan_bersuara(1)
@@ -3027,3 +3037,35 @@ def test_kartu_perangkat_memperingatkan_suara_ganda(qtbot, admin_auth):
     layanan.setel_anjungan_bersuara(None)
     kartu.muat_ulang()
     assert kartu.peringatan_suara.isHidden(), "tidak ada anjungan bersuara"
+
+
+def test_halaman_layanan_anjungan_memperingatkan_suara_bukan_indonesia(
+    qtbot, monkeypatch, app_config
+):
+    from app.services.paket_suara import InfoPaket
+    from app.ui.settings.layanan_anjungan_page import LayananAnjunganPage
+
+    klip = {"angka_1": "angka_1.wav"}
+    _status_palsu(
+        monkeypatch, api=True, terdaftar=True, firewall=True,
+        paket=InfoPaket("v1", "Microsoft David Desktop (en-US)", klip),
+    )
+    monkeypatch.setattr(
+        "app.ui.settings.layanan_anjungan_page.nama_loket_aktif", lambda: []
+    )
+    halaman = LayananAnjunganPage()
+    qtbot.addWidget(halaman)
+    qtbot.waitUntil(lambda: halaman._status is not None, timeout=3000)
+    assert halaman.baris_paket.lencana.text() == "Belum"
+    assert "bukan Bahasa Indonesia" in halaman.baris_paket.teks.text()
+    assert "Bahasa Indonesia" in halaman.baris_paket.teks.toolTip()
+
+    _status_palsu(
+        monkeypatch, api=True, terdaftar=True, firewall=True,
+        paket=InfoPaket("v2", "Microsoft Andika (Indonesia)", klip),
+    )
+    halaman.muat_ulang()
+    qtbot.waitUntil(lambda: halaman._status.paket.versi == "v2", timeout=3000)
+    assert halaman.baris_paket.lencana.text() == "Normal"
+    assert halaman.baris_paket.teks.toolTip() == ""
+

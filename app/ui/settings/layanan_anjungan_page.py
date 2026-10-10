@@ -64,6 +64,7 @@ from app.services.paket_suara import (
     folder_paket,
     info_paket,
     nama_loket_aktif,
+    suara_indonesia,
 )
 from app.ui.common import judul, keterangan, konfirmasi, tampilkan_peringatan, tombol
 from app.ui.style import DANGER, SUCCESS, TEXT_MUTED, WARNING
@@ -172,6 +173,14 @@ def _teks_tombol(label: str) -> str:
 
 
 #: (warna titik, teks lencana)
+#: Petunjuk bila paket suara dibuat dengan suara selain Bahasa Indonesia.
+PETUNJUK_SUARA_INDONESIA = (
+    "Komputer server ini belum punya suara Bahasa Indonesia, sehingga kalimat "
+    "panggilan diucapkan suara berlogat asing. Buka Settings Windows → Time & "
+    "language → Language & region → Add a language → Bahasa Indonesia, centang "
+    "Speech (text-to-speech). Sesudah terpasang, tekan Buat ulang paket suara."
+)
+
 _NORMAL = (SUCCESS, "Normal")
 _BELUM = (WARNING, "Belum")
 _TINDAKAN = (DANGER, "Perlu tindakan")
@@ -483,6 +492,7 @@ class LayananAnjunganPage(QWidget):
             )
 
         paket = status.paket
+        self.baris_paket.teks.setToolTip("")
         if paket is None:
             self.baris_paket.setel(
                 _BELUM, "Belum dibuat — layar tanpa suara Indonesia hanya berbunyi nada"
@@ -494,6 +504,15 @@ class LayananAnjunganPage(QWidget):
             self.baris_paket.setel(
                 _BELUM, f"Kata baru {kata} · diperbarui otomatis oleh API dalam 1 menit"
             )
+        elif not suara_indonesia(paket):
+            # Komputer server tanpa suara Indonesia Windows: kalimat Indonesia
+            # diucapkan suara Inggris dan sulit dipahami pengunjung.
+            # Petunjuk lengkap di tooltip: teks dua baris membuat halaman
+            # tidak lagi muat 1366x768.
+            self.baris_paket.setel(
+                _BELUM, f"Suara {paket.suara}, bukan Bahasa Indonesia (lihat petunjuk)"
+            )
+            self.baris_paket.teks.setToolTip(PETUNJUK_SUARA_INDONESIA)
         else:
             self.baris_paket.setel(_NORMAL, f"{paket.jumlah} klip · suara {paket.suara}")
 

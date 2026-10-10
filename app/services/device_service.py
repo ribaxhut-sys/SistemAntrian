@@ -281,8 +281,48 @@ def pasangkan(kode: str, device_id: str, nama: str, jenis: str) -> str:
             nama=baris.nama,
             jenis=baris.jenis,
         )
+        if baris.jenis == JENIS_ANJUNGAN:
+            _pilih_anjungan_bersuara_pertama(session, baris)
     logger.info("Perangkat dipasangkan: %s (%s)", nama, device_id)
     return token
+
+
+def _pilih_anjungan_bersuara_pertama(session, baris: KioskDevice) -> None:
+    """
+    Pemasangan baru dengan satu anjungan saja langsung bersuara.
+
+    Hanya bila pengaturannya BELUM PERNAH disentuh (barisnya tidak ada) dan
+    tidak ada perangkat terpasang lain — anjungan kedua atau layar antrian
+    Android. Pilihan admin, termasuk "Tidak ada" (baris berisi kosong),
+    tidak pernah ditimpa. Layar antrian Windows tidak terdaftar sebagai
+    perangkat; pemasangan yang memakainya mematikan suara layar itu atau
+    memilih Tidak ada di kartu Perangkat.
+    """
+    sudah_diatur = session.scalar(
+        sa.select(ApplicationSetting).where(ApplicationSetting.key == KUNCI_ANJUNGAN_BERSUARA)
+    )
+    if sudah_diatur is not None:
+        return
+    perangkat_lain = session.scalar(
+        sa.select(sa.func.count())
+        .select_from(KioskDevice)
+        .where(
+            KioskDevice.id != baris.id,
+            KioskDevice.token_hash.is_not(None),
+            KioskDevice.dicabut_pada.is_(None),
+        )
+    )
+    if perangkat_lain:
+        return
+    session.add(ApplicationSetting(key=KUNCI_ANJUNGAN_BERSUARA, value=baris.device_id))
+    audit_service.record(
+        session,
+        AuditAction.CHANGE_CONFIGURATION,
+        entity_type="setting",
+        key=KUNCI_ANJUNGAN_BERSUARA,
+        value=baris.device_id,
+    )
+    logger.info("Anjungan pertama %s dipilih membunyikan panggilan", baris.device_id)
 
 
 def batalkan_kode_aktif() -> int:

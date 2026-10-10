@@ -367,10 +367,20 @@ def _setel_bersuara(device_id: str) -> None:
     from app.core.database import session_scope
     from app.models import ApplicationSetting
 
+    import sqlalchemy as sa
+
     with session_scope() as session:
-        session.add(
-            ApplicationSetting(key=device_service.KUNCI_ANJUNGAN_BERSUARA, value=device_id)
+        baris = session.scalar(
+            sa.select(ApplicationSetting).where(
+                ApplicationSetting.key == device_service.KUNCI_ANJUNGAN_BERSUARA
+            )
         )
+        if baris is None:
+            session.add(
+                ApplicationSetting(key=device_service.KUNCI_ANJUNGAN_BERSUARA, value=device_id)
+            )
+        else:
+            baris.value = device_id
 
 
 def test_hanya_anjungan_terpasang_yang_dapat_bersuara(layanan):
@@ -383,8 +393,9 @@ def test_hanya_anjungan_terpasang_yang_dapat_bersuara(layanan):
             "/v1/kiosk/pair",
             json={"code": kode, "device_id": device_id, "name": "X", "kind": jenis},
         )
-    assert layanan.anjungan_bersuara() == ""
+    assert layanan.anjungan_bersuara() == DEVICE, "anjungan pertama dipilih otomatis"
 
+    layanan.setel_anjungan_bersuara(None)
     layanan.setel_anjungan_bersuara(DEVICE)
     assert device_service.anjungan_bersuara() == DEVICE
 
@@ -454,3 +465,46 @@ def test_anjungan_terpilih_membunyikan_panggilan(
     }
     assert klien.get("/v1/kiosk/sound/angka_1.wav", headers=kepala).content == b"RIFF-isi"
     assert klien.get("/v1/kiosk/sound/..%2Fpaket.json", headers=kepala).status_code == 404
+
+
+def _pasang_lewat_kode(layanan, device_id, jenis):
+    return device_service.pasangkan(layanan.buat_kode().kode, device_id, device_id, jenis)
+
+
+def test_anjungan_pertama_otomatis_bersuara(layanan):
+    _pasang_lewat_kode(layanan, "kios-satu", "anjungan")
+    assert device_service.anjungan_bersuara() == "kios-satu"
+
+    _pasang_lewat_kode(layanan, "kios-dua", "anjungan")
+    assert device_service.anjungan_bersuara() == "kios-satu", "anjungan kedua tidak menimpa"
+
+
+def test_tidak_otomatis_bila_ada_layar_antrian(layanan):
+    _pasang_lewat_kode(layanan, "tv-satu", "layar_antrian")
+    _pasang_lewat_kode(layanan, "kios-satu", "anjungan")
+    assert device_service.anjungan_bersuara() == ""
+
+
+def test_pilihan_tidak_ada_dari_admin_tidak_ditimpa(layanan):
+    layanan.setel_anjungan_bersuara(None)
+    _pasang_lewat_kode(layanan, "kios-satu", "anjungan")
+    assert device_service.anjungan_bersuara() == ""
+
+
+def test_anjungan_dicabut_tidak_menghalangi_pilihan_otomatis(layanan):
+    _pasang_lewat_kode(layanan, "kios-lama", "anjungan")
+    layanan.setel_anjungan_bersuara(None)
+    # Pemasangan ulang dari awal: baris pengaturan dihapus, perangkat lama dicabut.
+    from app.core.database import session_scope
+    from app.models import ApplicationSetting
+
+    with session_scope() as session:
+        session.query(ApplicationSetting).filter_by(
+            key=device_service.KUNCI_ANJUNGAN_BERSUARA
+        ).delete()
+    (lama,) = [p for p in layanan.daftar() if p.device_id == "kios-lama"]
+    layanan.cabut(lama.id)
+
+    _pasang_lewat_kode(layanan, "kios-baru", "anjungan")
+    assert device_service.anjungan_bersuara() == "kios-baru"
+

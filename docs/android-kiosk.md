@@ -92,9 +92,20 @@ Video sound follows **Suara video anjungan** (off by default).
 ### Suara panggilan (mulai APK 2.4.22)
 
 Pengganti sementara selama layar antrian belum terpasang. Di Layanan
-Anjungan → kartu Perangkat, pilih **Anjungan yang membunyikan panggilan**
-(bawaan: Tidak ada). Hanya satu anjungan, dan hanya yang dipasangkan dengan
-kode, supaya pengumuman tidak terdengar dua kali.
+Anjungan → kartu Perangkat, pilih **Anjungan yang membunyikan panggilan**.
+Hanya satu anjungan, dan hanya yang dipasangkan dengan kode, supaya
+pengumuman tidak terdengar dua kali.
+
+Pada pemasangan baru, anjungan PERTAMA yang dipasangkan langsung dipilih
+bersuara, asal belum ada perangkat terpasang lain (anjungan atau layar
+antrian Android) dan admin belum pernah mengubah pilihan ini. Layar antrian
+Windows tidak terdaftar sebagai perangkat: bila memakainya, matikan suara
+salah satunya.
+
+Komputer server perlu suara Bahasa Indonesia Windows (Microsoft Andika):
+Settings → Time & language → Language & region → tambah Bahasa Indonesia
+dengan Speech. Tanpa itu paket suara dibuat dengan suara berlogat asing dan
+Layanan Anjungan menampilkan peringatan di baris Paket suara.
 
 - `/v1/kiosk/display` mengirim `call_sound` (anjungan ini bersuara atau
   tidak) dan `sound_pack_version`.
