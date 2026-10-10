@@ -678,6 +678,9 @@ class MainWindow(QMainWindow):
         if self.mode_kios and not self.berjendela:
             self.showFullScreen()
             return
+        # Tanpa ini Windows menaruh jendela baru bertingkat dari pojok kiri
+        # atas. Petugas mengharapkan layarnya muncul di tengah monitor.
+        self._pusatkan(_area_layar_utama(), self.size())
         self.show()
 
     def ganti_layar_penuh(self) -> None:

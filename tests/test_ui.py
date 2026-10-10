@@ -512,6 +512,27 @@ def test_esc_dari_layar_penuh_awal_menaruh_jendela_di_tengah(qtbot, auth):
     assert jendela.height() <= area.height()
 
 
+def test_layar_petugas_dibuka_di_tengah(qtbot, admin_auth, monkeypatch):
+    """Jendela petugas tampil di tengah layar, bukan di pojok kiri atas."""
+    from app.ui import main_window
+
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    # Layar offscreen pada test lebih sempit dari jendela petugas, jadi
+    # yang diperiksa adalah permintaannya, bukan letak akhirnya.
+    panggilan = []
+    monkeypatch.setattr(
+        jendela, "_pusatkan", lambda area, ukuran: panggilan.append((area, ukuran))
+    )
+
+    ukuran = jendela.size()
+
+    jendela.tampilkan()
+
+    assert not jendela.isFullScreen()
+    assert panggilan == [(main_window._area_layar_utama(), ukuran)]
+
+
 def test_esc_setelah_f11_kembali_ke_posisi_terakhir(qtbot, admin_auth):
     """Jendela yang sudah digeser petugas kembali ke tempatnya, bukan ke tengah."""
     from PySide6.QtCore import QRect
