@@ -9,6 +9,8 @@ ke file log.
 
 from __future__ import annotations
 
+import warnings
+
 from collections.abc import Callable
 from typing import TypeVar
 
@@ -58,10 +60,14 @@ def lepaskan_pekerja(pekerja: PekerjaLatar) -> None:
     # Halaman induk sedang ditutup. Putuskan semua callback agar hasil yang
     # datang terlambat tidak mengakses widget yang sudah dihancurkan.
     for sinyal in (pekerja.berhasil, pekerja.gagal, pekerja.finished):
-        try:
-            sinyal.disconnect()
-        except (RuntimeError, TypeError):
-            pass
+        # Sinyal yang belum pernah disambung tidak melempar galat, tetapi
+        # PySide mengeluarkan RuntimeWarning "Failed to disconnect".
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            try:
+                sinyal.disconnect()
+            except (RuntimeError, TypeError):
+                pass
 
     pekerja.setParent(None)
     _PEKERJA_TERTINGGAL.add(pekerja)

@@ -14,6 +14,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 import threading
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -115,7 +116,17 @@ def periksa_status() -> StatusLayanan:
 
 
 class _Pekerja(QObject):
-    """Jalankan satu fungsi di utas lain; hasil atau galat kembali lewat sinyal."""
+    """
+    Jalankan satu fungsi di utas daemon; hasil atau galat kembali lewat sinyal.
+
+    Sengaja TANPA induk. Pemeriksaan status (Firewall, Task Scheduler) bisa
+    lebih lama daripada umur halamannya; objek sinyal yang ikut terhapus
+    bersama halaman lalu dipancari dari utas ini membuat Qt mengakses
+    memori yang sudah dibebaskan. Tanpa induk, objek ini hidup selama
+    utasnya masih memegangnya. Utas daemon, bukan QThread: saat aplikasi
+    ditutup ia ikut berhenti diam-diam, sedangkan QThread yang masih
+    berjalan membuat Qt menghentikan proses dengan paksa.
+    """
 
     selesai = Signal(object)
     gagal = Signal(object)
@@ -125,11 +136,30 @@ class _Pekerja(QObject):
             try:
                 hasil = fungsi()
             except Exception as exc:  # noqa: BLE001 - diteruskan ke layar
-                self.gagal.emit(exc)
+                self._pancarkan(self.gagal, exc)
             else:
-                self.selesai.emit(hasil)
+                self._pancarkan(self.selesai, hasil)
 
         threading.Thread(target=kerja, daemon=True).start()
+
+    @staticmethod
+    def _pancarkan(sinyal, isi: object) -> None:
+        try:
+            sinyal.emit(isi)
+        except RuntimeError:
+            # Aplikasi sudah menutup dan Qt membersihkan objek ini lebih
+            # dulu daripada utasnya selesai: tidak ada lagi yang menunggu.
+            pass
+
+    def putuskan(self) -> None:
+        """Hasil yang datang sesudah halaman ditutup tidak diteruskan ke mana pun."""
+        for sinyal in (self.selesai, self.gagal):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                try:
+                    sinyal.disconnect()
+                except (RuntimeError, TypeError):
+                    pass
 
 
 LABEL_PASANG = "Pasang & nyalakan"
@@ -485,7 +515,9 @@ class LayananAnjunganPage(QWidget):
         self.pasang.setEnabled(False)
         self.mulai_ulang.setEnabled(False)
         self.hapus.setEnabled(False)
-        pekerja = _Pekerja(self)
+        pekerja = _Pekerja()
+        if self._pekerja is not None:
+            self._pekerja.putuskan()
         self._pekerja = pekerja
 
         def selesai(hasil: object) -> None:
@@ -503,7 +535,15 @@ class LayananAnjunganPage(QWidget):
 
         pekerja.selesai.connect(selesai)
         pekerja.gagal.connect(gagal)
+        # Halaman yang dihapus tanpa hentikan() (misalnya ikut jendela).
+        self.destroyed.connect(lambda *_: pekerja.putuskan())
         pekerja.jalankan(fungsi)
+
+    def hentikan(self) -> None:
+        """Putuskan pemeriksaan yang masih berjalan; dipanggil saat halaman ditutup."""
+        if self._pekerja is not None:
+            self._pekerja.putuskan()
+            self._pekerja = None
 
     def _pasang(self) -> None:
         folder = get_config().base_dir
