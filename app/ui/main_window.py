@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRect, QSize, Qt, QThread, QTimer, Signal
@@ -85,6 +86,8 @@ SELANG_PERIKSA_KONEKSI_MS = 10_000
 #: database karena di komputer server ia ikut menjalankan PowerShell, dan
 #: kontak tablet sendiri hanya tercatat paling sering 30 detik sekali.
 SELANG_PERIKSA_ANJUNGAN_MS = 30_000
+#: Beri jendela waktu selesai tampil sebelum pemeriksaan lengkap pertama.
+TUNDA_PERIKSA_ANJUNGAN_AWAL_MS = 1_500
 
 #: Judul menu halaman Layanan Anjungan; juga dipakai pita peringatan untuk
 #: membuka halaman itu.
@@ -362,6 +365,7 @@ class MainWindow(QMainWindow):
         berjendela: bool | None = None,
     ) -> None:
         super().__init__(parent)
+        self._ditutup = False
         # Sejak keluar dari layar kembali ke Login/Pilihan Mode alih-alih
         # menutup aplikasi (lihat _jalankan_ui di app/main.py), close()
         # tanpa ini hanya menyembunyikan jendela — QTimer auto-refresh di
@@ -939,8 +943,19 @@ class MainWindow(QMainWindow):
                 # Ketukan ke 127.0.0.1 ditolak seketika bila port tertutup,
                 # jadi aman di utas UI dan label langsung bermakna.
                 self._periksa_api()
-            # Pemeriksaan lengkap menunggu jendela selesai tampil.
-            QTimer.singleShot(1500, self._jadwalkan_periksa_anjungan)
+            # Timer dimiliki jendela agar pemeriksaan pertama dapat dibatalkan
+            # bila jendela ditutup sebelum jedanya habis. QTimer.singleShot
+            # statis tetap dapat memanggil callback sesudah teardown test dan
+            # memulai QThread dengan induk yang sedang dihapus.
+            self._pewaktu_anjungan_awal = QTimer(self)
+            self._pewaktu_anjungan_awal.setSingleShot(True)
+            self._pewaktu_anjungan_awal.setInterval(
+                TUNDA_PERIKSA_ANJUNGAN_AWAL_MS
+            )
+            self._pewaktu_anjungan_awal.timeout.connect(
+                self._jadwalkan_periksa_anjungan
+            )
+            self._pewaktu_anjungan_awal.start()
             self._pewaktu_api = QTimer(self)
             self._pewaktu_api.setInterval(SELANG_PERIKSA_ANJUNGAN_MS)
             self._pewaktu_api.timeout.connect(self._jadwalkan_periksa_anjungan)
@@ -999,7 +1014,7 @@ class MainWindow(QMainWindow):
 
     def _jadwalkan_periksa_anjungan(self) -> None:
         """Mulai pemeriksaan anjungan di utas sendiri, bila belum berjalan."""
-        if self.mode_kios or self._sedang_memeriksa_anjungan:
+        if self._ditutup or self.mode_kios or self._sedang_memeriksa_anjungan:
             return
         if getattr(self, "_label_api", None) is None:
             return
@@ -1007,8 +1022,8 @@ class MainWindow(QMainWindow):
         pemeriksa = _PemeriksaAnjungan(self)
         pemeriksa.selesai.connect(self._tampilkan_status_anjungan)
         pemeriksa.finished.connect(self._selesai_periksa_anjungan)
-        pemeriksa.start()
         self._pemeriksa_anjungan = pemeriksa
+        pemeriksa.start()
 
     def _selesai_periksa_anjungan(self) -> None:
         self._sedang_memeriksa_anjungan = False
@@ -1091,14 +1106,16 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 - nama dari Qt
         """Pastikan sesi berakhir walau jendela ditutup lewat tombol silang."""
+        self._ditutup = True
         for indeks in range(self.halaman.count()):
             halaman = self.halaman.widget(indeks)
             hentikan = getattr(halaman, "hentikan", None)
             if callable(hentikan):
                 hentikan()
-        pewaktu_api = getattr(self, "_pewaktu_api", None)
-        if pewaktu_api is not None:
-            pewaktu_api.stop()
+        for nama in ("_pewaktu_anjungan_awal", "_pewaktu_api"):
+            pewaktu_api = getattr(self, nama, None)
+            if pewaktu_api is not None:
+                pewaktu_api.stop()
         pewaktu = getattr(self, "_pewaktu_db", None)
         if pewaktu is not None:
             pewaktu.stop()
@@ -1106,10 +1123,16 @@ class MainWindow(QMainWindow):
             pemeriksa = getattr(self, nama, None)
             if pemeriksa is None:
                 continue
-            try:
-                pemeriksa.selesai.disconnect()
-            except (RuntimeError, TypeError):
-                pass
+            # Tidak boleh ada hasil maupun callback selesai yang kembali ke
+            # jendela setelah teardown. Callback cleanup baru dipasang oleh
+            # _lepas_utas_berjalan bila utas tidak selesai dalam batas tunggu.
+            for sinyal in (pemeriksa.selesai, pemeriksa.finished):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    try:
+                        sinyal.disconnect()
+                    except (RuntimeError, TypeError):
+                        pass
             try:
                 if pemeriksa.isRunning() and not pemeriksa.wait(batas_ms):
                     _lepas_utas_berjalan(pemeriksa)

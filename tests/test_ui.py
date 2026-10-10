@@ -897,6 +897,31 @@ def test_menutup_jendela_mengakhiri_sesi(qtbot, admin_auth):
     assert not admin_auth.is_authenticated
 
 
+def test_menutup_jendela_membatalkan_pemeriksa_anjungan_awal(
+    qtbot, admin_auth, monkeypatch
+):
+    """Timer tertunda tidak boleh memulai QThread sesudah jendela ditutup."""
+    from app.ui import main_window as modul
+
+    monkeypatch.setattr(modul, "TUNDA_PERIKSA_ANJUNGAN_AWAL_MS", 20)
+    dimulai = []
+    monkeypatch.setattr(
+        modul._PemeriksaAnjungan,
+        "start",
+        lambda pemeriksa: dimulai.append(pemeriksa),
+    )
+
+    jendela = modul.MainWindow(admin_auth)
+    pewaktu = jendela._pewaktu_anjungan_awal
+    assert pewaktu.isActive()
+
+    jendela.close()
+    assert not pewaktu.isActive()
+    qtbot.wait(50)
+
+    assert dimulai == []
+
+
 # ---------------------------------------------------------------------
 # Halaman data master
 # ---------------------------------------------------------------------
