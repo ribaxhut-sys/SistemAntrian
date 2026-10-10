@@ -89,6 +89,43 @@ loops without a black gap; a file that fails is skipped, and only when every
 file fails does the panel fall back to text (retried every two minutes).
 Video sound follows **Suara video anjungan** (off by default).
 
+### Iklan (mulai APK 2.4.21)
+
+- **Syarat tayang.** Iklan hanya diputar bila **Tampilan panel anjungan** =
+  Folder media. Mencentang iklan di **Daftar putar media** sementara panel
+  masih Teks sambutan memindahkan pilihannya ke Folder media (tetap harus
+  disimpan), dan baris daftar putar menampilkan peringatan selama keduanya
+  tidak cocok.
+- **Jadwal dan lama tampil.** Pilih berkas lalu **Atur jadwal…** (atau klik
+  dua kali): tanggal mulai/selesai (keduanya ikut dihitung, menurut tanggal
+  server) dan lama tampil khusus gambar itu (3–60 detik; kosong = pengaturan
+  umum). Di luar tanggalnya berkas tidak dikirim ke tablet dan tidak
+  dilayani `/v1/kiosk/media`. Disimpan di `kiosk.daftar_putar` sebagai objek
+  `{"nama", "mulai", "selesai", "detik"}`; butir tanpa aturan tetap berupa
+  nama saja, jadi nilai lama terbaca apa adanya. `welcome_media_files[].seconds`
+  membawa lama tampilnya ke tablet.
+- **Saat pengunjung bertransaksi** (memilih layanan, konfirmasi, menunggu
+  tiket, layar "Nomor Anda", atau 15 detik sejak sentuhan terakhir) video
+  selalu dibisukan dan panel iklan diredupkan. Sub-menu layanan yang
+  ditinggal 30 detik tanpa sentuhan kembali ke menu awal, begitu pula saat
+  iklan memenuhi layar.
+- **Iklan layar penuh.** Setelah **Iklan layar penuh saat menganggur**
+  (bawaan 60 detik, 0 = mati) tanpa sentuhan, iklan memenuhi layar dengan
+  ajakan "Sentuh layar untuk mengambil nomor antrian". Sentuhan pertama hanya
+  mengembalikan layar biasa, tidak diteruskan ke tombol layanan. Tidak aktif
+  selama dialog terbuka, pembaruan APK, atau bila media gagal diputar.
+- **Laporan tayang.** Tablet menghitung berapa kali tiap berkas mulai tampil
+  (satu berkas yang tampil terus dihitung tiap putaran/lama tampilnya) dan
+  berapa kali gagal, lalu mengirimnya tiap menit ke
+  `POST /v1/kiosk/media-report`. Server menyimpannya per hari, per tablet,
+  per berkas (tabel `kiosk_media_tayang`). Daftar putar di Pengaturan
+  menampilkan tayang hari ini dan 30 hari, serta **⚠ Gagal diputar di
+  <tablet>** bila percobaan terakhir di tablet itu (kemarin atau hari ini)
+  gagal; galatnya terbaca di tooltip.
+- **Format video.** MP4 (H.264) dan WebM aman. MKV dan AVI masih diterima
+  tetapi ditandai berisiko di daftar putar dan saat dipilih, karena pemutar
+  bawaan Android sering tidak dapat memutarnya.
+
 ### Animasi (APK 2.4.12–2.4.13)
 
 Daftar nomor menunggu (2.4.14): halaman berganti dengan ubin berbalik

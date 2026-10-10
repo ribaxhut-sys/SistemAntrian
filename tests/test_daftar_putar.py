@@ -8,6 +8,8 @@ berkas tidak dapat dipakai untuk menunjuk ke luar folder media/kiosk.
 
 from __future__ import annotations
 
+import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -61,3 +63,81 @@ def test_pengaturan_menyimpan_daftar_putar_yang_dibakukan(admin_auth):
     settings.set(daftar_putar.KUNCI, '["b.mp4", "b.mp4", "a.jpg"]')
 
     assert settings.get(daftar_putar.KUNCI) == '["b.mp4", "a.jpg"]'
+
+
+# ---------------------------------------------------------------------------
+# Jadwal tayang dan lama tampil per berkas
+# ---------------------------------------------------------------------------
+
+
+JADWAL = (
+    '["a.jpg", {"nama": "promo.jpg", "mulai": "2026-11-01", '
+    '"selesai": "2026-11-30", "detik": 20}]'
+)
+
+
+@pytest.mark.parametrize(
+    ("hari", "harapan"),
+    [
+        (date(2026, 10, 31), ["a.jpg"]),
+        (date(2026, 11, 1), ["a.jpg", "promo.jpg"]),
+        (date(2026, 11, 30), ["a.jpg", "promo.jpg"]),
+        (date(2026, 12, 1), ["a.jpg"]),
+    ],
+)
+def test_iklan_hanya_tayang_dalam_tanggalnya(hari, harapan):
+    hasil = daftar_putar.terapkan(_berkas("a.jpg", "promo.jpg"), JADWAL, hari)
+
+    assert [p.name for p in hasil] == harapan
+
+
+def test_tanpa_tanggal_jadwal_tidak_menyaring():
+    """Pemakai lama (tanpa hari) tetap mendapat seluruh daftar."""
+    hasil = daftar_putar.terapkan(_berkas("a.jpg", "promo.jpg"), JADWAL)
+
+    assert [p.name for p in hasil] == ["a.jpg", "promo.jpg"]
+
+
+def test_lama_tampil_per_berkas():
+    assert daftar_putar.detik_per_berkas(JADWAL) == {"promo.jpg": 20}
+    assert daftar_putar.detik_per_berkas("") == {}
+
+
+def test_butir_tanpa_aturan_tetap_ditulis_sebagai_nama():
+    """Nilai lama dan nilai baru tanpa jadwal tidak berbeda bentuknya."""
+    nilai = daftar_putar.tulis(
+        [
+            daftar_putar.Butir("a.jpg"),
+            daftar_putar.Butir("b.jpg", mulai=date(2026, 11, 1), detik=15),
+        ]
+    )
+
+    assert json.loads(nilai) == ["a.jpg", {"nama": "b.jpg", "mulai": "2026-11-01", "detik": 15}]
+    assert daftar_putar.baca(nilai) == ["a.jpg", "b.jpg"]
+    assert daftar_putar.baku(nilai) == nilai
+
+
+@pytest.mark.parametrize(
+    "nilai",
+    [
+        '[{"nama": "a.jpg", "mulai": "kemarin"}]',
+        '[{"nama": "a.jpg", "mulai": "2026-11-30", "selesai": "2026-11-01"}]',
+        '[{"nama": "a.jpg", "detik": 1}]',
+        '[{"nama": "a.jpg", "detik": "lama"}]',
+        '[{"nama": "../a.jpg"}]',
+        '[{"berkas": "a.jpg"}]',
+        "[3]",
+    ],
+)
+def test_aturan_rusak_ditolak(nilai):
+    with pytest.raises(ValidationError):
+        daftar_putar.baku(nilai)
+
+
+def test_aturan_rusak_yang_sudah_tersimpan_tidak_menjatuhkan_anjungan():
+    """Nilai yang terlanjur rusak dibaca seadanya, bukan melempar galat."""
+    butir = daftar_putar.baca_butir(
+        '[{"nama": "a.jpg", "mulai": "kemarin", "detik": 999}, 7, "b.jpg"]'
+    )
+
+    assert butir == [daftar_putar.Butir("a.jpg"), daftar_putar.Butir("b.jpg")]

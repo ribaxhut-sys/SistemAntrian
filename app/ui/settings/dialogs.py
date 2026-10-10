@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDateEdit,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -14,12 +16,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from app.core.security import MIN_PASSWORD_LENGTH
 from app.models import UserRole
+from app.services import daftar_putar
 from app.ui.common import judul, keterangan, label_error, tombol
 from app.ui.kiosk.sambutan import (
     FILTER_BERKAS_ANJUNGAN,
@@ -561,5 +565,89 @@ class ResetPasswordDialog(_DialogIsian):
             return
         if self.password != self.input_ulangi.text():
             self.tampilkan_kesalahan("Ulangan kata sandi tidak sama.", self.input_ulangi)
+            return
+        self.accept()
+
+
+class JadwalIklanDialog(_DialogIsian):
+    """
+    Tanggal tayang dan lama tampil satu berkas di daftar putar anjungan.
+
+    Tanggal dibaca menurut jam server, dan keduanya ikut dihitung: iklan
+    1–30 November tayang sejak pagi tanggal 1 sampai malam tanggal 30.
+    """
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        butir: daftar_putar.Butir,
+        *,
+        gambar: bool,
+    ) -> None:
+        super().__init__(
+            parent,
+            "Jadwal Iklan",
+            f"{butir.nama}. Di luar tanggalnya berkas ini tidak diputar, "
+            "tetapi tetap tercentang di daftar putar.",
+        )
+        self._nama = butir.nama
+        hari_ini = QDate.currentDate()
+
+        self.pakai_mulai = QCheckBox("Mulai tanggal")
+        self.tanggal_mulai = self._kotak_tanggal(butir.mulai, hari_ini)
+        self.form.addRow(self.pakai_mulai, self.tanggal_mulai)
+        self.pakai_selesai = QCheckBox("Sampai tanggal")
+        self.tanggal_selesai = self._kotak_tanggal(butir.selesai, hari_ini.addDays(30))
+        self.form.addRow(self.pakai_selesai, self.tanggal_selesai)
+        for centang, kotak, nilai in (
+            (self.pakai_mulai, self.tanggal_mulai, butir.mulai),
+            (self.pakai_selesai, self.tanggal_selesai, butir.selesai),
+        ):
+            centang.toggled.connect(kotak.setEnabled)
+            centang.setChecked(nilai is not None)
+            kotak.setEnabled(nilai is not None)
+
+        self.detik = QSpinBox()
+        # Satu di bawah batas bawah berarti "ikut pengaturan umum".
+        self.detik.setRange(daftar_putar.DETIK_MIN - 1, daftar_putar.DETIK_MAKS)
+        self.detik.setSpecialValueText("Ikut pengaturan umum")
+        self.detik.setSuffix(" detik")
+        self.detik.setValue(butir.detik or self.detik.minimum())
+        if gambar:
+            self.form.addRow("Lama tampil", self.detik)
+        else:
+            # Video selalu diputar sampai selesai.
+            self.detik.setVisible(False)
+
+    @staticmethod
+    def _kotak_tanggal(nilai, cadangan: QDate) -> QDateEdit:
+        kotak = QDateEdit()
+        kotak.setCalendarPopup(True)
+        kotak.setDisplayFormat("d MMM yyyy")
+        kotak.setDate(
+            QDate(nilai.year, nilai.month, nilai.day) if nilai is not None else cadangan
+        )
+        return kotak
+
+    @property
+    def butir(self) -> daftar_putar.Butir:
+        mulai = self.tanggal_mulai.date().toPython() if self.pakai_mulai.isChecked() else None
+        selesai = (
+            self.tanggal_selesai.date().toPython() if self.pakai_selesai.isChecked() else None
+        )
+        detik = self.detik.value()
+        return daftar_putar.Butir(
+            self._nama,
+            mulai,
+            selesai,
+            None if detik < daftar_putar.DETIK_MIN else detik,
+        )
+
+    def simpan(self) -> None:
+        butir = self.butir
+        if butir.mulai and butir.selesai and butir.selesai < butir.mulai:
+            self.tampilkan_kesalahan(
+                "Tanggal selesai lebih awal dari tanggal mulai.", self.tanggal_selesai
+            )
             return
         self.accept()

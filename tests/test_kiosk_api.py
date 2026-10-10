@@ -271,6 +271,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "welcome_slide_seconds": 10,
         "welcome_media": [],
         "welcome_media_files": [],
+        "fullscreen_ad_idle_seconds": 60,
         "registration_open": True,
         "cooldown_remaining_seconds": 0,
         "waiting_queue_numbers": ["A-002", "A-003"],
@@ -564,3 +565,96 @@ def test_api_sends_ticket_raster_and_sample():
     assert any(
         row["text"] == "UJI-000" for row in contoh.json()["ticket_layout"]["rows"]
     )
+
+
+class _MediaTayang:
+    def __init__(self):
+        self.laporan = []
+
+    def catat(self, device_id, laporan):
+        self.laporan.append((device_id, laporan))
+
+
+def test_laporan_tayang_iklan_diteruskan_ke_pencatat():
+    from app.kiosk_api import create_app
+
+    services = _Services()
+    services.media_tayang = _MediaTayang()
+    client = TestClient(create_app(TOKEN, services))
+    headers = {"Authorization": f"Bearer {TOKEN}", "X-Device-Id": "tablet-lobi-01"}
+
+    response = client.post(
+        "/v1/kiosk/media-report",
+        headers=headers,
+        json={
+            "items": [
+                {"name": "promo.jpg", "plays": 4},
+                {
+                    "name": "iklan.avi",
+                    "failures": 2,
+                    "error": "video what=1",
+                    "last_failed": True,
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    ((device_id, laporan),) = services.media_tayang.laporan
+    assert device_id == "tablet-lobi-01"
+    assert [(b.nama, b.tayang, b.gagal, b.terakhir_gagal) for b in laporan] == [
+        ("promo.jpg", 4, 0, False),
+        ("iklan.avi", 0, 2, True),
+    ]
+    assert laporan[1].galat == "video what=1"
+
+
+def test_laporan_tayang_butuh_token_dan_angka_wajar():
+    from app.kiosk_api import create_app
+
+    services = _Services()
+    services.media_tayang = _MediaTayang()
+    client = TestClient(create_app(TOKEN, services))
+    laporan = {"items": [{"name": "a.jpg", "plays": 1}]}
+
+    assert client.post("/v1/kiosk/media-report", json=laporan).status_code == 401
+    assert client.post(
+        "/v1/kiosk/media-report",
+        headers={"Authorization": f"Bearer {TOKEN}", "X-Device-Id": "tablet-lobi-01"},
+        json={"items": [{"name": "a.jpg", "plays": -1}]},
+    ).status_code == 422
+    assert services.media_tayang.laporan == []
+
+
+def test_display_menyaring_jadwal_dan_mengirim_lama_tampil(tmp_path, monkeypatch):
+    from datetime import date
+
+    from app.kiosk_api import create_app
+
+    monkeypatch.setattr("app.kiosk_api.base_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.kiosk_api.clock.today", lambda: date(2026, 11, 5))
+    folder = tmp_path / "media" / "kiosk"
+    folder.mkdir(parents=True)
+    for nama in ("a.jpg", "promo.jpg", "lalu.jpg"):
+        (folder / nama).write_bytes(b"isi")
+    services = _Services()
+    services.settings.welcome_kind = "media"
+    services.settings.daftar_putar = json.dumps(
+        [
+            "a.jpg",
+            {"nama": "promo.jpg", "mulai": "2026-11-01", "detik": 25},
+            {"nama": "lalu.jpg", "selesai": "2026-10-31"},
+        ]
+    )
+    client = TestClient(create_app(TOKEN, services))
+    headers = {"Authorization": f"Bearer {TOKEN}", **VERSI_APK}
+
+    isi = client.get("/v1/kiosk/display", headers=headers).json()
+
+    assert isi["welcome_media"] == ["a.jpg", "promo.jpg"]
+    assert [(b["name"], b["seconds"]) for b in isi["welcome_media_files"]] == [
+        ("a.jpg", None),
+        ("promo.jpg", 25),
+    ]
+    # Iklan yang jadwalnya lewat juga tidak dilayani lagi.
+    assert client.get("/v1/kiosk/media/lalu.jpg", headers=headers).status_code == 404

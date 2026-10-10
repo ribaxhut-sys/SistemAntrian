@@ -115,6 +115,8 @@ _SETTINGS: list[tuple[str, str, str]] = [
      "Berkas media anjungan yang diputar, berurutan; kosong = semua"),
     ("kiosk.suara_video", "false",
      "Video di anjungan diputar dengan suara"),
+    ("kiosk.iklan_layar_penuh_detik", "60",
+     "Detik tanpa sentuhan sebelum iklan anjungan memenuhi layar; 0 = mati"),
     ("kiosk.posisi_loket", "otomatis",
      "Letak baris loket di anjungan: otomatis, atas, bawah, atau sembunyi"),
     ("kiosk.tema", "biru",

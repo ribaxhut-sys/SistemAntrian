@@ -126,6 +126,19 @@ class PrinterReport(BaseModel):
     message: str = Field(default="", max_length=200)
 
 
+class MediaReportItem(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    plays: int = Field(default=0, ge=0)
+    failures: int = Field(default=0, ge=0)
+    error: str = Field(default="", max_length=500)
+    #: Percobaan terakhir berkas ini di tablet gagal.
+    last_failed: bool = False
+
+
+class MediaReport(BaseModel):
+    items: list[MediaReportItem] = Field(default_factory=list, max_length=100)
+
+
 class PerangkatDb:
     """Penghubung API dengan tabel perangkat (app.services.device_service)."""
 
@@ -133,6 +146,15 @@ class PerangkatDb:
         from app.services import device_service
 
         return getattr(device_service, nama)
+
+
+class MediaTayangDb:
+    """Penghubung API dengan catatan tayang iklan (app.services.media_tayang)."""
+
+    def __getattr__(self, nama):
+        from app.services import media_tayang
+
+        return getattr(media_tayang, nama)
 
 
 #: Tebakan kode pasang yang salah sebelum semua kode aktif dihanguskan.
@@ -156,6 +178,7 @@ class KioskServices:
             NullTicketPrinter(), self.settings, self.master, self.queue
         )
         self.perangkat = PerangkatDb()
+        self.media_tayang = MediaTayangDb()
 
 
 def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
@@ -337,7 +360,8 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         if daftar_putar.baca(nilai_daftar) is not None:
             # Daftar putar yang sudah diatur berlaku apa adanya, juga bila
             # semua berkas sengaja dimatikan: tidak ada media, bukan cadangan.
-            return daftar_putar.terapkan(files, nilai_daftar)
+            # Iklan di luar tanggal tayangnya dilewati menurut tanggal SERVER.
+            return daftar_putar.terapkan(files, nilai_daftar, clock.today())
         if files:
             return files
         fallback_value = services.settings.get("kiosk.welcome_file", "").strip()
@@ -536,6 +560,39 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 logger.warning("Status printer %s gagal dicatat", device_id, exc_info=True)
         return {"status": "ok"}
 
+    @app.post("/v1/kiosk/media-report")
+    def media_report(
+        report: MediaReport,
+        device_id: str = Depends(require_token),  # noqa: B008
+    ):
+        """
+        Jumlah tayang dan gagal iklan sejak laporan sebelumnya.
+
+        Gagal mencatat tidak boleh membuat tablet mengulang laporan yang
+        sama selamanya; jawabannya tetap "ok" dan kesalahannya masuk log.
+        """
+        catatan = getattr(services, "media_tayang", None)
+        if catatan is not None and device_id and report.items:
+            from app.services.media_tayang import LaporanBerkas
+
+            try:
+                catatan.catat(
+                    device_id,
+                    [
+                        LaporanBerkas(
+                            nama=item.name,
+                            tayang=item.plays,
+                            gagal=item.failures,
+                            galat=item.error,
+                            terakhir_gagal=item.last_failed,
+                        )
+                        for item in report.items
+                    ],
+                )
+            except Exception:
+                logger.warning("Laporan tayang %s gagal dicatat", device_id, exc_info=True)
+        return {"status": "ok"}
+
     @app.get("/v1/kiosk/categories", dependencies=[Depends(require_token)])
     def categories():
         return [
@@ -561,6 +618,9 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         papan loket besar tetap urusan layar antrian.
         """
         media = welcome_media_paths()
+        detik_khusus = daftar_putar.detik_per_berkas(
+            services.settings.get(daftar_putar.KUNCI, "")
+        )
         apk = info_apk(folder_apk(base_dir()))
         judul = (services.settings.get("kiosk.judul", "") or "").strip()
         return {
@@ -585,9 +645,16 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                     "name": item.name,
                     "size": item.stat().st_size,
                     "modified_ms": int(item.stat().st_mtime * 1000),
+                    # Lama tampil gambar ini; null = welcome_slide_seconds.
+                    "seconds": detik_khusus.get(item.name),
                 }
                 for item in media
             ],
+            # Setelah sekian detik tanpa sentuhan iklan memenuhi layar;
+            # 0 = tidak pernah.
+            "fullscreen_ad_idle_seconds": services.settings.get_int(
+                "kiosk.iklan_layar_penuh_detik", 60
+            ),
             "registration_open": services.queue.pendaftaran_dibuka(),
             "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(device_id),
             "waiting_queue_numbers": services.queue.nomor_menunggu_untuk_layar(),

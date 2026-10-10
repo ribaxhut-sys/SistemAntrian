@@ -29,6 +29,7 @@ import android.text.TextUtils;
 import android.transition.AutoTransition;
 import android.transition.TransitionManager;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
@@ -234,6 +235,7 @@ public final class MainActivity extends Activity {
             }
             subtitleLabel.setVisibility(subjudulServer.isEmpty() ? View.GONE : View.VISIBLE);
         }
+        sembunyikanUntukIklanPenuh();
     }
 
     /** Pilihan tablet bila diatur, selain itu tema dari server. */
@@ -582,6 +584,44 @@ public final class MainActivity extends Activity {
     private final Map<String, Long> unduhGagalPada = new HashMap<>();
     /** Video yang sedang diputar langsung dari server, belum dari salinan. */
     private String videoLewatJaringan;
+    /** Lama tampil khusus tiap gambar dari server (detik). */
+    private final Map<String, Integer> detikPerBerkas = new HashMap<>();
+
+    // Iklan dan pengunjung. Selama pengunjung bertransaksi (memilih layanan
+    // sampai tiketnya keluar, atau baru saja menyentuh layar) video dibisukan
+    // dan panel iklan diredupkan, supaya perhatiannya tidak terbagi. Setelah
+    // tablet lama tidak disentuh, iklan diperbesar memenuhi layar.
+    private static final long JEDA_TRANSAKSI_MS = 15_000L;
+    /**
+     * Sub-menu layanan yang ditinggal pengunjung kembali ke menu awal. Tanpa
+     * ini pengunjung berikutnya mendapati pilihan orang lain, dan tablet
+     * tidak pernah dianggap menganggur.
+     */
+    private static final long KEMBALI_KE_MENU_AWAL_MS = 30_000L;
+    private long sentuhTerakhirMillis = System.currentTimeMillis();
+    private boolean sedangBertransaksi;
+    private float targetTirai = 0f;
+    /** Pengaturan server: detik tanpa sentuhan sebelum iklan layar penuh; 0 = mati. */
+    private int iklanPenuhDetik = 60;
+    private boolean iklanPenuh;
+    /** Sisa gestur yang membangunkan layar iklan; tidak diteruskan ke tombol. */
+    private boolean menelanSentuhan;
+    private final Map<View, Integer> visibilitasSebelumIklanPenuh = new HashMap<>();
+    private LinearLayout panelInfo;
+    private LinearLayout panelLayanan;
+    private FrameLayout bingkaiMedia;
+    private View tiraiMedia;
+    private TextView ajakanIklanPenuh;
+    private android.animation.ObjectAnimator denyutAjakanIklan;
+
+    // Laporan tayang ke server: jumlah tayang dan gagal sejak laporan
+    // terakhir, dikirim tiap menit. Hanya untuk media dari server; berkas di
+    // folder tablet tidak dikenal server.
+    private static final long SELANG_LAPORAN_TAYANG_MS = 60_000L;
+    private final Map<String, int[]> hitungTayang = new HashMap<>();
+    private final Map<String, String> galatTayang = new HashMap<>();
+    private final Map<String, Boolean> terakhirGagal = new HashMap<>();
+    private boolean laporanTayangTerkirim;
 
     private static final class Loket {
         final String nama;
@@ -681,6 +721,7 @@ public final class MainActivity extends Activity {
         public void run() {
             updateAvailability();
             perbaruiHitungMundurKonfirmasi();
+            perbaruiIklan();
             if (timeLabel != null) {
                 SimpleDateFormat format = new SimpleDateFormat(
                         "EEEE, d MMM yyyy · HH:mm:ss",
@@ -722,6 +763,31 @@ public final class MainActivity extends Activity {
     };
 
     private final Runnable nextSlide = () -> advanceSlide();
+    /**
+     * Satu berkas yang tampil terus (satu video diulang pemutar, satu gambar
+     * tanpa pergantian) tetap dihitung tayang tiap putaran atau tiap lama
+     * tampilnya, bukan sekali seumur hidup.
+     */
+    private String ulangTayangBerkas;
+    private long ulangTayangMs;
+    private final Runnable ulangTayang = new Runnable() {
+        @Override
+        public void run() {
+            String nama = ulangTayangBerkas;
+            if (nama == null || welcomeMedia.size() != 1
+                    || !nama.equals(welcomeMedia.get(0)) || mediaGagal) return;
+            catatTayang(nama);
+            handler.postDelayed(this, ulangTayangMs);
+        }
+    };
+
+    private final Runnable kirimLaporanTayang = new Runnable() {
+        @Override
+        public void run() {
+            kirimLaporanTayang();
+            handler.postDelayed(this, SELANG_LAPORAN_TAYANG_MS);
+        }
+    };
     // Semua media gagal (server mati sebentar, berkas rusak): coba lagi
     // berkala, supaya iklan kembali sendiri tanpa menyalakan ulang tablet.
     private static final long COBA_MEDIA_LAGI_MS = 120_000L;
@@ -790,6 +856,11 @@ public final class MainActivity extends Activity {
         root.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         LinearLayout infoPanel = panel();
+        panelInfo = infoPanel;
+        iklanPenuh = false;
+        menelanSentuhan = false;
+        visibilitasSebelumIklanPenuh.clear();
+        hentikanDenyutAjakanIklan();
         infoPanel.setPadding(dp(18), dp(12), dp(18), dp(12));
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setGravity(Gravity.CENTER);
@@ -840,10 +911,32 @@ public final class MainActivity extends Activity {
             welcome.setPadding(dp(12), dp(10), dp(12), dp(18));
         }
         mediaSlot.addView(welcome, new FrameLayout.LayoutParams(-1, -1));
-        infoPanel.addView(mediaSlot, new LinearLayout.LayoutParams(-1, 0, 1));
+        // Bingkai: media, tirai peredup di atasnya (juga menutupi video,
+        // yang digambar di permukaan sendiri dan tidak dapat dipudarkan),
+        // lalu ajakan menyentuh saat iklan memenuhi layar.
+        bingkaiMedia = new FrameLayout(this);
+        bingkaiMedia.addView(mediaSlot, new FrameLayout.LayoutParams(-1, -1));
+        tiraiMedia = new View(this);
+        tiraiMedia.setBackgroundColor(Color.BLACK);
+        tiraiMedia.setAlpha(0f);
+        targetTirai = 0f;
+        sedangBertransaksi = false;
+        bingkaiMedia.addView(tiraiMedia, new FrameLayout.LayoutParams(-1, -1));
+        ajakanIklanPenuh = text("Sentuh layar untuk mengambil nomor antrian",
+                20, Color.WHITE, true);
+        ajakanIklanPenuh.setGravity(Gravity.CENTER);
+        ajakanIklanPenuh.setPadding(dp(22), dp(12), dp(22), dp(12));
+        ajakanIklanPenuh.setBackground(rounded(Color.argb(185, 15, 23, 42), dp(28)));
+        ajakanIklanPenuh.setVisibility(View.GONE);
+        FrameLayout.LayoutParams ajakanParams = new FrameLayout.LayoutParams(-2, -2,
+                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        ajakanParams.bottomMargin = dp(20);
+        bingkaiMedia.addView(ajakanIklanPenuh, ajakanParams);
+        infoPanel.addView(bingkaiMedia, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(infoPanel, new LinearLayout.LayoutParams(-1, 0, 1));
 
         LinearLayout kioskPanel = panel();
+        panelLayanan = kioskPanel;
         kioskPanel.setPadding(dp(14), dp(12), dp(14), dp(12));
         invitation = text("Pilih layanan", 22, INK, true);
         invitation.setTypeface(huruf(800));
@@ -890,6 +983,8 @@ public final class MainActivity extends Activity {
         handler.postDelayed(displayRefresh, 5000);
         handler.removeCallbacks(waitingPageRotation);
         handler.postDelayed(waitingPageRotation, LAMA_HALAMAN_MENUNGGU_MS);
+        handler.removeCallbacks(kirimLaporanTayang);
+        handler.postDelayed(kirimLaporanTayang, SELANG_LAPORAN_TAYANG_MS);
     }
 
     private LinearLayout panel() {
@@ -954,6 +1049,7 @@ public final class MainActivity extends Activity {
             // salinan tidak dapat diperiksa, jadi media tetap diputar lewat
             // jaringan seperti sebelumnya.
             kunciSalinan.clear();
+            detikPerBerkas.clear();
             JSONArray infoRows = display.optJSONArray("welcome_media_files");
             if (infoRows != null) {
                 for (int i = 0; i < infoRows.length(); i++) {
@@ -963,8 +1059,11 @@ public final class MainActivity extends Activity {
                     if (nama.isEmpty()) continue;
                     kunciSalinan.put(nama, row.optLong("size", 0L) + "-"
                             + row.optLong("modified_ms", 0L) + "-" + namaAman(nama));
+                    int detik = row.isNull("seconds") ? 0 : row.optInt("seconds", 0);
+                    if (detik > 0) detikPerBerkas.put(nama, detik);
                 }
             }
+            iklanPenuhDetik = Math.max(0, display.optInt("fullscreen_ad_idle_seconds", 60));
             serverKind = display.optString("welcome_kind", "teks");
             serverMedia = media;
             welcomeFallbackText = display.optString("welcome_text", "");
@@ -1169,6 +1268,8 @@ public final class MainActivity extends Activity {
         String filename = welcomeMedia.get(index);
         String signature = mediaSignature + "|" + filename;
         handler.removeCallbacks(nextSlide);
+        handler.removeCallbacks(ulangTayang);
+        ulangTayangBerkas = null;
         pemutarVideo = null;
         videoLewatJaringan = null;
         String url = mediaUrl(filename);
@@ -1184,16 +1285,21 @@ public final class MainActivity extends Activity {
             mediaSlot.addView(video, new FrameLayout.LayoutParams(-1, -1));
             video.setOnCompletionListener(player -> advanceSlide());
             video.setOnErrorListener((player, what, extra) -> {
-                mediaGagalDiputar(signature, filename);
+                mediaGagalDiputar(signature, filename,
+                        "Video tidak dapat diputar (what=" + what + ", extra=" + extra + ")");
                 return true;
             });
             video.setOnPreparedListener(player -> {
                 pemutarVideo = player;
                 aturSuaraVideo();
                 // Satu video saja: diulang oleh pemutar, tanpa layar hitam.
-                player.setLooping(welcomeMedia.size() == 1);
+                boolean ulang = welcomeMedia.size() == 1;
+                player.setLooping(ulang);
                 player.start();
                 mediaBerhasilDiputar(filename);
+                if (ulang && player.getDuration() > 0) {
+                    jadwalkanUlangTayang(filename, player.getDuration());
+                }
             });
             if (lokal != null) {
                 video.setVideoURI(Uri.fromFile(lokal));
@@ -1231,13 +1337,17 @@ public final class MainActivity extends Activity {
                         mediaBerhasilDiputar(filename);
                         // Satu gambar saja tampil terus, tidak diunduh ulang.
                         if (welcomeMedia.size() > 1) {
-                            handler.postDelayed(nextSlide, welcomeSlideSeconds * 1000L);
+                            handler.postDelayed(nextSlide, detikTampil(filename) * 1000L);
+                        } else {
+                            jadwalkanUlangTayang(filename, detikTampil(filename) * 1000L);
                         }
                     });
                 } catch (Exception e) {
+                    String pesan = e.getMessage() == null
+                            ? e.getClass().getSimpleName() : e.getMessage();
                     runOnUiThread(() -> {
                         mediaSlot.removeView(image);
-                        mediaGagalDiputar(signature, filename);
+                        mediaGagalDiputar(signature, filename, pesan);
                     });
                 }
             });
@@ -1258,10 +1368,26 @@ public final class MainActivity extends Activity {
                 && filename.equals(welcomeMedia.get(mediaIndex));
     }
 
-    /** Suara mengikuti pengaturan server, juga untuk video yang sedang berputar. */
+    /** Lama tampil gambar ini: aturan khusus dari server, atau pengaturan umum. */
+    private int detikTampil(String filename) {
+        Integer khusus = sumberTablet() ? null : detikPerBerkas.get(filename);
+        return khusus != null && khusus > 0 ? khusus : welcomeSlideSeconds;
+    }
+
+    private void jadwalkanUlangTayang(String filename, long ms) {
+        handler.removeCallbacks(ulangTayang);
+        ulangTayangBerkas = filename;
+        ulangTayangMs = Math.max(3000L, ms);
+        handler.postDelayed(ulangTayang, ulangTayangMs);
+    }
+
+    /**
+     * Suara mengikuti pengaturan server, juga untuk video yang sedang
+     * berputar. Selama pengunjung bertransaksi video selalu bisu.
+     */
     private void aturSuaraVideo() {
         if (pemutarVideo == null) return;
-        float volume = suaraVideo ? 1f : 0f;
+        float volume = suaraVideo && !sedangBertransaksi ? 1f : 0f;
         try {
             pemutarVideo.setVolume(volume, volume);
         } catch (IllegalStateException e) {
@@ -1270,6 +1396,7 @@ public final class MainActivity extends Activity {
     }
 
     private void mediaBerhasilDiputar(String filename) {
+        catatTayang(filename);
         berkasGagal.remove(filename);
         if (mediaGagal) {
             mediaGagal = false;
@@ -1281,8 +1408,9 @@ public final class MainActivity extends Activity {
      * Satu berkas gagal: lewati ke berkas berikutnya. Baru bila SEMUA berkas
      * gagal, panel kembali ke teks sambutan dan dicoba lagi berkala.
      */
-    private void mediaGagalDiputar(String signature, String filename) {
+    private void mediaGagalDiputar(String signature, String filename, String pesan) {
         if (!isCurrentMedia(signature, filename)) return;
+        catatGagal(filename, pesan);
         berkasGagal.add(filename);
         if (berkasGagal.containsAll(welcomeMedia)) {
             showMediaFallback(signature);
@@ -1309,6 +1437,223 @@ public final class MainActivity extends Activity {
         if (!welcomeMedia.isEmpty()) {
             showWelcomeMedia((mediaIndex + 1) % welcomeMedia.size());
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Pengunjung dan iklan
+    // -----------------------------------------------------------------
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        int aksi = event.getActionMasked();
+        sentuhTerakhirMillis = System.currentTimeMillis();
+        if (iklanPenuh || menelanSentuhan) {
+            // Sentuhan pertama hanya membangunkan layar. Diteruskan ke tombol
+            // di bawahnya berarti pengunjung memilih layanan yang belum
+            // pernah ia lihat.
+            if (aksi == MotionEvent.ACTION_DOWN) {
+                menelanSentuhan = true;
+                keluarIklanPenuh();
+                perbaruiIklan();
+            }
+            if (aksi == MotionEvent.ACTION_UP || aksi == MotionEvent.ACTION_CANCEL) {
+                menelanSentuhan = false;
+            }
+            return true;
+        }
+        boolean hasil = super.dispatchTouchEvent(event);
+        if (aksi == MotionEvent.ACTION_DOWN) perbaruiIklan();
+        return hasil;
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean fokus) {
+        super.onWindowFocusChanged(fokus);
+        // Selama dialog (Pengaturan, pembaruan) terbuka sentuhannya tidak
+        // lewat sini; waktunya dihitung sebagai sedang dipakai.
+        sentuhTerakhirMillis = System.currentTimeMillis();
+    }
+
+    private boolean pengunjungBertransaksi(long sekarang) {
+        return showingConfirmation || showingResult || requestInFlight
+                || sekarang - sentuhTerakhirMillis < JEDA_TRANSAKSI_MS;
+    }
+
+    /** Bisu, redup, dan layar penuh mengikuti keadaan pengunjung. Dipanggil tiap detik. */
+    private void perbaruiIklan() {
+        if (bingkaiMedia == null) return;
+        long sekarang = System.currentTimeMillis();
+        if (!hasWindowFocus()) sentuhTerakhirMillis = sekarang;
+        if (!path.isEmpty() && !showingConfirmation && !showingResult && !requestInFlight
+                && !updating && !updateRequired
+                && sekarang - sentuhTerakhirMillis >= KEMBALI_KE_MENU_AWAL_MS) {
+            path.clear();
+            showCategories();
+        }
+        boolean mediaJalan = adaMediaSambutan && !mediaGagal;
+        boolean transaksi = pengunjungBertransaksi(sekarang);
+        if (transaksi != sedangBertransaksi) {
+            sedangBertransaksi = transaksi;
+            aturSuaraVideo();
+        }
+        float tirai = transaksi && mediaJalan && !iklanPenuh ? 0.55f : 0f;
+        if (tirai != targetTirai) {
+            targetTirai = tirai;
+            tiraiMedia.animate().alpha(tirai).setDuration(350).start();
+        }
+        boolean bolehPenuh = iklanPenuhDetik > 0 && mediaJalan && !updating && !updateRequired;
+        if (iklanPenuh && !bolehPenuh) {
+            keluarIklanPenuh();
+        } else if (!iklanPenuh && bolehPenuh && !transaksi
+                && sekarang - sentuhTerakhirMillis >= iklanPenuhDetik * 1000L) {
+            masukIklanPenuh();
+        }
+    }
+
+    private void masukIklanPenuh() {
+        if (rootLayout == null || iklanPenuh) return;
+        // Yang bangun dari layar iklan selalu mendapati menu awal.
+        if (!path.isEmpty()) {
+            path.clear();
+            showCategories();
+        }
+        iklanPenuh = true;
+        visibilitasSebelumIklanPenuh.clear();
+        AutoTransition transisi = new AutoTransition();
+        transisi.setDuration(450);
+        TransitionManager.beginDelayedTransition(rootLayout, transisi);
+        sembunyikanUntukIklanPenuh();
+        ajakanIklanPenuh.setVisibility(View.VISIBLE);
+        hentikanDenyutAjakanIklan();
+        denyutAjakanIklan = android.animation.ObjectAnimator.ofFloat(
+                ajakanIklanPenuh, View.ALPHA, 1f, 0.55f);
+        denyutAjakanIklan.setDuration(1400);
+        denyutAjakanIklan.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        denyutAjakanIklan.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        denyutAjakanIklan.start();
+    }
+
+    /**
+     * Saat iklan memenuhi layar, semua selain bingkai media disembunyikan.
+     * Dipanggil lagi setelah penyegaran yang mengatur ulang visibilitas
+     * (judul, baris loket); visibilitas yang baru ditetapkan penyegaran itu
+     * yang dipulihkan nanti.
+     */
+    private void sembunyikanUntukIklanPenuh() {
+        if (!iklanPenuh || panelInfo == null) return;
+        List<View> sasaran = new ArrayList<>();
+        for (int i = 0; i < panelInfo.getChildCount(); i++) {
+            View anak = panelInfo.getChildAt(i);
+            if (anak != bingkaiMedia) sasaran.add(anak);
+        }
+        if (panelLayanan != null) sasaran.add(panelLayanan);
+        if (panelHasil != null) sasaran.add(panelHasil);
+        for (View view : sasaran) {
+            if (view.getVisibility() != View.GONE
+                    || !visibilitasSebelumIklanPenuh.containsKey(view)) {
+                visibilitasSebelumIklanPenuh.put(view, view.getVisibility());
+            }
+            view.setVisibility(View.GONE);
+        }
+        bingkaiMedia.setVisibility(View.VISIBLE);
+    }
+
+    private void keluarIklanPenuh() {
+        if (!iklanPenuh) return;
+        iklanPenuh = false;
+        if (rootLayout != null) {
+            AutoTransition transisi = new AutoTransition();
+            transisi.setDuration(300);
+            TransitionManager.beginDelayedTransition(rootLayout, transisi);
+        }
+        for (Map.Entry<View, Integer> isi : visibilitasSebelumIklanPenuh.entrySet()) {
+            isi.getKey().setVisibility(isi.getValue());
+        }
+        visibilitasSebelumIklanPenuh.clear();
+        hentikanDenyutAjakanIklan();
+        ajakanIklanPenuh.setVisibility(View.GONE);
+        perbaruiJudul();
+        tampilanLoket = "";  // paksa baris loket ditata ulang
+        terapkanBarisLoket();
+    }
+
+    private void hentikanDenyutAjakanIklan() {
+        if (denyutAjakanIklan != null) {
+            denyutAjakanIklan.cancel();
+            denyutAjakanIklan = null;
+        }
+        if (ajakanIklanPenuh != null) ajakanIklanPenuh.setAlpha(1f);
+    }
+
+    // -----------------------------------------------------------------
+    // Laporan tayang
+    // -----------------------------------------------------------------
+
+    private void catatTayang(String filename) {
+        if (sumberTablet()) return;
+        int[] hitung = hitungTayang.get(filename);
+        if (hitung == null) hitungTayang.put(filename, hitung = new int[2]);
+        hitung[0]++;
+        terakhirGagal.put(filename, false);
+    }
+
+    private void catatGagal(String filename, String pesan) {
+        if (sumberTablet()) return;
+        int[] hitung = hitungTayang.get(filename);
+        if (hitung == null) hitungTayang.put(filename, hitung = new int[2]);
+        hitung[1]++;
+        galatTayang.put(filename, pesan == null ? "" : pesan);
+        terakhirGagal.put(filename, true);
+    }
+
+    /**
+     * Kirim jumlah sejak laporan terakhir. Bila gagal terkirim, jumlahnya
+     * dikembalikan dan ikut laporan berikutnya.
+     */
+    private void kirimLaporanTayang() {
+        if (laporanTayangTerkirim || hitungTayang.isEmpty() || !hasServerConfig()) return;
+        Map<String, int[]> kiriman = new HashMap<>(hitungTayang);
+        Map<String, String> galat = new HashMap<>(galatTayang);
+        Map<String, Boolean> gagalTerakhir = new HashMap<>(terakhirGagal);
+        hitungTayang.clear();
+        galatTayang.clear();
+        JSONObject body;
+        try {
+            JSONArray items = new JSONArray();
+            for (Map.Entry<String, int[]> isi : kiriman.entrySet()) {
+                String pesan = galat.get(isi.getKey());
+                items.put(new JSONObject()
+                        .put("name", isi.getKey())
+                        .put("plays", isi.getValue()[0])
+                        .put("failures", isi.getValue()[1])
+                        .put("error", pesan == null ? "" : pesan.length() > 190
+                                ? pesan.substring(0, 190) : pesan)
+                        .put("last_failed", Boolean.TRUE.equals(gagalTerakhir.get(isi.getKey()))));
+                if (items.length() >= 100) break;
+            }
+            body = new JSONObject().put("items", items);
+        } catch (Exception e) {
+            return;  // laporan hanya keterangan
+        }
+        laporanTayangTerkirim = true;
+        request("POST", "/v1/kiosk/media-report", body,
+                json -> laporanTayangTerkirim = false,
+                error -> {
+                    laporanTayangTerkirim = false;
+                    for (Map.Entry<String, int[]> isi : kiriman.entrySet()) {
+                        int[] sekarang = hitungTayang.get(isi.getKey());
+                        if (sekarang == null) {
+                            hitungTayang.put(isi.getKey(), isi.getValue());
+                        } else {
+                            sekarang[0] += isi.getValue()[0];
+                            sekarang[1] += isi.getValue()[1];
+                        }
+                        String pesan = galat.get(isi.getKey());
+                        if (pesan != null && !galatTayang.containsKey(isi.getKey())) {
+                            galatTayang.put(isi.getKey(), pesan);
+                        }
+                    }
+                });
     }
 
     private String mediaUrl(String filename) {
@@ -1807,7 +2152,7 @@ public final class MainActivity extends Activity {
         loketBawah.removeAllViews();
         loketAtas.setVisibility("atas".equals(letak) ? View.VISIBLE : View.GONE);
         loketBawah.setVisibility("bawah".equals(letak) ? View.VISIBLE : View.GONE);
-        mediaSlot.setVisibility(besar ? View.GONE : View.VISIBLE);
+        bingkaiMedia.setVisibility(besar ? View.GONE : View.VISIBLE);
         loketAtas.setLayoutParams(besar
                 ? new LinearLayout.LayoutParams(-1, 0, 1)
                 : new LinearLayout.LayoutParams(-1, -2));
@@ -1815,6 +2160,7 @@ public final class MainActivity extends Activity {
             isiBarisLoket("atas".equals(letak) ? loketAtas : loketBawah, besar);
         }
         if (panelHasilGelap) loketBawah.setVisibility(View.GONE);
+        sembunyikanUntukIklanPenuh();
 
         int baris = "bawah".equals(letak)
                 ? BARIS_NOMOR_MENUNGGU_BERSAMA_LOKET : BARIS_NOMOR_MENUNGGU;
@@ -3768,6 +4114,7 @@ public final class MainActivity extends Activity {
         }
         handler.removeCallbacksAndMessages(null);
         hentikanDenyutAjakan();
+        hentikanDenyutAjakanIklan();
         worker.shutdownNow();
         pengunduh.shutdownNow();
         super.onDestroy();

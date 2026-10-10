@@ -26,10 +26,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -44,6 +45,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core import clock
 from app.core.logger import get_logger
 from app.services import daftar_putar
 from app.services.settings_service import (
@@ -56,8 +58,15 @@ from app.services.settings_service import (
     SettingsService,
     kelompok_pengaturan,
 )
-from app.ui.common import jalankan_aman, judul, keterangan, konfirmasi, tombol
-from app.ui.settings.dialogs import PemilihMediaLayanan
+from app.ui.common import (
+    jalankan_aman,
+    judul,
+    keterangan,
+    konfirmasi,
+    tampilkan_peringatan,
+    tombol,
+)
+from app.ui.settings.dialogs import JadwalIklanDialog, PemilihMediaLayanan
 from app.ui.kiosk.sambutan import (
     EKSTENSI_VIDEO,
     FILTER_BERKAS_ANJUNGAN,
@@ -147,14 +156,50 @@ class _PemilihBerkas(QWidget):
         tujuan = salin_ke_media_kios(Path(path))
         self.isian.setText(tujuan.name)
         self.berkasDipilih.emit(tujuan.name)
+        ext = tujuan.suffix.lower()
+        if ext in EKSTENSI_VIDEO_BERISIKO:
+            tampilkan_peringatan(
+                self,
+                PERINGATAN_FORMAT.format(ext=ext.lstrip(".").upper()),
+                "Format video berisiko",
+            )
+
+
+#: Video yang sering gagal di pemutar bawaan Android. MP4 (H.264) dan WebM
+#: didukung semua tablet; MKV dan AVI tergantung isi dan pabrikan tabletnya.
+EKSTENSI_VIDEO_BERISIKO = {".mkv", ".avi"}
+
+PERINGATAN_FORMAT = (
+    "Format {ext} sering gagal diputar di tablet. Ubah ke MP4 (H.264) "
+    "supaya pasti tayang."
+)
+
+_BULAN = ("Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
+          "Jul", "Agu", "Sep", "Okt", "Nov", "Des")
+
+
+def _tanggal_pendek(nilai) -> str:
+    return f"{nilai.day} {_BULAN[nilai.month - 1]} {nilai.year}"
+
+
+def teks_jadwal(butir: daftar_putar.Butir) -> str:
+    """Jadwal tayang sebuah butir dalam kalimat pendek; kosong bila tanpa jadwal."""
+    if butir.mulai and butir.selesai:
+        return f"{_tanggal_pendek(butir.mulai)} – {_tanggal_pendek(butir.selesai)}"
+    if butir.mulai:
+        return f"mulai {_tanggal_pendek(butir.mulai)}"
+    if butir.selesai:
+        return f"sampai {_tanggal_pendek(butir.selesai)}"
+    return ""
 
 
 class _DaftarPutar(QWidget):
     """
     Berkas di folder media/kiosk dengan centang (diputar) dan urutannya.
 
-    Nilainya larik JSON nama berkas yang dicentang, berurutan. Selama
-    pengguna belum menyentuhnya, nilai kosong dipertahankan: artinya
+    Nilainya larik JSON nama berkas yang dicentang, berurutan, beserta
+    jadwal dan lama tampil bila diatur (lihat app.services.daftar_putar).
+    Selama pengguna belum menyentuhnya, nilai kosong dipertahankan: artinya
     "belum diatur, putar semua menurut nama" — membuka halaman pengaturan
     saja tidak boleh membuat baris ini tampak berubah.
     """
@@ -165,15 +210,30 @@ class _DaftarPutar(QWidget):
         super().__init__(parent)
         self._belum_diatur = True
         self._sedang_mengisi = False
+        #: Jadwal dan lama tampil per nama berkas. Ikut diingat untuk berkas
+        #: yang tidak dicentang, supaya mencentangnya kembali tidak membuang
+        #: jadwal yang sudah diatur — sampai halaman dimuat ulang.
+        self._aturan: dict[str, daftar_putar.Butir] = {}
+        #: Hasil media_tayang.ringkasan(): angka tayang dan tanda gagal.
+        self._ringkasan: dict = {}
 
         susunan = QVBoxLayout(self)
         susunan.setContentsMargins(0, 0, 0, 0)
         susunan.setSpacing(6)
 
+        self.peringatan = QLabel()
+        self.peringatan.setObjectName("peringatanDaftarPutar")
+        self.peringatan.setWordWrap(True)
+        self.peringatan.setStyleSheet(f"color: {WARNING}; font-weight: 600;")
+        self.peringatan.setVisible(False)
+        susunan.addWidget(self.peringatan)
+
         self.daftar = QListWidget()
         self.daftar.setObjectName("daftarPutarMedia")
-        self.daftar.setMinimumHeight(150)
+        self.daftar.setMinimumHeight(190)
+        self.daftar.setWordWrap(True)
         self.daftar.itemChanged.connect(self._pada_centang)
+        self.daftar.itemDoubleClicked.connect(lambda _item: self.atur_jadwal())
         susunan.addWidget(self.daftar)
 
         tombol_baris = QHBoxLayout()
@@ -182,10 +242,14 @@ class _DaftarPutar(QWidget):
         naik.clicked.connect(lambda: self._geser(-1))
         turun = tombol("Turun")
         turun.clicked.connect(lambda: self._geser(1))
+        jadwal = tombol("Atur jadwal…")
+        jadwal.setObjectName("tombolJadwalIklan")
+        jadwal.setToolTip("Tanggal tayang dan lama tampil berkas yang dipilih")
+        jadwal.clicked.connect(self.atur_jadwal)
         muat = tombol("Muat ulang")
         muat.setToolTip("Baca ulang isi folder media/kiosk")
         muat.clicked.connect(self.muat_ulang_folder)
-        for item in (naik, turun, muat):
+        for item in (naik, turun, jadwal, muat):
             tombol_baris.addWidget(item)
         tombol_baris.addStretch()
         susunan.addLayout(tombol_baris)
@@ -195,14 +259,27 @@ class _DaftarPutar(QWidget):
     def text(self) -> str:
         if self._belum_diatur:
             return ""
-        return daftar_putar.tulis(self._tercentang())
+        return daftar_putar.tulis([self._butir(nama) for nama in self._tercentang()])
 
     def setText(self, nilai: str) -> None:  # noqa: N802 - menyamai QLineEdit
-        urutan = daftar_putar.baca(nilai)
-        self._belum_diatur = urutan is None
-        self._isi(urutan)
+        butir = daftar_putar.baca_butir(nilai)
+        self._belum_diatur = butir is None
+        self._aturan = {b.nama: b for b in butir or []}
+        self._isi(None if butir is None else [b.nama for b in butir])
 
     # -------------------------------------------------------------------
+
+    def ada_yang_diputar(self) -> bool:
+        return bool(self._tercentang())
+
+    def tampilkan_peringatan(self, teks: str) -> None:
+        self.peringatan.setText(teks)
+        self.peringatan.setVisible(bool(teks))
+
+    def tampilkan_ringkasan(self, ringkasan: dict) -> None:
+        """Angka tayang dan tanda gagal dari laporan tablet."""
+        self._ringkasan = ringkasan or {}
+        self.muat_ulang_folder()
 
     def muat_ulang_folder(self) -> None:
         """Baca ulang folder tanpa membuang centang dan urutan yang ada."""
@@ -217,6 +294,37 @@ class _DaftarPutar(QWidget):
         self._isi(urutan)
         self.diubah.emit()
 
+    def atur_jadwal(self) -> None:
+        """Buka jadwal tayang berkas yang sedang dipilih."""
+        item = self.daftar.currentItem()
+        nama = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        if nama is None:
+            return
+        dialog = JadwalIklanDialog(
+            self,
+            self._butir(nama),
+            gambar=Path(nama).suffix.lower() not in EKSTENSI_VIDEO,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.terapkan_jadwal(dialog.butir)
+
+    def terapkan_jadwal(self, baru: daftar_putar.Butir) -> None:
+        """Pasang jadwal dan lama tampil satu berkas, lalu tandai berubah."""
+        if baru == self._butir(baru.nama):
+            return
+        self._aturan[baru.nama] = baru
+        # Mengatur jadwal berarti mulai mengatur daftar putarnya juga.
+        tercentang = None if self._belum_diatur else self._tercentang()
+        self._belum_diatur = False
+        baris = self.daftar.currentRow()
+        self._isi(tercentang)
+        self.daftar.setCurrentRow(baris)
+        self.diubah.emit()
+
+    def _butir(self, nama: str) -> daftar_putar.Butir:
+        return self._aturan.get(nama) or daftar_putar.Butir(nama)
+
     def _tercentang(self) -> list[str]:
         hasil = []
         for baris in range(self.daftar.count()):
@@ -224,6 +332,43 @@ class _DaftarPutar(QWidget):
             if item.checkState() == Qt.CheckState.Checked:
                 hasil.append(item.data(Qt.ItemDataRole.UserRole))
         return hasil
+
+    def _teks_butir(self, nama: str) -> tuple[str, str, bool]:
+        """Teks baris daftar, isi tooltip, dan apakah perlu diperhatikan."""
+        ext = Path(nama).suffix.lower()
+        video = ext in EKSTENSI_VIDEO
+        butir = self._butir(nama)
+        bagian = [nama, "video" if video else "gambar"]
+        if not video and butir.detik:
+            bagian.append(f"{butir.detik} dtk")
+        jadwal = teks_jadwal(butir)
+        if jadwal:
+            bagian.append(jadwal)
+            if not butir.tayang_pada(clock.today()):
+                bagian.append("di luar jadwal")
+        baris = ["  ·  ".join(bagian)]
+        tip = []
+
+        info = self._ringkasan.get(nama)
+        if info is not None and (info.tayang_rentang or info.tayang_hari_ini):
+            baris.append(
+                f"Tayang hari ini {_angka(info.tayang_hari_ini)}×  ·  "
+                f"30 hari {_angka(info.tayang_rentang)}×"
+            )
+        perhatian = False
+        if info is not None and info.gagal:
+            perhatian = True
+            baris.append(
+                "⚠ Gagal diputar di " + ", ".join(g.tablet for g in info.gagal)
+            )
+            tip += [
+                f"{g.tablet} ({g.waktu:%d/%m %H:%M}): {g.pesan or 'tanpa keterangan'}"
+                for g in info.gagal
+            ]
+        if ext in EKSTENSI_VIDEO_BERISIKO:
+            perhatian = True
+            baris.append("⚠ " + PERINGATAN_FORMAT.format(ext=ext.lstrip(".").upper()))
+        return "\n".join(baris), "\n".join(tip), perhatian
 
     def _isi(self, urutan: list[str] | None) -> None:
         semua = [path.name for path in daftar_media_kios()]
@@ -237,13 +382,17 @@ class _DaftarPutar(QWidget):
         try:
             self.daftar.clear()
             for nama, aktif in tampil:
-                jenis = "video" if Path(nama).suffix.lower() in EKSTENSI_VIDEO else "gambar"
-                item = QListWidgetItem(f"{nama}   ·  {jenis}")
+                teks, tip, perhatian = self._teks_butir(nama)
+                item = QListWidgetItem(teks)
                 item.setData(Qt.ItemDataRole.UserRole, nama)
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(
                     Qt.CheckState.Checked if aktif else Qt.CheckState.Unchecked
                 )
+                if tip:
+                    item.setToolTip(tip)
+                if perhatian:
+                    item.setForeground(QColor(WARNING))
                 self.daftar.addItem(item)
             if not tampil:
                 kosong = QListWidgetItem("Folder media/kiosk masih kosong.")
@@ -274,6 +423,11 @@ class _DaftarPutar(QWidget):
             self._sedang_mengisi = False
         self._belum_diatur = False
         self.diubah.emit()
+
+
+def _angka(nilai: int) -> str:
+    """Angka dengan titik ribuan: 12.345."""
+    return f"{nilai:,}".replace(",", ".")
 
 
 def _garis() -> QFrame:
@@ -515,6 +669,14 @@ class SettingsPage(QWidget):
             daftar = self.baris.get(daftar_putar.KUNCI)
             if daftar is not None and isinstance(daftar.kontrol, _DaftarPutar):
                 pemilih.kontrol.berkasDipilih.connect(daftar.kontrol.tambah)
+        daftar = self.baris.get(daftar_putar.KUNCI)
+        jenis = self.baris.get("kiosk.welcome_kind")
+        if daftar is not None and jenis is not None:
+            daftar.kontrol.diubah.connect(self._aktifkan_media_bila_perlu)
+            jenis.kontrol.currentIndexChanged.connect(
+                lambda *_: self._perbarui_peringatan_daftar()
+            )
+            self._perbarui_peringatan_daftar()
 
     # -----------------------------------------------------------------
     # Tampilan
@@ -845,7 +1007,57 @@ class SettingsPage(QWidget):
             return
         for kunci, baris in self.baris.items():
             baris.tampilkan(tersimpan.get(kunci, ""))
+        self._muat_ringkasan_tayang()
+        self._perbarui_peringatan_daftar()
         self._perbarui_status()
+
+    def _muat_ringkasan_tayang(self) -> None:
+        """Angka tayang dan tanda gagal yang dilaporkan tablet anjungan."""
+        daftar = self.baris.get(daftar_putar.KUNCI)
+        if daftar is None:
+            return
+        from app.services import media_tayang
+
+        try:
+            ringkasan = media_tayang.ringkasan()
+        except Exception:
+            # Angka tayang hanya pelengkap; halaman pengaturan tetap harus
+            # terbuka walau tabelnya belum ada atau database sedang sibuk.
+            logger.warning("Ringkasan tayang iklan gagal dibaca", exc_info=True)
+            return
+        daftar.kontrol.tampilkan_ringkasan(ringkasan)
+
+    def _aktifkan_media_bila_perlu(self) -> None:
+        """
+        Mencentang iklan sementara panel masih "Teks sambutan" berarti iklan
+        itu tidak pernah tayang. Jenis tampilan ikut dipindah ke folder media,
+        sebagai perubahan yang belum disimpan seperti perubahan lainnya.
+        """
+        daftar = self.baris.get(daftar_putar.KUNCI)
+        jenis = self.baris.get("kiosk.welcome_kind")
+        if daftar is None or jenis is None:
+            return
+        if daftar.kontrol.ada_yang_diputar() and jenis.nilai() == "teks":
+            jenis.tulis("media")
+            self._beritahu(
+                "Tampilan panel anjungan dipindah ke Folder media supaya "
+                "iklan yang dicentang tayang. Simpan untuk menerapkannya.",
+                WARNING,
+            )
+        self._perbarui_peringatan_daftar()
+
+    def _perbarui_peringatan_daftar(self) -> None:
+        daftar = self.baris.get(daftar_putar.KUNCI)
+        jenis = self.baris.get("kiosk.welcome_kind")
+        if daftar is None or jenis is None:
+            return
+        tidak_tayang = jenis.nilai() == "teks" and daftar.kontrol.ada_yang_diputar()
+        daftar.kontrol.tampilkan_peringatan(
+            "Iklan yang dicentang belum tayang: Tampilan panel anjungan masih "
+            "Teks sambutan. Pilih Folder media lalu simpan."
+            if tidak_tayang
+            else ""
+        )
 
     def berubah(self) -> dict[str, str]:
         """Pengaturan yang nilainya di layar berbeda dari yang tersimpan."""

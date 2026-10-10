@@ -64,6 +64,7 @@ BAWAAN: dict[str, str] = {
     "kiosk.posisi_loket": "otomatis",
     "kiosk.daftar_putar": "",
     "kiosk.suara_video": "false",
+    "kiosk.iklan_layar_penuh_detik": "60",
     "kiosk.tema": "biru",
     "kiosk.tema_agustus": "true",
     "display.screen_shape": "auto",
@@ -457,7 +458,9 @@ SKEMA: tuple[Pengaturan, ...] = (
         "Centang gambar atau video yang diputar di anjungan, lalu atur "
         "urutannya dengan Naik/Turun. Video diputar sampai selesai; satu "
         "video saja diulang terus. Yang tidak dicentang tetap "
-        "tersimpan di folder dan dapat dinyalakan lagi kapan saja.",
+        "tersimpan di folder dan dapat dinyalakan lagi kapan saja. "
+        "Atur jadwal… membatasi tanggal tayang dan lama tampil tiap gambar. "
+        "Angka tayang dan tanda gagal dilaporkan oleh tablet.",
         DAFTAR_PUTAR,
         boleh_kosong=True,
         kelompok="Antrian",
@@ -467,8 +470,22 @@ SKEMA: tuple[Pengaturan, ...] = (
         "Suara video anjungan",
         "Bila dimatikan, video di anjungan diputar tanpa suara. Sebaiknya "
         "tetap mati bila anjungan dekat layar antrian, supaya suara iklan "
-        "tidak menutupi panggilan nomor.",
+        "tidak menutupi panggilan nomor. Selama pengunjung sedang memilih "
+        "layanan sampai tiketnya keluar, video selalu dibisukan.",
         BOOLEAN,
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.iklan_layar_penuh_detik",
+        "Iklan layar penuh saat menganggur",
+        "Bila tablet tidak disentuh selama ini, iklan diperbesar memenuhi "
+        "layar. Sentuhan apa pun mengembalikan pilihan layanan. Hanya "
+        "berlaku bila daftar putar media sedang berputar.",
+        ANGKA,
+        minimum=0,
+        maksimum=600,
+        satuan="detik",
+        nilai_khusus="Mati",
         kelompok="Antrian",
     ),
     Pengaturan(
