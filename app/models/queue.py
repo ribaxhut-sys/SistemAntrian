@@ -41,7 +41,9 @@ class Queue(TimestampMixin, Base):
             "branch_id", "queue_date", "queue_number", name="uq_queue_date_number"
         ),
         sa.Index("ix_queue_date_status", "branch_id", "queue_date", "status"),
-        # Satu loket hanya boleh memegang satu nomor aktif per hari. Indeks
+        # Satu loket hanya boleh memegang satu nomor aktif per hari. SKIPPED
+        # sengaja tidak termasuk: nomor itu tetap menyimpan loket terakhir,
+        # tetapi loketnya sudah boleh memanggil pengunjung berikutnya. Indeks
         # parsial menjaga invariant ini juga bila dua proses lolos dari
         # pemeriksaan aplikasi pada saat yang persis bersamaan.
         sa.Index(

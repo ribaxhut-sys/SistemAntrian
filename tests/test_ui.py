@@ -1422,6 +1422,35 @@ def test_tombol_menyesuaikan_status_sepanjang_alur(halaman_layanan, terbitkan, a
     assert halaman_layanan.tombol_panggil.isEnabled()
 
 
+def test_lewati_sementara_masuk_daftar_dan_dapat_dipanggil_kembali(
+    halaman_layanan, terbitkan, monkeypatch
+):
+    monkeypatch.setattr(
+        "app.ui.queue.service_page.konfirmasi", lambda *_args, **_kwargs: True
+    )
+    terbitkan("A", 2)
+    halaman_layanan.muat_ulang()
+
+    halaman_layanan.panggil_berikutnya()
+    assert halaman_layanan.aksi["lewati"].isEnabled()
+    halaman_layanan.lewati_sementara()
+
+    assert halaman_layanan.label_nomor.text() == "—"
+    assert halaman_layanan.tombol_panggil.isEnabled()
+    assert halaman_layanan.tab_kanan.tabText(1) == "Dilewati (1)"
+    assert halaman_layanan.tabel_dilewati.item(0, 0).text() == "A-001"
+    assert halaman_layanan.tabel_dilewati.item(0, 2).text() == "1x"
+
+    halaman_layanan.tabel_dilewati.selectRow(0)
+    assert halaman_layanan.tombol_panggil_kembali.isEnabled()
+    halaman_layanan.panggil_kembali_dilewati()
+
+    assert halaman_layanan.label_nomor.text() == "A-001"
+    assert "2x" in halaman_layanan.label_status.text()
+    assert halaman_layanan.tabel_dilewati.rowCount() == 0
+    assert not halaman_layanan.tombol_panggil.isEnabled()
+
+
 def test_panggil_ulang_menaikkan_hitungan_pada_layar(halaman_layanan, terbitkan, auth):
     terbitkan("A", 1)
     auth.logout()
@@ -2301,6 +2330,7 @@ def test_pengingat_batas_panggilan_muncul_setelah_batasnya(
 
     assert halaman_layanan.label_batas.isVisibleTo(halaman_layanan)
     assert "Tidak Hadir" in halaman_layanan.label_batas.text()
+    assert halaman_layanan.aksi["lewati"].property("variant") == "warning"
     # Tombol Panggil Ulang tetap menyala: nomor yang sudah terbit tidak
     # dapat diterbitkan ulang, jadi pengunjung yang lambat tidak boleh
     # kehilangan gilirannya karena hitungan.

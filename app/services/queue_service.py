@@ -54,13 +54,19 @@ logger = get_logger("queue")
 #:
 #:     WAITING -> CALLED -> SERVING -> COMPLETED
 #:
-#: Jalur lain: CALLED -> NO_SHOW, WAITING/CALLED -> CANCELLED,
-#: dan SERVING <-> PAUSED.
+#: Jalur lain: CALLED -> SKIPPED -> CALLED, CALLED -> NO_SHOW,
+#: WAITING/CALLED/SKIPPED -> CANCELLED, dan SERVING <-> PAUSED.
 TRANSISI_SAH: dict[QueueStatus, frozenset[QueueStatus]] = {
     QueueStatus.WAITING: frozenset({QueueStatus.CALLED, QueueStatus.CANCELLED}),
     QueueStatus.CALLED: frozenset(
-        {QueueStatus.SERVING, QueueStatus.NO_SHOW, QueueStatus.CANCELLED}
+        {
+            QueueStatus.SKIPPED,
+            QueueStatus.SERVING,
+            QueueStatus.NO_SHOW,
+            QueueStatus.CANCELLED,
+        }
     ),
+    QueueStatus.SKIPPED: frozenset({QueueStatus.CALLED, QueueStatus.CANCELLED}),
     QueueStatus.SERVING: frozenset({QueueStatus.PAUSED, QueueStatus.COMPLETED}),
     QueueStatus.PAUSED: frozenset({QueueStatus.SERVING}),
     # Status akhir. Tidak ada jalan keluar dari sini.
@@ -73,6 +79,7 @@ TRANSISI_SAH: dict[QueueStatus, frozenset[QueueStatus]] = {
 LABEL_STATUS: dict[QueueStatus, str] = {
     QueueStatus.WAITING: "Menunggu",
     QueueStatus.CALLED: "Dipanggil",
+    QueueStatus.SKIPPED: "Dilewati",
     QueueStatus.SERVING: "Dilayani",
     QueueStatus.PAUSED: "Ditunda",
     QueueStatus.COMPLETED: "Selesai",
@@ -123,7 +130,8 @@ class QueueInfo:
         panggilan ulang akan menelantarkan pengunjung yang sebenarnya hadir
         tetapi lambat sampai ke loket, sedangkan nomor yang sudah terbit
         tidak dapat diterbitkan ulang. Keputusan menyatakan seseorang tidak
-        hadir tetap milik petugas yang melihat ruangannya.
+        hadir atau melewatinya sementara tetap milik petugas yang melihat
+        ruangannya.
         """
         return (
             self.status is QueueStatus.CALLED
@@ -155,7 +163,15 @@ class QueueInfo:
         if self.status is QueueStatus.WAITING:
             return ["panggil", "batal"]
         if self.status is QueueStatus.CALLED:
-            return ["panggil_ulang", "mulai_layani", "tidak_hadir", "batal"]
+            return [
+                "panggil_ulang",
+                "mulai_layani",
+                "lewati",
+                "tidak_hadir",
+                "batal",
+            ]
+        if self.status is QueueStatus.SKIPPED:
+            return ["panggil_kembali", "batal"]
         if self.status is QueueStatus.SERVING:
             return ["selesai", "tunda"]
         if self.status is QueueStatus.PAUSED:
@@ -593,6 +609,16 @@ class QueueService:
             )
             return [_as_info(r) for r in rows]
 
+    def list_skipped(self) -> list[QueueInfo]:
+        """Nomor hari ini yang dilewati sementara dan masih menunggu kembali."""
+        sesi = self.auth.require_permission(Permission.QUEUE_VIEW)
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            return [
+                _as_info(row, repo.jumlah_pemanggilan(row.id))
+                for row in repo.list_dilewati(sesi.branch_id, clock.today())
+            ]
+
     def get_queue(self, queue_id: int) -> QueueInfo:
         self.auth.require_permission(Permission.QUEUE_VIEW)
         with session_scope() as session:
@@ -872,9 +898,9 @@ class QueueService:
         Panggil antrian paling depan ke sebuah loket.
 
         Loket yang masih memegang antrian belum boleh memanggil berikutnya;
-        selesaikan, tunda, atau tandai tidak hadir terlebih dahulu. Tanpa
-        aturan ini, pengunjung yang sedang dilayani bisa terlantar begitu
-        saja saat petugas menekan "Panggil Berikutnya".
+        selesaikan, lewati sementara, tunda, atau tandai tidak hadir terlebih
+        dahulu. Tanpa aturan ini, pengunjung yang sedang dilayani bisa
+        terlantar begitu saja saat petugas menekan "Panggil Berikutnya".
         """
         sesi = self.auth.require_permission(Permission.QUEUE_CALL)
         hari = clock.today()
@@ -910,7 +936,8 @@ class QueueService:
             if sedang is not None:
                 raise BusinessRuleError(
                     f"Loket ini masih menangani {sedang.queue_number}. "
-                    "Selesaikan, tunda, atau tandai tidak hadir terlebih dahulu."
+                    "Selesaikan, lewati sementara, tunda, atau tandai tidak hadir "
+                    "terlebih dahulu."
                 )
 
             # Daftar kosong berarti loket ini boleh memanggil semua jenis
@@ -1033,6 +1060,109 @@ class QueueService:
             )
             jumlah = repo.jumlah_pemanggilan(antrian.id)
             logger.info("Antrian %s dipanggil ulang (ke-%d)", antrian.queue_number, jumlah)
+            return _as_info(antrian, jumlah, self.batas_panggilan())
+
+    def skip(self, queue_id: int) -> QueueInfo:
+        """Lewati nomor yang sudah dipanggil tanpa mengakhiri antreannya."""
+        return self._ubah_sederhana(
+            queue_id,
+            QueueStatus.SKIPPED,
+            Permission.QUEUE_CALL,
+            AuditAction.SKIP_QUEUE,
+            "dilewati sementara",
+        )
+
+    def recall_skipped(self, queue_id: int, counter_id: int) -> QueueInfo:
+        """Panggil kembali nomor yang dilewati ke loket yang sedang dipakai."""
+        sesi = self.auth.require_permission(Permission.QUEUE_CALL)
+        hari = clock.today()
+
+        with session_scope() as session:
+            petugas = session.get(User, sesi.user_id, with_for_update=True)
+            if petugas is None:
+                raise NotFoundError("Akun petugas tidak ditemukan.")
+            if (
+                petugas.default_counter_id is not None
+                and petugas.default_counter_id != counter_id
+            ):
+                raise BusinessRuleError(
+                    "Akun Anda telah ditugaskan ke loket lain. Muat ulang "
+                    "halaman pelayanan sebelum memanggil antrian."
+                )
+
+            repo = QueueRepository(session)
+            loket = self._pastikan_loket_aktif(
+                session, counter_id, sesi.branch_id, kunci=True
+            )
+            if loket.on_break:
+                raise BusinessRuleError(
+                    f"Loket {loket.name!r} sedang istirahat. Akhiri istirahat "
+                    "terlebih dahulu sebelum memanggil antrian."
+                )
+            sedang = repo.sedang_ditangani_loket(counter_id, hari)
+            if sedang is not None:
+                raise BusinessRuleError(
+                    f"Loket ini masih menangani {sedang.queue_number}. "
+                    "Selesaikan terlebih dahulu sebelum memanggil kembali "
+                    "nomor yang dilewati."
+                )
+
+            antrian = repo.get_by_id(queue_id, for_update=True)
+            if (
+                antrian is None
+                or antrian.branch_id != sesi.branch_id
+                or antrian.queue_date != hari
+            ):
+                raise BusinessRuleError(
+                    "Antrian yang dilewati tidak ditemukan untuk hari ini."
+                )
+            if antrian.status is not QueueStatus.SKIPPED:
+                raise BusinessRuleError(
+                    f"Antrian {antrian.queue_number} berstatus "
+                    f"{LABEL_STATUS[antrian.status]} sehingga tidak dapat "
+                    "dipanggil kembali dari daftar dilewati."
+                )
+
+            diizinkan = [kategori.id for kategori in loket.categories]
+            if diizinkan and antrian.category_id not in diizinkan:
+                raise BusinessRuleError(
+                    f"Loket {loket.name!r} tidak melayani jenis layanan "
+                    f"{antrian.category.name!r}."
+                )
+
+            self._pindah_status(antrian, QueueStatus.CALLED)
+            antrian.counter = loket
+            antrian.served_by = petugas
+            antrian.called_at = clock.now()
+            try:
+                session.flush()
+            except sa.exc.IntegrityError as exc:
+                raise BusinessRuleError(
+                    f"Loket {loket.name!r} baru saja memanggil nomor dari "
+                    "komputer lain. Muat ulang sebelum mencoba lagi."
+                ) from exc
+
+            repo.catat_pemanggilan(
+                queue_id=antrian.id,
+                counter_id=counter_id,
+                user_id=sesi.user_id,
+            )
+            audit_service.record(
+                session,
+                AuditAction.CALL_QUEUE,
+                user_id=sesi.user_id,
+                entity_type="queue",
+                entity_id=antrian.id,
+                nomor=antrian.queue_number,
+                tindakan="panggil kembali setelah dilewati",
+                loket=counter_id,
+            )
+            jumlah = repo.jumlah_pemanggilan(antrian.id)
+            logger.info(
+                "Antrian %s dipanggil kembali setelah dilewati (ke-%d)",
+                antrian.queue_number,
+                jumlah,
+            )
             return _as_info(antrian, jumlah, self.batas_panggilan())
 
     def start_service(self, queue_id: int) -> QueueInfo:

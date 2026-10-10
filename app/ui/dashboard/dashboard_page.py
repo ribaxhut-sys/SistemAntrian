@@ -40,11 +40,12 @@ from app.ui.style import (
 )
 from app.utils.formatting import hari_dan_tanggal
 
-#: Warna penanda per status. Menunggu dan tidak hadir sengaja mencolok:
-#: keduanya yang paling perlu ditindaklanjuti supervisor.
+#: Warna penanda per status. Menunggu, dilewati, dan tidak hadir sengaja
+#: mencolok: ketiganya yang paling perlu ditindaklanjuti supervisor.
 WARNA_STATUS: dict[QueueStatus, str] = {
     QueueStatus.WAITING: WARNING,
     QueueStatus.CALLED: PRIMARY,
+    QueueStatus.SKIPPED: WARNING,
     QueueStatus.SERVING: PRIMARY,
     QueueStatus.PAUSED: TEXT_MUTED,
     QueueStatus.COMPLETED: SUCCESS,

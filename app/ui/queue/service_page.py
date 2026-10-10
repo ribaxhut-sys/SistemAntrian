@@ -431,6 +431,7 @@ class ServicePage(QWidget):
         for kunci, teks, handler in (
             ("tunda", "Tunda Pelayanan", self.tunda),
             ("lanjutkan", "Lanjutkan Pelayanan", self.lanjutkan),
+            ("lewati", "Lewati Sementara", self.lewati_sementara),
         ):
             baris_lanjutan.addWidget(buat_aksi(kunci, teks, handler), stretch=1)
         kotak.addLayout(baris_lanjutan)
@@ -501,6 +502,7 @@ class ServicePage(QWidget):
         self.tab_kanan = QTabWidget()
         self.tab_kanan.setMinimumWidth(320)
         self.tab_kanan.addTab(self._bangun_panel_menunggu(), "Menunggu Dilayani")
+        self.tab_kanan.addTab(self._bangun_panel_dilewati(), "Dilewati (0)")
 
         self.panel_pengaduan: NotePanel | None = None
         if self.note is not None and self.pelapor is not None:
@@ -603,6 +605,76 @@ class ServicePage(QWidget):
         self.panel_kosong.setVisible(False)
         susunan.addWidget(self.panel_kosong, stretch=1)
 
+        return panel
+
+    def _bangun_panel_dilewati(self) -> QWidget:
+        """Daftar nomor yang belum batal, tetapi sedang tidak memegang loket."""
+        panel = QFrame()
+        panel.setObjectName("panelDilewati")
+        panel.setStyleSheet(
+            f"QFrame#panelDilewati {{ background: {SURFACE};"
+            f" border: 1px solid {BORDER}; border-radius: {RADIUS}px; }}"
+        )
+        self.panel_dilewati = panel
+
+        susunan = QVBoxLayout(panel)
+        susunan.setContentsMargins(16, 14, 16, 14)
+        susunan.setSpacing(10)
+
+        petunjuk = QLabel(
+            "Pilih nomor ketika pengunjung sudah kembali. Nomor akan "
+            "dipanggil ke loket yang sedang Anda gunakan."
+        )
+        petunjuk.setWordWrap(True)
+        petunjuk.setStyleSheet(f"color: {TEXT_MUTED};")
+        susunan.addWidget(petunjuk)
+
+        self.tabel_dilewati = QTableWidget(0, 4)
+        self.tabel_dilewati.setHorizontalHeaderLabels(
+            ["Nomor", "Layanan", "Panggilan", "Terakhir"]
+        )
+        self.tabel_dilewati.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.tabel_dilewati.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self.tabel_dilewati.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        self.tabel_dilewati.setShowGrid(False)
+        self.tabel_dilewati.setWordWrap(False)
+        self.tabel_dilewati.verticalHeader().setVisible(False)
+        self.tabel_dilewati.verticalHeader().setDefaultSectionSize(40)
+        kepala = self.tabel_dilewati.horizontalHeader()
+        kepala.setHighlightSections(False)
+        for kolom, mode in (
+            (0, QHeaderView.ResizeMode.ResizeToContents),
+            (1, QHeaderView.ResizeMode.Stretch),
+            (2, QHeaderView.ResizeMode.ResizeToContents),
+            (3, QHeaderView.ResizeMode.ResizeToContents),
+        ):
+            kepala.setSectionResizeMode(kolom, mode)
+        self.tabel_dilewati.itemSelectionChanged.connect(
+            self._perbarui_tombol_panggil_kembali
+        )
+        susunan.addWidget(self.tabel_dilewati, stretch=1)
+
+        self.label_dilewati_kosong = QLabel("Belum ada nomor yang dilewati.")
+        self.label_dilewati_kosong.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_dilewati_kosong.setStyleSheet(f"color: {TEXT_MUTED};")
+        susunan.addWidget(self.label_dilewati_kosong, stretch=1)
+
+        self.tombol_panggil_kembali = tombol(
+            "Panggil Kembali", variant="secondary"
+        )
+        self.tombol_panggil_kembali.setMinimumHeight(42)
+        self.tombol_panggil_kembali.setEnabled(False)
+        self.tombol_panggil_kembali.clicked.connect(
+            self.panggil_kembali_dilewati
+        )
+        susunan.addWidget(self.tombol_panggil_kembali)
+        self._dilewati_by_id: dict[int, QueueInfo] = {}
         return panel
 
     def _pasang_pintasan(self) -> None:
@@ -838,8 +910,9 @@ class ServicePage(QWidget):
             else None
         )
         menunggu = self.queue.list_waiting()
+        dilewati = self.queue.list_skipped()
         kategori = self.master.list_categories(only_active=True, only_leaf=True)
-        return diminta, loket_id, loket, antrian, menunggu, kategori
+        return diminta, loket_id, loket, antrian, menunggu, dilewati, kategori
 
     def _mulai_muat_latar(self) -> None:
         if self.loket_id is None and self.auth is None:
@@ -885,7 +958,7 @@ class ServicePage(QWidget):
         self._set_sibuk(self._pekerja_aksi is not None)
 
     def _terapkan_snapshot(self, snapshot) -> None:
-        _, loket_id, loket, antrian, menunggu, kategori = snapshot
+        _, loket_id, loket, antrian, menunggu, dilewati, kategori = snapshot
         if loket_id != self.loket_id:
             self.pilih_loket.blockSignals(True)
             indeks = self.pilih_loket.findData(loket_id)
@@ -916,6 +989,7 @@ class ServicePage(QWidget):
         self.antrian = antrian
         self._tampilkan_antrian()
         self._isi_tabel(menunggu)
+        self._isi_tabel_dilewati(dilewati)
 
     def _tandai_gagal_sinkron(self) -> None:
         self._sinkron_gagal = True
@@ -1078,7 +1152,7 @@ class ServicePage(QWidget):
         if self.antrian is not None and self.antrian.melewati_batas_panggilan:
             self.label_batas.setText(
                 f"Sudah dipanggil {self.antrian.jumlah_panggilan}x tanpa hadir. "
-                "Pertimbangkan menandainya Tidak Hadir."
+                "Lewati sementara atau tandai Tidak Hadir."
             )
             self.label_batas.setVisible(True)
         else:
@@ -1090,6 +1164,7 @@ class ServicePage(QWidget):
             self.tombol_survey.setEnabled(False)
             for btn in self.aksi.values():
                 btn.setEnabled(False)
+            self._perbarui_tombol_panggil_kembali()
             self._sorot_aksi_utama()
             return
 
@@ -1104,6 +1179,7 @@ class ServicePage(QWidget):
             btn.setEnabled(kunci in tersedia)
 
         self._perbarui_tombol_survey()
+        self._perbarui_tombol_panggil_kembali()
         self._sorot_aksi_utama()
 
     def _sorot_aksi_utama(self) -> None:
@@ -1119,6 +1195,7 @@ class ServicePage(QWidget):
             "selesai",
             "tunda",
             "lanjutkan",
+            "lewati",
         ):
             setel_variant(self.aksi[kunci], "secondary")
 
@@ -1136,6 +1213,15 @@ class ServicePage(QWidget):
             )
             return
         if self.antrian.status is QueueStatus.CALLED:
+            if (
+                self.antrian.melewati_batas_panggilan
+                and self.aksi["lewati"].isEnabled()
+            ):
+                setel_variant(self.aksi["lewati"], "warning")
+                self.label_petunjuk_aksi.setText(
+                    "Pengunjung belum hadir setelah beberapa kali dipanggil"
+                )
+                return
             if self.aksi["mulai_layani"].isEnabled():
                 setel_variant(self.aksi["mulai_layani"], "primary")
             self.label_petunjuk_aksi.setText("Mulai ketika pengunjung tiba di loket")
@@ -1190,7 +1276,9 @@ class ServicePage(QWidget):
         if aktif != self._kanan_aktif_sebelumnya:
             self._kanan_aktif_sebelumnya = aktif
             if self.panel_pengaduan is not None:
-                self.tab_kanan.setCurrentIndex(1 if aktif else 0)
+                self.tab_kanan.setCurrentWidget(
+                    self.panel_pengaduan if aktif else self.panel_menunggu
+                )
 
     def _perbarui_tombol_survey(self) -> None:
         aktif = self.settings.get_bool("survey.enabled", True)
@@ -1264,6 +1352,58 @@ class ServicePage(QWidget):
 
         self._perbarui_judul_tab_menunggu(len(menunggu), lama_menit)
 
+    def _isi_tabel_dilewati(self, dilewati: list[QueueInfo]) -> None:
+        """Perbarui tab dilewati sambil mempertahankan pilihan petugas."""
+        terpilih = self._id_dilewati_terpilih()
+        self._dilewati_by_id = {antrian.id: antrian for antrian in dilewati}
+        self.tabel_dilewati.setRowCount(len(dilewati))
+        for baris, antrian in enumerate(dilewati):
+            nilai = [
+                antrian.queue_number,
+                antrian.category_name,
+                f"{antrian.jumlah_panggilan}x",
+                antrian.called_at.strftime("%H:%M") if antrian.called_at else "—",
+            ]
+            for kolom, teks in enumerate(nilai):
+                sel = QTableWidgetItem(teks)
+                if kolom == 0:
+                    sel.setData(Qt.ItemDataRole.UserRole, antrian.id)
+                    sel.setForeground(QBrush(QColor(WARNING)))
+                    huruf = QFont()
+                    huruf.setBold(True)
+                    sel.setFont(huruf)
+                self.tabel_dilewati.setItem(baris, kolom, sel)
+            if antrian.id == terpilih:
+                self.tabel_dilewati.selectRow(baris)
+
+        ada = bool(dilewati)
+        self.tabel_dilewati.setVisible(ada)
+        self.label_dilewati_kosong.setVisible(not ada)
+        self.tab_kanan.setTabText(1, f"Dilewati ({len(dilewati)})")
+        self._perbarui_tombol_panggil_kembali()
+
+    def _id_dilewati_terpilih(self) -> int | None:
+        baris = self.tabel_dilewati.currentRow()
+        if baris < 0:
+            return None
+        sel = self.tabel_dilewati.item(baris, 0)
+        return sel.data(Qt.ItemDataRole.UserRole) if sel is not None else None
+
+    def _perbarui_tombol_panggil_kembali(self) -> None:
+        """Panggilan kembali hanya boleh dilakukan oleh loket yang kosong."""
+        tombol_kembali = getattr(self, "tombol_panggil_kembali", None)
+        if tombol_kembali is None:
+            return
+        tombol_kembali.setEnabled(
+            self._id_dilewati_terpilih() is not None
+            and self.antrian is None
+            and self.loket_id is not None
+            and not self.loket_istirahat
+            and not self._mode_ganti_loket
+            and not self._sedang_sibuk
+            and not self._sinkron_gagal
+        )
+
     def _perbarui_judul_tab_menunggu(
         self, jumlah: int, lama_menit: list[int]
     ) -> None:
@@ -1330,6 +1470,7 @@ class ServicePage(QWidget):
             self.tombol_survey.setEnabled(False)
             for btn in self.aksi.values():
                 btn.setEnabled(False)
+            self.tombol_panggil_kembali.setEnabled(False)
             self.label_petunjuk_aksi.setText(
                 "Tindakan dikunci sampai koneksi pulih"
                 if self._sinkron_gagal
@@ -1493,6 +1634,46 @@ class ServicePage(QWidget):
             return
         antrian_id = self.antrian.id
         self._jalankan(lambda: self.queue.pause(antrian_id))
+
+    def lewati_sementara(self) -> None:
+        if self.antrian is None or not self.aksi["lewati"].isEnabled():
+            return
+        if not konfirmasi(
+            self,
+            f"Lewati {self.antrian.queue_number} untuk sementara dan kosongkan loket?\n\n"
+            "Nomor tetap tersimpan di tab Dilewati dan dapat dipanggil kembali.",
+            "Lewati Sementara",
+        ):
+            return
+        antrian_id = self.antrian.id
+        self._jalankan(
+            lambda: self.queue.skip(antrian_id),
+            "Gagal melewati antrian",
+        )
+
+    def panggil_kembali_dilewati(self) -> None:
+        antrian_id = self._id_dilewati_terpilih()
+        if (
+            antrian_id is None
+            or self.loket_id is None
+            or not self.tombol_panggil_kembali.isEnabled()
+        ):
+            return
+        antrian = self._dilewati_by_id.get(antrian_id)
+        if antrian is None:
+            return
+        if not konfirmasi(
+            self,
+            f"Panggil kembali {antrian.queue_number} ke "
+            f"{self.pilih_loket.currentText()}?",
+            "Panggil Kembali",
+        ):
+            return
+        loket_id = self.loket_id
+        self._jalankan(
+            lambda: self.queue.recall_skipped(antrian_id, loket_id),
+            "Gagal memanggil kembali antrian",
+        )
 
     def lanjutkan(self) -> None:
         if self.antrian is None:

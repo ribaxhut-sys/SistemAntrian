@@ -38,6 +38,9 @@ def test_setiap_status_punya_label_indonesia():
     [
         (QueueStatus.WAITING, QueueStatus.CALLED),
         (QueueStatus.CALLED, QueueStatus.SERVING),
+        (QueueStatus.CALLED, QueueStatus.SKIPPED),
+        (QueueStatus.SKIPPED, QueueStatus.CALLED),
+        (QueueStatus.SKIPPED, QueueStatus.CANCELLED),
         (QueueStatus.SERVING, QueueStatus.COMPLETED),
         (QueueStatus.CALLED, QueueStatus.NO_SHOW),
         (QueueStatus.WAITING, QueueStatus.CANCELLED),
@@ -57,6 +60,8 @@ def test_transisi_yang_diizinkan_spesifikasi(dari, ke):
         (QueueStatus.WAITING, QueueStatus.SERVING),
         (QueueStatus.WAITING, QueueStatus.COMPLETED),
         (QueueStatus.WAITING, QueueStatus.NO_SHOW),
+        (QueueStatus.SKIPPED, QueueStatus.SERVING),
+        (QueueStatus.SKIPPED, QueueStatus.COMPLETED),
         # Tidak boleh selesai tanpa dilayani.
         (QueueStatus.CALLED, QueueStatus.COMPLETED),
         # Status akhir tidak punya jalan keluar.
@@ -169,6 +174,50 @@ def test_panggil_ulang_setelah_dilayani_ditolak(cro_queue, terbitkan, antrian_si
 
     with pytest.raises(BusinessRuleError):
         cro_queue.recall(antrian.id)
+
+
+# ---------------------------------------------------------------------
+# Lewati sementara dan panggil kembali
+# ---------------------------------------------------------------------
+
+def test_lewati_membebaskan_loket_dan_dapat_dipanggil_kembali(
+    cro_queue, terbitkan, antrian_siap
+):
+    terbitkan("A", 2)
+    loket = antrian_siap["loket"][0]
+
+    pertama = cro_queue.call_next(loket)
+    dilewati = cro_queue.skip(pertama.id)
+
+    assert dilewati.status is QueueStatus.SKIPPED
+    assert dilewati.completed_at is None
+    assert set(dilewati.aksi_tersedia()) == {"panggil_kembali", "batal"}
+    assert cro_queue.current_for_counter(loket) is None
+    assert [q.id for q in cro_queue.list_skipped()] == [pertama.id]
+
+    kedua = cro_queue.call_next(loket)
+    assert kedua.queue_number == "A-002", "loket bebas memanggil nomor berikutnya"
+    cro_queue.no_show(kedua.id)
+
+    kembali = cro_queue.recall_skipped(pertama.id, loket)
+    assert kembali.status is QueueStatus.CALLED
+    assert kembali.jumlah_panggilan == 2
+    assert kembali.counter_id == loket
+    assert cro_queue.list_skipped() == []
+
+
+def test_panggil_kembali_ditolak_bila_loket_masih_menangani_nomor(
+    cro_queue, terbitkan, antrian_siap
+):
+    terbitkan("A", 2)
+    loket = antrian_siap["loket"][0]
+    dilewati = cro_queue.skip(cro_queue.call_next(loket).id)
+    cro_queue.call_next(loket)
+
+    with pytest.raises(BusinessRuleError) as gagal:
+        cro_queue.recall_skipped(dilewati.id, loket)
+
+    assert "masih menangani" in gagal.value.user_message
 
 
 # ---------------------------------------------------------------------
@@ -468,7 +517,7 @@ def test_aksi_tersedia_mengikuti_status(cro_queue, terbitkan, antrian_siap):
 
     dipanggil = cro_queue.call_next(antrian_siap["loket"][0])
     assert set(dipanggil.aksi_tersedia()) == {
-        "panggil_ulang", "mulai_layani", "tidak_hadir", "batal"
+        "panggil_ulang", "mulai_layani", "lewati", "tidak_hadir", "batal"
     }
 
     dilayani = cro_queue.start_service(dipanggil.id)
@@ -491,7 +540,7 @@ def test_seluruh_tindakan_tercatat_di_audit(cro_queue, terbitkan, antrian_siap):
     from app.core.database import session_scope
     from app.models import AuditLog
 
-    terbitkan("A", 2)
+    terbitkan("A", 3)
     loket = antrian_siap["loket"][0]
 
     antrian = cro_queue.call_next(loket)
@@ -504,6 +553,9 @@ def test_seluruh_tindakan_tercatat_di_audit(cro_queue, terbitkan, antrian_siap):
     kedua = cro_queue.call_next(loket)
     cro_queue.no_show(kedua.id)
 
+    ketiga = cro_queue.call_next(loket)
+    cro_queue.skip(ketiga.id)
+
     with session_scope() as s:
         aksi = {r.action for r in s.scalars(sa.select(AuditLog))}
 
@@ -515,6 +567,7 @@ def test_seluruh_tindakan_tercatat_di_audit(cro_queue, terbitkan, antrian_siap):
         "RESUME_QUEUE",
         "COMPLETE_QUEUE",
         "NO_SHOW",
+        "SKIP_QUEUE",
     } <= aksi
 
 

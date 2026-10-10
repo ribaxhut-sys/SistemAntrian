@@ -30,7 +30,7 @@ from app.models import (
 STATUS_SIBUK = (QueueStatus.CALLED, QueueStatus.SERVING, QueueStatus.PAUSED)
 
 #: Status yang berarti antrian masih akan dilayani.
-STATUS_BELUM_SELESAI = (QueueStatus.WAITING, *STATUS_SIBUK)
+STATUS_BELUM_SELESAI = (QueueStatus.WAITING, QueueStatus.SKIPPED, *STATUS_SIBUK)
 
 #: Saat sebuah nomor dianggap hangus, pada tanggalnya sendiri.
 #:
@@ -248,6 +248,19 @@ class QueueRepository:
             stmt = stmt.where(Queue.category_id.in_(list(category_ids)))
         return list(self.session.scalars(self._dengan_relasi(stmt)))
 
+    def list_dilewati(self, branch_id: int, tanggal: date) -> list[Queue]:
+        """Nomor yang dilewati sementara, terbaru lebih dulu."""
+        stmt = (
+            sa.select(Queue)
+            .where(
+                Queue.branch_id == branch_id,
+                Queue.queue_date == tanggal,
+                Queue.status == QueueStatus.SKIPPED,
+            )
+            .order_by(Queue.updated_at.desc(), Queue.id.desc())
+        )
+        return list(self.session.scalars(self._dengan_relasi(stmt)))
+
     def nomor_menunggu(self, branch_id: int, tanggal: date) -> list[str]:
         """Nomor antrian yang belum dipanggil, urutan sama dengan `list_menunggu`."""
         return list(
@@ -363,7 +376,7 @@ class QueueRepository:
         sebelumnya.
 
         Dipakai oleh "Tutup Hari": mengumpulkan nomor yang masih menunggu,
-        dipanggil, dilayani, atau ditunda, termasuk sisa hari-hari
+        dilewati, dipanggil, dilayani, atau ditunda, termasuk sisa hari-hari
         sebelumnya yang tidak sempat ditutup.
         """
         stmt = (

@@ -31,6 +31,7 @@ logger = get_logger("dashboard")
 STATUS_RINGKASAN: tuple[QueueStatus, ...] = (
     QueueStatus.WAITING,
     QueueStatus.CALLED,
+    QueueStatus.SKIPPED,
     QueueStatus.SERVING,
     QueueStatus.PAUSED,
     QueueStatus.COMPLETED,

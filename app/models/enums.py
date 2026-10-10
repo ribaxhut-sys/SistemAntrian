@@ -36,6 +36,7 @@ class QueueStatus(str, Enum):
         WAITING -> CALLED -> SERVING -> COMPLETED
 
     Alur alternatif:
+        CALLED  -> SKIPPED -> CALLED
         CALLED  -> NO_SHOW
         WAITING -> CANCELLED
         CALLED  -> CANCELLED
@@ -46,6 +47,7 @@ class QueueStatus(str, Enum):
 
     WAITING = "WAITING"
     CALLED = "CALLED"
+    SKIPPED = "SKIPPED"
     SERVING = "SERVING"
     PAUSED = "PAUSED"
     COMPLETED = "COMPLETED"
@@ -74,6 +76,7 @@ class AuditAction(str, Enum):
     UPDATE_USER = "UPDATE_USER"
     CREATE_QUEUE = "CREATE_QUEUE"
     CALL_QUEUE = "CALL_QUEUE"
+    SKIP_QUEUE = "SKIP_QUEUE"
     START_SERVICE = "START_SERVICE"
     PAUSE_QUEUE = "PAUSE_QUEUE"
     RESUME_QUEUE = "RESUME_QUEUE"

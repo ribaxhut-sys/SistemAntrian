@@ -87,6 +87,19 @@ def test_antrian_dihitung_per_jenis_layanan(dashboard, terbitkan):
     assert sorted(per_kategori.values(), reverse=True)[:2] == [2, 1]
 
 
+def test_dilewati_tetap_dihitung_sebagai_belum_selesai(
+    dashboard, cro_queue, terbitkan, antrian_siap
+):
+    terbitkan("A")
+    dipanggil = cro_queue.call_next(antrian_siap["loket"][0])
+    cro_queue.skip(dipanggil.id)
+
+    hasil = dashboard().ringkasan_hari_ini()
+
+    assert hasil.per_status[QueueStatus.SKIPPED] == 1
+    assert hasil.belum_selesai == 1
+
+
 def test_pelayanan_selesai_mengurangi_belum_selesai(
     dashboard, layani_sampai_selesai, terbitkan
 ):
