@@ -48,6 +48,10 @@ SELANG_TULIS = timedelta(seconds=30)
 #: Kunci pengaturan: apakah token bersama lama masih diterima. Bukan bagian
 #: SKEMA Pengaturan, karena yang mengubahnya adalah layar Layanan Anjungan.
 KUNCI_TOKEN_BERSAMA = "kiosk.token_bersama_aktif"
+#: device_id anjungan yang membunyikan panggilan; kosong = semua anjungan diam.
+#: Satu nilai, bukan centang per perangkat: dua anjungan yang sama-sama
+#: bersuara mengulang pengumuman yang sama dengan selisih setengah detik.
+KUNCI_ANJUNGAN_BERSUARA = "kiosk.suara_panggilan_perangkat"
 
 
 def hash_token(token: str) -> str:
@@ -122,6 +126,17 @@ def token_bersama_aktif() -> bool:
             sa.select(ApplicationSetting).where(ApplicationSetting.key == KUNCI_TOKEN_BERSAMA)
         )
         return baris is None or baris.value.strip().lower() not in {"false", "0", "tidak"}
+
+
+def anjungan_bersuara() -> str:
+    """device_id anjungan yang membunyikan panggilan, atau kosong."""
+    with session_scope() as session:
+        baris = session.scalar(
+            sa.select(ApplicationSetting).where(
+                ApplicationSetting.key == KUNCI_ANJUNGAN_BERSUARA
+            )
+        )
+        return (baris.value or "").strip() if baris is not None else ""
 
 
 def perangkat_dari_token(token: str) -> PerangkatInfo | None:
@@ -392,5 +407,50 @@ class PerangkatService:
                 user_id=sesi.user_id,
                 entity_type="setting",
                 key=KUNCI_TOKEN_BERSAMA,
+                value=nilai,
+            )
+
+    def anjungan_bersuara(self) -> str:
+        self.auth.require_permission(Permission.CONFIG_MANAGE)
+        return anjungan_bersuara()
+
+    def setel_anjungan_bersuara(self, device_id: str | None) -> None:
+        """
+        Pilih anjungan yang membunyikan panggilan; None atau kosong = tidak ada.
+
+        Hanya anjungan yang dipasangkan dan belum dicabut: device_id tablet
+        bertoken bersama diisi tablet itu sendiri, sehingga API tidak dapat
+        memastikan tablet mana yang sebenarnya bertanya.
+        """
+        sesi = self.auth.require_permission(Permission.CONFIG_MANAGE)
+        nilai = (device_id or "").strip()
+        with session_scope() as session:
+            if nilai:
+                perangkat = session.scalar(
+                    sa.select(KioskDevice).where(KioskDevice.device_id == nilai)
+                )
+                if perangkat is None:
+                    raise NotFoundError("Perangkat tidak ditemukan.")
+                info = _info(perangkat)
+                if info.jenis != JENIS_ANJUNGAN or info.dicabut or not info.dipasangkan:
+                    raise BusinessRuleError(
+                        "Hanya anjungan yang sudah dipasangkan dan belum dicabut "
+                        "yang dapat membunyikan panggilan."
+                    )
+            baris = session.scalar(
+                sa.select(ApplicationSetting).where(
+                    ApplicationSetting.key == KUNCI_ANJUNGAN_BERSUARA
+                )
+            )
+            if baris is None:
+                session.add(ApplicationSetting(key=KUNCI_ANJUNGAN_BERSUARA, value=nilai))
+            else:
+                baris.value = nilai
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="setting",
+                key=KUNCI_ANJUNGAN_BERSUARA,
                 value=nilai,
             )

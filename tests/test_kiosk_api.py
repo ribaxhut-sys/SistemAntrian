@@ -292,6 +292,8 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "counter_position": "otomatis",
         "theme": "biru",
         "video_sound": False,
+        "call_sound": False,
+        "sound_pack_version": None,
         "app_min_version_code": VERSI_MINIMAL,
         "app_latest_version_code": None,
         "app_latest_version_name": None,

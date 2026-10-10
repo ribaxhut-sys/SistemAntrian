@@ -12,6 +12,7 @@ from datetime import datetime
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -26,7 +27,12 @@ from PySide6.QtWidgets import (
 )
 
 from app.core import clock
-from app.services.device_service import JENIS_LAYAR_ANTRIAN, PerangkatInfo, PerangkatService
+from app.services.device_service import (
+    JENIS_ANJUNGAN,
+    JENIS_LAYAR_ANTRIAN,
+    PerangkatInfo,
+    PerangkatService,
+)
 from app.ui.common import (
     keterangan,
     konfirmasi,
@@ -166,6 +172,24 @@ class KartuPerangkat(QFrame):
         self.token_bersama.toggled.connect(self._ubah_token_bersama)
         isi.addWidget(self.token_bersama)
 
+        baris_suara = QHBoxLayout()
+        baris_suara.addWidget(QLabel("Anjungan yang membunyikan panggilan:"))
+        self.pilih_suara = QComboBox()
+        self.pilih_suara.setMinimumWidth(240)
+        self.pilih_suara.activated.connect(self._ubah_anjungan_bersuara)
+        baris_suara.addWidget(self.pilih_suara)
+        baris_suara.addStretch()
+        isi.addLayout(baris_suara)
+        isi.addWidget(
+            keterangan(
+                "Pengganti sementara selama layar antrian belum terpasang: anjungan "
+                "terpilih mengucapkan \"Nomor antrian …, silakan menuju Loket …\" "
+                "dan mengecilkan suara iklannya selama pengumuman. Hanya anjungan "
+                "yang sudah dipasangkan dengan kode. Pilih Tidak ada begitu layar "
+                "antrian bersuara dipasang, supaya pengumuman tidak terdengar dua kali."
+            )
+        )
+
         self._pewaktu = QTimer(self)
         self._pewaktu.setInterval(SELANG_SEGARKAN_MS)
         self._pewaktu.timeout.connect(self.muat_ulang)
@@ -178,6 +202,7 @@ class KartuPerangkat(QFrame):
         try:
             self.perangkat = self.layanan.daftar()
             bersama = self.layanan.token_bersama_aktif()
+            bersuara = self.layanan.anjungan_bersuara()
         except Exception as exc:  # noqa: BLE001 - kartu tidak boleh menjatuhkan halaman
             self.kosong.setText(f"Daftar perangkat tidak terbaca: {pesan_untuk_user(exc)}")
             self.kosong.show()
@@ -185,7 +210,31 @@ class KartuPerangkat(QFrame):
         self.token_bersama.blockSignals(True)
         self.token_bersama.setChecked(bersama)
         self.token_bersama.blockSignals(False)
+        self._isi_pilihan_suara(bersuara)
         self._isi_tabel(clock.now())
+
+    def _isi_pilihan_suara(self, terpilih: str) -> None:
+        pilihan = [("", "Tidak ada (anjungan diam)")] + [
+            (p.device_id, p.nama)
+            for p in self.perangkat
+            if p.jenis == JENIS_ANJUNGAN and p.dipasangkan and not p.dicabut
+        ]
+        if terpilih and terpilih not in {d for d, _ in pilihan}:
+            # Tercatat tetapi sudah dicabut atau dihapus: tetap ditampilkan
+            # supaya admin tahu kenapa tidak ada yang bersuara.
+            pilihan.append((terpilih, "(perangkat tidak tersedia)"))
+        # Dibangun ulang hanya bila isinya berubah, supaya penyegaran tiap
+        # 10 detik tidak menutup daftar yang sedang dibuka admin.
+        if pilihan != getattr(self, "_pilihan_suara", None):
+            self._pilihan_suara = pilihan
+            self.pilih_suara.blockSignals(True)
+            self.pilih_suara.clear()
+            for device_id, nama in pilihan:
+                self.pilih_suara.addItem(nama, device_id)
+            self.pilih_suara.blockSignals(False)
+        indeks = self.pilih_suara.findData(terpilih)
+        if indeks >= 0 and indeks != self.pilih_suara.currentIndex():
+            self.pilih_suara.setCurrentIndex(indeks)
 
     def _isi_tabel(self, sekarang: datetime) -> None:
         # Tombol hanya dibangun ulang bila daftar perangkatnya berubah.
@@ -323,3 +372,8 @@ class KartuPerangkat(QFrame):
             self.token_bersama.blockSignals(False)
             return
         self._jalankan(lambda: self.layanan.setel_token_bersama(aktif))
+
+    def _ubah_anjungan_bersuara(self, indeks: int) -> None:
+        device_id = self.pilih_suara.itemData(indeks) or ""
+        if not self._jalankan(lambda: self.layanan.setel_anjungan_bersuara(device_id)):
+            self.muat_ulang()

@@ -17,6 +17,9 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
+import android.media.AudioManager;
+import android.media.MediaPlayer;
+import android.media.ToneGenerator;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -24,6 +27,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.transition.AutoTransition;
@@ -60,12 +65,15 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -545,6 +553,33 @@ public final class MainActivity extends Activity {
     /** Pengaturan server: video anjungan bersuara atau tidak. */
     private boolean suaraVideo;
     private android.media.MediaPlayer pemutarVideo;
+
+    // Suara panggilan. Anjungan yang dipilih admin di Layanan Anjungan
+    // merangkap pengeras suara selama layar antrian belum terpasang.
+    private static final String VERSI_PAKET_SUARA = "sound_pack_version";
+    private static final String TOKEN_JEDA = "_jeda";
+    private static final long SELANG_PANGGILAN_MS = 2000L;
+    private static final long COBA_PAKET_LAGI_MS = 120_000L;
+    /** Lebih dari ini, yang tertua dibuang: pengumuman basi lebih membingungkan. */
+    private static final int MAKS_ANTREAN_UCAPAN = 5;
+    /** Volume video iklan selama pengumuman, supaya kalimatnya jelas. */
+    private static final float VOLUME_VIDEO_SAAT_PANGGILAN = 0.15f;
+    /** Thread sendiri: penerbitan nomor tidak boleh menunggu di belakang polling. */
+    private final ExecutorService pemanggil = Executors.newSingleThreadExecutor();
+    private boolean suaraPanggilan;
+    private Long panggilanTerakhir;
+    private boolean panggilanDiminta;
+    private final ArrayDeque<JSONObject> antreanUcapan = new ArrayDeque<>();
+    private final Map<String, String> klipPaket = new HashMap<>();
+    private boolean sedangMengumumkan;
+    private TextToSpeech tts;
+    private boolean ttsDiperiksa;
+    private boolean ttsSiap;
+    private ToneGenerator nada;
+    private MediaPlayer pemutarKlip;
+    private boolean paketDiunduh;
+    private long paketCobaLagiPada;
+    private String versiPaketServer = "";
     /** Berkas daftar putar yang gagal dimuat pada putaran ini. */
     private final Set<String> berkasGagal = new HashSet<>();
     private int barisMenunggu = BARIS_NOMOR_MENUNGGU;
@@ -981,6 +1016,8 @@ public final class MainActivity extends Activity {
         handler.post(clock);
         handler.removeCallbacks(displayRefresh);
         handler.postDelayed(displayRefresh, 5000);
+        muatPaketSuara();
+        handler.post(pollingPanggilan);
         handler.removeCallbacks(waitingPageRotation);
         handler.postDelayed(waitingPageRotation, LAMA_HALAMAN_MENUNGGU_MS);
         handler.removeCallbacks(kirimLaporanTayang);
@@ -1090,6 +1127,10 @@ public final class MainActivity extends Activity {
                 suaraVideo = suara;
                 aturSuaraVideo();
             }
+            aturSuaraPanggilan(display.optBoolean("call_sound", false));
+            versiPaketServer = display.isNull("sound_pack_version")
+                    ? "" : display.optString("sound_pack_version", "");
+            sinkronkanPaketSuara();
             JSONArray loketRows = display.optJSONArray("counters");
             loketList.clear();
             if (loketRows != null) {
@@ -1387,7 +1428,8 @@ public final class MainActivity extends Activity {
      */
     private void aturSuaraVideo() {
         if (pemutarVideo == null) return;
-        float volume = suaraVideo && !sedangBertransaksi ? 1f : 0f;
+        float volume = !suaraVideo || sedangBertransaksi ? 0f
+                : sedangMengumumkan ? VOLUME_VIDEO_SAAT_PANGGILAN : 1f;
         try {
             pemutarVideo.setVolume(volume, volume);
         } catch (IllegalStateException e) {
@@ -3060,10 +3102,300 @@ public final class MainActivity extends Activity {
         denyutAjakan = null;
     }
 
+    // =================================================================
+    // Suara panggilan
+    // =================================================================
+
+    private final Runnable pollingPanggilan = new Runnable() {
+        @Override
+        public void run() {
+            handler.postDelayed(this, SELANG_PANGGILAN_MS);
+            if (!suaraPanggilan || !hasServerConfig()) {
+                // Dinyalakan lagi nanti: mulai dari panggilan terbaru saat
+                // itu, bukan mengucapkan semua yang lewat selama mati.
+                panggilanTerakhir = null;
+                return;
+            }
+            if (panggilanDiminta) return;
+            panggilanDiminta = true;
+            final boolean pertama = panggilanTerakhir == null;
+            String path = pertama ? "/v1/kiosk/calls"
+                    : "/v1/kiosk/calls?after=" + panggilanTerakhir;
+            request(pemanggil, "GET", path, null, json -> {
+                panggilanDiminta = false;
+                JSONObject isi = json.getJSONObject("data");
+                panggilanTerakhir = isi.optLong("last_id",
+                        panggilanTerakhir == null ? 0 : panggilanTerakhir);
+                if (pertama || !suaraPanggilan) return;
+                JSONArray calls = isi.optJSONArray("calls");
+                if (calls == null) return;
+                for (int i = 0; i < calls.length(); i++) {
+                    JSONObject call = calls.optJSONObject(i);
+                    if (call != null) antreanUcapan.add(call);
+                }
+                while (antreanUcapan.size() > MAKS_ANTREAN_UCAPAN) antreanUcapan.poll();
+                ucapkanBerikutnya();
+            }, message -> panggilanDiminta = false);
+        }
+    };
+
+    private void aturSuaraPanggilan(boolean aktif) {
+        if (aktif == suaraPanggilan) return;
+        suaraPanggilan = aktif;
+        if (aktif) {
+            siapkanSuara();
+            return;
+        }
+        antreanUcapan.clear();
+        if (tts != null) tts.stop();
+        lepasPemutarKlip();
+        selesaiMengumumkan(-1);
+    }
+
+    /** TTS dan nada baru disiapkan saat anjungan ini pertama kali dipilih bersuara. */
+    private void siapkanSuara() {
+        if (nada == null) {
+            try {
+                nada = new ToneGenerator(AudioManager.STREAM_MUSIC, 90);
+            } catch (RuntimeException e) {
+                nada = null;  // perangkat tanpa keluaran suara
+            }
+        }
+        if (tts != null) return;
+        tts = new TextToSpeech(this, status -> {
+            ttsDiperiksa = true;
+            if (status == TextToSpeech.SUCCESS) {
+                int hasil = tts.setLanguage(new Locale("id", "ID"));
+                ttsSiap = hasil != TextToSpeech.LANG_MISSING_DATA
+                        && hasil != TextToSpeech.LANG_NOT_SUPPORTED;
+                tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                    @Override public void onStart(String id) { }
+                    @Override public void onDone(String id) {
+                        handler.post(() -> selesaiMengumumkan(600));
+                    }
+                    @Override public void onError(String id) {
+                        handler.post(() -> selesaiMengumumkan(600));
+                    }
+                });
+            }
+            // Tanpa TTS Bahasa Indonesia, paket suara server yang dipakai.
+            handler.post(this::sinkronkanPaketSuara);
+        });
+    }
+
+    /**
+     * Ucapkan panggilan berikutnya. Urutan pilihan suara sama dengan layar
+     * antrian: TTS Bahasa Indonesia tablet, paket suara server, nada saja.
+     * Pengunjung yang sedang mengambil nomor tidak menunda pengumuman:
+     * orang yang dipanggil bisa terlewat bila harus menunggu.
+     */
+    private void ucapkanBerikutnya() {
+        if (sedangMengumumkan || antreanUcapan.isEmpty() || !suaraPanggilan) return;
+        JSONObject call = antreanUcapan.poll();
+        sedangMengumumkan = true;
+        aturSuaraVideo();
+        if (nada != null) nada.startTone(ToneGenerator.TONE_PROP_BEEP2, 600);
+        // Jeda sesudah nada, supaya kata pertama tidak tertelan nadanya.
+        handler.postDelayed(() -> {
+            if (!sedangMengumumkan) return;  // dimatikan admin di tengah jalan
+            String teks = call.optString("text");
+            JSONArray tokens = call.optJSONArray("tokens");
+            if (ttsSiap && !teks.isEmpty()) {
+                int hasil = tts.speak(teks, TextToSpeech.QUEUE_FLUSH, new Bundle(),
+                        UUID.randomUUID().toString());
+                if (hasil != TextToSpeech.SUCCESS) selesaiMengumumkan(1500);
+            } else if (!klipPaket.isEmpty() && tokens != null && tokens.length() > 0) {
+                putarKlip(tokens, 0);
+            } else {
+                selesaiMengumumkan(1500);
+            }
+        }, 900);
+    }
+
+    /** Pengumuman selesai; berikutnya menyusul setelah jeda. Negatif = berhenti. */
+    private void selesaiMengumumkan(long jedaMs) {
+        if (!sedangMengumumkan) return;
+        sedangMengumumkan = false;
+        aturSuaraVideo();
+        if (jedaMs >= 0) handler.postDelayed(this::ucapkanBerikutnya, jedaMs);
+    }
+
+    /** Putar klip paket suara satu per satu; token jeda = diam sejenak, klip hilang dilewati. */
+    private void putarKlip(JSONArray tokens, int indeks) {
+        if (!sedangMengumumkan) return;
+        if (indeks >= tokens.length()) {
+            selesaiMengumumkan(600);
+            return;
+        }
+        String token = tokens.optString(indeks);
+        if (TOKEN_JEDA.equals(token)) {
+            handler.postDelayed(() -> putarKlip(tokens, indeks + 1), 250);
+            return;
+        }
+        String nama = klipPaket.get(token);
+        File klip = nama == null ? null : new File(folderPaketSuara(), nama);
+        if (klip == null || !klip.isFile()) {
+            putarKlip(tokens, indeks + 1);
+            return;
+        }
+        lepasPemutarKlip();
+        try {
+            MediaPlayer media = new MediaPlayer();
+            pemutarKlip = media;
+            media.setAudioStreamType(AudioManager.STREAM_MUSIC);
+            media.setDataSource(klip.getAbsolutePath());
+            media.setOnCompletionListener(p -> {
+                lepasPemutarKlip();
+                putarKlip(tokens, indeks + 1);
+            });
+            media.setOnErrorListener((p, what, extra) -> {
+                lepasPemutarKlip();
+                putarKlip(tokens, indeks + 1);
+                return true;
+            });
+            media.prepare();
+            media.start();
+        } catch (Exception e) {
+            lepasPemutarKlip();
+            putarKlip(tokens, indeks + 1);
+        }
+    }
+
+    private void lepasPemutarKlip() {
+        if (pemutarKlip == null) return;
+        try {
+            pemutarKlip.release();
+        } catch (RuntimeException ignored) {
+            // Sudah dilepas.
+        }
+        pemutarKlip = null;
+    }
+
+    private File folderPaketSuara() {
+        return new File(getFilesDir(), "suara");
+    }
+
+    private void muatPaketSuara() {
+        klipPaket.clear();
+        File indeks = new File(folderPaketSuara(), "paket.json");
+        if (!indeks.isFile()) return;
+        try (FileInputStream input = new FileInputStream(indeks)) {
+            ByteArrayOutputStream isi = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int length;
+            while ((length = input.read(buffer)) != -1) isi.write(buffer, 0, length);
+            JSONObject json = new JSONObject(new String(isi.toByteArray(), StandardCharsets.UTF_8));
+            JSONObject clips = json.optJSONObject("clips");
+            if (clips == null) return;
+            Iterator<String> keys = clips.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                klipPaket.put(key, clips.optString(key));
+            }
+        } catch (Exception e) {
+            klipPaket.clear();
+        }
+    }
+
+    private static void hapusPohon(File berkas) {
+        File[] anak = berkas.listFiles();
+        if (anak != null) for (File item : anak) hapusPohon(item);
+        //noinspection ResultOfMethodCallIgnored
+        berkas.delete();
+    }
+
+    /**
+     * Unduh paket suara bila anjungan ini bersuara, tablet tidak punya TTS
+     * Bahasa Indonesia, dan versinya di server berubah. Paket baru diunduh
+     * ke folder sementara dan baru menggantikan yang lama sesudah lengkap.
+     */
+    private void sinkronkanPaketSuara() {
+        String versi = versiPaketServer;
+        if (!suaraPanggilan || versi.isEmpty() || !ttsDiperiksa || ttsSiap || paketDiunduh) return;
+        if (versi.equals(preferences.getString(VERSI_PAKET_SUARA, "")) && !klipPaket.isEmpty()) return;
+        if (System.currentTimeMillis() < paketCobaLagiPada) return;
+        paketDiunduh = true;
+        String base = preferences.getString(SERVER, "").trim().replaceAll("/+$", "");
+        pengunduh.execute(() -> {
+            String terpasang = null;
+            File sementara = new File(getFilesDir(), "suara-baru");
+            try {
+                JSONObject indeks = new JSONObject(new String(
+                        unduhBytes(base + "/v1/kiosk/sound"), StandardCharsets.UTF_8));
+                hapusPohon(sementara);
+                if (!sementara.mkdirs()) throw new IllegalStateException("folder paket");
+                JSONObject clips = indeks.getJSONObject("clips");
+                Iterator<String> keys = clips.keys();
+                while (keys.hasNext()) {
+                    String nama = clips.getString(keys.next());
+                    if (!nama.matches("[A-Za-z0-9_.-]+")) {
+                        throw new IllegalStateException("nama klip paket tidak sah");
+                    }
+                    byte[] isi = unduhBytes(base + "/v1/kiosk/sound/"
+                            + URLEncoder.encode(nama, "UTF-8"));
+                    try (OutputStream output = new FileOutputStream(new File(sementara, nama))) {
+                        output.write(isi);
+                    }
+                }
+                try (OutputStream output = new FileOutputStream(new File(sementara, "paket.json"))) {
+                    output.write(indeks.toString().getBytes(StandardCharsets.UTF_8));
+                }
+                File tujuan = folderPaketSuara();
+                hapusPohon(tujuan);
+                if (!sementara.renameTo(tujuan)) throw new IllegalStateException("pasang paket");
+                terpasang = indeks.optString("version");
+            } catch (Exception e) {
+                hapusPohon(sementara);
+            }
+            final String selesai = terpasang;
+            handler.post(() -> {
+                paketDiunduh = false;
+                if (selesai == null) {
+                    paketCobaLagiPada = System.currentTimeMillis() + COBA_PAKET_LAGI_MS;
+                    return;
+                }
+                preferences.edit().putString(VERSI_PAKET_SUARA, selesai).apply();
+                muatPaketSuara();
+            });
+        });
+    }
+
+    /** Berjalan di thread pengunduh. Klip paket suara kecil, cukup di memori. */
+    private byte[] unduhBytes(String url) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(15000);
+            applyHeaders(connection);
+            if (connection.getResponseCode() != 200) {
+                throw new IllegalStateException("Paket suara tidak dapat diunduh.");
+            }
+            long panjang = connection.getContentLengthLong();
+            ByteArrayOutputStream isi = new ByteArrayOutputStream();
+            try (InputStream input = connection.getInputStream()) {
+                byte[] buffer = new byte[16 * 1024];
+                int length;
+                while ((length = input.read(buffer)) != -1) isi.write(buffer, 0, length);
+            }
+            if (panjang >= 0 && isi.size() != panjang) {
+                throw new IllegalStateException("Unduhan paket suara terputus.");
+            }
+            return isi.toByteArray();
+        } finally {
+            connection.disconnect();
+        }
+    }
+
     private void request(
             String method, String path, org.json.JSONObject body,
             Success success, Failure failure) {
-        worker.execute(() -> {
+        request(worker, method, path, body, success, failure);
+    }
+
+    private void request(
+            ExecutorService pelaksana, String method, String path, org.json.JSONObject body,
+            Success success, Failure failure) {
+        pelaksana.execute(() -> {
             HttpURLConnection connection = null;
             try {
                 String base = preferences.getString(SERVER, "").trim().replaceAll("/+$", "");
@@ -4115,8 +4447,13 @@ public final class MainActivity extends Activity {
         handler.removeCallbacksAndMessages(null);
         hentikanDenyutAjakan();
         hentikanDenyutAjakanIklan();
+        antreanUcapan.clear();
+        lepasPemutarKlip();
+        if (tts != null) tts.shutdown();
+        if (nada != null) nada.release();
         worker.shutdownNow();
         pengunduh.shutdownNow();
+        pemanggil.shutdownNow();
         super.onDestroy();
     }
 }

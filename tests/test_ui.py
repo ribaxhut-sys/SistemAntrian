@@ -2905,6 +2905,35 @@ def test_kartu_perangkat_menampilkan_dan_mencabut(qtbot, admin_auth, monkeypatch
     ).text()
 
 
+def test_kartu_perangkat_memilih_anjungan_bersuara(qtbot, admin_auth):
+    from app.services import device_service
+    from app.services.device_service import PerangkatService
+    from app.ui.settings.kartu_perangkat import KartuPerangkat
+
+    layanan = PerangkatService(admin_auth)
+    device_service.pasangkan(
+        layanan.buat_kode().kode, "dev-anjungan-0002", "Anjungan Lobi", "anjungan"
+    )
+    device_service.catat_kontak("dev-tv-0002", nama="TV", jenis="layar_antrian")
+    device_service.catat_kontak("dev-lama-0002", nama="Tablet lama", jenis="anjungan")
+
+    kartu = KartuPerangkat(layanan)
+    qtbot.addWidget(kartu)
+
+    pilihan = [kartu.pilih_suara.itemText(i) for i in range(kartu.pilih_suara.count())]
+    assert pilihan == ["Tidak ada (anjungan diam)", "Anjungan Lobi"], (
+        "layar antrian dan tablet bertoken bersama tidak dapat dipilih"
+    )
+    assert kartu.pilih_suara.currentIndex() == 0
+
+    kartu.pilih_suara.setCurrentIndex(1)
+    kartu._ubah_anjungan_bersuara(1)
+    assert device_service.anjungan_bersuara() == "dev-anjungan-0002"
+
+    kartu._ubah_anjungan_bersuara(0)
+    assert device_service.anjungan_bersuara() == ""
+
+
 def test_kartu_perangkat_menampilkan_kode_pasang(qtbot, admin_auth, monkeypatch):
     from app.services.device_service import PerangkatService
     from app.ui.settings import kartu_perangkat as modul

@@ -355,3 +355,101 @@ def test_layar_boleh_meminta_sampai_dua_belas_nomor(layanan, antrian_siap, terbi
     assert len(bawaan["next"]) == 3
     assert len(banyak["next"]) == 12
     assert banyak["total_waiting"] == 15
+
+
+# ---------------------------------------------------------------------
+# Anjungan yang membunyikan panggilan
+# ---------------------------------------------------------------------
+
+
+def _setel_bersuara(device_id: str) -> None:
+    # Langsung ke tabel: fixture CRO sudah mengganti sesi admin.
+    from app.core.database import session_scope
+    from app.models import ApplicationSetting
+
+    with session_scope() as session:
+        session.add(
+            ApplicationSetting(key=device_service.KUNCI_ANJUNGAN_BERSUARA, value=device_id)
+        )
+
+
+def test_hanya_anjungan_terpasang_yang_dapat_bersuara(layanan):
+    from app.core.errors import NotFoundError
+
+    klien = _klien()
+    for device_id, jenis in ((DEVICE, "anjungan"), ("tv-0000-0000-0020", "layar_antrian")):
+        kode = layanan.buat_kode().kode
+        klien.post(
+            "/v1/kiosk/pair",
+            json={"code": kode, "device_id": device_id, "name": "X", "kind": jenis},
+        )
+    assert layanan.anjungan_bersuara() == ""
+
+    layanan.setel_anjungan_bersuara(DEVICE)
+    assert device_service.anjungan_bersuara() == DEVICE
+
+    with pytest.raises(BusinessRuleError):
+        layanan.setel_anjungan_bersuara("tv-0000-0000-0020")
+    with pytest.raises(NotFoundError):
+        layanan.setel_anjungan_bersuara("tidak-ada")
+    assert device_service.anjungan_bersuara() == DEVICE, "pilihan lama tetap"
+
+    (anjungan,) = [p for p in layanan.daftar() if p.device_id == DEVICE]
+    layanan.cabut(anjungan.id)
+    with pytest.raises(BusinessRuleError):
+        layanan.setel_anjungan_bersuara(DEVICE)
+
+    layanan.setel_anjungan_bersuara(None)
+    assert device_service.anjungan_bersuara() == ""
+
+
+def test_anjungan_terpilih_membunyikan_panggilan(
+    layanan, antrian_siap, terbitkan, cro_queue, tmp_path, monkeypatch
+):
+    import json as _json
+
+    monkeypatch.setattr("app.kiosk_api.base_dir", lambda: tmp_path)
+    klien = _klien()
+    bersuara = _pasang(klien, layanan, "kios-0000-0000-0021", "anjungan")
+    diam = _pasang(klien, layanan, "kios-0000-0000-0022", "anjungan")
+    tv = _pasang(klien, layanan, "tv-0000-0000-0023", "layar_antrian")
+    _setel_bersuara("kios-0000-0000-0021")
+
+    def display(token):
+        return klien.get(
+            "/v1/kiosk/display", headers={"Authorization": f"Bearer {token}"}
+        ).json()
+
+    assert display(bersuara)["call_sound"] is True
+    assert display(diam)["call_sound"] is False
+    assert display(TOKEN)["call_sound"] is False, "token bersama tidak dapat dipercaya"
+    assert display(bersuara)["sound_pack_version"] is None
+
+    kepala = {"Authorization": f"Bearer {bersuara}"}
+    terbitkan("A", 1)
+    awal = klien.get("/v1/kiosk/calls", headers=kepala).json()
+    assert awal["calls"] == []
+    cro_queue.call_next(antrian_siap["loket"][0])
+    (panggil,) = klien.get(
+        "/v1/kiosk/calls", params={"after": awal["last_id"]}, headers=kepala
+    ).json()["calls"]
+    assert panggil["queue_number"] == "A-001"
+    assert panggil["text"].startswith("Nomor antrian")
+    assert panggil["tokens"][0] == "nomor_antrian"
+    tolak = klien.get("/v1/kiosk/calls", headers={"Authorization": f"Bearer {tv}"})
+    assert tolak.status_code == 401, "token layar antrian tetap untuk /v1/layar"
+
+    assert klien.get("/v1/kiosk/sound", headers=kepala).status_code == 404
+    folder = tmp_path / "media" / "suara-layar"
+    folder.mkdir(parents=True)
+    (folder / "angka_1.wav").write_bytes(b"RIFF-isi")
+    (folder / "paket.json").write_text(
+        _json.dumps({"versi": "abc123", "suara": "X", "klip": {"angka_1": "angka_1.wav"}}),
+        encoding="utf-8",
+    )
+    assert display(bersuara)["sound_pack_version"] == "abc123"
+    assert klien.get("/v1/kiosk/sound", headers=kepala).json()["clips"] == {
+        "angka_1": "angka_1.wav"
+    }
+    assert klien.get("/v1/kiosk/sound/angka_1.wav", headers=kepala).content == b"RIFF-isi"
+    assert klien.get("/v1/kiosk/sound/..%2Fpaket.json", headers=kepala).status_code == 404

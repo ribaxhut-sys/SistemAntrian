@@ -89,6 +89,23 @@ loops without a black gap; a file that fails is skipped, and only when every
 file fails does the panel fall back to text (retried every two minutes).
 Video sound follows **Suara video anjungan** (off by default).
 
+### Suara panggilan (mulai APK 2.4.22)
+
+Pengganti sementara selama layar antrian belum terpasang. Di Layanan
+Anjungan → kartu Perangkat, pilih **Anjungan yang membunyikan panggilan**
+(bawaan: Tidak ada). Hanya satu anjungan, dan hanya yang dipasangkan dengan
+kode, supaya pengumuman tidak terdengar dua kali.
+
+- `/v1/kiosk/display` mengirim `call_sound` (anjungan ini bersuara atau
+  tidak) dan `sound_pack_version`.
+- Anjungan terpilih menanyakan `GET /v1/kiosk/calls?after=N` tiap 2 detik
+  dan mengucapkan kalimat yang sama dengan layar antrian: TTS Bahasa
+  Indonesia tablet, atau paket suara (`/v1/kiosk/sound`) bila tablet tidak
+  punya, atau nada saja.
+- Selama pengumuman, suara video iklan dikecilkan. Pengunjung yang sedang
+  mengambil nomor tidak menunda pengumuman.
+- Pilih **Tidak ada** kembali begitu layar antrian bersuara dipasang.
+
 ### Iklan (mulai APK 2.4.21)
 
 - **Syarat tayang.** Iklan hanya diputar bila **Tampilan panel anjungan** =

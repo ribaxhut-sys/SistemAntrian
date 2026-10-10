@@ -308,6 +308,16 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             return device_id
         return ""
 
+    def anjungan_ini_bersuara(device_id: str) -> bool:
+        if not device_id or perangkat is None:
+            return False
+        try:
+            return perangkat.anjungan_bersuara() == device_id
+        except Exception:
+            # Suara bukan syarat pelayanan; anjungan tetap menerbitkan nomor.
+            logger.warning("Pengaturan anjungan bersuara tidak terbaca", exc_info=True)
+            return False
+
     def posisi_loket() -> str:
         nilai = services.settings.get("kiosk.posisi_loket", "otomatis")
         return nilai if nilai in POSISI_LOKET else "otomatis"
@@ -467,8 +477,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             apk.berkas, media_type=TIPE_APK, filename=f"AntrianLayar-{apk.nama_versi}.apk"
         )
 
-    @app.get("/v1/layar/sound", dependencies=[Depends(require_layar)])
-    def layar_sound_index():
+    def indeks_paket_suara() -> dict:
         """Daftar klip paket suara: kunci → nama berkas."""
         paket = info_paket(folder_paket(base_dir()))
         if paket is None:
@@ -478,25 +487,19 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             )
         return {"version": paket.versi, "voice": paket.suara, "clips": paket.klip}
 
-    @app.get(
-        "/v1/layar/sound/{filename}",
-        dependencies=[Depends(require_layar)],
-        response_class=FileResponse,
-    )
-    def layar_sound_clip(filename: str):
+    def klip_paket_suara(filename: str) -> FileResponse:
         """Satu klip; hanya berkas yang tercantum di indeks paket."""
         paket = info_paket(folder_paket(base_dir()))
         if paket is None or filename not in set(paket.klip.values()):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Klip tidak ada.")
         return FileResponse(folder_paket(base_dir()) / filename, media_type="audio/wav")
 
-    @app.get("/v1/layar/calls", dependencies=[Depends(require_layar)])
-    def layar_calls(after: int | None = None):
+    def panggilan_sejak(after: int | None) -> dict:
         """
         Panggilan sesudah id `after`, beserta kalimat yang diucapkan.
 
-        Tanpa `after`, hanya id terakhir yang dikembalikan: TV yang baru
-        menyala tidak membunyikan ulang panggilan yang sudah lewat.
+        Tanpa `after`, hanya id terakhir yang dikembalikan: perangkat yang
+        baru menyala tidak membunyikan ulang panggilan yang sudah lewat.
         """
         from app.services.sound_service import teks_pengumuman
 
@@ -510,12 +513,48 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                     "counter_name": p.counter_name,
                     "call_number": p.call_number,
                     "text": teks_pengumuman(p.queue_number, p.counter_name),
-                    # Urutan klip paket suara, untuk layar tanpa TTS Indonesia.
+                    # Urutan klip paket suara, untuk perangkat tanpa TTS Indonesia.
                     "tokens": token_pengumuman(p.queue_number, p.counter_name),
                 }
                 for p in panggilan
             ],
         }
+
+    @app.get("/v1/layar/sound", dependencies=[Depends(require_layar)])
+    def layar_sound_index():
+        return indeks_paket_suara()
+
+    @app.get(
+        "/v1/layar/sound/{filename}",
+        dependencies=[Depends(require_layar)],
+        response_class=FileResponse,
+    )
+    def layar_sound_clip(filename: str):
+        return klip_paket_suara(filename)
+
+    @app.get("/v1/layar/calls", dependencies=[Depends(require_layar)])
+    def layar_calls(after: int | None = None):
+        return panggilan_sejak(after)
+
+    # Anjungan yang dipilih admin merangkap pengeras suara panggilan selama
+    # layar antrian belum terpasang. Isinya sama dengan milik layar antrian,
+    # tetapi lewat token anjungan: satu token tetap untuk satu jenis perangkat.
+
+    @app.get("/v1/kiosk/sound", dependencies=[Depends(require_token)])
+    def kiosk_sound_index():
+        return indeks_paket_suara()
+
+    @app.get(
+        "/v1/kiosk/sound/{filename}",
+        dependencies=[Depends(require_token)],
+        response_class=FileResponse,
+    )
+    def kiosk_sound_clip(filename: str):
+        return klip_paket_suara(filename)
+
+    @app.get("/v1/kiosk/calls", dependencies=[Depends(require_token)])
+    def kiosk_calls(after: int | None = None):
+        return panggilan_sejak(after)
 
     @app.post("/v1/kiosk/pair")
     def pair(request: PairRequest):
@@ -614,14 +653,16 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         yang sedang dilayani tiap loket.
 
         Keduanya hanya nomor anonim pada hari ini. Anjungan menampilkannya
-        sebagai satu baris ringkas "SEDANG DILAYANI"; panggilan bersuara dan
-        papan loket besar tetap urusan layar antrian.
+        sebagai satu baris ringkas "SEDANG DILAYANI"; papan loket besar tetap
+        urusan layar antrian. Panggilan bersuara juga, kecuali admin memilih
+        anjungan ini sebagai pengganti sementara (`call_sound`).
         """
         media = welcome_media_paths()
         detik_khusus = daftar_putar.detik_per_berkas(
             services.settings.get(daftar_putar.KUNCI, "")
         )
         apk = info_apk(folder_apk(base_dir()))
+        paket = info_paket(folder_paket(base_dir()))
         judul = (services.settings.get("kiosk.judul", "") or "").strip()
         return {
             # Judul anjungan sendiri; kosong berarti ikut judul layar antrian.
@@ -668,6 +709,12 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "counter_position": posisi_loket(),
             "theme": tema_anjungan(),
             "video_sound": services.settings.get_bool("kiosk.suara_video", False),
+            # Hanya anjungan pilihan admin yang membunyikan panggilan, dan
+            # hanya yang dipasangkan: device_id token bersama tidak dapat
+            # dipercaya (lihat perangkat_terpercaya).
+            "call_sound": anjungan_ini_bersuara(device_id),
+            # Tablet mengunduh ulang paket suara bila versinya berubah.
+            "sound_pack_version": paket.versi if paket else None,
             # Jam di layar anjungan memakai jam dan zona waktu SERVER, bukan
             # setelan tablet: tablet tanpa internet sering salah jam, dan
             # zona waktunya bisa terpasang di luar Indonesia.
