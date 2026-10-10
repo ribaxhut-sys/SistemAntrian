@@ -560,8 +560,14 @@ public final class MainActivity extends Activity {
     private static final String TOKEN_JEDA = "_jeda";
     private static final long SELANG_PANGGILAN_MS = 2000L;
     private static final long COBA_PAKET_LAGI_MS = 120_000L;
-    /** Lebih dari ini, yang tertua dibuang: pengumuman basi lebih membingungkan. */
-    private static final int MAKS_ANTREAN_UCAPAN = 5;
+    /**
+     * Panggilan yang lebih tua dari ini tidak diucapkan lagi: tablet yang
+     * sempat putus lalu tersambung tidak mengumumkan nomor yang mungkin
+     * sudah dilayani. Umurnya menurut jam server (age_seconds).
+     */
+    private static final double BATAS_UMUR_PANGGILAN_DETIK = 60;
+    /** Jaring pengaman saja; yang basi sudah dibuang menurut umurnya. */
+    private static final int MAKS_ANTREAN_UCAPAN = 10;
     /** Volume video iklan selama pengumuman, supaya kalimatnya jelas. */
     private static final float VOLUME_VIDEO_SAAT_PANGGILAN = 0.15f;
     /** Thread sendiri: penerbitan nomor tidak boleh menunggu di belakang polling. */
@@ -3129,9 +3135,12 @@ public final class MainActivity extends Activity {
                 if (pertama || !suaraPanggilan) return;
                 JSONArray calls = isi.optJSONArray("calls");
                 if (calls == null) return;
+                long diterima = System.currentTimeMillis();
                 for (int i = 0; i < calls.length(); i++) {
                     JSONObject call = calls.optJSONObject(i);
-                    if (call != null) antreanUcapan.add(call);
+                    if (call == null) continue;
+                    call.put("_diterima_ms", diterima);
+                    antreanUcapan.add(call);
                 }
                 while (antreanUcapan.size() > MAKS_ANTREAN_UCAPAN) antreanUcapan.poll();
                 ucapkanBerikutnya();
@@ -3190,8 +3199,9 @@ public final class MainActivity extends Activity {
      * orang yang dipanggil bisa terlewat bila harus menunggu.
      */
     private void ucapkanBerikutnya() {
-        if (sedangMengumumkan || antreanUcapan.isEmpty() || !suaraPanggilan) return;
-        JSONObject call = antreanUcapan.poll();
+        if (sedangMengumumkan || !suaraPanggilan) return;
+        JSONObject call = ambilPanggilanSegar();
+        if (call == null) return;
         sedangMengumumkan = true;
         aturSuaraVideo();
         if (nada != null) nada.startTone(ToneGenerator.TONE_PROP_BEEP2, 600);
@@ -3210,6 +3220,22 @@ public final class MainActivity extends Activity {
                 selesaiMengumumkan(1500);
             }
         }, 900);
+    }
+
+    /**
+     * Panggilan berikutnya yang belum basi. Umurnya = umur saat diterima
+     * ditambah lama menunggu giliran di tablet; server lama tanpa
+     * age_seconds dianggap baru.
+     */
+    private JSONObject ambilPanggilanSegar() {
+        long sekarang = System.currentTimeMillis();
+        while (!antreanUcapan.isEmpty()) {
+            JSONObject call = antreanUcapan.poll();
+            double umur = call.optDouble("age_seconds", 0)
+                    + (sekarang - call.optLong("_diterima_ms", sekarang)) / 1000.0;
+            if (umur <= BATAS_UMUR_PANGGILAN_DETIK) return call;
+        }
+        return null;
     }
 
     /** Pengumuman selesai; berikutnya menyusul setelah jeda. Negatif = berhenti. */

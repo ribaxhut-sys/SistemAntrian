@@ -512,6 +512,8 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                     "queue_number": p.queue_number,
                     "counter_name": p.counter_name,
                     "call_number": p.call_number,
+                    # Umur menurut jam server; jam tablet sering salah.
+                    "age_seconds": round(p.umur_detik, 1),
                     "text": teks_pengumuman(p.queue_number, p.counter_name),
                     # Urutan klip paket suara, untuk perangkat tanpa TTS Indonesia.
                     "tokens": token_pengumuman(p.queue_number, p.counter_name),

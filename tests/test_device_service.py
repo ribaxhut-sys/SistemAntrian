@@ -436,6 +436,7 @@ def test_anjungan_terpilih_membunyikan_panggilan(
     assert panggil["queue_number"] == "A-001"
     assert panggil["text"].startswith("Nomor antrian")
     assert panggil["tokens"][0] == "nomor_antrian"
+    assert 0 <= panggil["age_seconds"] < 30, "tablet melewati panggilan basi menurut umur ini"
     tolak = klien.get("/v1/kiosk/calls", headers={"Authorization": f"Bearer {tv}"})
     assert tolak.status_code == 401, "token layar antrian tetap untuk /v1/layar"
 

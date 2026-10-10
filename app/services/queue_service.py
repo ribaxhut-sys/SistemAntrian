@@ -237,6 +237,9 @@ class Panggilan:
     queue_number: str
     counter_name: str
     call_number: int
+    #: Detik sejak panggilan, menurut jam server. Perangkat yang sempat
+    #: putus melewati panggilan yang sudah basi alih-alih mengucapkannya.
+    umur_detik: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -736,7 +739,13 @@ class QueueService:
 
         with session_scope() as session:
             dasar = (
-                sa.select(QueueCall.id, Queue.queue_number, Counter.name, QueueCall.call_number)
+                sa.select(
+                    QueueCall.id,
+                    Queue.queue_number,
+                    Counter.name,
+                    QueueCall.call_number,
+                    QueueCall.called_at,
+                )
                 .join(Queue, Queue.id == QueueCall.queue_id)
                 .join(Counter, Counter.id == QueueCall.counter_id)
                 .where(Queue.branch_id == sesi.branch_id, Queue.queue_date == hari)
@@ -751,9 +760,16 @@ class QueueService:
             baris = session.execute(
                 dasar.where(QueueCall.id > setelah_id).order_by(QueueCall.id).limit(batas)
             ).all()
+        sekarang = clock.now()
         hasil = [
-            Panggilan(id=i, queue_number=nomor, counter_name=loket, call_number=ke)
-            for i, nomor, loket, ke in baris
+            Panggilan(
+                id=i,
+                queue_number=nomor,
+                counter_name=loket,
+                call_number=ke,
+                umur_detik=max(0.0, (sekarang - waktu).total_seconds()),
+            )
+            for i, nomor, loket, ke, waktu in baris
         ]
         return (hasil[-1].id if hasil else max(terakhir, setelah_id)), hasil
 
