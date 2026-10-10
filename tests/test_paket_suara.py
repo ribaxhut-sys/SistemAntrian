@@ -43,7 +43,10 @@ def test_buat_paket_menulis_indeks_sesudah_klip(tmp_path, monkeypatch):
 
     info = paket_suara.buat_paket(tmp_path, ["Loket 1"])
 
-    assert "System.Speech" in panggilan["args"][-1]
+    skrip = panggilan["args"][-1]
+    assert skrip.index("Windows.Media.SpeechSynthesis") < skrip.index("System.Speech.Synthesis"), (
+        "Andika (OneCore) hanya terlihat lewat WinRT; System.Speech cadangan"
+    )
     assert info.suara == "Microsoft Andika (Indonesia)"
     indeks = json.loads((tmp_path / "paket.json").read_text(encoding="utf-8"))
     assert indeks["klip"]["kata_loket"] == "kata_loket.wav"
@@ -64,3 +67,24 @@ def test_buat_paket_gagal_dilaporkan(tmp_path, monkeypatch):
     else:
         raise AssertionError("seharusnya gagal")
     assert paket_suara.info_paket(tmp_path) is None
+
+
+def test_hening_panjang_di_awal_dan_akhir_klip_dipangkas(tmp_path):
+    import array
+    import wave
+
+    laju = 16000
+    sampel = array.array("h", [0] * int(laju * 0.2) + [8000, -8000] * 2000 + [0] * int(laju * 0.8))
+    berkas = tmp_path / "angka_1.wav"
+    with wave.open(str(berkas), "wb") as keluar:
+        keluar.setnchannels(1)
+        keluar.setsampwidth(2)
+        keluar.setframerate(laju)
+        keluar.writeframes(sampel.tobytes())
+
+    paket_suara.pangkas_hening(berkas)
+
+    with wave.open(str(berkas), "rb") as masuk:
+        detik = masuk.getnframes() / masuk.getframerate()
+    assert abs(detik - (0.25 + paket_suara.SISA_HENING_DEPAN + paket_suara.SISA_HENING_BELAKANG)) < 0.01
+

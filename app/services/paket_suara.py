@@ -15,23 +15,34 @@ dari nama loket yang aktif. Urutan klip untuk satu panggilan disusun
 `sound_service.teks_pengumuman`, sehingga Windows, TTS perangkat, dan
 paket suara menyebut hal yang sama.
 
-Klip dibuat lewat PowerShell + System.Speech (bawaan Windows, tanpa
-dependensi Python tambahan), dengan suara Bahasa Indonesia bila ada.
+Klip dibuat lewat PowerShell (bawaan Windows, tanpa dependensi Python
+tambahan): suara Indonesia Microsoft Andika lewat WinRT bila terpasang,
+selain itu System.Speech.
 """
 
 from __future__ import annotations
 
+import array
 import hashlib
 import json
 import re
 import subprocess
+import sys
 import tempfile
+import wave
 from dataclasses import dataclass
 from pathlib import Path
 
 NAMA_FOLDER = Path("media") / "suara-layar"
 NAMA_INDEKS = "paket.json"
 JEDA = "_jeda"
+
+#: Sampel di bawah ambang ini dianggap hening (16-bit, maksimum 32767).
+AMBANG_HENING = 500
+#: Sisa hening yang dibiarkan di depan dan belakang kata, supaya awal dan
+#: akhir ucapan tidak terpotong.
+SISA_HENING_DEPAN = 0.03
+SISA_HENING_BELAKANG = 0.06
 
 #: Nama huruf Indonesia: diucapkan sama oleh suara bahasa apa pun.
 HURUF = {
@@ -115,6 +126,40 @@ def nama_loket_aktif() -> list[str]:
         )
 
 
+def pangkas_hening(berkas: Path) -> None:
+    """
+    Buang hening panjang di awal dan akhir satu klip WAV 16-bit.
+
+    Suara Windows menambahkan sekitar 0,8 detik hening sesudah tiap
+    ucapan. Kalimat panggilan disambung dari 8-10 klip, sehingga tanpa
+    dipangkas pengumumannya terdengar terpatah-patah dengan jeda bertotal
+    beberapa detik. Jeda yang memang dikehendaki diatur token `_jeda`.
+    """
+    with wave.open(str(berkas), "rb") as masuk:
+        parameter = masuk.getparams()
+        isi = masuk.readframes(masuk.getnframes())
+    if parameter.sampwidth != 2:
+        return
+    sampel = array.array("h", isi)
+    if sys.byteorder == "big":
+        sampel.byteswap()
+    saluran = parameter.nchannels
+    keras = [i for i, v in enumerate(sampel) if abs(v) > AMBANG_HENING]
+    if not keras:
+        return
+    laju = parameter.framerate
+    awal = max(0, keras[0] // saluran - int(laju * SISA_HENING_DEPAN))
+    akhir = min(len(sampel) // saluran, keras[-1] // saluran + 1 + int(laju * SISA_HENING_BELAKANG))
+    hasil = sampel[awal * saluran:akhir * saluran]
+    if sys.byteorder == "big":
+        hasil.byteswap()
+    with wave.open(str(berkas), "wb") as keluar:
+        keluar.setnchannels(saluran)
+        keluar.setsampwidth(2)
+        keluar.setframerate(laju)
+        keluar.writeframes(hasil.tobytes())
+
+
 def folder_paket(base: Path) -> Path:
     return Path(base) / NAMA_FOLDER
 
@@ -128,10 +173,45 @@ def info_paket(folder: Path) -> InfoPaket | None:
         return None
 
 
+#: Suara Indonesia Windows (Microsoft Andika) hanya terpasang sebagai suara
+#: OneCore, yang TIDAK terlihat oleh System.Speech: lewat System.Speech
+#: paket selalu jatuh ke David/Zira berlogat Inggris. Karena itu suara
+#: Indonesia dicari dulu lewat WinRT (Windows.Media.SpeechSynthesis, yang
+#: juga dipakai QtTextToSpeech di aplikasi Windows); System.Speech hanya
+#: cadangan bila WinRT tidak punya suara id-ID atau tidak tersedia.
 _SKRIP = r"""
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.Speech
 $daftar = Get-Content -LiteralPath $args[0] -Raw -Encoding UTF8 | ConvertFrom-Json
+try {
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
+    $null = [Windows.Media.SpeechSynthesis.SpeechSynthesizer, Windows.Media.SpeechSynthesis, ContentType = WindowsRuntime]
+    $null = [Windows.Storage.Streams.DataReader, Windows.Storage.Streams, ContentType = WindowsRuntime]
+    $suara = [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices | Where-Object { $_.Language -eq 'id-ID' } | Select-Object -First 1
+} catch { $suara = $null }
+if ($suara) {
+    $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+        $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
+        $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
+    function Tunggu($op, [Type]$jenis) {
+        $t = $asTask.MakeGenericMethod($jenis).Invoke($null, @($op)); $null = $t.Wait(-1); $t.Result
+    }
+    $s = New-Object Windows.Media.SpeechSynthesis.SpeechSynthesizer
+    $s.Voice = $suara
+    foreach ($butir in $daftar) {
+        $aliran = Tunggu ($s.SynthesizeTextToStreamAsync($butir.teks)) ([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])
+        $ukuran = [uint32]$aliran.Size
+        $baca = New-Object Windows.Storage.Streams.DataReader($aliran.GetInputStreamAt(0))
+        $null = Tunggu ($baca.LoadAsync($ukuran)) ([uint32])
+        $isi = New-Object byte[] $ukuran
+        $baca.ReadBytes($isi)
+        [IO.File]::WriteAllBytes($butir.berkas, $isi)
+        $baca.Dispose(); $aliran.Dispose()
+    }
+    $s.Dispose()
+    Write-Output ($suara.DisplayName + '|' + $suara.Language)
+    exit 0
+}
+Add-Type -AssemblyName System.Speech
 $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
 $id = $s.GetInstalledVoices() | Where-Object { $_.Enabled -and $_.VoiceInfo.Culture.Name -eq 'id-ID' } | Select-Object -First 1
 if ($id) { $s.SelectVoice($id.VoiceInfo.Name) }
@@ -179,10 +259,24 @@ def buat_paket(folder: Path, nama_loket: list[str], *, timeout: int = 300) -> In
         raise RuntimeError(
             "Suara Windows gagal membuat klip: " + (detail[-1] if detail else "tanpa keterangan")
         )
+    for berkas in klip.values():
+        try:
+            pangkas_hening(folder / berkas)
+        except (OSError, EOFError, wave.Error):
+            pass  # klip tetap dapat diputar, hanya jedanya lebih panjang
     nama, _, budaya = (hasil.stdout.strip().splitlines() or ["|"])[-1].partition("|")
     suara = f"{nama} ({'Indonesia' if budaya == 'id-ID' else budaya or '?'})"
     versi = hashlib.sha256(
-        json.dumps({"suara": suara, "kata": kata}, sort_keys=True).encode("utf-8")
+        json.dumps(
+            {
+                "suara": suara,
+                "kata": kata,
+                # Cara memangkas ikut menentukan isi klip: tablet yang sudah
+                # menyimpan klip versi lama harus mengunduh ulang.
+                "pangkas": [AMBANG_HENING, SISA_HENING_DEPAN, SISA_HENING_BELAKANG],
+            },
+            sort_keys=True,
+        ).encode("utf-8")
     ).hexdigest()[:12]
     info = InfoPaket(versi=versi, suara=suara, klip=klip)
     (folder / NAMA_INDEKS).write_text(
