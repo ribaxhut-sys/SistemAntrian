@@ -22,6 +22,8 @@ tersimpan apa adanya.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -62,9 +64,7 @@ from app.core.peran import (
     ADMIN as PERAN_ADMIN,
     BAWAAN,
     LABEL,
-    PAPAN_MEMANJANG,
     PETUGAS as PERAN_PETUGAS,
-    TELEVISI,
     PeranKomputer,
     baca_peran,
     path_berkas_peran,
@@ -72,19 +72,20 @@ from app.core.peran import (
 )
 from app.ui.common import keterangan, label_error, tombol
 
+if TYPE_CHECKING:
+    from app.services.ticket_service import TicketData
+
 #: Urutan peran di kotak pilihan, dari yang paling banyak jumlahnya di
 #: kantor ke yang paling jarang. Namanya diambil dari app.core.peran supaya
 #: bilah status dan dialog ini tidak pernah menyebut hal yang sama dengan
 #: dua kata yang berbeda.
 NAMA_PERAN: tuple[tuple[str, str], ...] = (
-    ("", "Belum ditetapkan — tanya setiap kali dibuka"),
+    ("", "Belum ditetapkan"),
     *(
         (kode, LABEL[kode])
         for kode in (
             PERAN_PETUGAS,
             PERAN_ADMIN,
-            TELEVISI,
-            PAPAN_MEMANJANG,
         )
     ),
 )
@@ -604,13 +605,17 @@ class SetupMesinDialog(QDialog):
         pengguna = self.isian_pengguna.text().strip()
         if pengguna not in _PENGGUNA_TETAP:
             pengguna = PENGGUNA_BAWAAN
+        # Rahasia yang sudah tersimpan tidak pernah dimasukkan kembali ke
+        # widget. Kotak kosong berarti pertahankan sandi lama; hanya sandi
+        # baru yang diketik pengguna boleh hidup di layar.
+        sandi = self.isian_sandi.text() or self._sandi_tersimpan
         return PengaturanMesin(
             peran=self._peran_terpilih(),
             host=self.isian_host.text().strip(),
             port=int(self.isian_port.value()),
             nama_database=DATABASE_BAWAAN,
             pengguna=pengguna,
-            sandi=self.isian_sandi.text(),
+            sandi=sandi,
         )
 
     def _muat(self, pengaturan: PengaturanMesin) -> None:
@@ -625,7 +630,12 @@ class SetupMesinDialog(QDialog):
         self.isian_database.setText(pengaturan.nama_database)
         self.isian_pengguna.setText(pengaturan.pengguna)
         self.isian_sandi.blockSignals(True)
-        self.isian_sandi.setText(pengaturan.sandi)
+        self.isian_sandi.clear()
+        self.isian_sandi.setPlaceholderText(
+            "Sandi tersimpan — ketik hanya untuk mengganti"
+            if pengaturan.sandi
+            else "sandi database antrian"
+        )
         self.isian_sandi.blockSignals(False)
         self.isian_ulang.clear()
 
@@ -668,8 +678,11 @@ class SetupMesinDialog(QDialog):
 
         Sandi pertama, yang belum pernah tersimpan, cukup diketik sekali.
         """
-        berubah = bool(self._sandi_tersimpan) and (
-            self.isian_sandi.text() != self._sandi_tersimpan
+        sandi_baru = self.isian_sandi.text()
+        berubah = (
+            bool(self._sandi_tersimpan)
+            and bool(sandi_baru)
+            and sandi_baru != self._sandi_tersimpan
         )
         self._baris_ulang.setVisible(berubah or self._wajib_ulang)
         if self._baris_ulang.isHidden():
@@ -678,7 +691,7 @@ class SetupMesinDialog(QDialog):
     def _salah_ketik_ulang(self) -> str | None:
         if self._peran_terpilih() == SENDIRI or self._baris_ulang.isHidden():
             return None
-        if not self.isian_sandi.text():
+        if not self._pengaturan_dari_form().sandi:
             return "Kata sandi database belum diisi. Ketik ulang di kedua kotak."
         if self.isian_sandi.text() != self.isian_ulang.text():
             return "Ketik ulang kata sandi yang sama di kedua kotak."
@@ -686,7 +699,11 @@ class SetupMesinDialog(QDialog):
 
     def _sandi_diterima(self) -> None:
         self._wajib_ulang = False
-        self._sandi_tersimpan = self.isian_sandi.text()
+        self._sandi_tersimpan = self._pengaturan_dari_form().sandi
+        self.isian_sandi.clear()
+        self.isian_sandi.setPlaceholderText(
+            "Sandi tersimpan — ketik hanya untuk mengganti"
+        )
         self.isian_ulang.clear()
         self._perbarui_ulang_sandi()
 
@@ -826,7 +843,8 @@ class SetupMesinDialog(QDialog):
         Sandi postgres ditanya sekali dan tidak ditulis ke mesin.json.
         Sandi yang sudah diketik di form menjadi sandi pengguna antrian.
         """
-        if not self.isian_sandi.text():
+        sandi_antrian = self._pengaturan_dari_form().sandi
+        if not sandi_antrian:
             self._tampilkan_error(
                 "Isi kata sandi database antrian terlebih dahulu. "
                 "Sandi itulah yang akan dibuat."
@@ -849,7 +867,7 @@ class SetupMesinDialog(QDialog):
         if not jadi:
             return
         hasil = siapkan_database_lokal(
-            self.isian_sandi.text(),
+            sandi_antrian,
             sandi_postgres,
             port=int(self.isian_port.value()),
         )

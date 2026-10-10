@@ -205,6 +205,11 @@ def _jalankan_powershell(script: str, *, timeout: int = 15) -> subprocess.Comple
     )
 
 
+# Aturan berlaku di semua profil jaringan, tetapi hanya untuk alamat di
+# subnet lokal. Dulu hanya profil Private: setiap kali Wi-Fi atau router
+# berganti, Windows mencatat jaringan barunya Public dan tablet terblokir
+# sampai seseorang dengan hak Administrator mengubah profilnya. Batas
+# LocalSubnet tetap menutup port dari luar jaringan kantor.
 _SKRIP_FIREWALL_CEK = r"""
 $ErrorActionPreference = 'Stop'
 $rules = @(
@@ -216,12 +221,14 @@ foreach ($item in $rules) {
         Where-Object {
             $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' `
                 -and $_.Action -eq 'Allow' `
-                -and $_.Profile.ToString().Contains('Private')
+                -and $_.Profile.ToString() -eq 'Any'
         } | Select-Object -First 1
     if ($null -eq $rule) { exit 1 }
     $filter = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $rule
     if ($filter.Protocol -ne $item.Protocol `
         -or $filter.LocalPort -notcontains $item.Port) { exit 1 }
+    $alamat = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $rule
+    if (@($alamat.RemoteAddress) -notcontains 'LocalSubnet') { exit 1 }
 }
 Write-Output 'OK'
 """
@@ -237,10 +244,10 @@ foreach ($item in $rules) {
     if ($null -eq $rule) {
         New-NetFirewallRule -DisplayName $item.Name -Direction Inbound `
             -Action Allow -Protocol $item.Protocol -LocalPort $item.Port `
-            -Profile Private | Out-Null
+            -Profile Any -RemoteAddress LocalSubnet | Out-Null
     } else {
         Set-NetFirewallRule -InputObject $rule -Enabled True -Direction Inbound `
-            -Action Allow -Profile Private
+            -Action Allow -Profile Any -RemoteAddress LocalSubnet
         $rule | Get-NetFirewallPortFilter |
             Set-NetFirewallPortFilter -Protocol $item.Protocol -LocalPort $item.Port
     }
@@ -369,7 +376,7 @@ def _jalankan_terangkat(script: str, *, pesan_gagal: str, timeout: int = 120) ->
 
 
 def siapkan_firewall() -> None:
-    """Izinkan API TCP dan pencarian UDP pada profil Private, dengan UAC."""
+    """Izinkan API TCP dan pencarian UDP dari subnet lokal, dengan UAC."""
     if _firewall_sudah_siap():
         return
     _jalankan_terangkat(

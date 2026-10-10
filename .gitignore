@@ -41,6 +41,7 @@ data/peran.json
 data/anjungan-token.txt
 data/anjungan-token.txt.tmp
 backup/*.db
+backup/*.dump
 backup/*.zip
 tiket/
 Print hasil/

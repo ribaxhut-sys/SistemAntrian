@@ -5,7 +5,7 @@ Titik masuk aplikasi.
 
 Urutan yang dijalankan:
 
-    siapkan database -> pilih layar -> masuk -> jendela utama
+    siapkan database -> masuk -> jendela utama
 
 Argumen:
     --tv          langsung membuka layar antrian ruang tunggu, tanpa dialog
@@ -198,19 +198,15 @@ def _jalankan_ui(
     """
     Buka aplikasi berjendela. Import Qt ditunda sampai benar-benar dipakai.
 
-    Menutup sebuah layar TIDAK pernah menutup proses aplikasi, hanya
-    memundurkan satu langkah, seolah komputer baru dinyalakan:
+    Aplikasi Windows biasa langsung membuka layar masuk:
 
         ganti kata sandi wajib dibatalkan -> kembali ke layar masuk
-        layar masuk ditutup               -> kembali ke layar pilihan mode
-        mesin publik ditutup              -> kembali ke layar pilihan mode
-        layar pilihan mode ditutup        -> aplikasi berhenti
+        layar masuk ditutup               -> aplikasi berhenti
+        mesin publik lama ditutup         -> aplikasi berhenti
 
-    Petugas yang logout tetap kembali langsung ke layar masuk, tanpa
-    mampir ke layar pilihan. Layar pilihan mode adalah satu-satunya pintu
-    keluar aplikasi. Dahulu menutup layar masuk ikut mematikan aplikasi,
-    sehingga satu tekan Esc yang tidak sengaja membuat loket berhenti
-    melayani.
+    Petugas yang logout kembali langsung ke layar masuk. Mode layar antrian
+    hanya tersisa sebagai kompatibilitas untuk argumen --tv lama; ia tidak
+    pernah lagi ditawarkan pada alur pembukaan biasa.
     """
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication, QDialog
@@ -218,7 +214,7 @@ def _jalankan_ui(
     from app.services.auth_service import get_auth_service
     from app.ui.login.change_password_dialog import ChangePasswordDialog
     from app.ui.login.login_window import LoginWindow
-    from app.ui.login.mode_dialog import LAYAR_ANTRIAN, ModeDialog
+    from app.ui.login.mode_dialog import LAYAR_ANTRIAN
     from app.ui.main_window import MainWindow
     from app.ui.style import STYLESHEET
 
@@ -235,62 +231,40 @@ def _jalankan_ui(
     pewaktu_hari.start(SELANG_PERIKSA_HARI_MS)
 
     auth = get_auth_service()
-    #: Argumen baris perintah hanya berlaku pada peluncuran pertama. Setelah
-    #: layarnya ditutup, tetap lewat dialog pilihan seperti biasa — seseorang
-    #: sudah hadir untuk menekan Ctrl+Q.
-    mode_pertama = mode_awal
+    if mode_awal == LAYAR_ANTRIAN:
+        # Jalur kompatibilitas bagi pintasan --tv lama. Tidak ada lagi tombol
+        # yang dapat membukanya dari aplikasi Windows biasa.
+        auth.mulai_sesi_layar()
+        jendela = MainWindow(auth, berjendela=berjendela)
+        jendela.tampilkan()
+        app.exec()
+        return 0
 
+    # Beberapa petugas berbagi satu komputer, jadi nama dan sandi selalu
+    # diminta. Logout mengulang loop ini; menutup login mengakhiri aplikasi.
     while True:
-        if mode_pertama is not None:
-            mode = mode_pertama
-            mode_pertama = None
-        else:
-            pilihan = ModeDialog()
-            if pilihan.exec() != QDialog.DialogCode.Accepted:
-                logger.info("Aplikasi ditutup dari layar pilihan")
-                return 0
-            mode = pilihan.pilihan
+        login = LoginWindow(auth)
+        if login.exec() != QDialog.DialogCode.Accepted:
+            logger.info("Layar masuk ditutup; aplikasi berhenti")
+            return 0
 
-        if mode == LAYAR_ANTRIAN:
-            # Tanpa login: komputernya menghadap publik dan tidak diawasi.
-            auth.mulai_sesi_layar()
-            jendela = MainWindow(auth, berjendela=berjendela)
-            jendela.tampilkan()
-            app.exec()
-            continue  # mesin publik ditutup -> kembali ke layar pilihan mode
-
-        # Loket: logout kembali langsung ke layar masuk, tidak mampir
-        # dulu ke layar pilihan mode.
-        #
-        # Beberapa petugas berbagi satu komputer, jadi nama dan sandi
-        # selalu diminta — juga saat dijalankan dari source. Pintasan
-        # tanpa sandi akan memilih satu akun dan menutup jalan yang lain.
-        # Layar antrian tidak lewat sini.
-        while True:
-            login = LoginWindow(auth)
-            if login.exec() != QDialog.DialogCode.Accepted:
-                logger.info("Layar masuk ditutup, kembali ke layar pilihan")
-                break  # -> layar pilihan mode
-
-            sesi = auth.require_session()
+        sesi = auth.require_session()
 
             # Akun dengan kata sandi bawaan tidak boleh dipakai bekerja
             # sebelum kata sandinya diganti. Membatalkannya mengembalikan ke
             # layar masuk, bukan menutup aplikasi: petugas lain yang kata
             # sandinya sudah benar masih bisa langsung memakai loketnya.
-            if sesi.must_change_password:
-                dialog = ChangePasswordDialog(auth, wajib=True)
-                if dialog.exec() != QDialog.DialogCode.Accepted:
-                    auth.logout()
-                    logger.info("Kata sandi wajib tidak diganti, kembali ke layar masuk")
-                    continue
+        if sesi.must_change_password:
+            dialog = ChangePasswordDialog(auth, wajib=True)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                auth.logout()
+                logger.info("Kata sandi wajib tidak diganti, kembali ke layar masuk")
+                continue
 
-            jendela = MainWindow(auth)
-            # tampilkan(), bukan show(): akun layar antrian dibuka penuh
-            # tanpa bingkai jendela karena layarnya menghadap pengunjung.
-            jendela.tampilkan()
-            app.exec()
-            # petugas logout -> kembali langsung ke layar masuk
+        jendela = MainWindow(auth)
+        jendela.tampilkan()
+        app.exec()
+        # petugas logout -> kembali langsung ke layar masuk
 
 
 def mode_dari_argumen(argv: list[str]) -> str | None:
@@ -300,7 +274,7 @@ def mode_dari_argumen(argv: list[str]) -> str | None:
     `--tv` didahulukan: papan kosong terlihat seluruh ruang tunggu.
 
     `--kios`, `--kios-totem`, dan `--layar` (anjungan Windows) sudah tidak
-    ada; pintasan lama yang masih memakainya membuka dialog pilihan biasa.
+    ada; pintasan lama yang masih memakainya mengikuti alur Login Petugas.
     """
     from app.ui.login.mode_dialog import LAYAR_ADMIN, LAYAR_ANTRIAN, LAYAR_PETUGAS
 
@@ -315,33 +289,18 @@ def mode_dari_argumen(argv: list[str]) -> str | None:
 
 def mode_awal_mesin(argv: list[str], db_path) -> str | None:
     """
-    Mode peluncuran pertama: flag baris perintah, lalu peran yang tersimpan.
+    Mode peluncuran pertama hanya dari flag kompatibilitas baris perintah.
 
     Flag menang. Ia diketik untuk sekali jalan oleh orang yang sedang
     menguji sesuatu, dan tidak seharusnya kalah oleh berkas yang ditulis
     berminggu-minggu sebelumnya.
 
-    Peran yang tersimpan menutup kegagalan yang paling mungkin terjadi di
-    lapangan. Dahulu peran layar hanya hidup di dalam pintasan, sehingga
-    komputer yang dinyalakan lewat .exe langsung — atau yang pintasannya
-    rusak sesudah pembaruan — membuka dialog pilih-mode lalu layar login,
-    tepat di depan pengunjung yang sedang menunggu.
-
-    Hanya berlaku pada peluncuran PERTAMA, sama seperti flag. Sesudah
-    layarnya ditutup, tetap lewat dialog pilihan: menutup papan menuntut
-    Ctrl+Q, jadi seseorang memang sudah hadir — dan mesin yang selalu
-    membuka papannya kembali tidak akan pernah bisa ditutup sama sekali.
+    Peran layar yang tersimpan tidak lagi mengubah aplikasi Windows menjadi
+    papan antrian. Instalasi lama karena itu aman kembali ke login petugas,
+    sedangkan --tv tetap tersedia sementara untuk pintasan lama yang memang
+    menyebutkannya secara eksplisit.
     """
-    dari_flag = mode_dari_argumen(argv)
-    if dari_flag is not None:
-        return dari_flag
-
-    from app.core.peran import baca_peran, path_berkas_peran
-
-    mode = baca_peran(path_berkas_peran(db_path)).mode
-    if mode:
-        logger.info("Peran tersimpan membuka mode '%s'.", mode)
-    return mode or None
+    return mode_dari_argumen(argv)
 
 
 def berjendela_dari_argumen(argv: list[str]) -> bool:
@@ -353,20 +312,11 @@ def _mesin_publik_tanpa_jaga(argv: list[str], db_path=None) -> bool:
     """
     True bila mesin ini pulih sendiri tanpa klik.
 
-    Dibaca dari flag pintasan, dan — bila folder databasenya diketahui —
-    juga dari peran yang tersimpan. Keduanya wajib dijawab sama: sesudah
-    peran dapat disimpan di berkas, mesin yang menyebut dirinya televisi
-    lewat `peran.json` tidak boleh diperlakukan berbeda daripada mesin yang
-    menyebutnya lewat `--tv`.
+    Hanya flag --tv lama yang masih boleh melewati dialog awal. Peran layar
+    yang tersimpan sengaja diabaikan agar pembukaan biasa selalu menuju
+    aplikasi petugas Windows.
     """
-    if "--tv" in argv:
-        return True
-    if db_path is None:
-        return False
-
-    from app.core.peran import baca_peran, path_berkas_peran
-
-    return baca_peran(path_berkas_peran(db_path)).publik
+    return "--tv" in argv
 
 
 def perlu_setup_awal(
@@ -394,7 +344,7 @@ def perlu_setup_awal(
         return False
     if "--init-only" in argv or "--kios-api" in argv:
         return False
-    if _mesin_publik_tanpa_jaga(argv, db_path):
+    if "--tv" in argv:
         return False
     if lewati_login_pengembang():
         return False

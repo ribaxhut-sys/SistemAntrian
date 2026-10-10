@@ -8,9 +8,9 @@ berurutan dari yang paling menentukan:
 1. Apakah API anjungan menjawab? Di komputer server diketuk di 127.0.0.1;
    di komputer loket diketuk di alamat server database, karena API selalu
    berjalan di sana.
-2. (Hanya di server) Apakah jaringan yang dipakai tercatat Public? Aturan
-   Firewall API hanya dibuka untuk jaringan Private, sehingga API yang
-   berjalan pun tidak terjangkau tablet.
+2. (Hanya di server) Apakah aturan Firewall sudah yang terbaru? Aturan
+   lama hanya membuka port untuk jaringan Private, sehingga API yang
+   berjalan pun tidak terjangkau tablet begitu jaringannya tercatat Public.
 3. Apakah ada tablet anjungan yang benar-benar menyambung? Tablet mencatat
    kontaknya ke database lewat API (lihat device_service.catat_kontak).
 
@@ -75,7 +75,7 @@ def nilai_status(
     port: int,
     api_hidup: bool,
     berkas_token_ada: bool = True,
-    jaringan_public: tuple[str, ...] = (),
+    firewall_siap: bool = True,
     tablet: tuple[TabletAnjungan, ...] = (),
     sekarang: datetime | None = None,
 ) -> StatusAnjungan:
@@ -111,23 +111,21 @@ def nilai_status(
                 "sudah dibuka.",
                 f"Minta admin di komputer server membuka {_LANGKAH_LAYANAN} dan "
                 "memeriksa status API.",
-                "Pastikan jaringan di komputer server bertipe Private — Firewall "
-                f"hanya membuka port {port} di jaringan Private.",
+                "Pastikan komputer ini dan komputer server berada di jaringan "
+                "lokal yang sama.",
             ),
         )
 
-    if jaringan_public:
-        nama = ", ".join(f"'{n}'" for n in jaringan_public)
+    if di_server and not firewall_siap:
         return StatusAnjungan(
             MASALAH,
-            "API anjungan: ● diblokir Firewall",
-            f"API berjalan, tetapi jaringan {nama} tercatat Public sehingga "
-            "Firewall menolak tablet.",
+            "API anjungan: ● aturan Firewall perlu diperbarui",
+            "API berjalan, tetapi aturan Firewall belum ada atau masih aturan "
+            "lama yang hanya berlaku di jaringan Private.",
             (
-                "Ubah di Settings › Network & internet › Wi-Fi/Ethernet › "
-                f"{jaringan_public[0]} › Network profile type › Private network.",
-                "Jaringan baru (misalnya router pengganti) selalu dianggap Public "
-                "oleh Windows; ulangi langkah ini setiap berganti jaringan.",
+                f"Buka {_LANGKAH_LAYANAN}, lalu tekan Pasang ulang "
+                "(perlu izin Administrator). Sesudahnya tablet dapat menyambung "
+                "walau Windows mencatat jaringannya Public.",
             ),
         )
 
@@ -192,22 +190,6 @@ def api_terjangkau(host: str, port: int, *, timeout: float = 2.0) -> bool:
         return False
 
 
-def jaringan_public() -> tuple[str, ...]:
-    """Nama jaringan tersambung yang tercatat Public. Kosong bila tidak dapat diperiksa."""
-    from app.services.kiosk_server import _jalankan_powershell
-
-    try:
-        hasil = _jalankan_powershell(
-            "Get-NetConnectionProfile | Where-Object { $_.NetworkCategory -eq 'Public' } "
-            "| ForEach-Object { $_.Name }"
-        )
-    except Exception:  # noqa: BLE001 - indikator tidak boleh menggagalkan apa pun
-        return ()
-    if hasil.returncode != 0:
-        return ()
-    return tuple(b.strip() for b in (hasil.stdout or "").splitlines() if b.strip())
-
-
 def periksa_status_anjungan() -> StatusAnjungan | None:
     """
     Kumpulkan fakta lalu nilai. None bila komputer ini tidak memakai anjungan.
@@ -217,7 +199,12 @@ def periksa_status_anjungan() -> StatusAnjungan | None:
     """
     from app.core.config import get_config
     from app.services import device_service
-    from app.services.kiosk_server import komputer_server, path_berkas_token, port_api
+    from app.services.kiosk_server import (
+        _firewall_sudah_siap,
+        komputer_server,
+        path_berkas_token,
+        port_api,
+    )
 
     config = get_config()
     if config.memakai_sqlite:
@@ -229,7 +216,7 @@ def periksa_status_anjungan() -> StatusAnjungan | None:
     hidup = api_terjangkau(host, port)
 
     berkas_token_ada = True
-    public: tuple[str, ...] = ()
+    firewall_siap = True
     if di_server:
         try:
             berkas_token_ada = bool(
@@ -238,7 +225,10 @@ def periksa_status_anjungan() -> StatusAnjungan | None:
         except OSError:
             berkas_token_ada = False
         if hidup:
-            public = jaringan_public()
+            try:
+                firewall_siap = _firewall_sudah_siap()
+            except Exception:  # noqa: BLE001 - indikator tidak boleh menggagalkan apa pun
+                firewall_siap = True
 
     try:
         tablet = tuple(
@@ -255,6 +245,6 @@ def periksa_status_anjungan() -> StatusAnjungan | None:
         port=port,
         api_hidup=hidup,
         berkas_token_ada=berkas_token_ada,
-        jaringan_public=public,
+        firewall_siap=firewall_siap,
         tablet=tablet,
     )

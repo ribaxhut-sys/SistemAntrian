@@ -30,8 +30,9 @@ class LoginWindow(QDialog):
     kotak dialog. Petugas yang salah ketik cukup mengetik ulang tanpa
     harus menutup dialog terlebih dahulu.
 
-    Menutup jendela ini — lewat tombol "Kembali", tombol silang, maupun
-    Esc — mengembalikan ke layar pilihan mode, bukan menutup aplikasi.
+    Aplikasi Windows sekarang khusus petugas. Karena itu tidak ada lagi
+    layar pemilih mode di depannya: menutup dialog berarti menutup aplikasi,
+    sedangkan pengaturan koneksi mesin tersedia langsung dari sini.
     """
 
     def __init__(self, auth: AuthService, parent: QWidget | None = None) -> None:
@@ -86,12 +87,12 @@ class LoginWindow(QDialog):
         self.tombol_masuk.clicked.connect(self.coba_masuk)
         susunan.addWidget(self.tombol_masuk)
 
-        # "Kembali", bukan "Keluar": tombol ini memundurkan satu layar ke
-        # pilihan mode, tidak menutup aplikasi. Petugas yang salah memilih
-        # layar tidak perlu membuka ulang aplikasi hanya untuk membetulkannya.
-        self.tombol_kembali = tombol("Kembali")
-        self.tombol_kembali.clicked.connect(self.reject)
-        susunan.addWidget(self.tombol_kembali)
+        self.tombol_atur_komputer = tombol("Atur komputer ini")
+        self.tombol_atur_komputer.setToolTip(
+            "Atur komputer ini sebagai server, klien, atau satu komputer."
+        )
+        self.tombol_atur_komputer.clicked.connect(self.atur_komputer)
+        susunan.addWidget(self.tombol_atur_komputer)
 
         # Enter pada isian, bukan tombol default dialog. Bila keduanya
         # aktif, Qt menjalankan login dua kali: yang kedua melihat isian
@@ -150,3 +151,30 @@ class LoginWindow(QDialog):
             self.tombol_masuk.setEnabled(True)
 
         self.accept()
+
+    def atur_komputer(self) -> None:
+        """Buka pengaturan mesin tanpa harus berhasil masuk lebih dahulu."""
+        from PySide6.QtWidgets import QDialog
+
+        from app.core.mesin import env_url_mengalahkan
+        from app.ui.common import tampilkan_info, tampilkan_peringatan
+        from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+        dialog = SetupMesinDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if env_url_mengalahkan():
+            tampilkan_peringatan(
+                self,
+                "Isian disimpan, tetapi ANTRIAN_DB_URL masih mengalahkan "
+                "pengaturan komputer. Hapus variabel itu, lalu buka ulang aplikasi.",
+                "Koneksi belum berubah",
+            )
+            return
+        if dialog.memerlukan_buka_ulang:
+            tampilkan_info(
+                self,
+                "Pengaturan komputer telah disimpan. Tutup aplikasi, lalu buka "
+                "kembali agar koneksi baru dipakai.",
+                "Komputer ini",
+            )

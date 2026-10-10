@@ -472,7 +472,29 @@ def test_mode_dialog_tidak_menawarkan_masuk_admin_tanpa_sandi(qtbot):
     assert not any("ADMIN" in b.text() for b in kartu)
 
 
-def test_dialog_mesin_bawaan_satu_komputer(qtbot, app_config):
+@pytest.fixture
+def tanpa_url_database(monkeypatch):
+    """
+    Dialog mesin diuji seperti di komputer yang belum diatur.
+
+    ANTRIAN_DB_URL sengaja mengalahkan isian dialog, sehingga test dialog
+    gagal hanya karena suite dijalankan di atas PostgreSQL lewat variabel
+    itu. Dialog tidak menyentuh database; yang diuji isiannya.
+    """
+    from app.core import config as config_module
+    from app.core import database as database_module
+
+    monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
+    # Konfigurasi yang sudah dibaca masih menunjuk URL tadi; tanpa dibaca
+    # ulang dialog mengira koneksinya berubah dan menuntut buka ulang.
+    database_module.dispose_engine()
+    config_module.reset_config()
+    yield
+    database_module.dispose_engine()
+    config_module.reset_config()
+
+
+def test_dialog_mesin_bawaan_satu_komputer(qtbot, app_config, tanpa_url_database):
     from PySide6.QtWidgets import QDialog
 
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
@@ -488,7 +510,7 @@ def test_dialog_mesin_bawaan_satu_komputer(qtbot, app_config):
     assert dialog.pengaturan_tersimpan.peran == "sendiri"
 
 
-def test_dialog_mesin_server_hanya_menampilkan_sandi(qtbot, app_config):
+def test_dialog_mesin_server_hanya_menampilkan_sandi(qtbot, app_config, tanpa_url_database):
     """Port, database, dan pengguna tidak lagi diubah dari dialog ini."""
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
@@ -505,7 +527,7 @@ def test_dialog_mesin_server_hanya_menampilkan_sandi(qtbot, app_config):
     assert dialog._tombol_cari.isHidden()
 
 
-def test_dialog_sandi_berubah_minta_diketik_ulang(qtbot, app_config):
+def test_dialog_sandi_berubah_minta_diketik_ulang(qtbot, app_config, tanpa_url_database):
     from PySide6.QtWidgets import QDialog
 
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
@@ -527,7 +549,7 @@ def test_dialog_sandi_berubah_minta_diketik_ulang(qtbot, app_config):
     assert "ulang" in dialog._label_error.text().lower()
 
 
-def test_dialog_penolakan_antrian_tidak_mengosongkan_sandi(qtbot, app_config):
+def test_dialog_penolakan_antrian_tidak_mengosongkan_sandi(qtbot, app_config, tanpa_url_database):
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
     dialog = SetupMesinDialog()
@@ -545,7 +567,7 @@ def test_dialog_penolakan_antrian_tidak_mengosongkan_sandi(qtbot, app_config):
     assert "belum ada" in dialog._label_error.text().lower()
 
 
-def test_dialog_port_muncul_bila_tidak_menjawab(qtbot, app_config):
+def test_dialog_port_muncul_bila_tidak_menjawab(qtbot, app_config, tanpa_url_database):
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
     dialog = SetupMesinDialog()
@@ -563,7 +585,7 @@ def test_dialog_port_muncul_bila_tidak_menjawab(qtbot, app_config):
     assert dialog._pengaturan_dari_form().port == 5433
 
 
-def test_dialog_dapat_menampilkan_sandi_lalu_menyembunyikannya(qtbot, app_config):
+def test_dialog_dapat_menampilkan_sandi_lalu_menyembunyikannya(qtbot, app_config, tanpa_url_database):
     from PySide6.QtWidgets import QLineEdit
 
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
@@ -584,7 +606,42 @@ def test_dialog_dapat_menampilkan_sandi_lalu_menyembunyikannya(qtbot, app_config
     assert dialog.isian_sandi.text() == "rahasia-db"
 
 
-def test_dialog_ubah_port_hanya_untuk_loket_admin(qtbot, app_config):
+def test_dialog_tidak_memaparkan_sandi_tersimpan_sebelum_login(qtbot, app_config, tanpa_url_database):
+    """Sandi lama dipertahankan tanpa pernah dimasukkan ke widget."""
+    from app.core.mesin import (
+        KLIEN,
+        PengaturanMesin,
+        baca_berkas_mesin,
+        path_berkas_mesin,
+        tulis_berkas_mesin,
+    )
+    from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+    path = path_berkas_mesin(app_config.db_path)
+    tulis_berkas_mesin(
+        path,
+        PengaturanMesin(
+            peran=KLIEN,
+            host="192.168.1.10",
+            sandi="rahasia-tersimpan",
+        ),
+    )
+
+    dialog = SetupMesinDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.isian_sandi.text() == ""
+    assert "tersimpan" in dialog.isian_sandi.placeholderText().lower()
+    dialog._tukar_tampil_sandi()
+    assert dialog.isian_sandi.text() == ""
+
+    dialog._simpan()
+    tersimpan = baca_berkas_mesin(path)
+    assert tersimpan is not None
+    assert tersimpan.sandi == "rahasia-tersimpan"
+
+
+def test_dialog_ubah_port_hanya_untuk_loket_admin(qtbot, app_config, tanpa_url_database):
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
     dialog = SetupMesinDialog()
@@ -603,7 +660,7 @@ def test_dialog_ubah_port_hanya_untuk_loket_admin(qtbot, app_config):
     assert not dialog.isian_port.isHidden()
 
 
-def test_dialog_mesin_server_menampilkan_alamat(qtbot, app_config):
+def test_dialog_mesin_server_menampilkan_alamat(qtbot, app_config, tanpa_url_database):
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
     dialog = SetupMesinDialog()
@@ -616,7 +673,7 @@ def test_dialog_mesin_server_menampilkan_alamat(qtbot, app_config):
     assert "alamat" in dialog._label_alamat.text().lower()
 
 
-def test_dialog_mesin_klien_wajib_alamat_server(qtbot, app_config):
+def test_dialog_mesin_klien_wajib_alamat_server(qtbot, app_config, tanpa_url_database):
     from PySide6.QtWidgets import QDialog
 
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
@@ -633,7 +690,7 @@ def test_dialog_mesin_klien_wajib_alamat_server(qtbot, app_config):
     assert "Alamat" in dialog._label_error.text()
 
 
-def test_dialog_mesin_klien_menyimpan_alamat(qtbot, app_config):
+def test_dialog_mesin_klien_menyimpan_alamat(qtbot, app_config, tanpa_url_database):
     from PySide6.QtWidgets import QDialog
 
     from app.core.mesin import baca_berkas_mesin, path_berkas_mesin
@@ -892,7 +949,7 @@ def _panel_dengan_video_layanan(halaman_kios, folder_media):
 # Dialog: komputer ini dipakai sebagai apa
 # ---------------------------------------------------------------------
 
-def test_dialog_mesin_bawaan_peran_belum_ditetapkan(qtbot, app_config):
+def test_dialog_mesin_bawaan_peran_belum_ditetapkan(qtbot, app_config, tanpa_url_database):
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
     dialog = SetupMesinDialog()
@@ -904,23 +961,23 @@ def test_dialog_mesin_bawaan_peran_belum_ditetapkan(qtbot, app_config):
     assert dialog.pilih_bentuk.currentData() is None
 
 
-def test_dialog_mesin_menyimpan_peran_ke_berkasnya_sendiri(qtbot, app_config):
+def test_dialog_mesin_menyimpan_peran_ke_berkasnya_sendiri(qtbot, app_config, tanpa_url_database):
     from app.core.peran import baca_peran, path_berkas_peran
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
     dialog = SetupMesinDialog()
     qtbot.addWidget(dialog)
-    dialog._pilih_nilai(dialog.pilih_peran, "televisi")
+    dialog._pilih_nilai(dialog.pilih_peran, "petugas")
     dialog._simpan()
 
     tersimpan = baca_peran(path_berkas_peran(app_config.db_path))
 
-    assert tersimpan.peran == "televisi"
-    assert tersimpan.mode == "antrian"
+    assert tersimpan.peran == "petugas"
+    assert tersimpan.mode == "petugas"
     assert not tersimpan.disesuaikan
 
 
-def test_kata_sandi_database_tidak_pernah_masuk_berkas_peran(qtbot, app_config):
+def test_kata_sandi_database_tidak_pernah_masuk_berkas_peran(qtbot, app_config, tanpa_url_database):
     """
     peran.json dirancang untuk DISALIN ke komputer lain sebagai contekan.
     Kata sandi yang ikut tersalin akan menyebar ke tujuh mesin sekaligus.
@@ -944,34 +1001,28 @@ def test_kata_sandi_database_tidak_pernah_masuk_berkas_peran(qtbot, app_config):
     assert "192.168.1.10" not in isi
 
 
-def test_memilih_peran_memperlihatkan_apa_yang_disimpulkannya(qtbot, app_config):
+def test_memilih_peran_memperlihatkan_apa_yang_disimpulkannya(qtbot, app_config, tanpa_url_database):
     """
-    Inilah yang membuat perannya terbaca tanpa membuka dokumen mana pun:
-    memilih papan memanjang langsung memperlihatkan bahwa mesin itu DIAM.
+    Aplikasi Windows hanya menawarkan peran petugas/admin; televisi dan
+    papan memanjang sudah dipindahkan ke Android.
     """
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
     dialog = SetupMesinDialog()
     qtbot.addWidget(dialog)
 
-    # Anjungan bukan lagi peran komputer Windows.
-    assert "anjungan" not in [
-        dialog.pilih_peran.itemData(i) for i in range(dialog.pilih_peran.count())
-    ]
-    dialog._pilih_nilai(dialog.pilih_peran, "papan-memanjang")
-    assert "diam" in dialog.pilih_suara.itemText(0).lower()
+    pilihan = [dialog.pilih_peran.itemData(i) for i in range(dialog.pilih_peran.count())]
+    assert "anjungan" not in pilihan
+    assert "televisi" not in pilihan
+    assert "papan-memanjang" not in pilihan
 
-    dialog._pilih_nilai(dialog.pilih_peran, "televisi")
-    assert "ikut pengaturan" in dialog.pilih_suara.itemText(0).lower()
+    dialog._pilih_nilai(dialog.pilih_peran, "petugas")
     assert "tidak mencetak" in dialog.pilih_pencetak.itemText(0).lower()
 
-    dialog._pilih_nilai(dialog.pilih_peran, "papan-memanjang")
-    assert "memanjang" in dialog.pilih_bentuk.itemText(0).lower()
 
-
-def test_penimpaan_per_isian_tersimpan_sebagai_kehendak(qtbot, app_config):
+def test_penimpaan_per_isian_tersimpan_sebagai_kehendak(qtbot, app_config, tanpa_url_database):
     """
-    Televisi yang dibuat diam menyimpan `False`, bukan mengikuti tabel.
+    Peran petugas yang disesuaikan menyimpan `False`, bukan mengikuti tabel.
     Isian yang dibiarkan tetap `null` supaya ikut bila tabelnya diperbaiki.
     """
     from app.core.peran import baca_peran, path_berkas_peran
@@ -979,7 +1030,7 @@ def test_penimpaan_per_isian_tersimpan_sebagai_kehendak(qtbot, app_config):
 
     dialog = SetupMesinDialog()
     qtbot.addWidget(dialog)
-    dialog._pilih_nilai(dialog.pilih_peran, "televisi")
+    dialog._pilih_nilai(dialog.pilih_peran, "petugas")
     dialog._pilih_nilai(dialog.pilih_suara, False)
     dialog._simpan()
 
@@ -990,22 +1041,21 @@ def test_penimpaan_per_isian_tersimpan_sebagai_kehendak(qtbot, app_config):
     assert tersimpan.disesuaikan
 
 
-def test_peran_yang_berganti_menuntut_buka_ulang(qtbot, app_config):
+def test_peran_yang_berganti_menuntut_buka_ulang(qtbot, app_config, tanpa_url_database):
     """
-    Mode dibaca sekali saat peluncuran, jadi televisi yang baru ditetapkan
-    tetap menampilkan layar yang sedang terbuka sampai dijalankan lagi.
+    Perubahan peran lokal baru diterapkan utuh setelah aplikasi dibuka ulang.
     """
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
     dialog = SetupMesinDialog()
     qtbot.addWidget(dialog)
-    dialog._pilih_nilai(dialog.pilih_peran, "televisi")
+    dialog._pilih_nilai(dialog.pilih_peran, "petugas")
     dialog._simpan()
 
     assert dialog.memerlukan_buka_ulang
 
 
-def test_peran_yang_tidak_berubah_tidak_menuntut_buka_ulang(qtbot, app_config):
+def test_peran_yang_tidak_berubah_tidak_menuntut_buka_ulang(qtbot, app_config, tanpa_url_database):
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
     dialog = SetupMesinDialog()
@@ -1015,7 +1065,7 @@ def test_peran_yang_tidak_berubah_tidak_menuntut_buka_ulang(qtbot, app_config):
     assert not dialog.memerlukan_buka_ulang
 
 
-def test_dialog_memuat_kembali_peran_yang_sudah_tersimpan(qtbot, app_config):
+def test_dialog_memuat_kembali_peran_yang_sudah_tersimpan(qtbot, app_config, tanpa_url_database):
     from app.core.peran import PeranKomputer, path_berkas_peran, tulis_peran
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
@@ -1027,23 +1077,25 @@ def test_dialog_memuat_kembali_peran_yang_sudah_tersimpan(qtbot, app_config):
     dialog = SetupMesinDialog()
     qtbot.addWidget(dialog)
 
-    assert dialog.pilih_peran.currentData() == "papan-memanjang"
+    # Nilai layar Windows lama tidak ditawarkan lagi, tetapi override lokal
+    # tetap terbaca agar berkas lama tidak rusak saat dibuka.
+    assert dialog.pilih_peran.currentData() == ""
     assert dialog.pilih_suara.currentData() is True
     assert dialog.pilih_bentuk.currentData() is None
 
 
-def test_uji_cetak_menolak_mesin_yang_tidak_mencetak(qtbot, app_config):
+def test_uji_cetak_menolak_mesin_yang_tidak_mencetak(qtbot, app_config, tanpa_url_database):
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
     dialog = SetupMesinDialog()
     qtbot.addWidget(dialog)
-    dialog._pilih_nilai(dialog.pilih_peran, "televisi")
+    dialog._pilih_nilai(dialog.pilih_peran, "petugas")
     dialog._uji_cetak()
 
     assert "tidak mencetak" in dialog._label_error.text().lower()
 
 
-def test_uji_cetak_mengatakan_bila_caranya_belum_dipilih(qtbot, app_config):
+def test_uji_cetak_mengatakan_bila_caranya_belum_dipilih(qtbot, app_config, tanpa_url_database):
     """
     Anjungan mengikuti pengaturan bersama, yang baru terbaca sesudah
     database tersambung — sedangkan dialog ini tampil sebelum itu.
@@ -1058,7 +1110,7 @@ def test_uji_cetak_mengatakan_bila_caranya_belum_dipilih(qtbot, app_config):
     assert "pilih cara mencetak" in dialog._label_error.text().lower()
 
 
-def test_uji_cetak_pdf_menghasilkan_berkas(qtbot, app_config, monkeypatch):
+def test_uji_cetak_pdf_menghasilkan_berkas(qtbot, app_config, monkeypatch, tanpa_url_database):
     """
     Pasangan Uji koneksi. Pencetak yang keliru biasanya baru ketahuan
     ketika pengunjung pertama sudah berdiri di depan anjungan.

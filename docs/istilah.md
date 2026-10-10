@@ -30,15 +30,14 @@ Aplikasi petugas (Windows) ─────────────────�
 
 * Anjungan **tidak lagi** berjalan di Windows. Mode `--kios`, `--kios-totem`,
   dan `--layar` sudah dihapus.
-* Layar antrian Windows (`AntrianCRO.exe --tv`) **masih ada** sebagai
-  pengganti sementara sampai layar antrian Maxtor terbukti berjalan di
-  kantor, lalu ikut dihapus.
+* Layar antrian tidak lagi ditawarkan pada aplikasi Windows. `--tv` hanya
+  tersisa sementara untuk kompatibilitas pintasan lama.
 
 ## Di dalam kode
 
 | Istilah | Nama di kode |
 |---|---|
 | Anjungan | `anjungan` (jenis perangkat), `android-kiosk/`, `/v1/kiosk/...` |
-| Layar antrian | `layar_antrian` (jenis perangkat), `android-kiosk/layar/`, `/v1/layar/...`, `app/ui/display/` (Windows, sementara) — [layar-antrian.md](layar-antrian.md) |
+| Layar antrian | `layar_antrian` (jenis perangkat), `android-kiosk/layar/`, `/v1/layar/...` — [layar-antrian.md](layar-antrian.md) |
 | Aplikasi server | peran mesin `server`, `app/kiosk_api.py`, `app/services/kiosk_server.py` |
 | Aplikasi petugas | peran mesin `klien`, `app/ui/queue/`, `app/ui/main_window.py` |

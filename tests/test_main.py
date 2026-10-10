@@ -291,19 +291,13 @@ def test_tanpa_flag_dan_tanpa_berkas_tetap_lewat_dialog(tmp_path, monkeypatch):
     assert mode_awal_mesin([], tmp_path / "data" / "queue.db") is None
 
 
-def test_peran_tersimpan_membuka_modenya_sendiri(tmp_path, monkeypatch):
-    """
-    Kegagalan yang ditutup: dahulu peran layar hanya hidup di pintasan,
-    sehingga komputer yang dinyalakan lewat .exe langsung membuka dialog
-    pilih-mode lalu layar login di depan pengunjung.
-    """
+def test_peran_layar_tersimpan_tidak_lagi_mengubah_startup_windows(tmp_path, monkeypatch):
+    """Konfigurasi televisi lama kembali aman ke login petugas."""
     monkeypatch.delenv("ANTRIAN_PERAN_PATH", raising=False)
     from app.main import mode_awal_mesin
-    from app.ui.login.mode_dialog import LAYAR_ANTRIAN
-
     db = _tulis_peran(tmp_path / "data", peran="televisi")
 
-    assert mode_awal_mesin([], db) == LAYAR_ANTRIAN
+    assert mode_awal_mesin([], db) is None
 
 
 def test_flag_mengalahkan_peran_tersimpan(tmp_path, monkeypatch):
@@ -334,8 +328,8 @@ def test_berkas_peran_rusak_kembali_ke_dialog(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("peran", "publik"),
     [
-        ("televisi", True),
-        ("papan-memanjang", True),
+        ("televisi", False),
+        ("papan-memanjang", False),
         # Peran lama dari berkas sebelum anjungan pindah ke Android.
         ("anjungan", False),
         ("anjungan-totem", False),
@@ -347,9 +341,8 @@ def test_mesin_publik_dikenali_dari_berkas_seperti_dari_flag(
     tmp_path, monkeypatch, peran, publik
 ):
     """
-    Televisi yang menyebut dirinya lewat peran.json tidak boleh berhenti
-    di dialog pemasangan, sama seperti televisi yang menyebutnya lewat
-    --tv. Tidak ada yang berdiri di sana untuk menekan tombol.
+    Hanya --tv eksplisit yang masih dianggap mesin publik. Berkas lama
+    tidak boleh lagi mengalihkan aplikasi Windows dari login petugas.
     """
     monkeypatch.delenv("ANTRIAN_PERAN_PATH", raising=False)
     from app.main import _mesin_publik_tanpa_jaga

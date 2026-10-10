@@ -61,7 +61,7 @@ def test_api_tidak_terjangkau_dari_loket_tidak_menyuruh_menekan_tombol_server():
     assert status.tingkat == MASALAH
     assert "192.168.1.10:8765" in status.judul
     assert any("komputer server menyala" in s for s in status.saran)
-    assert any("Private" in s for s in status.saran)
+    assert any("jaringan lokal yang sama" in s for s in status.saran)
     assert not any(s.startswith("Buka Pengaturan") for s in status.saran)
 
 
@@ -69,12 +69,18 @@ def test_api_tidak_terjangkau_dari_loket_tidak_menyuruh_menekan_tombol_server():
 # Firewall
 # ---------------------------------------------------------------------
 
-def test_jaringan_public_diblokir_walau_api_berjalan():
-    status = _nilai(api_hidup=True, jaringan_public=("Hahaha 331",))
+def test_aturan_firewall_lama_minta_pasang_ulang():
+    status = _nilai(api_hidup=True, firewall_siap=False)
 
     assert status.tingkat == MASALAH
-    assert "'Hahaha 331'" in status.judul
-    assert "Private network" in status.saran[0]
+    assert "Firewall" in status.ringkas
+    assert "Pasang ulang" in status.saran[0]
+
+
+def test_aturan_firewall_hanya_dinilai_di_server():
+    status = _nilai(di_server=False, host="192.168.1.10", api_hidup=True, firewall_siap=False)
+
+    assert status.tingkat == NORMAL
 
 
 # ---------------------------------------------------------------------
@@ -154,16 +160,16 @@ def test_pita_yang_disembunyikan_muncul_lagi_bila_masalahnya_berubah(qtbot):
     pita.tampilkan(mati)
     assert pita.isHidden(), "pemeriksaan berkala tidak boleh memunculkannya lagi"
 
-    pita.tampilkan(_nilai(api_hidup=True, jaringan_public=("Kantor",)))
+    pita.tampilkan(_nilai(api_hidup=True, firewall_siap=False))
     assert not pita.isHidden()
 
 
-def test_pita_tidak_menafsirkan_nama_jaringan_sebagai_html(qtbot):
+def test_pita_tidak_menafsirkan_saran_sebagai_html(qtbot):
     from app.ui.indikator_anjungan import PitaAnjungan
 
     pita = PitaAnjungan(lambda: None)
     qtbot.addWidget(pita)
-    pita.tampilkan(_nilai(api_hidup=True, jaringan_public=("<b>wifi</b>",)))
+    pita.tampilkan(StatusAnjungan(MASALAH, "ringkas", "judul", ("<b>wifi</b>",)))
 
     assert "&lt;b&gt;wifi&lt;/b&gt;" in pita.saran.text()
 
@@ -174,7 +180,7 @@ def test_jendela_petugas_menampilkan_hasil_pemeriksaan(qtbot, admin_auth, monkey
     monkeypatch.setattr(
         "app.services.kiosk_server.api_sudah_berjalan", lambda port=8765: True
     )
-    status = _nilai(api_hidup=True, jaringan_public=("Hahaha 331",))
+    status = _nilai(api_hidup=True, firewall_siap=False)
     monkeypatch.setattr(
         "app.services.status_anjungan.periksa_status_anjungan", lambda: status
     )
@@ -188,8 +194,8 @@ def test_jendela_petugas_menampilkan_hasil_pemeriksaan(qtbot, admin_auth, monkey
     jendela._jadwalkan_periksa_anjungan()
     qtbot.waitUntil(lambda: not jendela.pita_anjungan.isHidden(), timeout=3000)
 
-    assert jendela._label_api.text() == "API anjungan: ● diblokir Firewall"
-    assert "Hahaha 331" in jendela.pita_anjungan.judul.text()
+    assert jendela._label_api.text() == "API anjungan: ● aturan Firewall perlu diperbarui"
+    assert "Private" in jendela.pita_anjungan.judul.text()
     assert jendela.pita_anjungan.tombol_layanan is not None
 
     jendela.pita_anjungan.tombol_layanan.click()

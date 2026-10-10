@@ -10,6 +10,12 @@ beserta alasannya.
 > [istilah.md](istilah.md). Bagian dokumen ini yang menyebut anjungan
 > Windows adalah catatan sejarah.
 
+> **Pembaruan 9 Oktober 2026:** aplikasi Windows sekarang langsung membuka
+> Login Petugas dan tombol **Atur komputer ini**. Peran televisi/papan
+> memanjang tidak lagi ditawarkan; layar antrian berjalan di Android.
+> Uraian dialog pilih-mode dan peran layar di bawah adalah catatan rancangan
+> lama. `--tv` hanya dipertahankan sementara untuk kompatibilitas pintasan.
+
 Ditujukan untuk pemasangan sebenarnya: 5 komputer loket, 1 anjungan ambil
 nomor, 1 televisi ruang tunggu, dan — bila jadi dipasang — 1 papan LED
 memanjang di atas pintu.

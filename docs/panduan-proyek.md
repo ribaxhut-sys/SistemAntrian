@@ -190,7 +190,8 @@ bersama PostgreSQL:
 1. Login sebagai Administrator di aplikasi Windows pada PC server. Menu
    **Layanan Anjungan** hanya muncul di PC yang perannya server.
 2. Buka **Layanan Anjungan**, tekan **Pasang & nyalakan**, lalu setujui UAC.
-   Satu izin itu membuka Firewall (TCP `8765`, UDP `8766`, profil Private)
+   Satu izin itu membuka Firewall (TCP `8765`, UDP `8766`, semua profil jaringan tetapi
+   hanya dari subnet lokal)
    dan mendaftarkan tugas Task Scheduler `AntrianCRO API Anjungan` yang
    menyala sendiri setiap kali Windows dinyalakan, walaupun aplikasi belum
    dibuka.
@@ -238,8 +239,10 @@ Lihat [README](../README.md) untuk aturan bisnis lengkap dan tabel hak akses.
 
 - Tempatkan PostgreSQL dan API hanya di jaringan kantor/pribadi yang
   dikendalikan.
-- Batasi akses `5432` pada subnet klien yang benar; batasi API `8765` dan
-  discovery `8766` pada profil Private.
+- Batasi akses `5432` pada subnet klien yang benar. API `8765` dan
+  discovery `8766` dibuka di semua profil jaringan tetapi hanya untuk
+  `LocalSubnet`, sehingga Wi-Fi yang tercatat Public tidak memblokir tablet.
+  Pemasangan lama (hanya profil Private) diperbarui dengan **Pasang ulang**.
 - Jangan membuat port-forwarding router atau membuka layanan ke internet.
 - Jangan kirim kata sandi PostgreSQL atau token API melalui chat, log, atau
   repository.
@@ -280,7 +283,6 @@ Argumen mesin yang umum:
 
 ```powershell
 .\.venv\Scripts\python.exe -m app.main --admin
-.\.venv\Scripts\python.exe -m app.main --tv
 .\.venv\Scripts\python.exe -m app.main --setup
 .\.venv\Scripts\python.exe -m app.main --kios-api
 ```
@@ -322,7 +324,7 @@ di UI. Jangan mengubah skema database secara manual tanpa migration Alembic.
 |---|---|
 | Klien menampilkan database tidak terjangkau | Layanan PostgreSQL aktif, IP server, TCP `5432`, `listen_addresses`, `pg_hba.conf`, dan Firewall |
 | PC melihat database lokal, bukan server | Pilihan peran klien tersimpan atau `ANTRIAN_DB_URL` lama mengalahkan konfigurasi mesin |
-| Android tidak menemukan server | API aktif, jaringan sama, profil Private, UDP `8766`; coba IP manual |
+| Android tidak menemukan server | API aktif, jaringan sama, aturan Firewall terbaru, UDP `8766`; coba IP manual |
 | Android menerima koneksi ditolak/timeout | Alamat `http://IP:8765`, API aktif, TCP `8765`, subnet dan Firewall |
 | Android menolak otorisasi | Token di Android harus sama persis dengan token server |
 | API tidak dapat mulai | Periksa database aktif, token minimal 8 karakter, port `8765` tidak dipakai, lalu lihat `logs\app.log` dan `logs\kiosk-api-stderr.log` |

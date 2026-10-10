@@ -204,7 +204,7 @@ def test_pasang_layanan_mendaftarkan_tugas_saat_windows_menyala(monkeypatch, tmp
     assert "[TimeSpan]::Zero" in script, "batas 72 jam bawaan harus dimatikan"
     assert "--kios-api" in script
     assert str(tmp_path) in script
-    assert "-Profile Private" in script
+    assert "-Profile Any -RemoteAddress LocalSubnet" in script
     assert "Start-ScheduledTask" in script
     # Pemeriksa berkala: API yang berhenti di tengah jalan dinyalakan lagi.
     assert "-RepetitionInterval (New-TimeSpan -Minutes 5)" in script
@@ -326,7 +326,7 @@ def test_siapkan_firewall_meminta_elevasi_dan_membatasi_ke_private(monkeypatch):
     assert "-Verb RunAs" in perintah
     assert "8765" in script
     assert "8766" in script
-    assert "-Profile Private" in script
+    assert "-Profile Any -RemoteAddress LocalSubnet" in script
     assert kwargs["timeout"] == 120
     assert len(panggilan) == 2
 

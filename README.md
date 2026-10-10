@@ -149,13 +149,26 @@ dan tersimpan sebelum tiket dicetak; petugas cukup menyebutkan nomornya.
 | Bagian | Perangkat | Tugas | Login |
 |---|---|---|---|
 | **Anjungan** | Tablet Android + printer USB | Pengunjung memilih layanan, nomor dicetak | tidak |
-| **Layar antrian** | Panel Android Maxtor — sementara `AntrianCRO.exe --tv` | Menampilkan dan membunyikan panggilan | tidak |
+| **Layar antrian** | Panel Android Maxtor | Menampilkan dan membunyikan panggilan | tidak |
 | **Aplikasi server** | 1 PC Windows berperan server | Database, API untuk anjungan/layar antrian, backup, Layanan Anjungan | ya |
 | **Aplikasi petugas** | PC Windows di tiap loket | Memanggil dan melayani; admin mengelola data | ya |
 
-Anjungan tidak lagi berjalan di Windows. Layar antrian Windows (`--tv`)
-tetap ada sampai layar antrian Maxtor terbukti berjalan, lalu ikut dihapus
-([docs/layar-antrian.md](docs/layar-antrian.md)).
+Anjungan dan layar antrian tidak lagi menjadi pilihan pada aplikasi Windows.
+Keduanya berjalan di Android; Windows langsung membuka login petugas.
+
+Sesudah petugas masuk, panel pelayanan memakai **loket bawaan akun** dan
+mengunci pilihannya agar roda mouse atau salah klik tidak memindahkan meja
+diam-diam. Akun yang belum memiliki loket bawaan wajib memilih dan
+mengonfirmasinya satu kali. Perpindahan berikutnya dilakukan lewat **Ganti
+Loket**, disimpan untuk login berikutnya, dan ditolak selama loket lama atau
+loket tujuan masih menangani antrian.
+
+Jika petugas meninggalkan pelayanan aktif, pengambilalihan dilakukan ADMIN
+melalui **Pelayanan Aktif**, bukan dengan meminjam akun lama. Admin memilih
+petugas pengganti (beserta loket bawaannya) dan menulis alasan. Pelayanan yang
+sudah berjalan dialihkan dalam keadaan Ditunda agar petugas baru meninjaunya
+sebelum melanjutkan. Jika pelayanan tidak akan diteruskan, ADMIN memakai
+**Batalkan Paksa**. Kedua tindakan dicatat lengkap dalam jejak aktivitas.
 
 Layar antrian berjalan **tanpa login**: komputer yang menghadap publik dan
 tidak diawasi tidak boleh menyimpan kata sandi petugas. Ia membuka layar
@@ -657,22 +670,13 @@ berguna saat memeriksa pemasangan di komputer baru. Hasilnya juga tercatat
 di `logs/app.log`, karena `AntrianCRO.exe` berjendela dan tidak punya
 terminal untuk menampilkannya.
 
-Saat dibuka tanpa argumen, aplikasi menanyakan layar mana yang akan
-dipakai: **Layar Antrian** (tanpa login) atau **Layar Petugas** (wajib
-masuk). Anjungan adalah tablet Android, bukan pilihan di sini.
+Saat dibuka tanpa argumen, aplikasi langsung menampilkan **Login Petugas**.
+Tombol **Atur komputer ini** pada layar yang sama mengatur komputer sebagai
+server, klien, atau pemasangan satu komputer. Bila database tidak dapat
+dihubungi, tombol **Ubah koneksi** tetap tersedia sebelum login.
 
-Televisi ruang tunggu sebaiknya **melewati dialog itu**, supaya mati
-listrik siang hari tidak meninggalkan papan nomor kosong sampai ada yang
-mengklik:
-
-```powershell
-.\.venv\Scripts\python.exe -m app.main --tv          # televisi ruang tunggu
-```
-
-Pasang perintah yang sama pada pintasan Startup Windows, atau
-`AntrianCRO.exe --tv` di komputer yang sudah di-build. `--jendela`
-membukanya sebagai jendela biasa untuk diuji di laptop. Pintasan lama
-`--kios`, `--kios-totem`, dan `--layar` kini membuka dialog pilihan biasa.
+`--tv` dan `--jendela` hanya dipertahankan sementara sebagai kompatibilitas
+pintasan lama; keduanya tidak ditawarkan oleh antarmuka Windows baru.
 
 Jeda antar-pengambilan nomor di anjungan diatur lewat
 `kiosk.cooldown_seconds` (bawaan 10 detik). Jeda ini **hanya** berlaku pada

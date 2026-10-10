@@ -27,7 +27,7 @@ komputer yang perannya server.
 
 1. Masuk sebagai Administrator, buka **Layanan Anjungan**.
 2. Tekan **Pasang & nyalakan** dan setujui UAC. Satu izin itu membuka
-   Firewall (TCP 8765, UDP 8766, profil Private) dan mendaftarkan tugas
+   Firewall (TCP 8765, UDP 8766, semua profil jaringan tetapi hanya dari subnet lokal) dan mendaftarkan tugas
    Task Scheduler `AntrianCRO API Anjungan`.
 3. Salin alamat server dan token ke tablet.
 
