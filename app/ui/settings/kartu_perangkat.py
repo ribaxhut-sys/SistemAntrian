@@ -136,6 +136,24 @@ class KartuPerangkat(QFrame):
         label.setStyleSheet(f"color: {TEXT_MUTED}; font-weight: 600; letter-spacing: 1px;")
         kepala.addWidget(label)
         kepala.addStretch()
+        # Di baris judul, sejajar tombol yang sama tinggi, dengan keterangan
+        # di tooltip: halaman Layanan Anjungan harus tetap muat 1366x768.
+        penjelasan_suara = (
+            "Pengganti sementara selama layar antrian belum terpasang: anjungan "
+            "terpilih mengucapkan \"Nomor antrian …, silakan menuju Loket …\" dan "
+            "mengecilkan suara iklannya selama pengumuman. Hanya anjungan yang "
+            "sudah dipasangkan dengan kode. Pilih Tidak ada begitu layar antrian "
+            "bersuara dipasang, supaya pengumuman tidak terdengar dua kali."
+        )
+        label_suara = QLabel("Anjungan yang membunyikan panggilan:")
+        label_suara.setToolTip(penjelasan_suara)
+        kepala.addWidget(label_suara)
+        self.pilih_suara = QComboBox()
+        self.pilih_suara.setMinimumWidth(220)
+        self.pilih_suara.setToolTip(penjelasan_suara)
+        self.pilih_suara.activated.connect(self._ubah_anjungan_bersuara)
+        kepala.addWidget(self.pilih_suara)
+        kepala.addSpacing(12)
         self.tambah = tombol("+ Tambah perangkat", variant="primary")
         self.tambah.clicked.connect(self._tambah)
         kepala.addWidget(self.tambah)
@@ -171,29 +189,11 @@ class KartuPerangkat(QFrame):
         )
         self.token_bersama.toggled.connect(self._ubah_token_bersama)
         isi.addWidget(self.token_bersama)
-
-        baris_suara = QHBoxLayout()
-        baris_suara.addWidget(QLabel("Anjungan yang membunyikan panggilan:"))
-        self.pilih_suara = QComboBox()
-        self.pilih_suara.setMinimumWidth(240)
-        self.pilih_suara.activated.connect(self._ubah_anjungan_bersuara)
-        baris_suara.addWidget(self.pilih_suara)
-        baris_suara.addStretch()
-        isi.addLayout(baris_suara)
         self.peringatan_suara = QLabel()
         self.peringatan_suara.setWordWrap(True)
         self.peringatan_suara.setStyleSheet(f"color: {WARNING}; font-weight: 600;")
         self.peringatan_suara.hide()
         isi.addWidget(self.peringatan_suara)
-        isi.addWidget(
-            keterangan(
-                "Pengganti sementara selama layar antrian belum terpasang: anjungan "
-                "terpilih mengucapkan \"Nomor antrian …, silakan menuju Loket …\" "
-                "dan mengecilkan suara iklannya selama pengumuman. Hanya anjungan "
-                "yang sudah dipasangkan dengan kode. Pilih Tidak ada begitu layar "
-                "antrian bersuara dipasang, supaya pengumuman tidak terdengar dua kali."
-            )
-        )
 
         self._pewaktu = QTimer(self)
         self._pewaktu.setInterval(SELANG_SEGARKAN_MS)
