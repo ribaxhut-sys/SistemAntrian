@@ -1572,3 +1572,58 @@ def test_loket_memanggil_bersamaan_mendapat_nomor_berbeda(
     riwayat = _riwayat_panggilan()
     assert len(riwayat) == len(loket) * putaran
     assert all(len(pemanggil) == 1 for pemanggil in riwayat.values())
+
+
+def test_urutan_id_panggilan_sama_dengan_urutan_commit(antrian_siap, terbitkan, users):
+    """
+    Penulis panggilan kedua menunggu sampai yang pertama commit.
+
+    Layar antrian dan anjungan bersuara hanya mengingat id panggilan
+    terakhir. Bila id 38 dapat terlihat sebelum id 37 commit, panggilan 37
+    tidak pernah diucapkan.
+    """
+    import threading
+
+    from app.core.database import session_scope
+    from app.repositories.queue_repository import QueueRepository
+    from tests.conftest import _pakai_sqlite
+
+    if _pakai_sqlite():
+        pytest.skip("SQLite menulis satu per satu; kuncinya khusus PostgreSQL")
+
+    pertama, kedua = terbitkan("A", 2)
+    loket_a, loket_b = antrian_siap["loket"][:2]
+    petugas = users["CRO"]
+    tercatat = threading.Event()
+    lanjutkan = threading.Event()
+    kedua_selesai = threading.Event()
+    id_panggilan: dict[str, int] = {}
+
+    def tulis_pertama():
+        with session_scope() as session:
+            id_panggilan["pertama"] = QueueRepository(session).catat_pemanggilan(
+                queue_id=pertama.id, counter_id=loket_a, user_id=petugas
+            ).id
+            tercatat.set()
+            lanjutkan.wait(10)
+
+    def tulis_kedua():
+        with session_scope() as session:
+            id_panggilan["kedua"] = QueueRepository(session).catat_pemanggilan(
+                queue_id=kedua.id, counter_id=loket_b, user_id=petugas
+            ).id
+        kedua_selesai.set()
+
+    a = threading.Thread(target=tulis_pertama)
+    a.start()
+    assert tercatat.wait(10)
+    b = threading.Thread(target=tulis_kedua)
+    b.start()
+    try:
+        assert not kedua_selesai.wait(1.0), "penulis kedua harus menunggu commit pertama"
+    finally:
+        lanjutkan.set()
+        a.join(10)
+        b.join(10)
+    assert kedua_selesai.is_set()
+    assert id_panggilan["kedua"] > id_panggilan["pertama"]

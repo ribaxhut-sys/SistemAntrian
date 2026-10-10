@@ -39,6 +39,10 @@ STATUS_BELUM_SELESAI = (QueueStatus.WAITING, *STATUS_SIBUK)
 #: pelayanan berhari-hari untuk nomor yang loketnya sudah pulang.
 AKHIR_HARI = time(23, 59, 59)
 
+#: Kunci advisory PostgreSQL yang mengantrekan penulisan baris QueueCall.
+#: Angka bebas yang tidak dipakai kunci lain ("ANTRIPGL" dalam heksadesimal).
+KUNCI_URUTAN_PANGGILAN = 0x414E54524950474C
+
 
 #: Umur kunci idempotensi tiket anjungan sebelum boleh dibuang. Tablet
 #: mengulang permintaan dalam hitungan detik sampai menit; seminggu sudah
@@ -551,7 +555,20 @@ class QueueRepository:
 
         Baris lama tidak pernah ditimpa, sehingga terlihat berapa kali
         sebuah nomor dipanggil sebelum dilayani atau dinyatakan tidak hadir.
+
+        Di PostgreSQL penulisan panggilan diantrekan dengan advisory lock
+        sampai transaksinya selesai. Layar antrian dan anjungan bersuara
+        hanya mengingat id panggilan terakhir yang sudah diucapkannya
+        (`panggilan_sejak`). Tanpa kunci, id dibagikan saat flush, bukan saat
+        commit: Loket 1 mendapat id 37, Loket 2 id 38 dan commit lebih dulu,
+        perangkat bertanya tepat di antaranya dan mencatat 38 — panggilan
+        Loket 1 tidak pernah diucapkan. Dengan kunci, urutan id sama dengan
+        urutan commit. SQLite tidak perlu: penulisnya memang satu per satu.
         """
+        if self.session.get_bind().dialect.name == "postgresql":
+            self.session.execute(
+                sa.select(sa.func.pg_advisory_xact_lock(KUNCI_URUTAN_PANGGILAN))
+            )
         panggilan = QueueCall(
             queue_id=queue_id,
             counter_id=counter_id,
