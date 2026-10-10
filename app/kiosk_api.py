@@ -951,6 +951,12 @@ def serve() -> int:
             daemon=True,
         )
         discovery_thread.start()
+        threading.Thread(
+            target=_jaga_paket_suara,
+            args=(discovery_stop,),
+            name="kiosk-paket-suara",
+            daemon=True,
+        ).start()
         logger.info(
             "API anjungan dimulai pada %s:%s; pencarian LAN UDP %s "
             "(revisi database %s)",
@@ -970,6 +976,45 @@ def serve() -> int:
             discovery_socket.close()
         if discovery_thread is not None:
             discovery_thread.join(timeout=1)
+
+
+#: Selang pemeriksaan paket suara terhadap nama loket aktif.
+SELANG_PERIKSA_PAKET_DETIK = 60
+
+
+def _jaga_paket_suara(berhenti: threading.Event) -> None:
+    """
+    Perbarui paket suara bila loket ditambah atau diganti namanya.
+
+    Berjalan di API karena API selalu hidup di komputer server, tempat
+    paket disimpan dan dibagikan; nama loket dapat diubah dari PC admin
+    mana pun. Kegagalan hanya dicatat: suara bukan syarat pelayanan.
+    """
+    from app.services.paket_suara import (
+        SuaraTurunError,
+        nama_loket_aktif,
+        perbarui_bila_perlu,
+    )
+
+    # Nama loket yang paketnya sudah gagal dibuat: tidak dicoba lagi tiap
+    # menit (satu PowerShell penuh) sampai nama loketnya berubah.
+    ditolak: list[str] | None = None
+    while not berhenti.wait(SELANG_PERIKSA_PAKET_DETIK):
+        try:
+            nama_loket = sorted(nama_loket_aktif())
+            if nama_loket == ditolak:
+                continue
+            baru = perbarui_bila_perlu(folder_paket(base_dir()), nama_loket)
+        except SuaraTurunError as exc:
+            ditolak = nama_loket
+            logger.warning("Paket suara tidak diperbarui otomatis: %s", exc)
+            continue
+        except Exception:
+            ditolak = nama_loket
+            logger.warning("Paket suara gagal diperbarui otomatis", exc_info=True)
+            continue
+        if baru is not None:
+            logger.info("Paket suara diperbarui otomatis: %s klip, %s", baru.jumlah, baru.suara)
 
 
 def main() -> int:

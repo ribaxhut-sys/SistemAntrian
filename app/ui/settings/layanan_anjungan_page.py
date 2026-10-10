@@ -489,7 +489,11 @@ class LayananAnjunganPage(QWidget):
             )
         elif status.kata_kurang:
             kata = ", ".join(k.removeprefix("kata_") for k in status.kata_kurang)
-            self.baris_paket.setel(_BELUM, f"Perlu dibuat ulang: kata baru {kata}")
+            # API memperbaruinya sendiri tiap menit; tombol tetap ada untuk
+            # API yang mati, atau akun SYSTEM yang tidak punya suara Indonesia.
+            self.baris_paket.setel(
+                _BELUM, f"Kata baru {kata} · diperbarui otomatis oleh API dalam 1 menit"
+            )
         else:
             self.baris_paket.setel(_NORMAL, f"{paket.jumlah} klip · suara {paket.suara}")
 

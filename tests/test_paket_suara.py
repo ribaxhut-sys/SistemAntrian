@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import subprocess
 
+import pytest
+
 from app.services import paket_suara
 
 
@@ -88,3 +90,52 @@ def test_hening_panjang_di_awal_dan_akhir_klip_dipangkas(tmp_path):
         detik = masuk.getnframes() / masuk.getframerate()
     assert abs(detik - (0.25 + paket_suara.SISA_HENING_DEPAN + paket_suara.SISA_HENING_BELAKANG)) < 0.01
 
+
+
+def _paket_palsu(monkeypatch, suara):
+    """buat_paket tanpa PowerShell: klip kosong dengan suara yang ditentukan."""
+    dibuat = []
+
+    def buat(folder, nama_loket, **_):
+        folder.mkdir(parents=True, exist_ok=True)
+        klip = {k: f"{k}.wav" for k in paket_suara.kosakata(nama_loket)}
+        for berkas in klip.values():
+            (folder / berkas).write_bytes(suara.encode())
+        (folder / "paket.json").write_text(
+            json.dumps({"versi": suara, "suara": suara, "klip": klip}), encoding="utf-8"
+        )
+        dibuat.append(list(nama_loket))
+        return paket_suara.info_paket(folder)
+
+    monkeypatch.setattr(paket_suara, "buat_paket", buat)
+    return dibuat
+
+
+def test_perbarui_paket_hanya_bila_ada_kata_loket_baru(tmp_path, monkeypatch):
+    folder = tmp_path / "suara-layar"
+    dibuat = _paket_palsu(monkeypatch, "Microsoft Andika (Indonesia)")
+
+    assert paket_suara.perbarui_bila_perlu(folder, ["Loket 1"]) is not None, "belum ada paket"
+    assert paket_suara.perbarui_bila_perlu(folder, ["Loket 2"]) is None, "angka sudah ada"
+    baru = paket_suara.perbarui_bila_perlu(folder, ["Loket 1", "Prioritas"])
+
+    assert "kata_prioritas" in baru.klip
+    assert (folder / "kata_prioritas.wav").is_file()
+    assert paket_suara.info_paket(folder).klip == baru.klip
+    assert len(dibuat) == 2
+    assert not (tmp_path / "suara-layar-baru").exists()
+
+
+def test_paket_indonesia_tidak_ditimpa_suara_inggris(tmp_path, monkeypatch):
+    folder = tmp_path / "suara-layar"
+    _paket_palsu(monkeypatch, "Microsoft Andika (Indonesia)")
+    paket_suara.perbarui_bila_perlu(folder, ["Loket 1"])
+
+    _paket_palsu(monkeypatch, "Microsoft David Desktop (en-US)")
+    with pytest.raises(paket_suara.SuaraTurunError):
+        paket_suara.perbarui_bila_perlu(folder, ["Loket 1", "Prioritas"])
+
+    lama = paket_suara.info_paket(folder)
+    assert lama.suara == "Microsoft Andika (Indonesia)"
+    assert (folder / "kata_loket.wav").read_bytes() == b"Microsoft Andika (Indonesia)"
+    assert not (folder / "kata_prioritas.wav").exists()

@@ -26,6 +26,7 @@ import array
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -284,3 +285,52 @@ def buat_paket(folder: Path, nama_loket: list[str], *, timeout: int = 300) -> In
         encoding="utf-8",
     )
     return info
+
+
+class SuaraTurunError(RuntimeError):
+    """Paket baru berlogat lain, sedangkan paket terpasang berbahasa Indonesia."""
+
+
+def suara_indonesia(info: InfoPaket | None) -> bool:
+    return info is not None and info.suara.endswith("(Indonesia)")
+
+
+def perbarui_bila_perlu(folder: Path, nama_loket: list[str]) -> InfoPaket | None:
+    """
+    Buat ulang paket bila belum ada atau ada kata nama loket tanpa klip.
+
+    Dipanggil berkala oleh API anjungan di komputer server, sehingga loket
+    yang ditambah atau diganti namanya dari PC admin mana pun tetap
+    terdengar di perangkat tanpa TTS Indonesia — tanpa menunggu admin
+    menekan "Buat ulang paket suara".
+
+    API berjalan sebagai akun SYSTEM, yang belum tentu melihat suara
+    Indonesia. Karena itu paket dibangun di folder sementara dan baru
+    dipasang bila suaranya tidak turun: paket berbahasa Indonesia tidak
+    pernah ditimpa paket berlogat Inggris. Klip disalin lebih dulu dan
+    indeks paling akhir, seperti `buat_paket`.
+
+    Mengembalikan paket yang baru dipasang, atau None bila tidak perlu.
+    SuaraTurunError bila paket baru ditolak karena suaranya.
+    """
+    folder = Path(folder)
+    lama = info_paket(folder)
+    if lama is not None and not lama.kurang(nama_loket):
+        return None
+    sementara = folder.with_name(folder.name + "-baru")
+    shutil.rmtree(sementara, ignore_errors=True)
+    try:
+        baru = buat_paket(sementara, nama_loket)
+        if suara_indonesia(lama) and not suara_indonesia(baru):
+            raise SuaraTurunError(
+                f"Paket tetap memakai {lama.suara}: proses ini hanya mendapat {baru.suara}. "
+                "Tekan Buat ulang paket suara di Layanan Anjungan."
+            )
+        folder.mkdir(parents=True, exist_ok=True)
+        for berkas in baru.klip.values():
+            shutil.copyfile(sementara / berkas, folder / berkas)
+        shutil.copyfile(sementara / NAMA_INDEKS, folder / NAMA_INDEKS)
+        return baru
+    finally:
+        shutil.rmtree(sementara, ignore_errors=True)
+
