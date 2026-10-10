@@ -105,6 +105,15 @@ kode, supaya pengumuman tidak terdengar dua kali.
 - Selama pengumuman, suara video iklan dikecilkan. Pengunjung yang sedang
   mengambil nomor tidak menunda pengumuman.
 - Pilih **Tidak ada** kembali begitu layar antrian bersuara dipasang.
+- Kartu Perangkat memperingatkan bila layar antrian Android yang tersambung
+  juga bersuara (pengumuman terdengar dua kali).
+- Mulai APK 2.4.23 panggilan yang lebih tua dari 60 detik menurut jam server
+  (`age_seconds`) tidak diucapkan, misalnya setelah Wi-Fi tablet sempat putus.
+- Panggilan yang hampir bersamaan dari dua loket tidak terlewat: di
+  PostgreSQL penulisan panggilan diantrekan (advisory lock), sehingga urutan
+  id sama dengan urutan commit.
+- Paket suara memakai suara Indonesia Windows (Microsoft Andika) dan
+  diperbarui otomatis oleh API tiap menit bila ada kata nama loket baru.
 
 ### Iklan (mulai APK 2.4.21)
 

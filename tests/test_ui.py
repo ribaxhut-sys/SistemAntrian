@@ -2974,3 +2974,31 @@ def test_bilah_status_petugas_tanpa_info_teknis(qtbot, auth, app_config, monkeyp
     assert teks == "Database: ● tersambung"
     jendela._tampilkan_status_database(False)
     assert "hubungi admin" in jendela.findChild(QLabel, "statusDatabase").text()
+
+
+def test_kartu_perangkat_memperingatkan_suara_ganda(qtbot, admin_auth):
+    from app.services import device_service
+    from app.services.device_service import PerangkatService
+    from app.services.settings_service import SettingsService
+    from app.ui.settings.kartu_perangkat import KartuPerangkat
+
+    layanan = PerangkatService(admin_auth)
+    device_service.pasangkan(
+        layanan.buat_kode().kode, "dev-anjungan-0003", "Anjungan Lobi", "anjungan"
+    )
+    device_service.catat_kontak("dev-tv-0003", nama="TV Lobi", jenis="layar_antrian")
+    layanan.setel_anjungan_bersuara("dev-anjungan-0003")
+
+    kartu = KartuPerangkat(layanan)
+    qtbot.addWidget(kartu)
+    assert not kartu.peringatan_suara.isHidden()
+    assert "TV Lobi" in kartu.peringatan_suara.text()
+
+    SettingsService(admin_auth).set("display.sound_enabled", "false")
+    kartu.muat_ulang()
+    assert kartu.peringatan_suara.isHidden(), "layar antrian sudah diam"
+
+    SettingsService(admin_auth).set("display.sound_enabled", "true")
+    layanan.setel_anjungan_bersuara(None)
+    kartu.muat_ulang()
+    assert kartu.peringatan_suara.isHidden(), "tidak ada anjungan bersuara"

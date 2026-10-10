@@ -327,8 +327,9 @@ SKEMA: tuple[Pengaturan, ...] = (
         "display.sound_enabled",
         "Bunyikan panggilan",
         "Berlaku untuk komputer layar antrian dan loket. Anjungan ambil "
-        "nomor sengaja tetap diam agar tidak berbunyi bersahutan dengan "
-        "televisi; satu mesin dapat menyimpang dari pengaturan ini lewat "
+        "nomor tetap diam agar tidak berbunyi bersahutan dengan televisi, "
+        "kecuali satu anjungan yang dipilih di Layanan Anjungan → Perangkat "
+        "sebagai pengganti sementara; satu mesin dapat menyimpang dari pengaturan ini lewat "
         "ANTRIAN_SUARA. Komputer tanpa perangkat suara tetap berjalan "
         "normal, hanya tanpa bunyi.",
         BOOLEAN,

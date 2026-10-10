@@ -180,6 +180,11 @@ class KartuPerangkat(QFrame):
         baris_suara.addWidget(self.pilih_suara)
         baris_suara.addStretch()
         isi.addLayout(baris_suara)
+        self.peringatan_suara = QLabel()
+        self.peringatan_suara.setWordWrap(True)
+        self.peringatan_suara.setStyleSheet(f"color: {WARNING}; font-weight: 600;")
+        self.peringatan_suara.hide()
+        isi.addWidget(self.peringatan_suara)
         isi.addWidget(
             keterangan(
                 "Pengganti sementara selama layar antrian belum terpasang: anjungan "
@@ -203,6 +208,7 @@ class KartuPerangkat(QFrame):
             self.perangkat = self.layanan.daftar()
             bersama = self.layanan.token_bersama_aktif()
             bersuara = self.layanan.anjungan_bersuara()
+            suara_layar = self.layanan.suara_layar_antrian_menyala()
         except Exception as exc:  # noqa: BLE001 - kartu tidak boleh menjatuhkan halaman
             self.kosong.setText(f"Daftar perangkat tidak terbaca: {pesan_untuk_user(exc)}")
             self.kosong.show()
@@ -211,7 +217,34 @@ class KartuPerangkat(QFrame):
         self.token_bersama.setChecked(bersama)
         self.token_bersama.blockSignals(False)
         self._isi_pilihan_suara(bersuara)
-        self._isi_tabel(clock.now())
+        sekarang = clock.now()
+        self._tampilkan_peringatan_suara(bersuara, suara_layar, sekarang)
+        self._isi_tabel(sekarang)
+
+    def _tampilkan_peringatan_suara(
+        self, bersuara: str, suara_layar: bool, sekarang: datetime
+    ) -> None:
+        """
+        Anjungan bersuara sementara layar antrian Android yang tersambung
+        juga bersuara: pengunjung mendengar setiap panggilan dua kali.
+
+        Layar antrian Windows tidak terdaftar sebagai perangkat, sehingga
+        hanya yang Android dapat diperiksa di sini.
+        """
+        layar = [
+            p.nama
+            for p in self.perangkat
+            if p.jenis == JENIS_LAYAR_ANTRIAN and p.aktif(sekarang)
+        ]
+        if bersuara and suara_layar and layar:
+            self.peringatan_suara.setText(
+                f"⚠ Layar antrian {', '.join(layar)} juga membunyikan panggilan; "
+                "setiap nomor akan terdengar dua kali. Pilih Tidak ada di atas, "
+                "atau matikan Bunyikan panggilan di Pengaturan."
+            )
+            self.peringatan_suara.show()
+        else:
+            self.peringatan_suara.hide()
 
     def _isi_pilihan_suara(self, terpilih: str) -> None:
         pilihan = [("", "Tidak ada (anjungan diam)")] + [

@@ -139,6 +139,15 @@ def anjungan_bersuara() -> str:
         return (baris.value or "").strip() if baris is not None else ""
 
 
+def suara_layar_antrian_menyala() -> bool:
+    """Pengaturan "suara layar antrian" (display.sound_enabled); bawaannya YA."""
+    with session_scope() as session:
+        baris = session.scalar(
+            sa.select(ApplicationSetting).where(ApplicationSetting.key == "display.sound_enabled")
+        )
+        return baris is None or baris.value.strip().lower() not in {"false", "0", "tidak"}
+
+
 def perangkat_dari_token(token: str) -> PerangkatInfo | None:
     """Perangkat pemilik token ini, termasuk yang sudah dicabut."""
     with session_scope() as session:
@@ -413,6 +422,10 @@ class PerangkatService:
     def anjungan_bersuara(self) -> str:
         self.auth.require_permission(Permission.CONFIG_MANAGE)
         return anjungan_bersuara()
+
+    def suara_layar_antrian_menyala(self) -> bool:
+        self.auth.require_permission(Permission.CONFIG_MANAGE)
+        return suara_layar_antrian_menyala()
 
     def setel_anjungan_bersuara(self, device_id: str | None) -> None:
         """
