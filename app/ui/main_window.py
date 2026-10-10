@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import QRect, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractScrollArea,
     QApplication,
     QButtonGroup,
     QFrame,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -49,6 +51,7 @@ from app.ui.queue.service_page import ServicePage
 from app.ui.registration.registration_page import RegistrationPage
 from app.ui.settings.layanan_anjungan_page import LayananAnjunganPage
 from app.ui.settings.backup_page import BackupPage
+from app.ui.settings.active_service_page import ActiveServicePage
 from app.ui.settings.close_day_page import CloseDayPage
 from app.ui.settings.master_data_page import MasterDataPage
 from app.ui.settings.settings_page import SettingsPage
@@ -66,7 +69,11 @@ def _area_layar_utama() -> QRect:
 #: Bagian terbesar area layar yang boleh dipakai jendela yang diletakkan di
 #: tengah. 1280 x 720 lebih besar dari laptop 1366 x 768 berskala 150%
 #: (±910 x 512); jendela yang lebih besar dari layarnya tidak terlihat utuh.
-BAGIAN_LAYAR_MAKS = 0.9
+BAGIAN_LAYAR_MAKS = 0.92
+
+# Ukuran nyaman pada monitor besar. Pada laptop kecil atau Windows dengan
+# skala tampilan tinggi, ukuran ini otomatis dipotong oleh area kerja layar.
+UKURAN_JENDELA_PREFERENSI = QSize(1440, 900)
 
 #: Selang uji koneksi di bilah status, dalam milidetik.
 #:
@@ -192,7 +199,10 @@ class BilahNavigasi(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("navigasi")
-        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # Tinggi ekstra menampung scrollbar horizontal ketika menu admin
+        # tidak muat. Teks tombol tetap utuh; menu digeser, bukan diciutkan.
+        self.setFixedHeight(64)
 
         self._tombol: list[QPushButton] = []
         self._baris = -1
@@ -200,9 +210,38 @@ class BilahNavigasi(QFrame):
         self._grup.setExclusive(True)
         self._grup.idClicked.connect(self.setCurrentRow)
 
-        self._susunan = QHBoxLayout(self)
+        luar = QVBoxLayout(self)
+        luar.setContentsMargins(0, 0, 0, 0)
+        luar.setSpacing(0)
+
+        self._gulir = QScrollArea()
+        self._gulir.setObjectName("gulirNavigasi")
+        self._gulir.setFrameShape(QFrame.Shape.NoFrame)
+        # Konten sengaja tidak mengikuti lebar viewport. Bila semua tombol
+        # lebih lebar daripada jendela, viewport menggulirnya; bila True,
+        # Qt sempat menjadikan total lebar tombol sebagai minimum window
+        # sebelum frame native Windows selesai dibangun.
+        self._gulir.setWidgetResizable(False)
+        self._gulir.setSizeAdjustPolicy(
+            QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored
+        )
+        self._gulir.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._gulir.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._gulir.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
+        )
+        self._gulir.setMinimumSize(0, 0)
+        self._gulir.viewport().setAutoFillBackground(False)
+
+        self._wadah = QWidget()
+        self._wadah.setObjectName("wadahNavigasi")
+        self._susunan = QHBoxLayout(self._wadah)
         self._susunan.setContentsMargins(4, 4, 4, 4)
         self._susunan.setSpacing(2)
+        self._gulir.setWidget(self._wadah)
+        luar.addWidget(self._gulir)
 
     def addItem(self, teks: str) -> None:
         tombol_menu = QPushButton(teks)
@@ -217,6 +256,7 @@ class BilahNavigasi(QFrame):
         self._grup.addButton(tombol_menu, indeks)
         self._tombol.append(tombol_menu)
         self._susunan.addWidget(tombol_menu)
+        self._wadah.adjustSize()
         if indeks < 9:
             tombol_menu.setToolTip(f"{teks}  ·  Ctrl+{indeks + 1}")
 
@@ -257,6 +297,47 @@ class PlaceholderPage(QWidget):
         susunan.addWidget(judul(nama))
         susunan.addWidget(keterangan(keterangan_teks))
         susunan.addStretch()
+
+
+class HalamanAdaptif(QScrollArea):
+    """Wadah halaman kerja yang mencegah form terpotong pada layar kecil."""
+
+    def __init__(self, isi: QWidget, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("halamanAdaptif")
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setWidgetResizable(True)
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setWidget(isi)
+
+    @property
+    def isi(self) -> QWidget | None:
+        return self.widget()
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - nama Qt
+        # QStackedWidget mengambil hint TERBESAR dari semua halaman, termasuk
+        # halaman tersembunyi. Tanpa batas ini, form Pengaturan yang panjang
+        # dapat memaksa window melebar sebelum scrollbar sempat aktif.
+        return QSize(640, 400)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - nama Qt
+        return QSize(160, 120)
+
+    def muat_ulang(self) -> None:
+        isi = self.isi
+        segarkan = getattr(isi, "muat_ulang", None)
+        if callable(segarkan):
+            segarkan()
+
+    def hentikan(self) -> None:
+        isi = self.isi
+        hentikan = getattr(isi, "hentikan", None)
+        if callable(hentikan):
+            hentikan()
 
 
 class MainWindow(QMainWindow):
@@ -338,6 +419,9 @@ class MainWindow(QMainWindow):
         self.mode_kios = sesi.kios or sesi.permissions == frozenset(
             {Permission.DISPLAY_VIEW}
         )
+        #: Peran mesin, status API anjungan, dan alamat database hanya untuk
+        #: admin — yang dapat menindaklanjutinya di Pengaturan.
+        self._info_teknis = auth.has_permission(Permission.CONFIG_MANAGE)
 
         if self.mode_kios:
             # Nama petugas tidak ikut ditampilkan. Judul jendela terbaca
@@ -346,11 +430,20 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(APP_NAME)
         else:
             self.setWindowTitle(f"{APP_NAME} — {sesi.full_name}")
-        # Panel pelayanan disusun dua kolom: kartu antrian beserta tombolnya
-        # di kiri, daftar tunggu di kanan. Menu di kepala (bukan kolom kiri)
-        # menyisakan lebar penuh untuk keduanya. 1280 x 720 masih muat utuh
-        # pada layar 1366 x 768 yang paling sempit di kantor.
-        self.resize(1280, 720)
+        # Ukuran awal mengikuti area kerja dalam piksel logis Qt, sehingga
+        # skala Windows 125%/150% ikut diperhitungkan. Batas preferensi
+        # mencegah jendela terlalu melebar pada monitor 2K/4K.
+        area_awal = _area_layar_utama()
+        self.resize(
+            min(
+                UKURAN_JENDELA_PREFERENSI.width(),
+                round(area_awal.width() * BAGIAN_LAYAR_MAKS),
+            ),
+            min(
+                UKURAN_JENDELA_PREFERENSI.height(),
+                round(area_awal.height() * BAGIAN_LAYAR_MAKS),
+            ),
+        )
         #: Geometri jendela biasa, untuk F11. Layar antrian dibuka langsung
         #: fullscreen; tanpa ini, restore Qt memakai ukuran bawaan kecil.
         self._geometri_normal = QRect(self.geometry())
@@ -382,8 +475,11 @@ class MainWindow(QMainWindow):
         # publik mengundang orang menutupnya.
         if not self.mode_kios:
             susunan_utama.addWidget(self._bangun_kepala())
-            # Pita peringatan anjungan, tepat di bawah kepala. Tersembunyi
-            # selama semuanya normal; lihat _pasang_bilah_database.
+        # Pita peringatan anjungan, tepat di bawah kepala. Tersembunyi
+        # selama semuanya normal; lihat _pasang_bilah_database. Hanya untuk
+        # admin: petugas loket tidak dapat memperbaiki Firewall atau API,
+        # jadi peringatan itu hanya membuat cemas.
+        if not self.mode_kios and self._info_teknis:
             boleh_buka_layanan = _komputer_server() and self.auth.has_permission(
                 Permission.CONFIG_MANAGE
             )
@@ -409,9 +505,12 @@ class MainWindow(QMainWindow):
         kepala = QFrame()
         kepala.setObjectName("panelHeader")
 
-        susunan = QHBoxLayout(kepala)
-        susunan.setContentsMargins(16, 10, 16, 10)
-        susunan.setSpacing(12)
+        susunan = QVBoxLayout(kepala)
+        susunan.setContentsMargins(16, 8, 16, 8)
+        susunan.setSpacing(7)
+
+        baris_atas = QHBoxLayout()
+        baris_atas.setSpacing(12)
 
         sesi = self.auth.require_session()
 
@@ -430,10 +529,8 @@ class MainWindow(QMainWindow):
         nama = QLabel(APP_NAME)
         nama.setObjectName("judulMerek")
         susunan_merek.addWidget(nama)
-        susunan.addWidget(merek)
-
-        susunan.addWidget(self.navigasi)
-        susunan.addStretch()
+        baris_atas.addWidget(merek)
+        baris_atas.addStretch()
 
         chip = QFrame()
         chip.setObjectName("chipPengguna")
@@ -452,17 +549,25 @@ class MainWindow(QMainWindow):
         )
         identitas.setObjectName("namaPengguna")
         susunan_chip.addWidget(identitas)
-        susunan.addWidget(chip)
+        self._chip_pengguna = chip
+        baris_atas.addWidget(chip)
 
         ganti = tombol("Ganti Kata Sandi")
         ganti.setObjectName("tombolKepala")
         ganti.clicked.connect(self.ganti_kata_sandi)
-        susunan.addWidget(ganti)
+        self._tombol_ganti_kata_sandi = ganti
+        baris_atas.addWidget(ganti)
 
         keluar = tombol("Keluar", variant="danger")
         keluar.setObjectName("tombolKepala")
         keluar.clicked.connect(self.keluar)
-        susunan.addWidget(keluar)
+        baris_atas.addWidget(keluar)
+
+        susunan.addLayout(baris_atas)
+        # Navigasi mendapat satu baris penuh. Pada admin jumlah menunya jauh
+        # lebih banyak daripada petugas, dan menaruhnya di antara merek serta
+        # profil membuat label menyusut atau keluar layar pada laptop kecil.
+        susunan.addWidget(self.navigasi)
 
         return kepala
 
@@ -527,6 +632,11 @@ class MainWindow(QMainWindow):
                 lambda: BackupPage(self.backup_service),
             ),
             _Menu(
+                "Pelayanan Aktif",
+                Permission.QUEUE_REASSIGN,
+                lambda: ActiveServicePage(self.queue_service),
+            ),
+            _Menu(
                 "Tutup Hari",
                 Permission.QUEUE_CLOSE_DAY,
                 lambda: CloseDayPage(self.queue_service, self.backup_service),
@@ -580,7 +690,15 @@ class MainWindow(QMainWindow):
             if butir.permission is None or self.auth.has_permission(butir.permission):
                 self.menu_aktif.append(butir)
                 self.navigasi.addItem(butir.judul)
-                self.halaman.addWidget(butir.pembuat())
+                halaman = butir.pembuat()
+                # Papan antrian menyusun dirinya sendiri berdasarkan bentuk
+                # monitor dan harus mengisi layar tanpa bilah gulir. Halaman
+                # kerja biasa diberi fallback gulir agar semua kontrol tetap
+                # dapat dicapai ketika tinggi/lebar layar tidak mencukupi.
+                if isinstance(halaman, DisplayPage):
+                    self.halaman.addWidget(halaman)
+                else:
+                    self.halaman.addWidget(HalamanAdaptif(halaman))
 
         if not self.menu_aktif:
             # Terjadi bila perannya tidak punya satu pun halaman, misalnya
@@ -678,10 +796,40 @@ class MainWindow(QMainWindow):
         if self.mode_kios and not self.berjendela:
             self.showFullScreen()
             return
-        # Tanpa ini Windows menaruh jendela baru bertingkat dari pojok kiri
-        # atas. Petugas mengharapkan layarnya muncul di tengah monitor.
-        self._pusatkan(_area_layar_utama(), self.size())
-        self.show()
+        # Paksa kembali ke mode normal: shortcut Windows dapat dikonfigurasi
+        # "Run: Maximized", dan status itu akan mengalahkan move()/resize()
+        # bila tidak dibersihkan lebih dulu. Pusatkan SETELAH showNormal()
+        # supaya frameGeometry sudah memuat bingkai native Windows; sebelum
+        # jendela tampil, tinggi bilah judul belum selalu ikut dihitung.
+        ukuran = (
+            self._geometri_normal.size()
+            if self._geometri_normal is not None and self._geometri_normal.isValid()
+            else QSize(self.size())
+        )
+        area = _area_layar_utama()
+        self.showNormal()
+        self._pusatkan(area, ukuran)
+        batas = QSize(
+            round(area.width() * BAGIAN_LAYAR_MAKS),
+            round(area.height() * BAGIAN_LAYAR_MAKS),
+        )
+        target = ukuran.boundedTo(batas)
+        if self.size() != target:
+            # Pada Windows, minimum native sempat dihitung dari sizeHint
+            # seluruh halaman tersembunyi sebelum QScrollArea aktif. Ulangi
+            # sesudah event show diproses agar batas yang sudah mengecil
+            # benar-benar diterapkan oleh window manager.
+            def ulangi_geometri() -> None:
+                if not self.isVisible() or self.isFullScreen():
+                    return
+                self.setMinimumSize(0, 0)
+                self.updateGeometry()
+                self._pusatkan(area, ukuran)
+                self._geometri_normal = QRect(self.geometry())
+
+            QTimer.singleShot(0, ulangi_geometri)
+        self._geometri_normal = QRect(self.geometry())
+        self._posisi_normal_diketahui = True
 
     def ganti_layar_penuh(self) -> None:
         if self.isFullScreen():
@@ -742,6 +890,17 @@ class MainWindow(QMainWindow):
         if baris >= 0:
             self.halaman.setCurrentIndex(baris)
 
+    def resizeEvent(self, event) -> None:  # noqa: N802 - nama Qt
+        """Ringkaskan kepala saat lebar jendela terbatas."""
+        super().resizeEvent(event)
+        ringkas = event.size().width() < 1100
+        chip = getattr(self, "_chip_pengguna", None)
+        if chip is not None:
+            chip.setVisible(not ringkas)
+        ganti = getattr(self, "_tombol_ganti_kata_sandi", None)
+        if ganti is not None:
+            ganti.setText("Kata Sandi" if ringkas else "Ganti Kata Sandi")
+
     def _pasang_bilah_database(self) -> None:
         """
         Widget tetap di kanan bilah status, supaya F5 tidak menghapusnya.
@@ -759,7 +918,7 @@ class MainWindow(QMainWindow):
         from app.core.peran import baca_peran, path_berkas_peran
 
         peran = baca_peran(path_berkas_peran(get_config().db_path))
-        if peran.label:
+        if peran.label and self._info_teknis:
             self._label_peran = QLabel(peran.label)
             self._label_peran.setObjectName("statusPeran")
             self.statusBar().addPermanentWidget(self._label_peran)
@@ -772,7 +931,7 @@ class MainWindow(QMainWindow):
         self._sedang_memeriksa_anjungan = False
         self._pemeriksa_anjungan: _PemeriksaAnjungan | None = None
         di_server = _komputer_server()
-        if di_server or not get_config().memakai_sqlite:
+        if self._info_teknis and (di_server or not get_config().memakai_sqlite):
             self._label_api = QLabel("API anjungan: memeriksa…")
             self._label_api.setObjectName("statusApiAnjungan")
             self.statusBar().addPermanentWidget(self._label_api)
@@ -791,6 +950,9 @@ class MainWindow(QMainWindow):
         self._label_database.setObjectName("statusDatabase")
         self._label_database.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self._label_database.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
         self.statusBar().addPermanentWidget(self._label_database)
         self._sedang_memeriksa_db = False
@@ -879,7 +1041,23 @@ class MainWindow(QMainWindow):
         label = getattr(self, "_label_database", None)
         if label is None:
             return
-        label.setText(teks_status_database(terhubung=terhubung))
+        if self._info_teknis:
+            detail = teks_status_database(terhubung=terhubung)
+            label.setToolTip(detail)
+            label.setText(
+                "Database: ● tersambung"
+                if terhubung
+                else "Database: ● tidak tersambung — cek server"
+            )
+        else:
+            # Petugas cukup tahu tersambung atau tidak; alamat server dan
+            # jenis database hanya berguna bagi admin yang memperbaikinya.
+            label.setText(
+                "Database: ● tersambung"
+                if terhubung
+                else "Database: ● tidak tersambung — hubungi admin"
+            )
+            label.setToolTip("")
         label.setStyleSheet("" if terhubung else f"color: {DANGER};")
 
     def muat_ulang_halaman(self) -> None:
@@ -890,7 +1068,7 @@ class MainWindow(QMainWindow):
             # tanpa penjagaan ini menekan F5 justru memunculkan bilah yang
             # sengaja tidak dibangun pada mode kios.
             if not self.mode_kios:
-                self.statusBar().showMessage("Data dimuat ulang.", 2000)
+                self.statusBar().showMessage("Memuat ulang data…", 2000)
                 self._jadwalkan_periksa_database()
 
     def ganti_kata_sandi(self) -> None:
@@ -913,6 +1091,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 - nama dari Qt
         """Pastikan sesi berakhir walau jendela ditutup lewat tombol silang."""
+        for indeks in range(self.halaman.count()):
+            halaman = self.halaman.widget(indeks)
+            hentikan = getattr(halaman, "hentikan", None)
+            if callable(hentikan):
+                hentikan()
         pewaktu_api = getattr(self, "_pewaktu_api", None)
         if pewaktu_api is not None:
             pewaktu_api.stop()

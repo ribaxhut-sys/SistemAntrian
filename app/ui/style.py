@@ -10,16 +10,16 @@ orang di depannya, bukan sambil mengamati layar.
 from __future__ import annotations
 
 # Warna dasar
-PRIMARY = "#2563EB"
-PRIMARY_DARK = "#1D4ED8"
+PRIMARY = "#4F46E5"
+PRIMARY_DARK = "#4338CA"
 DANGER = "#DC2626"
-SUCCESS = "#15803D"
+SUCCESS = "#047857"
 WARNING = "#B45309"
-TEXT = "#0F172A"
-TEXT_MUTED = "#64748B"
-BORDER = "#E2E8F0"
+TEXT = "#172033"
+TEXT_MUTED = "#667085"
+BORDER = "#E1E7EF"
 SURFACE = "#FFFFFF"
-BACKGROUND = "#F1F5F9"
+BACKGROUND = "#F4F7FB"
 
 #: Warna dasar yang sama, dilarutkan menjadi latar.
 #:
@@ -27,14 +27,14 @@ BACKGROUND = "#F1F5F9"
 #: yang sedang ditangani, baris paling depan pada daftar tunggu. Latar
 #: sepucat ini tetap menyisakan kontras teks yang aman, sedangkan warna
 #: penuh pada bidang selebar itu justru membuat angkanya sulit dibaca.
-PRIMARY_SOFT = "#EFF6FF"
+PRIMARY_SOFT = "#EEF2FF"
 DANGER_SOFT = "#FEF2F2"
 SUCCESS_SOFT = "#F0FDF4"
 WARNING_SOFT = "#FFFBEB"
 
 #: Garis pembatas yang lebih tegas, untuk tepi yang memang perlu terlihat
 #: (kepala tabel, tepi kartu aktif). BORDER biasa terlalu samar di situ.
-BORDER_STRONG = "#CBD5E1"
+BORDER_STRONG = "#C9D3E1"
 #: Latar sekunder: baris tabel berselang, panel di dalam panel.
 SURFACE_ALT = "#F8FAFC"
 
@@ -58,8 +58,8 @@ MODE_PETUGAS = "#4F46E5"
 #: Sudut membulat. Satu nilai untuk kartu dan panel, satu untuk kontrol
 #: kecil. Dua ukuran sudah cukup — lebih dari itu hanya membuat tampilan
 #: tampak tidak disengaja.
-RADIUS = 10
-RADIUS_SM = 6
+RADIUS = 12
+RADIUS_SM = 8
 
 # Palet layar pengunjung. Dibaca dari seberang ruangan, jadi kontras
 # lebih penting daripada keselarasan dengan UI petugas di meja.
@@ -161,15 +161,11 @@ FONT_SIZE_LARGE = 18
 FONT_SIZE_XL = 22
 FONT_SIZE_HUGE = 32
 
-#: Urutan font, dari yang paling diinginkan ke cadangan yang pasti ada.
-#:
-#: Inter dan Poppins TIDAK ikut Windows: bila belum dipasang di mesin
-#: anjungan, Qt diam-diam turun ke nama berikutnya — Segoe UI Variable,
-#: font modern bawaan Windows 11. Jadi tampilannya tetap rapi tanpa font
-#: tambahan, dan otomatis memakai Inter/Poppins begitu font itu dipasang.
-#: Jangan hapus cadangannya: nama font yang tidak ada tanpa cadangan
-#: membuat Qt memilih font pengganti apa adanya.
-FONT_UI = '"Inter", "Poppins", "Segoe UI Variable", "Segoe UI", Arial, sans-serif'
+# Qt Style Sheets tidak mendukung daftar fallback CSS secara konsisten.
+# Daftar beberapa nama font justru dapat dianggap sebagai SATU nama font
+# yang tidak ada dan menghasilkan kotak-kotak kosong pada sebagian mesin.
+# Segoe UI tersedia pada semua versi Windows yang didukung aplikasi ini.
+FONT_UI = '"Segoe UI"'
 
 STYLESHEET = f"""
 QWidget {{
@@ -183,8 +179,8 @@ QMainWindow, QDialog {{
 }}
 
 QLabel[heading="true"] {{
-    font-size: {FONT_SIZE_LARGE}px;
-    font-weight: 700;
+    font-size: {FONT_SIZE_XL}px;
+    font-weight: 750;
 }}
 
 QLabel[muted="true"] {{
@@ -214,7 +210,7 @@ QLineEdit, QComboBox, QSpinBox {{
 }}
 
 QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{
-    border: 1px solid {PRIMARY};
+    border: 1px solid #A5B4FC;
 }}
 
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
@@ -233,7 +229,7 @@ QPlainTextEdit, QTextEdit {{
 }}
 
 QPlainTextEdit:hover, QTextEdit:hover {{
-    border: 1px solid {PRIMARY};
+    border: 1px solid #A5B4FC;
 }}
 
 QPlainTextEdit:focus, QTextEdit:focus {{
@@ -244,33 +240,6 @@ QPlainTextEdit:focus, QTextEdit:focus {{
 QPlainTextEdit:disabled, QTextEdit:disabled {{
     background: {SURFACE_ALT};
     color: #A3AEC0;
-}}
-
-QTabWidget::pane {{
-    background: {SURFACE};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_SM}px;
-    top: -1px;
-}}
-
-QTabBar::tab {{
-    background: {SURFACE_ALT};
-    border: 1px solid {BORDER};
-    border-bottom: none;
-    border-top-left-radius: {RADIUS_SM}px;
-    border-top-right-radius: {RADIUS_SM}px;
-    color: {TEXT_MUTED};
-    padding: 7px 16px;
-    margin-right: 3px;
-    font-weight: 600;
-}}
-
-/* Tab terpilih dibedakan warna DAN garis atas tebal. Perbedaan warna saja
-   terlalu tipis dilihat sekilas pada monitor kantor yang jarang dikalibrasi. */
-QTabBar::tab:selected {{
-    background: {SURFACE};
-    color: {PRIMARY_DARK};
-    border-top: 2px solid {PRIMARY};
 }}
 
 QLineEdit[invalid="true"] {{
@@ -300,29 +269,66 @@ QComboBox QAbstractItemView {{
     outline: none;
 }}
 
+QComboBox::drop-down {{
+    border: none;
+    width: 30px;
+}}
+
 QPushButton {{
     background: {SURFACE};
     border: 1px solid {BORDER_STRONG};
     border-radius: {RADIUS_SM}px;
     padding: 9px 18px;
     min-height: 22px;
-    font-weight: 600;
+    font-weight: 650;
 }}
 
 QPushButton:hover {{
     background: {SURFACE_ALT};
-    border: 1px solid {PRIMARY};
+    border: 1px solid #A5B4FC;
     color: {PRIMARY_DARK};
 }}
 
 QPushButton:pressed {{
     background: {PRIMARY_SOFT};
+    border: 1px solid {PRIMARY};
+}}
+
+QPushButton:focus {{
+    border: 2px solid {PRIMARY};
+    padding: 8px 17px;
 }}
 
 QPushButton:disabled {{
-    color: #A3AEC0;
-    background: {SURFACE_ALT};
+    color: #98A2B3;
+    background: #F2F4F7;
+    border: 1px solid #E4E7EC;
+}}
+
+/* Tombol pendamping: lebih tenang daripada aksi utama, tetapi tetap
+   terbaca sebagai kontrol. Dipakai untuk alur yang sah namun bukan langkah
+   paling disarankan pada keadaan saat ini. */
+QPushButton[variant="secondary"] {{
+    background: #F1F3F9;
     border: 1px solid {BORDER};
+    color: {TEXT};
+}}
+
+QPushButton[variant="secondary"]:hover {{
+    background: {PRIMARY_SOFT};
+    border: 1px solid #C7D2FE;
+    color: {PRIMARY_DARK};
+}}
+
+QPushButton[variant="secondary"]:pressed {{
+    background: #E0E7FF;
+    border: 1px solid #A5B4FC;
+}}
+
+QPushButton[variant="secondary"]:disabled {{
+    color: #98A2B3;
+    background: #F2F4F7;
+    border: 1px solid #E4E7EC;
 }}
 
 QPushButton[variant="primary"] {{
@@ -335,6 +341,12 @@ QPushButton[variant="primary"] {{
 QPushButton[variant="primary"]:hover {{
     background: {PRIMARY_DARK};
     border: 1px solid {PRIMARY_DARK};
+    color: white;
+}}
+
+QPushButton[variant="primary"]:pressed {{
+    background: #3730A3;
+    border: 1px solid #3730A3;
     color: white;
 }}
 
@@ -357,8 +369,14 @@ QPushButton[variant="success"] {{
 }}
 
 QPushButton[variant="success"]:hover {{
-    background: #166534;
-    border: 1px solid #166534;
+    background: #065F46;
+    border: 1px solid #065F46;
+    color: white;
+}}
+
+QPushButton[variant="success"]:pressed {{
+    background: #064E3B;
+    border: 1px solid #064E3B;
     color: white;
 }}
 
@@ -391,15 +409,22 @@ QPushButton[variant="warning"]:disabled {{
 }}
 
 QPushButton[variant="danger"] {{
+    background: #FFF7F7;
     color: {DANGER};
-    border: 1px solid #F2C2C2;
-    font-weight: 600;
+    border: 1px solid #FECACA;
+    font-weight: 650;
 }}
 
 QPushButton[variant="danger"]:hover {{
-    background: {DANGER_SOFT};
+    background: #FEE2E2;
     border: 1px solid {DANGER};
     color: {DANGER};
+}}
+
+QPushButton[variant="danger"]:pressed {{
+    background: #FECACA;
+    border: 1px solid #B91C1C;
+    color: #B91C1C;
 }}
 
 QPushButton[variant="danger"]:disabled {{
@@ -416,7 +441,7 @@ QTableWidget {{
 }}
 
 QTableWidget::item {{
-    padding: 8px 4px;
+    padding: 9px 6px;
     border-bottom: 1px solid {BORDER};
 }}
 
@@ -462,36 +487,66 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
 QTabWidget::pane {{
     border: 1px solid {BORDER};
     background: {SURFACE};
-    border-radius: {RADIUS_SM}px;
+    border-radius: {RADIUS}px;
+    top: -1px;
+}}
+
+/* Jangan elipsis atau potong label ketika tab dipilih. Bobot font tab
+   terpilih sengaja sama dengan tab biasa: perubahan 650 -> 750 membuat
+   teks melebar setelah Qt selesai menghitung lebar tab. */
+QTabBar {{
+    qproperty-elideMode: ElideNone;
 }}
 
 QTabBar::tab {{
-    padding: 9px 18px;
-    border: 1px solid {BORDER};
-    border-bottom: none;
-    background: {SURFACE_ALT};
-    margin-right: 2px;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: {TEXT_MUTED};
+    padding: 10px 20px 8px 20px;
+    margin-right: 6px;
+    font-weight: 650;
+}}
+
+QTabBar::tab:hover:!selected {{
+    background: {PRIMARY_SOFT};
+    color: {PRIMARY_DARK};
 }}
 
 QTabBar::tab:selected {{
-    background: {SURFACE};
+    background: transparent;
+    border-bottom: 3px solid {PRIMARY};
     color: {PRIMARY_DARK};
-    font-weight: 700;
+    font-weight: 650;
+}}
+
+QToolTip {{
+    background: {TEXT};
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 9px;
 }}
 
 QFrame#panelHeader {{
-    background: {SURFACE};
-    border-bottom: 1px solid {BORDER};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #25205F,
+                                stop:0.55 #3730A3,
+                                stop:1 #4338CA);
+    border: none;
+    border-bottom: 1px solid #312E81;
 }}
 
 QLabel#judulMerek {{
+    color: white;
     font-size: {FONT_SIZE_LARGE}px;
-    font-weight: 700;
+    font-weight: 750;
 }}
 
 QLabel#tandaMerek {{
-    background: {PRIMARY};
-    color: white;
+    background: white;
+    border: 1px solid rgba(255, 255, 255, 160);
+    color: #3730A3;
     border-radius: 8px;
     font-size: {FONT_SIZE_SMALL}px;
     font-weight: 800;
@@ -502,9 +557,21 @@ QLabel#tandaMerek {{
    pil terpilih berwarna penuh supaya terbaca sekilas tanpa membaca
    ulang seluruh baris. */
 QFrame#navigasi {{
-    background: {SURFACE_ALT};
-    border: 1px solid {BORDER};
-    border-radius: 10px;
+    background: rgba(255, 255, 255, 24);
+    border: 1px solid rgba(255, 255, 255, 45);
+    border-radius: 12px;
+}}
+
+QScrollArea#gulirNavigasi,
+QScrollArea#gulirNavigasi > QWidget > QWidget,
+QWidget#wadahNavigasi {{
+    background: transparent;
+    border: none;
+}}
+
+QScrollArea#gulirFormDialog {{
+    background: transparent;
+    border: none;
 }}
 
 QPushButton#navPil {{
@@ -513,51 +580,72 @@ QPushButton#navPil {{
     border-radius: 8px;
     padding: 7px 14px;
     min-height: 20px;
-    color: {TEXT_MUTED};
+    color: #DDE2FF;
     font-weight: 600;
 }}
 
 QPushButton#navPil:hover:!checked {{
-    background: {SURFACE};
+    background: rgba(255, 255, 255, 28);
     border: none;
-    color: {TEXT};
+    color: white;
 }}
 
 QPushButton#navPil:checked {{
-    background: {PRIMARY};
+    background: white;
     border: none;
-    color: white;
+    color: #3730A3;
     font-weight: 700;
 }}
 
 QPushButton#navPil:checked:hover {{
-    background: {PRIMARY_DARK};
+    background: #EEF2FF;
     border: none;
-    color: white;
+    color: #312E81;
 }}
 
 QFrame#chipPengguna {{
-    background: {SURFACE_ALT};
-    border: 1px solid {BORDER};
+    background: rgba(255, 255, 255, 20);
+    border: 1px solid rgba(255, 255, 255, 48);
     border-radius: 20px;
 }}
 
 QLabel#inisialPengguna {{
-    background: {PRIMARY_SOFT};
-    color: {PRIMARY_DARK};
+    background: white;
+    color: #3730A3;
     border-radius: 14px;
     font-size: {FONT_SIZE_SMALL}px;
     font-weight: 800;
 }}
 
 QLabel#namaPengguna {{
-    color: {TEXT};
+    color: white;
     font-weight: 600;
 }}
 
 QPushButton#tombolKepala {{
+    background: rgba(255, 255, 255, 18);
+    border: 1px solid rgba(255, 255, 255, 72);
+    color: white;
     padding: 7px 14px;
     min-height: 20px;
+}}
+
+QPushButton#tombolKepala:hover {{
+    background: rgba(255, 255, 255, 40);
+    border: 1px solid rgba(255, 255, 255, 120);
+    color: white;
+}}
+
+QPushButton#tombolKepala[variant="danger"] {{
+    background: rgba(220, 38, 38, 52);
+    border: 1px solid #FCA5A5;
+    color: #FEE2E2;
+}}
+
+QPushButton#tombolKepala[variant="danger"]:hover {{
+    background: #DC2626;
+    border: 1px solid #F87171;
+    color: white;
 }}
 
 QStatusBar {{

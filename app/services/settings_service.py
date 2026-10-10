@@ -269,7 +269,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         maksimum=10,
         satuan="nomor",
         nilai_khusus="Tidak ditampilkan",
-        kelompok="Layar Antrian",
+        kelompok="Nomor Layar Antrian",
     ),
     Pengaturan(
         "display.list_rows",
@@ -282,7 +282,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         minimum=1,
         maksimum=12,
         satuan="baris",
-        kelompok="Layar Antrian",
+        kelompok="Nomor Layar Antrian",
     ),
     Pengaturan(
         "display.list_font_size",
@@ -296,7 +296,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         maksimum=96,
         satuan="px",
         nilai_khusus="Otomatis",
-        kelompok="Layar Antrian",
+        kelompok="Nomor Layar Antrian",
     ),
     Pengaturan(
         "display.rotate_seconds",
@@ -310,7 +310,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         maksimum=60,
         satuan="detik",
         nilai_khusus="Tidak berpindah sendiri",
-        kelompok="Layar Antrian",
+        kelompok="Nomor Layar Antrian",
     ),
     Pengaturan(
         "display.number_font_scale",
@@ -321,7 +321,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         minimum=50,
         maksimum=200,
         satuan="%",
-        kelompok="Layar Antrian",
+        kelompok="Nomor Layar Antrian",
     ),
     Pengaturan(
         "display.sound_enabled",
@@ -332,7 +332,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         "ANTRIAN_SUARA. Komputer tanpa perangkat suara tetap berjalan "
         "normal, hanya tanpa bunyi.",
         BOOLEAN,
-        kelompok="Layar Antrian",
+        kelompok="Suara Panggilan",
     ),
     # Dua pengaturan berikut sengaja TIDAK tampil di layar Pengaturan.
     #
@@ -390,6 +390,25 @@ SKEMA: tuple[Pengaturan, ...] = (
         kelompok="Antrian",
     ),
     Pengaturan(
+        "kiosk.judul",
+        "Judul anjungan",
+        "Tulisan di bagian atas tablet anjungan, misalnya \"Selamat datang di "
+        "Bapenda DKI Jakarta\". Kosongkan untuk memakai Judul layar antrian. "
+        "Tablet dapat menimpanya di Pengaturan tablet.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.subjudul",
+        "Subjudul anjungan",
+        "Satu baris kecil di bawah judul, misalnya nama kantor atau jam "
+        "layanan. Kosongkan bila tidak perlu.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Anjungan",
+    ),
+    Pengaturan(
         "kiosk.welcome_kind",
         "Tampilan panel anjungan",
         "Isi panel besar di atas tombol A/B/C sebelum pengunjung memilih "
@@ -401,26 +420,7 @@ SKEMA: tuple[Pengaturan, ...] = (
             ("teks", "Teks sambutan"),
             ("media", "Folder media (gambar & video bergantian)"),
         ),
-        kelompok="Antrian",
-    ),
-    Pengaturan(
-        "kiosk.judul",
-        "Judul anjungan",
-        "Tulisan di bagian atas tablet anjungan, misalnya \"Selamat datang di "
-        "Bapenda DKI Jakarta\". Kosongkan untuk memakai Judul layar antrian. "
-        "Tablet dapat menimpanya di Pengaturan tablet.",
-        TEKS,
-        boleh_kosong=True,
-        kelompok="Antrian",
-    ),
-    Pengaturan(
-        "kiosk.subjudul",
-        "Subjudul anjungan",
-        "Satu baris kecil di bawah judul, misalnya nama kantor atau jam "
-        "layanan. Kosongkan bila tidak perlu.",
-        TEKS,
-        boleh_kosong=True,
-        kelompok="Antrian",
+        kelompok="Panel Anjungan",
     ),
     Pengaturan(
         "kiosk.welcome_text",
@@ -429,7 +429,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         "media kosong atau gagal. Kosongkan untuk memakai teks bawaan.",
         TEKS,
         boleh_kosong=True,
-        kelompok="Antrian",
+        kelompok="Panel Anjungan",
     ),
     Pengaturan(
         "kiosk.welcome_file",
@@ -439,7 +439,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         "tampilan panel ke folder media. Tetap klik Simpan.",
         BERKAS,
         boleh_kosong=True,
-        kelompok="Antrian",
+        kelompok="Panel Anjungan",
     ),
     Pengaturan(
         "kiosk.welcome_slide_seconds",
@@ -450,7 +450,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         minimum=3,
         maksimum=60,
         satuan="detik",
-        kelompok="Antrian",
+        kelompok="Panel Anjungan",
     ),
     Pengaturan(
         "kiosk.daftar_putar",
@@ -459,11 +459,10 @@ SKEMA: tuple[Pengaturan, ...] = (
         "urutannya dengan Naik/Turun. Video diputar sampai selesai; satu "
         "video saja diulang terus. Yang tidak dicentang tetap "
         "tersimpan di folder dan dapat dinyalakan lagi kapan saja. "
-        "Atur jadwal… membatasi tanggal tayang dan lama tampil tiap gambar. "
-        "Angka tayang dan tanda gagal dilaporkan oleh tablet.",
+        "Atur jadwal… membatasi tanggal tayang dan lama tampil tiap gambar.",
         DAFTAR_PUTAR,
         boleh_kosong=True,
-        kelompok="Antrian",
+        kelompok="Iklan Anjungan",
     ),
     Pengaturan(
         "kiosk.suara_video",
@@ -473,7 +472,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         "tidak menutupi panggilan nomor. Selama pengunjung sedang memilih "
         "layanan sampai tiketnya keluar, video selalu dibisukan.",
         BOOLEAN,
-        kelompok="Antrian",
+        kelompok="Iklan Anjungan",
     ),
     Pengaturan(
         "kiosk.iklan_layar_penuh_detik",
@@ -486,7 +485,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         maksimum=600,
         satuan="detik",
         nilai_khusus="Mati",
-        kelompok="Antrian",
+        kelompok="Iklan Anjungan",
     ),
     Pengaturan(
         "kiosk.posisi_loket",
@@ -504,7 +503,7 @@ SKEMA: tuple[Pengaturan, ...] = (
             ("atas", "Pindahkan loket ke panel atas"),
             ("sembunyi", "Sembunyikan baris loket"),
         ),
-        kelompok="Antrian",
+        kelompok="Anjungan",
     ),
     Pengaturan(
         "kiosk.tema",
@@ -520,7 +519,7 @@ SKEMA: tuple[Pengaturan, ...] = (
             ("gelap", "Gelap elegan"),
             ("merah_putih", "Merah putih (perayaan)"),
         ),
-        kelompok="Antrian",
+        kelompok="Anjungan",
     ),
     Pengaturan(
         "kiosk.tema_agustus",
@@ -528,7 +527,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         "Selama bulan Agustus anjungan memakai tema merah putih, lalu "
         "kembali ke tema di atas pada 1 September tanpa perlu diubah.",
         BOOLEAN,
-        kelompok="Antrian",
+        kelompok="Anjungan",
     ),
     Pengaturan(
         "survey.enabled",

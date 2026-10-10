@@ -21,7 +21,12 @@ from app.ui.common import PESAN_TAK_TERDUGA, pesan_untuk_user
 from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.login.login_window import LoginWindow
 from app.ui.main_window import SELANG_PERIKSA_KONEKSI_MS, MainWindow, PlaceholderPage
-from app.ui.settings.dialogs import CategoryDialog, CounterDialog, UserDialog
+from app.ui.settings.dialogs import (
+    CategoryDialog,
+    CounterCategoryDialog,
+    CounterDialog,
+    UserDialog,
+)
 from app.ui.settings.master_data_page import MasterDataPage
 from tests.conftest import TEST_PASSWORD
 
@@ -74,21 +79,13 @@ def test_login_berhasil_menutup_jendela(qtbot, auth):
     assert jendela.session.role is UserRole.CRO
 
 
-def test_tombol_kembali_menutup_layar_masuk_tanpa_login(qtbot, auth):
-    """
-    Layar masuk dimundurkan ke pilihan mode, bukan ditutup aplikasinya.
-
-    Dahulu tombolnya bernama "Keluar" dan benar-benar mematikan aplikasi,
-    sehingga petugas yang salah memilih layar harus membukanya ulang.
-    """
+def test_layar_masuk_menawarkan_atur_komputer_tanpa_pemilih_mode(qtbot, auth):
+    """Windows langsung login; pengaturan mesin tersedia sebagai aksi sekunder."""
     jendela = LoginWindow(auth)
     qtbot.addWidget(jendela)
 
-    assert jendela.tombol_kembali.text() == "Kembali"
-
-    jendela.tombol_kembali.click()
-
-    assert jendela.result() == QDialog.DialogCode.Rejected
+    assert jendela.tombol_atur_komputer.text() == "Atur komputer ini"
+    assert not hasattr(jendela, "tombol_kembali")
     assert jendela.session is None
     assert not auth.is_authenticated
 
@@ -319,6 +316,25 @@ def test_admin_melihat_menu_data_master(qtbot, admin_auth):
     assert "Data Master" in menu
 
 
+def test_hanya_admin_melihat_menu_pelayanan_aktif(qtbot, auth):
+    auth.login("admin", TEST_PASSWORD)
+    admin = MainWindow(auth)
+    qtbot.addWidget(admin)
+    menu_admin = [
+        admin.navigasi.item(i).text() for i in range(admin.navigasi.count())
+    ]
+    assert "Pelayanan Aktif" in menu_admin
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    petugas = MainWindow(auth)
+    qtbot.addWidget(petugas)
+    menu_petugas = [
+        petugas.navigasi.item(i).text() for i in range(petugas.navigasi.count())
+    ]
+    assert "Pelayanan Aktif" not in menu_petugas
+
+
 @pytest.mark.parametrize("peran", ["cro", "supervisor", "registration", "display"])
 def test_selain_admin_tidak_melihat_menu_data_master(qtbot, auth, peran):
     auth.login(peran, TEST_PASSWORD)
@@ -406,11 +422,12 @@ def test_bilah_status_loket_menampilkan_lokasi_database(qtbot, admin_auth):
     cfg = get_config()
     label = jendela.findChild(QLabel, "statusDatabase")
     assert label is not None
-    assert cfg.teks_lokasi in label.text()
+    assert label.text() == "Database: ● tersambung"
+    assert cfg.teks_lokasi in label.toolTip()
     assert "tidak terjangkau" not in label.text()
     if not cfg.memakai_sqlite:
-        assert "PostgreSQL @" in label.text()
-        assert "queue.db" not in label.text()
+        assert "PostgreSQL @" in label.toolTip()
+        assert "queue.db" not in label.toolTip()
     assert jendela._pewaktu_db.isActive()
     assert jendela._pewaktu_db.interval() == SELANG_PERIKSA_KONEKSI_MS
 
@@ -422,7 +439,8 @@ def test_bilah_status_saat_tidak_terjangkau(qtbot, admin_auth):
 
     jendela._tampilkan_status_database(False)
 
-    teks = jendela.findChild(QLabel, "statusDatabase").text()
+    label = jendela.findChild(QLabel, "statusDatabase")
+    teks = label.toolTip()
     assert "tidak terjangkau" in teks
     assert str(get_config().teks_lokasi) in teks
 
@@ -436,7 +454,7 @@ def test_bilah_status_tetap_setelah_muat_ulang(qtbot, admin_auth):
     jendela.muat_ulang_halaman()
 
     assert jendela.findChild(QLabel, "statusDatabase") is label
-    assert str(get_config().teks_lokasi) in label.text()
+    assert str(get_config().teks_lokasi) in label.toolTip()
 
 
 def test_judul_jendela_kios_tanpa_nama_petugas(qtbot, auth, users):
@@ -531,6 +549,212 @@ def test_layar_petugas_dibuka_di_tengah(qtbot, admin_auth, monkeypatch):
 
     assert not jendela.isFullScreen()
     assert panggilan == [(main_window._area_layar_utama(), ukuran)]
+
+
+def test_layar_petugas_menghapus_status_maksimal_dan_tetap_di_tengah(
+    qtbot, admin_auth, monkeypatch
+):
+    """Konfigurasi shortcut ``Run: Maximized`` tidak boleh mengalahkan posisi awal."""
+    from app.ui import main_window
+
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    ukuran_normal = jendela.size()
+    panggilan = []
+    monkeypatch.setattr(
+        jendela, "_pusatkan", lambda area, ukuran: panggilan.append((area, ukuran))
+    )
+
+    jendela.showMaximized()
+    qtbot.waitExposed(jendela)
+    jendela.tampilkan()
+
+    assert not jendela.isMaximized()
+    assert panggilan == [(main_window._area_layar_utama(), ukuran_normal)]
+
+
+def test_ukuran_awal_mengikuti_area_kerja_monitor(admin_auth, monkeypatch):
+    """Layar kecil dan skala Windows tinggi tidak boleh dilewati jendela."""
+    from PySide6.QtCore import QRect, QSize
+
+    from app.ui import main_window
+
+    monkeypatch.setattr(
+        main_window, "_area_layar_utama", lambda: QRect(0, 0, 1024, 768)
+    )
+    jendela = MainWindow(admin_auth)
+
+    assert jendela.size() == QSize(942, 707)
+
+
+def test_semua_halaman_kerja_memiliki_fallback_gulir(qtbot, admin_auth):
+    """Form tetap dapat dicapai walau minimum layout melebihi ukuran layar."""
+    from app.ui.main_window import HalamanAdaptif
+
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+
+    for indeks in range(jendela.halaman.count()):
+        halaman = jendela.halaman.widget(indeks)
+        assert isinstance(halaman, HalamanAdaptif)
+        assert halaman.widgetResizable()
+        assert (
+            halaman.horizontalScrollBarPolicy()
+            is Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        assert halaman.verticalScrollBarPolicy() is Qt.ScrollBarPolicy.ScrollBarAsNeeded
+
+
+def test_kepala_diringkas_pada_jendela_kecil(qtbot, admin_auth):
+    """Identitas panjang tidak boleh mendorong menu dan form keluar jendela."""
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    jendela.resize(900, 650)
+    jendela.show()
+    qtbot.wait(10)
+
+    assert not jendela._chip_pengguna.isVisibleTo(jendela)
+    assert jendela._tombol_ganti_kata_sandi.text() == "Kata Sandi"
+
+    jendela.resize(1280, 720)
+    qtbot.wait(10)
+    assert jendela._chip_pengguna.isVisibleTo(jendela)
+    assert jendela._tombol_ganti_kata_sandi.text() == "Ganti Kata Sandi"
+
+
+def test_jendela_admin_benar_benar_muat_pada_800_x_600(
+    qtbot, admin_auth, monkeypatch
+):
+    """Minimum layout tidak boleh memaksa tepi jendela keluar monitor kecil."""
+    from PySide6.QtCore import QRect
+
+    from app.ui import main_window
+
+    monkeypatch.setattr(
+        main_window, "_area_layar_utama", lambda: QRect(0, 0, 870, 652)
+    )
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    jendela.tampilkan()
+    qtbot.wait(10)
+
+    assert (jendela.width(), jendela.height()) == (800, 600)
+    assert jendela.minimumSizeHint().width() <= 800
+    assert jendela.minimumSizeHint().height() <= 600
+    # Menu boleh muat atau bergulir, asal tidak memaksa jendela melebar.
+    # Dengan font Windows sungguhan menunya muat pada 800 px; dulu test ini
+    # mengandaikan huruf kotak selebar "M" yang selalu membuatnya bergulir.
+    assert jendela.navigasi.minimumSizeHint().width() <= jendela.width()
+
+
+def test_window_admin_penuh_tanpa_scrollbar_luar(qtbot, admin_auth):
+    """
+    Pada layar penuh 1366 x 768, monitor tersempit di kantor, halaman admin
+    harus muat dalam satu layar.
+    """
+    lebar = 1366
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    jendela.show()
+    jendela.resize(lebar, 768)
+    qtbot.wait(10)
+
+    assert jendela.navigasi._gulir.horizontalScrollBar().maximum() == 0
+    bermasalah = []
+    for indeks in range(jendela.halaman.count()):
+        jendela.navigasi.setCurrentRow(indeks)
+        qtbot.wait(1)
+        halaman = jendela.halaman.widget(indeks)
+        horizontal = halaman.horizontalScrollBar().maximum()
+        vertikal = halaman.verticalScrollBar().maximum()
+        if horizontal or vertikal:
+            bermasalah.append(
+                (jendela.menu_aktif[indeks].judul, horizontal, vertikal)
+            )
+
+    assert bermasalah == []
+
+
+@pytest.mark.parametrize("server", [False, True], ids=["loket", "server"])
+def test_form_admin_penuh_tanpa_scrollbar_form(qtbot, admin_auth, monkeypatch, server):
+    """
+    Area form ikut muat pada 1366 x 768, termasuk SETIAP kelompok
+    Pengaturan, bukan hanya kelompok yang terbuka pertama kali.
+
+    Varian server memunculkan Layanan Anjungan, yang hanya ada di komputer
+    server (di lapangan selalu PostgreSQL), lengkap dengan perangkat yang
+    terdaftar; di atas SQLite halaman itu tidak pernah ikut diperiksa.
+    """
+    from PySide6.QtWidgets import QScrollArea
+
+    from app.ui.settings.settings_page import SettingsPage
+
+    monkeypatch.setattr("app.ui.main_window._komputer_server", lambda: server)
+    if server:
+        from app.services import device_service
+
+        monkeypatch.setattr(
+            "app.services.kiosk_server.api_sudah_berjalan", lambda port=8765: False
+        )
+        _status_palsu(monkeypatch)
+        for nomor, (nama, jenis) in enumerate(
+            [
+                ("Tablet Lobi", "anjungan"),
+                ("Tablet Pintu", "anjungan"),
+                ("Tablet Lantai 2", "anjungan"),
+                ("TV Ruang Tunggu", "layar_antrian"),
+            ]
+        ):
+            device_service.catat_kontak(
+                f"perangkat-uji-{nomor:04d}", nama=nama, jenis=jenis,
+                alamat_ip=f"192.168.1.{30 + nomor}", versi_nama="2.4.21",
+            )
+
+    lebar = 1366
+
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    jendela.show()
+    jendela.resize(lebar, 768)
+    qtbot.wait(10)
+
+    bermasalah = []
+
+    def periksa(halaman, judul_halaman):
+        for gulir in halaman.findChildren(QScrollArea):
+            if not gulir.isVisibleTo(jendela):
+                continue
+            horizontal = gulir.horizontalScrollBar().maximum()
+            vertikal = gulir.verticalScrollBar().maximum()
+            if horizontal or vertikal:
+                bermasalah.append(
+                    (
+                        judul_halaman,
+                        gulir.objectName() or type(gulir).__name__,
+                        horizontal,
+                        vertikal,
+                    )
+                )
+
+    for indeks in range(jendela.halaman.count()):
+        jendela.navigasi.setCurrentRow(indeks)
+        qtbot.wait(1)
+        halaman = jendela.halaman.widget(indeks)
+        judul_halaman = jendela.menu_aktif[indeks].judul
+        pengaturan = (
+            [halaman] if isinstance(halaman, SettingsPage)
+            else halaman.findChildren(SettingsPage)
+        )
+        if not pengaturan:
+            periksa(halaman, judul_halaman)
+            continue
+        rail = pengaturan[0].rail
+        for baris in range(rail.count()):
+            rail.setCurrentRow(baris)
+            qtbot.wait(1)
+            periksa(halaman, f"{judul_halaman} / {rail.item(baris).text()}")
+
+    assert bermasalah == []
 
 
 def test_esc_setelah_f11_kembali_ke_posisi_terakhir(qtbot, admin_auth):
@@ -975,6 +1199,46 @@ def test_tab_bar_tidak_memakai_panah_gulir(halaman_master):
     assert not halaman_master.tab.tabBar().usesScrollButtons()
 
 
+def test_label_tab_admin_tidak_dielipsis_saat_dipilih(halaman_master):
+    """Memilih tab panjang tidak boleh memotong ujung labelnya."""
+    bar = halaman_master.tab.tabBar()
+    label = ["Loket", "Jenis Layanan", "Akun Petugas", "Identitas Kantor"]
+
+    assert bar.elideMode() is Qt.TextElideMode.ElideNone
+    for indeks, teks in enumerate(label):
+        halaman_master.tab.setCurrentIndex(indeks)
+        assert halaman_master.tab.tabText(indeks) == teks
+        assert bar.tabSizeHint(indeks).width() >= bar.fontMetrics().horizontalAdvance(teks)
+
+
+def test_dialog_data_master_panjang_muat_di_monitor_dan_dapat_digulir(qtbot):
+    """Daftar layanan panjang tidak boleh mendorong tombol Simpan keluar layar."""
+    from types import SimpleNamespace
+
+    loket = SimpleNamespace(name="Loket Uji", category_ids=())
+    kategori = [
+        SimpleNamespace(
+            id=indeks,
+            name=f"Jenis layanan panjang nomor {indeks}",
+            prefix=f"X{indeks}",
+            level=indeks % 3,
+            punya_anak=False,
+            is_active=True,
+        )
+        for indeks in range(1, 41)
+    ]
+    dialog = CounterCategoryDialog(counter=loket, categories=kategori)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.wait(10)
+
+    area = dialog.screen().availableGeometry()
+    assert dialog.width() <= area.width() - 32
+    assert dialog.height() <= area.height() - 32
+    assert dialog._gulir_form.verticalScrollBar().maximum() > 0
+    assert dialog.tombol_simpan.isVisibleTo(dialog)
+
+
 # ---------------------------------------------------------------------
 # Halaman penerbitan nomor (Phase 4)
 # ---------------------------------------------------------------------
@@ -1014,6 +1278,30 @@ def test_nomor_berurutan_saat_tombol_ditekan_berkali_kali(halaman_daftar, antria
     for harapan in ("A-001", "A-002", "A-003"):
         halaman_daftar.terbitkan(kategori)
         assert halaman_daftar.label_nomor.text() == harapan
+
+
+def test_pintasan_pendaftaran_tidak_bertambah_setelah_refresh(halaman_daftar):
+    """F5 tidak boleh membuat shortcut angka ambigu dan berhenti bekerja."""
+    from PySide6.QtGui import QShortcut
+
+    awal = len(halaman_daftar.findChildren(QShortcut))
+    halaman_daftar.muat_ulang()
+    halaman_daftar.muat_ulang()
+
+    assert len(halaman_daftar.findChildren(QShortcut)) == awal
+
+
+def test_jalur_ui_pendaftaran_menahan_klik_ganda(
+    qtbot, halaman_daftar, antrian_siap
+):
+    kategori = antrian_siap["kategori"]["A"]
+
+    halaman_daftar._minta_terbitkan(kategori)
+    halaman_daftar._minta_terbitkan(kategori)
+
+    assert halaman_daftar.label_nomor.text() == "A-001"
+    assert len(halaman_daftar.queue.list_waiting()) == 1
+    qtbot.wait(550)
 
 
 def test_sinyal_dipancarkan_saat_nomor_terbit(qtbot, halaman_daftar, antrian_siap):
@@ -1745,7 +2033,11 @@ def test_menu_pengaturan_hanya_untuk_admin(qtbot, auth, antrian_siap):
         assert "Pengaturan" not in menu
 
 
-def test_admin_melihat_menu_pengaturan(qtbot, admin_auth):
+def test_admin_melihat_menu_pengaturan(qtbot, admin_auth, monkeypatch):
+    # Ditetapkan, bukan disimpulkan dari jenis database: suite yang
+    # dijalankan di atas PostgreSQL lokal membuat komputer ini terbaca
+    # sebagai server.
+    monkeypatch.setattr("app.ui.main_window._komputer_server", lambda: False)
     from app.ui.main_window import MainWindow
 
     jendela = MainWindow(admin_auth)
@@ -1753,7 +2045,6 @@ def test_admin_melihat_menu_pengaturan(qtbot, admin_auth):
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
 
     assert "Pengaturan" in menu
-    # Test berjalan di atas SQLite, jadi komputer ini bukan server.
     assert "Layanan Anjungan" not in menu
 
 
@@ -2087,6 +2378,27 @@ def test_supervisor_hanya_memantau(qtbot, auth, antrian_siap):
     assert menu == ["Pengaduan", "Ringkasan Harian", "Laporan", "Hasil Survey"]
 
 
+def test_timer_hanya_berjalan_pada_halaman_yang_terlihat(qtbot, auth, antrian_siap):
+    from app.ui.dashboard.dashboard_page import DashboardPage
+    from app.ui.main_window import MainWindow
+    from app.ui.notes.note_page import NotePage
+
+    auth.logout()
+    auth.login("supervisor", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+    jendela.show()
+
+    catatan = jendela.findChild(NotePage)
+    ringkasan = jendela.findChild(DashboardPage)
+    qtbot.waitUntil(lambda: catatan.penyegar.isActive())
+    assert not ringkasan.penyegar.isActive()
+
+    jendela.navigasi.setCurrentRow(1)
+    qtbot.waitUntil(lambda: ringkasan.penyegar.isActive())
+    assert not catatan.penyegar.isActive()
+
+
 def test_tombol_minta_survey_aktif_setelah_pelayanan_selesai(
     halaman_layanan, antrian_siap, terbitkan
 ):
@@ -2100,6 +2412,107 @@ def test_tombol_minta_survey_aktif_setelah_pelayanan_selesai(
 
     assert halaman_layanan.tombol_survey.isEnabled()
     assert "belum dinilai" in halaman_layanan.label_survey.text()
+
+
+def test_pelayanan_terlihat_memuat_nomor_baru_di_worker(
+    qtbot, halaman_layanan, terbitkan
+):
+    halaman_layanan.show()
+    qtbot.waitUntil(lambda: halaman_layanan._pekerja_data is None, timeout=3000)
+    halaman_layanan.pewaktu_data.stop()
+
+    terbitkan("A")
+    halaman_layanan.muat_ulang()
+
+    qtbot.waitUntil(lambda: halaman_layanan.label_jumlah.text() == "1", timeout=3000)
+    assert halaman_layanan._pekerja_data is None
+
+
+def test_refresh_gagal_mempertahankan_keadaan_terakhir(
+    qtbot, halaman_layanan, terbitkan, monkeypatch
+):
+    terbitkan("A")
+    halaman_layanan.muat_ulang()
+    halaman_layanan.panggil_berikutnya()
+    nomor_lama = halaman_layanan.antrian.queue_number
+
+    halaman_layanan.show()
+    qtbot.waitUntil(lambda: halaman_layanan._pekerja_data is None, timeout=3000)
+    halaman_layanan.pewaktu_data.stop()
+
+    def gagal(_loket_id):
+        raise RuntimeError("koneksi uji terputus")
+
+    monkeypatch.setattr(halaman_layanan, "_ambil_snapshot", gagal)
+    halaman_layanan.muat_ulang()
+    qtbot.waitUntil(lambda: halaman_layanan._pekerja_data is None, timeout=3000)
+
+    assert halaman_layanan.antrian.queue_number == nomor_lama
+    assert halaman_layanan.label_sinkron.isVisibleTo(halaman_layanan)
+    assert not halaman_layanan.tombol_panggil.isEnabled()
+
+
+def test_refresh_selesai_tidak_membuka_tombol_saat_aksi_masih_berjalan(
+    halaman_layanan,
+):
+    """Worker data dan worker aksi boleh selesai dalam urutan apa pun."""
+
+    class PekerjaSelesai:
+        def deleteLater(self):
+            pass
+
+    halaman_layanan._set_sibuk(True)
+    halaman_layanan._pekerja_data = PekerjaSelesai()
+    halaman_layanan._pekerja_aksi = object()
+
+    halaman_layanan._bersihkan_pekerja_data()
+
+    assert halaman_layanan._sedang_sibuk
+    assert not halaman_layanan.tombol_panggil.isEnabled()
+    halaman_layanan._pekerja_aksi = None
+
+
+def test_aksi_worker_menangkap_id_antrian_sebelum_dijalankan(
+    halaman_layanan, monkeypatch
+):
+    """Refresh paralel tidak boleh memindahkan aksi ke nomor lain."""
+    from types import SimpleNamespace
+
+    lama = SimpleNamespace(id=101)
+    baru = SimpleNamespace(id=202)
+    halaman_layanan.antrian = lama
+    halaman_layanan.aksi["panggil_ulang"].setEnabled(True)
+    tertunda = {}
+
+    def simpan_aksi(aksi, *_args, **_kwargs):
+        tertunda["aksi"] = aksi
+
+    monkeypatch.setattr(halaman_layanan, "_jalankan", simpan_aksi)
+    monkeypatch.setattr(halaman_layanan.queue, "recall", lambda queue_id: queue_id)
+
+    halaman_layanan.panggil_ulang()
+    halaman_layanan.antrian = baru
+
+    assert tertunda["aksi"]() == 101
+
+
+def test_memanggil_nomor_baru_menutup_survey_nomor_lama(
+    halaman_layanan, antrian_siap, terbitkan
+):
+    terbitkan("A", 2)
+    halaman_layanan.muat_ulang()
+    halaman_layanan.panggil_berikutnya()
+    halaman_layanan.mulai_melayani()
+    halaman_layanan.selesaikan()
+    nomor_lama = halaman_layanan.baru_selesai
+
+    halaman_layanan.panggil_berikutnya()
+
+    assert nomor_lama is not None
+    assert halaman_layanan.antrian is not None
+    assert halaman_layanan.antrian.queue_number == "A-002"
+    assert halaman_layanan.baru_selesai is None
+    assert not halaman_layanan.tombol_survey.isEnabled()
 
 
 @pytest.mark.parametrize(
@@ -2174,20 +2587,58 @@ def test_loket_bawaan_langsung_terpilih_saat_masuk(qtbot, auth, antrian_siap, us
     auth.logout()
     auth.login("cro", TEST_PASSWORD)
 
-    assert _halaman_layanan(qtbot, auth).loket_id == loket
+    halaman = _halaman_layanan(qtbot, auth)
+
+    assert halaman.loket_id == loket
+    assert not halaman.pilih_loket.isEnabled()
 
 
-def test_tanpa_loket_bawaan_jatuh_ke_pilihan_pertama(qtbot, auth, antrian_siap):
-    """Perilaku lama dipertahankan bagi akun yang belum diatur."""
+def test_halaman_pelayanan_mengikuti_perubahan_loket_dari_admin(
+    qtbot, auth, antrian_siap, users
+):
+    from app.services.auth_service import AuthService
+    from app.services.user_service import UserService
+
+    lama, baru = antrian_siap["loket"][:2]
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    UserService(auth).update_user(
+        users["CRO"], full_name="Petugas Cro", role="CRO", default_counter_id=lama
+    )
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    assert auth.current_session.default_counter_id == lama
+
+    admin = AuthService()
+    admin.login("admin", TEST_PASSWORD)
+    UserService(admin).update_user(
+        users["CRO"], full_name="Petugas Cro", role="CRO", default_counter_id=baru
+    )
+
+    halaman = _halaman_layanan(qtbot, auth)
+
+    assert auth.current_session.default_counter_id == baru
+    assert halaman.loket_id == baru
+    assert halaman.tombol_ganti_loket.isVisibleTo(halaman)
+
+
+def test_tanpa_loket_bawaan_wajib_memilih_dulu(qtbot, auth, antrian_siap):
+    """Jangan diam-diam memakai loket pertama untuk akun yang belum diatur."""
     auth.logout()
     auth.login("cro", TEST_PASSWORD)
     halaman = _halaman_layanan(qtbot, auth)
 
-    assert halaman.loket_id == antrian_siap["loket"][0]
+    assert halaman.loket_id is None
+    assert halaman.pilih_loket.isEnabled()
+    assert not halaman.tombol_panggil.isEnabled()
+    assert not halaman.tombol_ganti_loket.isVisibleTo(halaman)
 
 
-def test_pindah_loket_dari_panel_diingat(qtbot, auth, antrian_siap):
+def test_pilih_loket_pertama_dari_panel_diingat(
+    qtbot, auth, antrian_siap, monkeypatch
+):
     """Petugas pindah meja tanpa memanggil admin, dan besok tidak mengulang."""
+    monkeypatch.setattr("app.ui.queue.service_page.konfirmasi", lambda *_args: True)
     auth.logout()
     auth.login("cro", TEST_PASSWORD)
     halaman = _halaman_layanan(qtbot, auth)
@@ -2197,9 +2648,45 @@ def test_pindah_loket_dari_panel_diingat(qtbot, auth, antrian_siap):
     )
 
     assert auth.current_session.default_counter_id == antrian_siap["loket"][1]
+    assert not halaman.pilih_loket.isEnabled()
+    assert halaman.tombol_ganti_loket.isVisibleTo(halaman)
 
 
-def test_loket_khusus_hanya_menawarkan_layanannya(qtbot, auth, antrian_siap):
+def test_ganti_loket_memerlukan_tombol_dan_konfirmasi(
+    qtbot, auth, antrian_siap, users, monkeypatch
+):
+    from app.services.user_service import UserService
+
+    lama, baru = antrian_siap["loket"][:2]
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    UserService(auth).update_user(
+        users["CRO"], full_name="Petugas Cro", role="CRO", default_counter_id=lama
+    )
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman = _halaman_layanan(qtbot, auth)
+
+    pertanyaan = []
+    monkeypatch.setattr(
+        "app.ui.queue.service_page.konfirmasi",
+        lambda _parent, pesan, _judul: pertanyaan.append(pesan) or True,
+    )
+
+    halaman.tombol_ganti_loket.click()
+    assert halaman.pilih_loket.isEnabled()
+    assert not halaman.tombol_panggil.isEnabled()
+
+    halaman.pilih_loket.setCurrentIndex(halaman.pilih_loket.findData(baru))
+
+    assert pertanyaan and "Pindah dari" in pertanyaan[0]
+    assert auth.current_session.default_counter_id == baru
+    assert not halaman.pilih_loket.isEnabled()
+
+
+def test_loket_khusus_hanya_menawarkan_layanannya(
+    qtbot, auth, antrian_siap, monkeypatch
+):
     """
     Menawarkan jenis layanan yang pasti ditolak service hanya membuat
     petugas menabrak pesan kesalahan tanpa sebab yang terlihat.
@@ -2216,6 +2703,8 @@ def test_loket_khusus_hanya_menawarkan_layanannya(qtbot, auth, antrian_siap):
     auth.logout()
     auth.login("cro", TEST_PASSWORD)
     halaman = _halaman_layanan(qtbot, auth)
+    monkeypatch.setattr("app.ui.queue.service_page.konfirmasi", lambda *_args: True)
+    halaman.pilih_loket.setCurrentIndex(halaman.pilih_loket.findData(loket))
 
     tersedia = {
         halaman.pilih_kategori.itemData(i)
@@ -2224,10 +2713,16 @@ def test_loket_khusus_hanya_menawarkan_layanannya(qtbot, auth, antrian_siap):
     assert tersedia == {None, antrian_siap["kategori"]["B"]}
 
 
-def test_loket_tanpa_batasan_menawarkan_semua_layanan(qtbot, auth, antrian_siap):
+def test_loket_tanpa_batasan_menawarkan_semua_layanan(
+    qtbot, auth, antrian_siap, monkeypatch
+):
     auth.logout()
     auth.login("cro", TEST_PASSWORD)
     halaman = _halaman_layanan(qtbot, auth)
+    monkeypatch.setattr("app.ui.queue.service_page.konfirmasi", lambda *_args: True)
+    halaman.pilih_loket.setCurrentIndex(
+        halaman.pilih_loket.findData(antrian_siap["loket"][0])
+    )
 
     assert halaman.pilih_kategori.count() == len(antrian_siap["kategori"]) + 1
 
@@ -2428,3 +2923,25 @@ def test_kartu_perangkat_menampilkan_kode_pasang(qtbot, admin_auth, monkeypatch)
 
     angka = tampil["kode"].replace(" ", "")
     assert len(angka) == 6 and angka.isdigit()
+
+
+def test_bilah_status_petugas_tanpa_info_teknis(qtbot, auth, app_config, monkeypatch):
+    """Petugas loket tidak dapat memperbaiki Firewall atau API; jangan buat cemas."""
+    from app.core.peran import PeranKomputer, path_berkas_peran, tulis_peran
+
+    monkeypatch.setattr("app.ui.main_window._komputer_server", lambda: True)
+    tulis_peran(
+        path_berkas_peran(app_config.db_path), PeranKomputer(peran="petugas")
+    )
+    auth.login("cro", TEST_PASSWORD)
+
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+
+    assert not hasattr(jendela, "_label_peran")
+    assert getattr(jendela, "_label_api", None) is None
+    assert getattr(jendela, "pita_anjungan", None) is None
+    teks = jendela.findChild(QLabel, "statusDatabase").text()
+    assert teks == "Database: ● tersambung"
+    jendela._tampilkan_status_database(False)
+    assert "hubungi admin" in jendela.findChild(QLabel, "statusDatabase").text()

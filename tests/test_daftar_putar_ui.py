@@ -75,7 +75,7 @@ def test_peringatan_bila_panel_dikembalikan_ke_teks(halaman):
     jenis.tulis("teks")
 
     assert not daftar.peringatan.isHidden()
-    assert "belum tayang" in daftar.peringatan.text()
+    assert "Belum tayang" in daftar.peringatan.text()
 
 
 def test_peringatan_untuk_pengaturan_lama_yang_tersimpan(qtbot, admin_auth, seeded, folder):
@@ -85,7 +85,7 @@ def test_peringatan_untuk_pengaturan_lama_yang_tersimpan(qtbot, admin_auth, seed
     halaman = SettingsPage(SettingsService(admin_auth))
     qtbot.addWidget(halaman)
 
-    assert "belum tayang" in _daftar(halaman).peringatan.text()
+    assert "Belum tayang" in _daftar(halaman).peringatan.text()
     assert not halaman.berubah(), "membuka halaman saja tidak mengubah apa pun"
 
 

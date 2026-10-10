@@ -85,7 +85,7 @@ JEDA_PESAN = 4000
 #: Lebar kolom kelompok di kiri, termasuk padding kartu. Cukup untuk
 #: "Ringkasan Harian" pada satu baris — nama kelompok yang terlipat dua
 #: baris membuat daftarnya terbaca sebagai paragraf, bukan sebagai daftar.
-LEBAR_RAIL = 252
+LEBAR_RAIL = 220
 
 #: Lebar kotak isian di kanan setiap baris.
 #:
@@ -93,18 +93,27 @@ LEBAR_RAIL = 252
 #: untuk menampung angka "3" memaksa mata berjalan jauh dari nama
 #: pengaturannya ke nilainya, dan itu satu-satunya pasangan yang benar-benar
 #: perlu dibaca bersamaan di layar ini.
-LEBAR_KONTROL_MIN = 300
-LEBAR_KONTROL_MAKS = 460
+#:
+#: Kolomnya selebar tetap, dan seluruh sisa lebar baris menjadi milik
+#: penjelasan. Pembagian 3:2 sebelumnya menyisakan ruang kosong di kiri
+#: kotak isian sementara penjelasan terlipat sampai delapan baris, sehingga
+#: kelompok berisi lima pengaturan tidak muat satu layar 1366 x 768.
+LEBAR_KONTROL = 340
 
 #: Kalimat pengantar tiap kelompok. Tinggal di sini, bukan di SKEMA:
 #: yang dijelaskan adalah letaknya di layar, dan itu urusan tampilan.
 KETERANGAN_KELOMPOK: dict[str, str] = {
     "Tiket": "Cara nomor dicetak dan apa yang tertulis pada tiketnya.",
-    "Layar Antrian": (
-        "Papan yang menghadap pengunjung di ruang tunggu, dan papan kecil "
-        "di dalam anjungan."
+    "Layar Antrian": "Papan yang menghadap pengunjung di ruang tunggu.",
+    "Nomor Layar Antrian": (
+        "Nomor berikutnya dan nomor menunggu di layar antrian, juga papan "
+        "kecil di dalam anjungan."
     ),
-    "Antrian": "Aturan pemanggilan dan panel anjungan ambil nomor.",
+    "Suara Panggilan": "Bunyi dan suara saat nomor dipanggil di layar antrian.",
+    "Antrian": "Aturan pemanggilan dan jeda ambil nomor.",
+    "Anjungan": "Judul, tema, dan letak baris loket di tablet ambil nomor.",
+    "Panel Anjungan": "Isi panel besar di atas tombol layanan: teks atau media.",
+    "Iklan Anjungan": "Urutan, jadwal, dan cara iklan diputar di tablet.",
     "Survey": "Penilaian kepuasan yang diminta setelah pelayanan selesai.",
     "Ringkasan Harian": "Layar rekap yang dibaca penyelia sepanjang hari.",
     "Backup": "Salinan database dan berapa lama salinan itu disimpan.",
@@ -230,7 +239,7 @@ class _DaftarPutar(QWidget):
 
         self.daftar = QListWidget()
         self.daftar.setObjectName("daftarPutarMedia")
-        self.daftar.setMinimumHeight(190)
+        self.daftar.setMinimumHeight(160)
         self.daftar.setWordWrap(True)
         self.daftar.itemChanged.connect(self._pada_centang)
         self.daftar.itemDoubleClicked.connect(lambda _item: self.atur_jadwal())
@@ -471,8 +480,11 @@ class _BarisPengaturan(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         susunan = QHBoxLayout(self)
-        susunan.setContentsMargins(18, 14, 18, 14)
-        susunan.setSpacing(28)
+        # Form admin harus muat pada layar penuh 1366x768. Jarak 14 px di
+        # atas DAN bawah tiap baris menumpuk menjadi lebih dari satu baris
+        # kontrol pada kelompok berisi lima pengaturan.
+        susunan.setContentsMargins(18, 8, 18, 8)
+        susunan.setSpacing(18)
 
         kiri = QVBoxLayout()
         kiri.setSpacing(3)
@@ -485,10 +497,13 @@ class _BarisPengaturan(QFrame):
         self.penjelasan.setWordWrap(True)
         self.penjelasan.setProperty("muted", "true")
         kiri.addWidget(self.penjelasan)
-        susunan.addLayout(kiri, stretch=3)
+        # Baris yang kontrolnya tinggi (daftar putar) tidak boleh membuat
+        # nama dan penjelasannya melayang terpisah di tengah dan di bawah.
+        kiri.addStretch()
+        susunan.addLayout(kiri, stretch=1)
 
         self.kontrol = self._bangun_kontrol()
-        susunan.addWidget(self._bungkus(self.kontrol), stretch=2)
+        susunan.addWidget(self._bungkus(self.kontrol))
         self._hubungkan()
 
     # -----------------------------------------------------------------
@@ -530,12 +545,12 @@ class _BarisPengaturan(QFrame):
     def _bungkus(self, kontrol: QWidget) -> QWidget:
         """Kontrol dirapatkan ke kanan pada lebar yang seragam."""
         kotak = QWidget()
+        kotak.setFixedWidth(LEBAR_KONTROL)
         tata = QHBoxLayout(kotak)
         tata.setContentsMargins(0, 0, 0, 0)
         tata.addStretch()
         if self.butir.jenis != BOOLEAN:
-            kontrol.setMinimumWidth(LEBAR_KONTROL_MIN)
-            kontrol.setMaximumWidth(LEBAR_KONTROL_MAKS)
+            kontrol.setFixedWidth(LEBAR_KONTROL)
         tata.addWidget(kontrol, alignment=Qt.AlignmentFlag.AlignTop)
         return kotak
 
@@ -684,8 +699,8 @@ class SettingsPage(QWidget):
 
     def _bangun_tampilan(self) -> None:
         luar = QVBoxLayout(self)
-        luar.setContentsMargins(24, 20, 24, 0)
-        luar.setSpacing(14)
+        luar.setContentsMargins(24, 16, 24, 0)
+        luar.setSpacing(10)
 
         luar.addWidget(judul("Pengaturan Aplikasi"))
         luar.addWidget(
@@ -780,7 +795,7 @@ class SettingsPage(QWidget):
 
         isi = QWidget()
         susunan = QVBoxLayout(isi)
-        susunan.setContentsMargins(0, 0, 10, 16)
+        susunan.setContentsMargins(0, 0, 10, 8)
         susunan.setSpacing(6)
 
         susunan.addWidget(judul(nama))
@@ -791,7 +806,7 @@ class SettingsPage(QWidget):
         kartu = QFrame()
         kartu.setObjectName("kartuPengaturan")
         kartu_susunan = QVBoxLayout(kartu)
-        kartu_susunan.setContentsMargins(0, 6, 0, 6)
+        kartu_susunan.setContentsMargins(0, 4, 0, 4)
         kartu_susunan.setSpacing(0)
         for indeks, baris in enumerate(baris_baris):
             if indeks:
@@ -902,7 +917,7 @@ class SettingsPage(QWidget):
         bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         susunan = QHBoxLayout(bar)
-        susunan.setContentsMargins(0, 12, 0, 12)
+        susunan.setContentsMargins(0, 8, 0, 8)
         susunan.setSpacing(12)
 
         self.pesan = QLabel("")
@@ -1053,8 +1068,7 @@ class SettingsPage(QWidget):
             return
         tidak_tayang = jenis.nilai() == "teks" and daftar.kontrol.ada_yang_diputar()
         daftar.kontrol.tampilkan_peringatan(
-            "Iklan yang dicentang belum tayang: Tampilan panel anjungan masih "
-            "Teks sambutan. Pilih Folder media lalu simpan."
+            "Belum tayang: Panel Anjungan masih memakai Teks sambutan."
             if tidak_tayang
             else ""
         )

@@ -17,6 +17,12 @@ import pytest
 # Widget Qt harus dapat dibuat tanpa layar fisik agar test dapat berjalan
 # di terminal maupun pada mesin build. Harus diset sebelum Qt diimpor.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Qt offscreen tidak membawa font sendiri. Tanpa folder font setiap huruf
+# digambar sebagai kotak selebar "M", sehingga test tata letak ("muat satu
+# layar 1366 x 768") mengukur teks dua kali lebih lebar dari kenyataan.
+_FONT_WINDOWS = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+if _FONT_WINDOWS.is_dir():
+    os.environ.setdefault("QT_QPA_FONTDIR", str(_FONT_WINDOWS))
 from sqlalchemy.orm import Session
 
 from app.core import config as config_module

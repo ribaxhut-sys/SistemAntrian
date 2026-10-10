@@ -4,18 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, QSize, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
     QFileDialog,
+    QFrame,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -131,7 +133,6 @@ class _DialogIsian(QDialog):
     def __init__(self, parent: QWidget | None, judul_teks: str, penjelasan: str = "") -> None:
         super().__init__(parent)
         self.setWindowTitle(judul_teks)
-        self.setMinimumWidth(440)
 
         self._susunan = QVBoxLayout(self)
         self._susunan.setContentsMargins(28, 24, 28, 24)
@@ -140,9 +141,23 @@ class _DialogIsian(QDialog):
         if penjelasan:
             self._susunan.addWidget(keterangan(penjelasan))
 
-        self.form = QFormLayout()
+        self._gulir_form = QScrollArea()
+        self._gulir_form.setObjectName("gulirFormDialog")
+        self._gulir_form.setWidgetResizable(True)
+        self._gulir_form.setFrameShape(QFrame.Shape.NoFrame)
+        self._gulir_form.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._gulir_form.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+
+        self._isi_form = QWidget()
+        self.form = QFormLayout(self._isi_form)
+        self.form.setContentsMargins(0, 0, 8, 0)
         self.form.setSpacing(12)
-        self._susunan.addLayout(self.form)
+        self._gulir_form.setWidget(self._isi_form)
+        self._susunan.addWidget(self._gulir_form, stretch=1)
 
         self.pesan_kesalahan = label_error()
         self._susunan.addWidget(self.pesan_kesalahan)
@@ -156,6 +171,20 @@ class _DialogIsian(QDialog):
         self.tombol_simpan.clicked.connect(self.simpan)
         baris.addWidget(self.tombol_simpan)
         self._susunan.addLayout(baris)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - nama Qt
+        """Batasi dialog ke area monitor; isi panjang tetap dapat digulir."""
+        super().showEvent(event)
+        layar = self.screen()
+        if layar is None:
+            return
+        area = layar.availableGeometry()
+        maksimum = QSize(max(1, area.width() - 32), max(1, area.height() - 32))
+        self.setMinimumWidth(min(440, maksimum.width()))
+        self.setMaximumSize(maksimum)
+        ideal = self.sizeHint().boundedTo(maksimum)
+        ideal.setWidth(min(maksimum.width(), max(self.minimumWidth(), ideal.width())))
+        self.resize(ideal)
 
     def tampilkan_kesalahan(self, pesan: str, fokus: QWidget | None = None) -> None:
         self.pesan_kesalahan.setText(pesan)

@@ -756,7 +756,10 @@ class KartuLoket(QFrame):
             return
         dalam = max(1, self.height() - 2 * self.palet.tebal_tepi - 8)
         penuh = self._tinggi_butuh(self.skala)
-        target = 1.0 if penuh <= dalam else max(0.35, dalam / penuh)
+        # Perkiraan tinggi isi sedikit di bawah kenyataan dengan font
+        # sungguhan (Bahnschrift/Segoe): tanpa sisa 5% nomor di kartu kecil
+        # bento masih terpotong 2-3 px di tepi atasnya.
+        target = 1.0 if penuh <= dalam else max(0.35, dalam / penuh * 0.95)
         if abs(target - self._faktor_muat) < 0.02:
             return
         self._faktor_muat = target

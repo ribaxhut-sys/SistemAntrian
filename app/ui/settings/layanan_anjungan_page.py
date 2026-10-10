@@ -194,8 +194,8 @@ class LayananAnjunganPage(QWidget):
         self._status: StatusLayanan | None = None
         self._alamat = alamat_ipv4_lan()
 
-        # Isi halaman lebih tinggi dari jendela 1280x720 sejak ada daftar
-        # perangkat, jadi seluruhnya digulir.
+        # Gulir hanya cadangan untuk jendela yang diperkecil; pada layar
+        # penuh 1366 x 768 susunan dua kolom di bawah sudah muat.
         luar = QVBoxLayout(self)
         luar.setContentsMargins(0, 0, 0, 0)
         gulir = QScrollArea()
@@ -206,8 +206,8 @@ class LayananAnjunganPage(QWidget):
         luar.addWidget(gulir)
 
         layout = QVBoxLayout(isi_halaman)
-        layout.setContentsMargins(32, 28, 32, 28)
-        layout.setSpacing(14)
+        layout.setContentsMargins(24, 16, 24, 16)
+        layout.setSpacing(12)
         layout.addWidget(judul("Layanan Anjungan"))
         layout.addWidget(
             keterangan(
@@ -246,7 +246,20 @@ class LayananAnjunganPage(QWidget):
                 "Indonesia sendiri. Buat ulang bila nama loket berubah."
             )
         )
-        layout.addWidget(kartu_status)
+        # Dua kolom: pada 1366 x 768 seluruh halaman muat satu layar.
+        # Ditumpuk satu kolom, status dan tablet saja sudah melewati tinggi
+        # layar sebelum daftar perangkat sempat terlihat.
+        dua_kolom = QHBoxLayout()
+        dua_kolom.setSpacing(16)
+        kiri = QVBoxLayout()
+        kiri.setSpacing(12)
+        kiri.addWidget(kartu_status)
+        kiri.addStretch()
+        kanan = QVBoxLayout()
+        kanan.setSpacing(12)
+        dua_kolom.addLayout(kiri, stretch=1)
+        dua_kolom.addLayout(kanan, stretch=1)
+        layout.addLayout(dua_kolom)
 
         # --- Sambungkan tablet ----------------------------------------------
         kartu_tablet, isi_tablet = _kartu("Sambungkan tablet")
@@ -297,10 +310,11 @@ class LayananAnjunganPage(QWidget):
         isi_tablet.addWidget(
             keterangan(
                 "Di tablet: ⚙ Pengaturan Server → Cari Server Otomatis, atau isi "
-                "alamat dan token di atas. Profil jaringan Windows harus Private."
+                "alamat dan token di atas. Tablet harus berada di jaringan lokal "
+                "yang sama dengan komputer ini."
             )
         )
-        layout.addWidget(kartu_tablet)
+        kanan.addWidget(kartu_tablet)
 
         # --- Tindakan -------------------------------------------------------
         self.catatan = QLabel()
@@ -310,7 +324,7 @@ class LayananAnjunganPage(QWidget):
             " border-radius: 8px; padding: 10px 14px;"
         )
         self.catatan.hide()
-        layout.addWidget(self.catatan)
+        kanan.addWidget(self.catatan)
 
         tindakan = QHBoxLayout()
         self.pasang = tombol(_teks_tombol(LABEL_PASANG), variant="primary")
@@ -322,16 +336,21 @@ class LayananAnjunganPage(QWidget):
         tindakan.addWidget(self.pasang)
         tindakan.addWidget(self.mulai_ulang)
         tindakan.addWidget(self.hapus)
-        tindakan.addStretch()
-        layout.addLayout(tindakan)
 
-        self.api_otomatis = QCheckBox(
-            "Nyalakan API juga saat aplikasi ini dibuka "
-            "(cadangan bila Task Scheduler gagal)"
+        # Kotak centang tidak melipat teksnya; kalimat panjang memaksa
+        # kolom kanan melebar dan halaman bergulir ke samping.
+        self.api_otomatis = QCheckBox("Nyalakan API juga saat aplikasi ini dibuka")
+        self.api_otomatis.setToolTip(
+            "Cadangan bila Task Scheduler gagal menyalakan API saat Windows mulai."
         )
         self.api_otomatis.setChecked(muat_api_otomatis())
         self.api_otomatis.toggled.connect(self._ubah_api_otomatis)
-        layout.addWidget(self.api_otomatis)
+        # Sebaris dengan tombol tindakan: keduanya tentang cara API menyala.
+        tindakan.addSpacing(8)
+        tindakan.addWidget(self.api_otomatis)
+        tindakan.addStretch()
+        kanan.addLayout(tindakan)
+        kanan.addStretch()
 
         self.kartu_perangkat = None
         if perangkat is not None:
@@ -389,10 +408,14 @@ class LayananAnjunganPage(QWidget):
             )
 
         if status.firewall:
-            self.baris_firewall.setel(_NORMAL, "TCP 8765 & UDP 8766 terbuka (jaringan Private)")
+            self.baris_firewall.setel(
+                _NORMAL, "TCP 8765 & UDP 8766 terbuka untuk jaringan lokal"
+            )
         else:
             self.baris_firewall.setel(
-                _BELUM, "Belum dibuka — tablet tidak dapat menjangkau komputer ini"
+                _BELUM,
+                "Belum dibuka atau masih aturan lama (hanya jaringan Private) — "
+                "tekan Pasang ulang",
             )
 
         apk = status.apk

@@ -597,7 +597,7 @@ class UserTab(_TabelTab):
             return
         berhasil_loket, loket = jalankan_aman(self, self.master.list_counters)
         self.loket = loket if berhasil_loket else []
-        nama_loket = {l.id: l.name for l in self.loket}
+        nama_loket = {loket.id: loket.name for loket in self.loket}
 
         self.data = data
         self.tabel.setRowCount(len(data))
@@ -800,6 +800,10 @@ class MasterDataPage(QWidget):
         # Tanpa ini, Qt memasang panah gulir yang menutupi tab pertama dan
         # terakhir walaupun ruangnya masih lebar.
         self.tab.tabBar().setUsesScrollButtons(False)
+        # Label panjang seperti "Identitas Kantor" tidak boleh berubah
+        # menjadi elipsis atau terpotong ketika tab mendapat fokus/terpilih.
+        # Gaya global menjaga bobot font tetap, ini menjaga kebijakan Qt-nya.
+        self.tab.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
         self.tab_loket = CounterTab(master)
         self.tab_layanan = CategoryTab(master)
         self.tab_akun = UserTab(users, master)

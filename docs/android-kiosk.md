@@ -146,7 +146,7 @@ Semua memakai animator Android, jadi ikut mati bila opsi pengembang
 
 ### Judul anjungan (mulai APK 2.4.11)
 
-**Pengaturan → Antrian → Judul anjungan** mengganti tulisan di atas tablet
+**Pengaturan → Anjungan → Judul anjungan** mengganti tulisan di atas tablet
 tanpa mengubah judul TV; kosong berarti ikut **Judul layar antrian**.
 **Subjudul anjungan** menambah satu baris kecil di bawahnya (nama kantor,
 jam layanan). ⚙ Pengaturan tablet → **Judul tablet ini** menimpa judul untuk
@@ -155,7 +155,7 @@ hurufnya mengecil bila teksnya panjang.
 
 ### Tema anjungan (mulai APK 2.4.6)
 
-**Pengaturan → Antrian → Tema anjungan**: *Biru instansi* (bawaan), *Hijau
+**Pengaturan → Anjungan → Tema anjungan**: *Biru instansi* (bawaan), *Hijau
 segar*, *Kontras tinggi* (hitam-kuning, huruf 12% lebih besar), *Gelap
 elegan*, dan *Merah putih (perayaan)* dengan pita "Dirgahayu Republik
 Indonesia ke-N" di panel sambutan. **Merah putih otomatis setiap Agustus**
