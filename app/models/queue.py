@@ -84,9 +84,9 @@ class Queue(TimestampMixin, Base):
     counter_id: Mapped[int | None] = mapped_column(
         sa.ForeignKey("counter.id", ondelete="RESTRICT"), index=True
     )
-    # Terisi saat pelayanan dimulai. Dipakai laporan per petugas; tidak
-    # diturunkan dari QueueCall karena pemanggilan ulang bisa dilakukan
-    # petugas yang berbeda dan akan mengacaukan atribusi.
+    # Petugas yang bertanggung jawab sejak nomor dipanggil. Dapat dialihkan
+    # ADMIN bila petugas meninggalkan pelayanan; hasil akhirnya dipakai
+    # laporan per petugas dan survey.
     served_by_user_id: Mapped[int | None] = mapped_column(
         sa.ForeignKey("app_user.id", ondelete="RESTRICT"), index=True
     )

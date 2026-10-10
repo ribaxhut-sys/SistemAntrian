@@ -47,7 +47,15 @@ from app.core import clock
 from app.services.auth_service import AuthService
 from app.services.note_service import NoteInfo, NoteService
 from app.services.permissions import Permission
-from app.ui.common import jalankan_aman, judul, keterangan, konfirmasi, tombol
+from app.ui.common import (
+    PekerjaLatar,
+    jalankan_aman,
+    judul,
+    lepaskan_pekerja,
+    konfirmasi,
+    tampilkan_error,
+    tombol,
+)
 from app.ui.style import (
     BORDER,
     FONT_SIZE_LARGE,
@@ -93,6 +101,8 @@ class NotePage(QWidget):
         self._dari_terakhir: date | None = None
         self._sampai_terakhir: date | None = None
         self._hanya_pengaduan_terakhir = False
+        self._pekerja: PekerjaLatar | None = None
+        self._cari_ditunda = False
 
         self._bangun_tampilan()
         self.muat_ulang()
@@ -108,7 +118,16 @@ class NotePage(QWidget):
         """
         self.penyegar = QTimer(self)
         self.penyegar.timeout.connect(self._segarkan_otomatis)
-        self.penyegar.start(SELANG_PENYEGARAN_MS)
+        self.penyegar.setInterval(SELANG_PENYEGARAN_MS)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - nama Qt
+        super().showEvent(event)
+        self._segarkan_otomatis()
+        self.penyegar.start()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 - nama Qt
+        self.penyegar.stop()
+        super().hideEvent(event)
 
     # -----------------------------------------------------------------
     # Tampilan
@@ -128,12 +147,6 @@ class NotePage(QWidget):
         susunan.setSpacing(12)
 
         susunan.addWidget(judul("Pengaduan & Catatan"))
-        susunan.addWidget(
-            keterangan(
-                "Berisi data pribadi pelapor. Buka seperlunya, dan jangan "
-                "menyalinnya ke luar aplikasi."
-            )
-        )
         susunan.addLayout(self._bangun_penyaring())
 
         isi = QHBoxLayout()
@@ -299,9 +312,15 @@ class NotePage(QWidget):
         yang belum selesai diketik sama saja mendahului petugas yang
         belum meminta apa pun.
         """
-        self._cari_dan_tampilkan()
+        if self.isVisible():
+            self._mulai_cari_latar(diam=True)
+        else:
+            self._cari_dan_tampilkan()
 
     def _cari_dan_tampilkan(self) -> None:
+        if self.isVisible():
+            self._mulai_cari_latar(diam=False)
+            return
         berhasil, data = jalankan_aman(
             self,
             lambda: self.note.cari(
@@ -315,12 +334,63 @@ class NotePage(QWidget):
         if not berhasil:
             return
 
+        self._terapkan_hasil(data)
+
+    def _mulai_cari_latar(self, *, diam: bool) -> None:
+        if self._pekerja is not None:
+            self._cari_ditunda = True
+            return
+        pilih_id = self.terpilih.id if self.terpilih else None
+        kata = self._kata_terakhir
+        dari = self._dari_terakhir
+        sampai = self._sampai_terakhir
+        hanya_pengaduan = self._hanya_pengaduan_terakhir
+        pekerja = PekerjaLatar(
+            lambda: self.note.cari(
+                kata,
+                dari=dari,
+                sampai=sampai,
+                hanya_pengaduan=hanya_pengaduan,
+            ),
+            self,
+        )
+        pekerja.berhasil.connect(
+            lambda data: self._terapkan_hasil(data, pilih_id=pilih_id)
+        )
+        if not diam:
+            pekerja.gagal.connect(
+                lambda exc: tampilkan_error(self, exc, "Gagal membaca pengaduan")
+            )
+        pekerja.finished.connect(self._bersihkan_pekerja)
+        self._pekerja = pekerja
+        pekerja.start()
+
+    def _bersihkan_pekerja(self) -> None:
+        pekerja = self._pekerja
+        self._pekerja = None
+        if pekerja is not None:
+            pekerja.deleteLater()
+        if self._cari_ditunda and self.isVisible():
+            self._cari_ditunda = False
+            self._mulai_cari_latar(diam=True)
+
+    def _terapkan_hasil(self, data, *, pilih_id: int | None = None) -> None:
+
         # Baris yang sedang dibaca petugas TIDAK BOLEH melompat ke baris
         # lain hanya karena penyegaran berkala kebetulan berbunyi —
         # dicatat di sini, sebelum `self.hasil` ditimpa hasil yang baru.
-        dipilih_sebelumnya = self.terpilih.id if self.terpilih else None
+        dipilih_sebelumnya = (
+            pilih_id if pilih_id is not None else (self.terpilih.id if self.terpilih else None)
+        )
         self.hasil = data or []
         self._isi_tabel(pilih_id=dipilih_sebelumnya)
+
+    def hentikan(self) -> None:
+        self.penyegar.stop()
+        if self._pekerja is not None and self._pekerja.isRunning():
+            self._pekerja.wait(3_500)
+        if self._pekerja is not None and self._pekerja.isRunning():
+            lepaskan_pekerja(self._pekerja)
 
     def _isi_tabel(self, pilih_id: int | None = None) -> None:
         self.tabel.setRowCount(len(self.hasil))

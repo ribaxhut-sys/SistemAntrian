@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TypeVar
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QWidget
 
 from app.core.errors import AppError
@@ -22,10 +22,57 @@ logger = get_logger("ui")
 
 T = TypeVar("T")
 
+_PEKERJA_TERTINGGAL: set["PekerjaLatar"] = set()
+
 PESAN_TAK_TERDUGA = (
     "Terjadi kesalahan yang tidak terduga. Silakan coba kembali.\n"
     "Bila terus berulang, hubungi administrator."
 )
+
+
+class PekerjaLatar(QThread):
+    """Jalankan satu fungsi lambat tanpa menahan event loop Qt."""
+
+    berhasil = Signal(object)
+    gagal = Signal(object)
+
+    def __init__(self, aksi: Callable[[], object], parent=None) -> None:
+        super().__init__(parent)
+        self.aksi = aksi
+
+    def run(self) -> None:
+        try:
+            hasil = self.aksi()
+        except Exception as exc:  # noqa: BLE001 - exception dikirim ke thread UI
+            logger.exception("Pekerjaan latar UI gagal")
+            self.gagal.emit(exc)
+            return
+        self.berhasil.emit(hasil)
+
+
+def lepaskan_pekerja(pekerja: PekerjaLatar) -> None:
+    """Biarkan worker yang macet selesai tanpa bergantung pada halaman UI."""
+    if not pekerja.isRunning():
+        return
+
+    # Halaman induk sedang ditutup. Putuskan semua callback agar hasil yang
+    # datang terlambat tidak mengakses widget yang sudah dihancurkan.
+    for sinyal in (pekerja.berhasil, pekerja.gagal, pekerja.finished):
+        try:
+            sinyal.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+
+    pekerja.setParent(None)
+    _PEKERJA_TERTINGGAL.add(pekerja)
+
+    def selesai() -> None:
+        _PEKERJA_TERTINGGAL.discard(pekerja)
+        pekerja.deleteLater()
+
+    pekerja.finished.connect(selesai)
+    if pekerja.isFinished():
+        selesai()
 
 
 def pesan_untuk_user(exc: Exception) -> str:

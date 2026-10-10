@@ -58,17 +58,6 @@ from app.ui.style import (
     WARNING_SOFT,
 )
 
-#: Peringatan tetap di atas kotak keluhan.
-#:
-#: Lembar ini satu-satunya tempat data pribadi disimpan di aplikasi ini,
-#: dan petugas yang sedang terburu-buru tidak akan mengingat itu. Kalimatnya
-#: menyebut apa yang TIDAK perlu ditulis, bukan sekadar mengimbau
-#: berhati-hati — imbauan tanpa isi tidak mengubah apa pun.
-PERINGATAN = (
-    "Isi seperlunya. Jangan menyalin NIK, nomor rekening, atau data lain "
-    "yang tidak dibutuhkan untuk menindaklanjuti pengaduan ini."
-)
-
 #: Tinggi terkecil kedua kotak.
 #:
 #: Kotak setinggi satu baris membuat petugas mengetik keluhan panjang lewat
@@ -126,9 +115,9 @@ class NotePanel(QWidget):
         susunan.setContentsMargins(0, 0, 0, 0)
         susunan.setSpacing(0)
 
-        # Hanya peringatan dan kedua kartu yang digulir. Kaki berisi tombol
-        # Simpan tetap di tempatnya — tombol yang ikut tergulir keluar
-        # layar adalah tombol yang tidak ditemukan petugas.
+        # Kedua kartu dapat digulir. Kaki berisi tombol Simpan tetap di
+        # tempatnya — tombol yang ikut tergulir keluar layar adalah tombol
+        # yang tidak ditemukan petugas.
         gulir = QScrollArea()
         gulir.setWidgetResizable(True)
         gulir.setFrameShape(QFrame.Shape.NoFrame)
@@ -141,7 +130,6 @@ class NotePanel(QWidget):
         badan.setSpacing(12)
 
         badan.addLayout(self._bangun_kepala())
-        badan.addWidget(self._bangun_peringatan())
         badan.addWidget(self._bangun_bagian_pengaduan(), stretch=3)
         badan.addWidget(self._bangun_bagian_catatan(), stretch=2)
 
@@ -158,18 +146,8 @@ class NotePanel(QWidget):
         baris.addWidget(self.kapsul)
         return baris
 
-    def _bangun_peringatan(self) -> QWidget:
-        peringatan = QLabel(PERINGATAN)
-        peringatan.setWordWrap(True)
-        peringatan.setStyleSheet(
-            f"background: {WARNING_SOFT}; color: {WARNING};"
-            f" border-radius: {RADIUS_SM}px; padding: 8px 12px;"
-            f" font-size: {FONT_SIZE_SMALL}px;"
-        )
-        return peringatan
-
     def _bangun_bagian_pengaduan(self) -> QWidget:
-        kartu, badan = self._kartu("PENGADUAN", "Kata pengunjung")
+        kartu, badan = self._kartu("PENGADUAN")
 
         self.isian_deskripsi = QPlainTextEdit()
         self.isian_deskripsi.setPlaceholderText(
@@ -183,7 +161,7 @@ class NotePanel(QWidget):
         return kartu
 
     def _bangun_bagian_catatan(self) -> QWidget:
-        kartu, badan = self._kartu("CATATAN PETUGAS", "Tidak dibacakan ke pengunjung")
+        kartu, badan = self._kartu("CATATAN PETUGAS")
 
         self.isian_catatan = QPlainTextEdit()
         self.isian_catatan.setPlaceholderText(
@@ -219,7 +197,7 @@ class NotePanel(QWidget):
         return kaki
 
     @staticmethod
-    def _kartu(judul_bagian: str, petunjuk: str = "") -> tuple[QFrame, QVBoxLayout]:
+    def _kartu(judul_bagian: str) -> tuple[QFrame, QVBoxLayout]:
         """Kartu berjudul; mengembalikan kartunya beserta susunan isinya."""
         kartu = QFrame()
         kartu.setObjectName("kartuBagian")
@@ -238,13 +216,6 @@ class NotePanel(QWidget):
         judul_label = QLabel(judul_bagian)
         judul_label.setProperty("kapsi", "true")
         kepala.addWidget(judul_label)
-
-        if petunjuk:
-            catatan = QLabel(f"· {petunjuk}")
-            catatan.setStyleSheet(
-                f"color: {TEXT_MUTED}; font-size: {FONT_SIZE_SMALL}px;"
-            )
-            kepala.addWidget(catatan)
 
         kepala.addStretch()
         susunan.addLayout(kepala)

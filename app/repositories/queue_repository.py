@@ -199,10 +199,11 @@ class QueueRepository:
             selectinload(Queue.served_by),
         )
 
-    def get_by_id(self, queue_id: int) -> Queue | None:
-        return self.session.scalar(
-            self._dengan_relasi(sa.select(Queue).where(Queue.id == queue_id))
-        )
+    def get_by_id(self, queue_id: int, *, for_update: bool = False) -> Queue | None:
+        stmt = sa.select(Queue).where(Queue.id == queue_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        return self.session.scalar(self._dengan_relasi(stmt))
 
     def tiket_anjungan(self, kunci: KunciTiket) -> KioskTicketRequest | None:
         """Permintaan tiket anjungan yang sudah pernah diterbitkan, bila ada."""
@@ -290,27 +291,28 @@ class QueueRepository:
             )
         )
 
-    def list_sedang_ditangani(self, branch_id: int, tanggal: date) -> list[Queue]:
+    def list_sedang_ditangani(
+        self, branch_id: int, tanggal: date, *, for_update: bool = False
+    ) -> list[Queue]:
         """
         Antrian yang sedang dipegang seluruh loket cabang, hari ini.
 
         Diurutkan dari panggilan terbaru supaya pemanggil dapat mengambil
         satu baris pertama per loket tanpa query tambahan.
         """
-        return list(
-            self.session.scalars(
-                self._dengan_relasi(
-                    sa.select(Queue)
-                    .where(
-                        Queue.branch_id == branch_id,
-                        Queue.queue_date == tanggal,
-                        Queue.status.in_(STATUS_SIBUK),
-                        Queue.counter_id.is_not(None),
-                    )
-                    .order_by(Queue.called_at.desc())
-                )
+        stmt = (
+            sa.select(Queue)
+            .where(
+                Queue.branch_id == branch_id,
+                Queue.queue_date == tanggal,
+                Queue.status.in_(STATUS_SIBUK),
+                Queue.counter_id.is_not(None),
             )
+            .order_by(Queue.called_at.desc())
         )
+        if for_update:
+            stmt = stmt.with_for_update()
+        return list(self.session.scalars(self._dengan_relasi(stmt)))
 
     def list_hari_ini(
         self, branch_id: int, tanggal: date, *, status: tuple[QueueStatus, ...] | None = None

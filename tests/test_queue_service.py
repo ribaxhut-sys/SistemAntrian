@@ -8,6 +8,7 @@ from app.core.errors import (
     AuthorizationError,
     BusinessRuleError,
     NotFoundError,
+    ValidationError,
 )
 from app.models import QueueStatus
 from app.services.queue_service import (
@@ -592,7 +593,7 @@ def test_set_istirahat_menandai_loket_istirahat(cro_queue, antrian_siap, auth):
     auth.logout()
     auth.login("display", TEST_PASSWORD)
     state = QueueService(auth).display_state()
-    entri = next(l for l in state.loket if l.counter_id == loket)
+    entri = next(b for b in state.loket if b.counter_id == loket)
     assert entri.istirahat is True
 
 
@@ -1090,6 +1091,49 @@ def test_pindah_loket_diingat_sampai_login_berikutnya(auth, antrian_siap):
     assert sesi.default_counter_id == loket
 
 
+def test_tidak_dapat_pindah_sebelum_antrian_loket_lama_selesai(
+    auth, cro_queue, terbitkan, antrian_siap
+):
+    lama, baru = antrian_siap["loket"][:2]
+    auth.pindah_loket(lama)
+    terbitkan("A")
+    cro_queue.call_next(lama)
+
+    with pytest.raises(BusinessRuleError, match="Selesaikan antrian"):
+        auth.pindah_loket(baru)
+
+    assert auth.current_session.default_counter_id == lama
+
+
+def test_dapat_memilih_loket_yang_sedang_ditangani_sendiri(
+    auth, cro_queue, terbitkan, antrian_siap
+):
+    tujuan = antrian_siap["loket"][1]
+    terbitkan("A")
+    cro_queue.call_next(tujuan)
+
+    sesi = auth.pindah_loket(tujuan)
+
+    assert sesi.default_counter_id == tujuan
+
+
+def test_petugas_lama_dapat_pindah_setelah_pengalihan_di_loket_yang_sama(
+    auth, cro_queue, terbitkan, antrian_siap
+):
+    lama, baru = antrian_siap["loket"][:2]
+    auth.pindah_loket(lama)
+    terbitkan("A")
+    aktif = cro_queue.call_next(lama)
+    admin, target_id = _buat_target_pengalihan(lama)
+    QueueService(admin).alihkan_pelayanan(
+        aktif.id, target_id, "Pergantian petugas pada loket yang sama"
+    )
+
+    sesi = auth.pindah_loket(baru)
+
+    assert sesi.default_counter_id == baru
+
+
 def test_pindah_ke_loket_nonaktif_ditolak(auth, antrian_siap, master_service):
     loket = antrian_siap["loket"][0]
     master_service.set_counter_status(loket, False)
@@ -1127,6 +1171,186 @@ def test_selain_cro_tidak_dapat_pindah_loket(auth, antrian_siap, peran):
 
     with pytest.raises(AuthorizationError):
         auth.pindah_loket(antrian_siap["loket"][0])
+
+
+# ---------------------------------------------------------------------
+# Pengalihan pelayanan oleh admin
+# ---------------------------------------------------------------------
+
+def _buat_target_pengalihan(loket_id: int):
+    from app.services.auth_service import AuthService
+    from app.services.user_service import UserService
+
+    admin = AuthService()
+    admin.login("admin", TEST_PASSWORD)
+    target_id = UserService(admin).create_user(
+        username="cro_pengganti",
+        full_name="Petugas Pengganti",
+        password=TEST_PASSWORD,
+        role="CRO",
+        must_change_password=False,
+        default_counter_id=loket_id,
+    )
+    return admin, target_id
+
+
+def test_admin_mengalihkan_pelayanan_berjalan_dalam_keadaan_ditunda(
+    auth, cro_queue, terbitkan, antrian_siap
+):
+    lama, tujuan = antrian_siap["loket"][:2]
+    terbitkan("A")
+    aktif = cro_queue.call_next(lama)
+    cro_queue.start_service(aktif.id)
+    admin, target_id = _buat_target_pengalihan(tujuan)
+
+    hasil = QueueService(admin).alihkan_pelayanan(
+        aktif.id, target_id, "Petugas sebelumnya pulang mendadak"
+    )
+
+    assert hasil.status is QueueStatus.PAUSED
+    assert hasil.counter_id == tujuan
+    assert hasil.served_by_id == target_id
+    assert hasil.served_by_name == "Petugas Pengganti"
+
+    with pytest.raises(BusinessRuleError, match="telah dialihkan"):
+        cro_queue.complete(aktif.id)
+
+    from app.services.auth_service import AuthService
+
+    pengganti = AuthService()
+    sesi_pengganti = pengganti.login("cro_pengganti", TEST_PASSWORD)
+    assert sesi_pengganti.default_counter_id == tujuan
+    layanan_pengganti = QueueService(pengganti)
+    assert layanan_pengganti.current_for_counter(tujuan).id == aktif.id
+    layanan_pengganti.resume(aktif.id)
+    assert layanan_pengganti.complete(aktif.id).status is QueueStatus.COMPLETED
+
+
+def test_admin_tidak_dapat_mengalihkan_ke_loket_yang_tidak_melayani_kategori(
+    auth, cro_queue, terbitkan, antrian_siap
+):
+    lama, tujuan = antrian_siap["loket"][:2]
+    terbitkan("A")
+    aktif = cro_queue.call_next(lama)
+    _batasi_loket(auth, tujuan, [antrian_siap["kategori"]["B"]])
+    admin, target_id = _buat_target_pengalihan(tujuan)
+
+    with pytest.raises(BusinessRuleError, match="tidak melayani"):
+        QueueService(admin).alihkan_pelayanan(
+            aktif.id, target_id, "Petugas lama pulang"
+        )
+
+
+def test_petugas_tidak_dapat_memanggil_dari_loket_selain_penugasannya(
+    auth, cro_queue, terbitkan, antrian_siap
+):
+    pertama, kedua = antrian_siap["loket"][:2]
+    auth.pindah_loket(pertama)
+    terbitkan("A", 2)
+    aktif = cro_queue.call_next(pertama)
+
+    with pytest.raises(BusinessRuleError, match="ditugaskan ke loket lain"):
+        cro_queue.call_next(kedua)
+
+    assert cro_queue.current_for_counter(pertama).id == aktif.id
+    assert cro_queue.current_for_counter(kedua) is None
+
+
+def test_pengalihan_nomor_yang_baru_dipanggil_mempertahankan_status(
+    cro_queue, terbitkan, antrian_siap
+):
+    lama, tujuan = antrian_siap["loket"][:2]
+    terbitkan("A")
+    aktif = cro_queue.call_next(lama)
+    admin, target_id = _buat_target_pengalihan(tujuan)
+
+    hasil = QueueService(admin).alihkan_pelayanan(
+        aktif.id, target_id, "Pergantian petugas"
+    )
+
+    assert hasil.status is QueueStatus.CALLED
+    assert hasil.counter_id == tujuan
+    assert hasil.served_by_id == target_id
+
+
+def test_pengalihan_mencatat_asal_tujuan_dan_alasan(
+    cro_queue, terbitkan, antrian_siap
+):
+    import json
+
+    from app.services import audit_service
+
+    lama, tujuan = antrian_siap["loket"][:2]
+    terbitkan("A")
+    aktif = cro_queue.call_next(lama)
+    admin, target_id = _buat_target_pengalihan(tujuan)
+
+    QueueService(admin).alihkan_pelayanan(
+        aktif.id, target_id, "Petugas lama sudah pulang"
+    )
+
+    entri = audit_service.list_terakhir(batas=1)[0]
+    meta = json.loads(entri.meta)
+    assert entri.action == "REASSIGN_QUEUE"
+    assert meta["alasan"] == "Petugas lama sudah pulang"
+    assert meta["loket_lama_id"] == lama
+    assert meta["loket_baru_id"] == tujuan
+    assert meta["petugas_baru_id"] == target_id
+
+
+def test_tidak_dapat_mengalihkan_ke_loket_yang_sedang_sibuk(
+    cro_queue, terbitkan, antrian_siap
+):
+    lama, tujuan = antrian_siap["loket"][:2]
+    terbitkan("A", 2)
+    pertama = cro_queue.call_next(lama)
+    cro_queue.call_next(tujuan)
+    admin, target_id = _buat_target_pengalihan(tujuan)
+
+    with pytest.raises(BusinessRuleError, match="masih menangani"):
+        QueueService(admin).alihkan_pelayanan(
+            pertama.id, target_id, "Petugas lama pulang"
+        )
+
+
+def test_alasan_pengalihan_dan_pembatalan_paksa_wajib_diisi(
+    cro_queue, terbitkan, antrian_siap
+):
+    terbitkan("A")
+    aktif = cro_queue.call_next(antrian_siap["loket"][0])
+    admin, target_id = _buat_target_pengalihan(antrian_siap["loket"][1])
+    layanan_admin = QueueService(admin)
+
+    with pytest.raises(ValidationError, match="wajib diisi"):
+        layanan_admin.alihkan_pelayanan(aktif.id, target_id, "   ")
+    with pytest.raises(ValidationError, match="wajib diisi"):
+        layanan_admin.batalkan_paksa(aktif.id, "")
+
+
+def test_admin_dapat_membatalkan_paksa_pelayanan_aktif(
+    cro_queue, terbitkan, antrian_siap
+):
+    terbitkan("A")
+    aktif = cro_queue.call_next(antrian_siap["loket"][0])
+    admin, _target_id = _buat_target_pengalihan(antrian_siap["loket"][1])
+
+    hasil = QueueService(admin).batalkan_paksa(
+        aktif.id, "Pengunjung tidak dapat melanjutkan"
+    )
+
+    assert hasil.status is QueueStatus.CANCELLED
+    assert QueueService(admin).list_pelayanan_aktif() == []
+
+
+def test_hanya_admin_dapat_melihat_dan_mengalihkan_pelayanan(cro_queue):
+    with pytest.raises(AuthorizationError):
+        cro_queue.list_pelayanan_aktif()
+    with pytest.raises(AuthorizationError):
+        cro_queue.list_tujuan_pengalihan()
+    with pytest.raises(AuthorizationError):
+        cro_queue.alihkan_pelayanan(1, 1, "uji")
+    with pytest.raises(AuthorizationError):
+        cro_queue.batalkan_paksa(1, "uji")
 
 
 # ---------------------------------------------------------------------
@@ -1229,6 +1453,33 @@ def _riwayat_panggilan() -> dict[int, list[int]]:
     return riwayat
 
 
+def _petugas_loket_lain(loket_id: int) -> QueueService:
+    """
+    Petugas kedua yang memanggil di loket B.
+
+    Dua komputer di lapangan adalah dua akun di dua proses. Memanggil
+    loket B dengan akun yang sama dari dalam transaksi loket A membuat
+    panggilan B menunggu kunci akun milik A selamanya di PostgreSQL;
+    SQLite mengabaikan FOR UPDATE sehingga tidak terlihat di sana.
+    """
+    from app.services.auth_service import AuthService
+    from app.services.user_service import UserService
+
+    admin = AuthService()
+    admin.login("admin", TEST_PASSWORD)
+    UserService(admin).create_user(
+        username="cro_loket_b",
+        full_name="Petugas Loket B",
+        password=TEST_PASSWORD,
+        role="CRO",
+        must_change_password=False,
+        default_counter_id=loket_id,
+    )
+    petugas = AuthService()
+    petugas.login("cro_loket_b", TEST_PASSWORD)
+    return QueueService(petugas)
+
+
 def test_loket_lain_yang_menyela_tidak_membuat_nomor_dipanggil_dua_kali(
     cro_queue, antrian_siap, terbitkan, monkeypatch
 ):
@@ -1243,6 +1494,7 @@ def test_loket_lain_yang_menyela_tidak_membuat_nomor_dipanggil_dua_kali(
 
     terbitkan("A", 2)
     loket_a, loket_b = antrian_siap["loket"][:2]
+    petugas_b = _petugas_loket_lain(loket_b)
 
     asli = QueueRepository.list_menunggu
     hasil_b = []
@@ -1251,7 +1503,7 @@ def test_loket_lain_yang_menyela_tidak_membuat_nomor_dipanggil_dua_kali(
         calon = asli(self, *args, **kwargs)
         if not hasil_b:
             hasil_b.append(None)
-            hasil_b[0] = cro_queue.call_next(loket_b)
+            hasil_b[0] = petugas_b.call_next(loket_b)
         return calon
 
     monkeypatch.setattr(QueueRepository, "list_menunggu", dibaca_lalu_disela)
@@ -1270,6 +1522,7 @@ def test_klaim_kalah_tanpa_calon_lain_menjawab_tidak_ada_antrian(
 
     terbitkan("A", 1)
     loket_a, loket_b = antrian_siap["loket"][:2]
+    petugas_b = _petugas_loket_lain(loket_b)
 
     asli = QueueRepository.list_menunggu
     disela = []
@@ -1278,7 +1531,7 @@ def test_klaim_kalah_tanpa_calon_lain_menjawab_tidak_ada_antrian(
         calon = asli(self, *args, **kwargs)
         if not disela:
             disela.append(None)  # dipasang dulu: panggilan B juga lewat sini
-            disela[0] = cro_queue.call_next(loket_b)
+            disela[0] = petugas_b.call_next(loket_b)
         return calon
 
     monkeypatch.setattr(QueueRepository, "list_menunggu", dibaca_lalu_disela)

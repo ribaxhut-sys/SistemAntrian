@@ -29,6 +29,7 @@ def halaman_kerja(qtbot, auth, antrian_siap):
 
     auth.logout()
     auth.login("cro", TEST_PASSWORD)
+    auth.pindah_loket(antrian_siap["loket"][0])
     halaman = ServicePage(
         QueueService(auth),
         MasterDataService(auth),
@@ -126,6 +127,21 @@ def test_judul_tab_tanpa_keterangan_lama_bila_tidak_ada(halaman_kerja):
 # ---------------------------------------------------------------------
 # Panel Pengaduan & Catatan
 # ---------------------------------------------------------------------
+
+def test_panel_pelayanan_tidak_menampilkan_label_penjelas_berulang(
+    halaman_kerja,
+):
+    from PySide6.QtWidgets import QLabel
+
+    teks = {label.text() for label in halaman_kerja.findChildren(QLabel)}
+
+    assert "F2 panggil · F3 ulangi · F4 mulai · F8 selesai" not in teks
+    assert "ALUR PELAYANAN" not in teks
+    assert "BILA PENGUNJUNG TIDAK DATANG" not in teks
+    assert "Kata pengunjung" not in teks
+    assert "Tidak dibacakan ke pengunjung" not in teks
+    assert not any("Jangan menyalin NIK" in isi for isi in teks)
+
 
 def test_panel_pengaduan_mati_tanpa_antrian(halaman_kerja):
     """Dinonaktifkan, bukan disembunyikan — sama seperti tombol tindakan."""
@@ -474,6 +490,17 @@ def _halaman_pengaduan(qtbot, auth):
 def test_layar_pengaduan_menampilkan_seluruh_lembar(qtbot, auth, lembar_terisi):
     halaman = _halaman_pengaduan(qtbot, auth)
     assert halaman.tabel.rowCount() == 2
+
+
+def test_layar_pengaduan_tanpa_pengantar_privasi_berulang(
+    qtbot, auth, lembar_terisi
+):
+    from PySide6.QtWidgets import QLabel
+
+    halaman = _halaman_pengaduan(qtbot, auth)
+    teks = {label.text() for label in halaman.findChildren(QLabel)}
+
+    assert not any("Berisi data pribadi pelapor" in isi for isi in teks)
 
 
 def test_pencarian_menyaring_daftar(qtbot, auth, lembar_terisi):

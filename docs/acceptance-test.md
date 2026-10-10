@@ -94,6 +94,17 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
+| E0a | Masuk sebagai CRO yang belum memiliki loket bawaan | Pilihan menunjukkan **Pilih loket…**; tombol panggil dan istirahat belum dapat dipakai | |
+| E0b | Pilih satu loket dan konfirmasi | Loket tersimpan sebagai bawaan; pilihan terkunci; pelayanan dapat digunakan | |
+| E0c | Masuk ulang sebagai CRO yang sudah memiliki loket bawaan | Loket bawaan langsung terpilih dan terkunci | |
+| E0d | Tekan **Ganti Loket**, pilih loket lain, lalu batalkan konfirmasi | Tetap di loket semula | |
+| E0e | Saat sedang menangani nomor, coba **Ganti Loket** | Ditolak sampai antrian selesai | |
+| E0f | Coba pindah ke loket lain yang sedang menangani nomor | Ditolak dan pilihan kembali ke loket semula | |
+| E0g | Tinggalkan satu pelayanan berstatus Dilayani, lalu masuk sebagai ADMIN dan buka **Pelayanan Aktif** | Nomor, status, loket, dan petugas lama terlihat | |
+| E0h | Pilih petugas pengganti yang memiliki loket kosong, isi alasan, lalu tekan **Alihkan Pelayanan** | Nomor berpindah ke loket tujuan dalam status Ditunda; petugas lama tidak dapat mengubahnya lagi | |
+| E0i | Masuk sebagai petugas pengganti setelah E0h | Nomor yang dialihkan tampil; dapat dilanjutkan lalu diselesaikan | |
+| E0j | Coba mengalihkan tanpa alasan atau ke loket yang sedang sibuk | Ditolak dan keadaan antrean tidak berubah | |
+| E0k | Dari **Pelayanan Aktif**, isi alasan lalu tekan **Batalkan Paksa** | Nomor menjadi Dibatalkan dan tidak lagi muncul dalam daftar aktif | |
 | E1 | Masuk sebagai CRO, tekan `F2` | Nomor terdepan terpanggil ke loket terpilih | |
 | E2 | Tekan `F2` lagi tanpa menyelesaikan | Ditolak dengan pesan bahwa loket masih menangani nomor | |
 | E3 | Tekan `F3` | Panggilan ulang tercatat; hitungan panggilan naik | |
@@ -180,9 +191,9 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| L1 | Buka aplikasi tanpa argumen | Dialog pilihan hanya **Layar Antrian** / **Layar Petugas**; tidak ada pilihan anjungan | |
+| L1 | Buka aplikasi Windows tanpa argumen | Langsung tampil Login Petugas dengan tombol **Atur komputer ini**; tidak ada pilihan Layar Antrian | |
 | L2 | Ambil nomor di tablet anjungan Android | Pilih layanan → nomor terbit di server → tiket tercetak; layar tidak menampilkan antrian maupun jumlah menunggu | |
-| L3 | Buka dengan `AntrianCRO.exe --kios` (pintasan lama) | Dialog pilihan biasa; anjungan Windows sudah tidak ada | |
+| L3 | Buka dengan `AntrianCRO.exe --kios` (pintasan lama) | Tetap menuju Login Petugas; anjungan Windows sudah tidak ada | |
 | L4 | Sentuh satu jenis layanan | Nomor terbit (mis. `A-001`); tiket tercetak (bila printer aktif) | |
 | L5 | Sentuh lagi segera setelahnya | Tombol mati dan ada keterangan menunggu; nomor kedua belum terbit | |
 | L6 | Tunggu jeda selesai, ambil nomor lagi | Nomor berikutnya terbit | |
@@ -204,19 +215,19 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | L18 | Dari komputer admin, tambah satu jenis layanan; biarkan anjungan menyala | Kartunya menyusul sendiri dalam ±20 detik, tanpa anjungan dibuka ulang | |
 | L19 | Ulangi L18 saat pengunjung sedang di layar konfirmasi | Layar konfirmasi TIDAK terganggu; kartu baru muncul setelah layarnya kembali menganggur | |
 
-## M. Layar antrian televisi (tanpa login)
+## M. Layar antrian Android (tanpa login)
 
-Dijalankan di komputer televisi ruang tunggu, terpisah dari anjungan.
+Dijalankan pada panel Android ruang tunggu, terpisah dari anjungan.
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| M1 | Buka dengan `AntrianCRO.exe --tv` | Dialog dilewati; papan nomor layar penuh, tanpa login | |
+| M1 | Nyalakan aplikasi Layar Antrian pada panel Android | Papan nomor terbuka penuh dan tersambung ke API server, tanpa login petugas | |
 | M2 | Amati layarnya | Hanya papan nomor — tidak ada tombol ambil nomor, bilah atas, maupun bilah status | |
 | M3 | Panggil satu nomor dari loket | Nada "ting" terdengar lebih dulu, baru pengumuman lisan | |
 | M4 | Berdiri di ujung ruang tunggu | Nomor antrian terbaca dari jarak itu | |
-| M5 | Cabut listrik komputer televisi, nyalakan lagi | Papan kembali sendiri tanpa ada yang mengetik apa pun | |
-| M6 | **PostgreSQL:** dari mesin televisi, coba terbitkan nomor lewat SQL | Ditolak hak akses; televisi hanya boleh membaca | |
-| M7 | **PostgreSQL:** dari mesin televisi, coba baca tabel `app_user` | Ditolak hak akses | |
+| M5 | Cabut listrik panel, nyalakan lagi | Papan kembali sendiri tanpa ada yang mengetik apa pun | |
+| M6 | Gunakan token layar untuk mencoba endpoint penerbitan nomor | Ditolak; perangkat layar hanya boleh membaca data panggilan | |
+| M7 | Cabut pasangan perangkat dari aplikasi server | Panel kehilangan akses dan meminta dipasangkan kembali | |
 | M8 | Terbitkan nomor pada satu layanan lebih banyak dari `display.list_rows` x 2 | Daftar bawah terbagi halaman; judulnya menyebut "1 / 2" | |
 | M9 | Amati satu menit tanpa menyentuh apa pun | Halaman berganti sendiri sesuai `display.rotate_seconds`, lalu kembali ke halaman 1 | |
 | M10 | Berdiri di ujung ruang tunggu saat halaman berganti | Masih sempat membaca satu halaman penuh sebelum berganti | |
@@ -293,20 +304,20 @@ ini" — lihat [lanjutan.md bagian 6](lanjutan.md).
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
 | O1 | Buka aplikasi di komputer baru, tekan tombol **Atur komputer ini** | Dialog muncul dengan dua bagian: peran terhadap database, dan "Komputer ini dipakai sebagai" | |
-| O2 | Pilih peran **Anjungan ambil nomor**, amati baris Suara panggilan | Butir pertamanya berbunyi "Ikut peran (diam)" — tanpa membuka dokumen apa pun | |
-| O3 | Ganti ke **Televisi ruang tunggu** | Baris Suara berubah menjadi "Ikut peran (ikut pengaturan)", Pencetak menjadi "Ikut peran (tidak mencetak)" | |
-| O4 | Ganti ke **Papan memanjang di atas pintu** | Bentuk layar berbunyi "Ikut peran (memanjang)" dan Suara "Ikut peran (diam)" | |
-| O5 | Tekan **Uji cetak** dengan peran Televisi | Ditolak dengan kalimat: komputer ini disetel tidak mencetak | |
-| O6 | Pilih Anjungan, pilih Pencetak **Cetak ke printer Windows**, tekan Uji cetak | Keluar satu tiket bernomor **UJI-000** dengan catatan kaki "Bukan nomor antrian" | |
-| O7 | Simpan, lalu tutup dan buka aplikasi lagi | Komputer langsung membuka layar perannya, **tanpa** dialog pilih-mode | |
-| O8 | Nyalakan lewat `AntrianCRO.exe` polos, tanpa pintasan ber-flag | Tetap membuka layar perannya — inilah kegagalan yang ditutup fitur ini | |
+| O2 | Periksa pilihan peran | Hanya **Petugas loket** dan **Loket admin** yang ditawarkan; Anjungan, Televisi, dan Papan Memanjang tidak ada | |
+| O3 | Pilih **Petugas loket** | Pencetak mengikuti peran "tidak mencetak" dan dapat disesuaikan per komputer | |
+| O4 | Pilih **Loket admin** pada pemasangan PostgreSQL | Tombol **Ubah port** tersedia; pada peran Petugas tombol itu tidak tersedia | |
+| O5 | Pilih **Petugas loket**, lalu tekan **Uji cetak** tanpa memilih pencetak lain | Ditolak dengan kalimat bahwa komputer ini disetel tidak mencetak | |
+| O6 | Pilih Pencetak **Cetak ke printer Windows**, tekan Uji cetak | Keluar satu tiket bernomor **UJI-000** dengan catatan kaki "Bukan nomor antrian" | |
+| O7 | Simpan, lalu tutup dan buka aplikasi lagi | Aplikasi langsung membuka Login Petugas; tidak ada dialog pilih-mode | |
+| O8 | Nyalakan lewat `AntrianCRO.exe` polos, tanpa pintasan ber-flag | Tetap membuka Login Petugas, apa pun peran layar lama di `peran.json` | |
 | O9 | Periksa bilah status di komputer loket | Nama peran tampil di kiri lokasi database | |
 | O10 | Ubah satu isian menyimpang dari bawaan peran, simpan, buka ulang | Bilah status menulis "… (disesuaikan)" | |
 | O11 | Buka `data/peran.json` dengan Notepad | Terbaca manusia; isian yang ikut peran bernilai `null` | |
 | O12 | Cari kata sandi database di dalam berkas itu | **Tidak ada**; sandi hanya di `mesin.json` | |
 | O13 | Salin `peran.json` dari satu loket ke empat loket lain | Keempatnya berperilaku sama tanpa disetel satu per satu | |
-| O14 | Rusak isi `peran.json` (hapus satu kurung), buka aplikasi | Tetap terbuka; kembali ke dialog pilih-mode; ada peringatan di `logs/app.log` | |
-| O15 | Isi `setx ANTRIAN_PRINTER none` pada mesin anjungan, buka ulang | Environment menang atas berkas peran | |
+| O14 | Rusak isi `peran.json` (hapus satu kurung), buka aplikasi | Tetap terbuka ke Login Petugas; ada peringatan di `logs/app.log` | |
+| O15 | Isi `setx ANTRIAN_PRINTER none` pada komputer petugas, buka ulang | Environment menang atas berkas peran | |
 | O16 | Jalankan `git status` di komputer pengembangan setelah menetapkan peran | `data/peran.json` **tidak** muncul | |
 
 ---

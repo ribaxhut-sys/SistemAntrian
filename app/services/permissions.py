@@ -29,6 +29,7 @@ class Permission(str, Enum):
     QUEUE_CANCEL = "QUEUE_CANCEL"
     QUEUE_NO_SHOW = "QUEUE_NO_SHOW"
     QUEUE_CLOSE_DAY = "QUEUE_CLOSE_DAY"
+    QUEUE_REASSIGN = "QUEUE_REASSIGN"
     QUEUE_TOGGLE_INTAKE = "QUEUE_TOGGLE_INTAKE"
 
     # Layar antrian
@@ -99,6 +100,7 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
             Permission.CONFIG_MANAGE,
             Permission.BACKUP_MANAGE,
             Permission.QUEUE_CLOSE_DAY,
+            Permission.QUEUE_REASSIGN,
             Permission.QUEUE_TOGGLE_INTAKE,
             # Menghapus pengaduan adalah tindakan administratif, dan
             # sengaja TIDAK diberikan kepada petugas yang menulisnya:

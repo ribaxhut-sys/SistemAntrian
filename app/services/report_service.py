@@ -146,9 +146,8 @@ class ReportService:
                 Queue.queue_date >= dari,
                 Queue.queue_date <= sampai,
             )
-            # Nomor yang tidak hadir atau dibatalkan sesudah dipanggil tidak
-            # pernah punya `served_by_user_id`; yang memanggilnya terakhir
-            # adalah petugas yang menanganinya.
+            # Data lama dapat belum mempunyai `served_by_user_id`; untuk
+            # baris itu pemanggil terakhir menjadi petugas penanganannya.
             pemanggil: dict[int, int] = {}
             for queue_id, user_id, _ in session.execute(
                 sa.select(QueueCall.queue_id, QueueCall.user_id, QueueCall.call_number)

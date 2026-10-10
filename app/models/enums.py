@@ -80,6 +80,8 @@ class AuditAction(str, Enum):
     COMPLETE_QUEUE = "COMPLETE_QUEUE"
     NO_SHOW = "NO_SHOW"
     CANCEL_QUEUE = "CANCEL_QUEUE"
+    REASSIGN_QUEUE = "REASSIGN_QUEUE"
+    FORCE_CANCEL_QUEUE = "FORCE_CANCEL_QUEUE"
     CLOSE_DAY = "CLOSE_DAY"
     REOPEN_DAY = "REOPEN_DAY"
     #: Sapuan otomatis nomor sisa hari-hari sebelumnya. Sengaja BUKAN

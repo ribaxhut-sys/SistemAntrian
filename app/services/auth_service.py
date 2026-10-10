@@ -28,6 +28,7 @@ from app.core.logger import get_logger
 from app.core.security import hash_password, needs_rehash, validate_password_strength, verify_password
 from app.models import AuditAction, RecordStatus, UserRole
 from app.repositories.master_repository import CounterRepository
+from app.repositories.queue_repository import QueueRepository
 from app.repositories.user_repository import UserRepository, normalize_username
 from app.services import audit_service
 from app.services.permissions import Permission, permissions_for
@@ -452,10 +453,9 @@ class AuthService:
         dan pilihannya disimpan sebagai loket bawaan supaya besok tidak
         perlu diulang.
 
-        Menyimpannya juga yang membuat pengikatan ini ada gunanya: tanpa
-        disimpan, layar pelayanan akan kembali ke loket pertama daftar
-        setiap kali dibuka, dan petugas kembali berisiko memanggil atas
-        nama loket sebelah.
+        Menyimpannya juga mencegah petugas harus memilih ulang setiap kali
+        masuk. Layar pelayanan tidak pernah memilih loket pertama secara
+        diam-diam ketika akun belum memiliki loket bawaan.
         """
         sesi = self.require_permission(Permission.QUEUE_CALL)
         if sesi.user_id is None:
@@ -466,14 +466,45 @@ class AuthService:
             if user is None:
                 raise NotFoundError("Akun tidak ditemukan.")
 
+            tujuan = None
             if counter_id is not None:
-                loket = CounterRepository(session).get_by_id(counter_id)
-                if loket is None or loket.branch_id != sesi.branch_id:
+                tujuan = CounterRepository(session).get_by_id(counter_id)
+                if tujuan is None or tujuan.branch_id != sesi.branch_id:
                     raise NotFoundError("Loket tidak ditemukan.")
-                if loket.status is not RecordStatus.ACTIVE:
+                if tujuan.status is not RecordStatus.ACTIVE:
                     raise BusinessRuleError(
-                        f"Loket {loket.name!r} sedang tidak aktif."
+                        f"Loket {tujuan.name!r} sedang tidak aktif."
                     )
+
+            loket_semula = user.default_counter_id
+            if counter_id != loket_semula:
+                antrean = QueueRepository(session)
+                if loket_semula is not None:
+                    sedang = antrean.sedang_ditangani_loket(
+                        loket_semula, clock.today()
+                    )
+                    if (
+                        sedang is not None
+                        and sedang.served_by_user_id in (None, sesi.user_id)
+                    ):
+                        raise BusinessRuleError(
+                            f"Selesaikan antrian {sedang.queue_number} di "
+                            "loket saat ini sebelum berpindah."
+                        )
+
+                if counter_id is not None:
+                    sedang = antrean.sedang_ditangani_loket(
+                        counter_id, clock.today()
+                    )
+                    if (
+                        sedang is not None
+                        and sedang.served_by_user_id != sesi.user_id
+                    ):
+                        nama = tujuan.name if tujuan is not None else "tersebut"
+                        raise BusinessRuleError(
+                            f"Loket {nama!r} masih menangani antrian "
+                            f"{sedang.queue_number}. Pilih loket lain."
+                        )
 
             user.default_counter_id = counter_id
             audit_service.record(
@@ -489,6 +520,25 @@ class AuthService:
         self._session = replace(sesi, default_counter_id=counter_id)
         logger.info("Petugas %s pindah ke loket %s", sesi.username, counter_id)
         return self._session
+
+    def sinkronkan_loket(self) -> AuthSession:
+        """Segarkan loket sesi dari database tanpa mengubah penugasannya."""
+        sesi = self.require_permission(Permission.QUEUE_CALL)
+        if sesi.user_id is None:
+            return sesi
+
+        with session_scope() as session:
+            user = UserRepository(session).get_by_id(sesi.user_id)
+            if user is None:
+                raise NotFoundError("Akun tidak ditemukan.")
+            loket_terbaru = user.default_counter_id
+
+        if loket_terbaru != sesi.default_counter_id:
+            self._session = replace(sesi, default_counter_id=loket_terbaru)
+            logger.info(
+                "Loket sesi %s disinkronkan ke %s", sesi.username, loket_terbaru
+            )
+        return self.current_session
 
 
 _auth_service: AuthService | None = None
