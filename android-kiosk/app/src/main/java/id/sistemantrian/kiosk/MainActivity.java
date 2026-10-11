@@ -114,6 +114,19 @@ public final class MainActivity extends Activity {
     private static final int RED = Color.rgb(220, 38, 38);
 
     private static final String TEMA_TABLET = "tema";
+    /** Warna kilau petunjuk ajakan di tablet ini; "mati" mematikannya. */
+    private static final String WARNA_KILAU = "warna_kilau";
+    private static final String KILAU_TEMA = "tema";
+    private static final String[][] PILIHAN_KILAU = {
+            {KILAU_TEMA, "Ikut tema"},
+            {"putih", "Putih"},
+            {"emas", "Emas"},
+            {"biru", "Biru"},
+            {"hijau", "Hijau"},
+            {"merah", "Merah muda"},
+            {"ungu", "Ungu"},
+            {"mati", "Tanpa kilau"},
+    };
     private static final String IKUTI_SERVER_TEMA = "server";
     private static final String[][] PILIHAN_TEMA = {
             {IKUTI_SERVER_TEMA, "Ikuti pengaturan server"},
@@ -285,7 +298,7 @@ public final class MainActivity extends Activity {
         }
         int lebarLama = lama == null ? 0 : lama.getWidth();
         int tinggiLama = lama == null ? 0 : lama.getHeight();
-        hentikanDenyutAjakan();
+        hentikanKilauAjakan();
         buildHome();
         if (potret != null) {
             android.graphics.drawable.BitmapDrawable tumpukan =
@@ -557,7 +570,6 @@ public final class MainActivity extends Activity {
     private long batasSorotMillis;
     private boolean sorotDidenyutkan;
     private boolean sorotDitunjukkan;
-    private android.animation.ObjectAnimator denyutAjakan;
     /** Panel bawah sedang memakai latar gelap layar "Nomor Anda". */
     private boolean panelHasilGelap;
     private LinearLayout panelHasil;
@@ -3218,64 +3230,168 @@ public final class MainActivity extends Activity {
         hint.setTextColor(fg);
         hint.setBackground(rounded(bg, dp(24)));
         if ("ajak".equals(tone)) {
-            mulaiDenyutAjakan();
+            mulaiKilauAjakan();
         } else {
-            hentikanDenyutAjakan();
+            hentikanKilauAjakan();
         }
     }
 
     /**
-     * Petunjuk "Sentuh jenis layanan..." diam, lalu sesekali berdenyut dua
-     * kali dengan jeda acak. Denyut tanpa henti melelahkan mata dan lama-lama
-     * tidak diperhatikan; gerak yang jarang dan tak terduga justru menarik
-     * pandangan. Berhenti begitu ada yang memilih layanan.
+     * Petunjuk "Sentuh jenis layanan..." diam, lalu sesekali disapu pita
+     * cahaya dengan jeda acak. Gerak tanpa henti melelahkan mata dan lama-lama
+     * tidak diperhatikan; kilau yang jarang dan tak terduga justru menarik
+     * pandangan. Berhenti begitu ada yang memilih layanan. Warnanya dipilih
+     * per tablet di Pengaturan (WARNA_KILAU), termasuk mematikannya.
      */
-    private static final long JEDA_DENYUT_MIN_MS = 8_000L;
-    private static final long JEDA_DENYUT_MAX_MS = 20_000L;
-    private final java.util.Random acakDenyut = new java.util.Random();
-    private boolean denyutAjakanAktif;
+    private static final long JEDA_KILAU_MIN_MS = 8_000L;
+    private static final long JEDA_KILAU_MAX_MS = 20_000L;
+    private static final long LAMA_SAPUAN_KILAU_MS = 1_200L;
+    private final java.util.Random acakKilau = new java.util.Random();
+    private boolean kilauAjakanAktif;
+    private KilauDrawable kilauAjakan;
+    private android.animation.ValueAnimator sapuanKilau;
 
-    private final Runnable denyutAjakanSekali = new Runnable() {
+    private final Runnable kilauAjakanSekali = new Runnable() {
         @Override
         public void run() {
-            if (!denyutAjakanAktif || hint == null) return;
-            denyutAjakan = android.animation.ObjectAnimator.ofPropertyValuesHolder(hint,
-                    android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.05f),
-                    android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.05f));
-            denyutAjakan.setDuration(420);
-            denyutAjakan.setRepeatCount(3);  // naik-turun dua kali
-            denyutAjakan.setRepeatMode(android.animation.ValueAnimator.REVERSE);
-            denyutAjakan.setInterpolator(
-                    new android.view.animation.AccelerateDecelerateInterpolator());
-            denyutAjakan.start();
-            handler.postDelayed(this, jedaDenyutAcak());
+            if (!kilauAjakanAktif || hint == null) return;
+            sapukanKilau();
+            handler.postDelayed(this, jedaKilauAcak());
         }
     };
 
-    private long jedaDenyutAcak() {
-        return JEDA_DENYUT_MIN_MS
-                + (long) (acakDenyut.nextDouble() * (JEDA_DENYUT_MAX_MS - JEDA_DENYUT_MIN_MS));
+    private long jedaKilauAcak() {
+        return JEDA_KILAU_MIN_MS
+                + (long) (acakKilau.nextDouble() * (JEDA_KILAU_MAX_MS - JEDA_KILAU_MIN_MS));
     }
 
-    private void mulaiDenyutAjakan() {
+    /** Satu sapuan kiri ke kanan; tidak terjadi apa-apa bila kilau dimatikan. */
+    private void sapukanKilau() {
+        Integer warna = warnaKilau();
+        if (warna == null || hint == null) return;
+        if (kilauAjakan == null || hint.getForeground() != kilauAjakan) {
+            kilauAjakan = new KilauDrawable(dp(24));
+            hint.setForeground(kilauAjakan);
+        }
+        kilauAjakan.aturWarna(warna);
+        if (sapuanKilau != null) sapuanKilau.cancel();
+        KilauDrawable sasaran = kilauAjakan;
+        sapuanKilau = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        sapuanKilau.setDuration(LAMA_SAPUAN_KILAU_MS);
+        sapuanKilau.setInterpolator(
+                new android.view.animation.AccelerateDecelerateInterpolator());
+        sapuanKilau.addUpdateListener(a -> sasaran.aturPosisi((float) a.getAnimatedValue()));
+        sapuanKilau.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator animasi) {
+                sasaran.aturPosisi(-1f);
+            }
+        });
+        sapuanKilau.start();
+    }
+
+    /** Warna kilau tablet ini, atau null bila dimatikan. */
+    private Integer warnaKilau() {
+        return warnaKilau(preferences == null ? KILAU_TEMA
+                : preferences.getString(WARNA_KILAU, KILAU_TEMA));
+    }
+
+    private Integer warnaKilau(String pilihan) {
+        switch (pilihan) {
+            case "mati":
+                return null;
+            case "putih":
+                return Color.WHITE;
+            case "emas":
+                return Color.rgb(251, 191, 36);
+            case "biru":
+                return Color.rgb(96, 165, 250);
+            case "hijau":
+                return Color.rgb(52, 211, 153);
+            case "merah":
+                return Color.rgb(248, 113, 113);
+            case "ungu":
+                return Color.rgb(167, 139, 250);
+            default:
+                return EMAS;  // ikut tema
+        }
+    }
+
+    private void mulaiKilauAjakan() {
         // Dipanggil tiap detik lewat updateAvailability; jadwal yang sudah
         // berjalan dibiarkan.
-        if (denyutAjakanAktif) return;
-        denyutAjakanAktif = true;
-        handler.postDelayed(denyutAjakanSekali, jedaDenyutAcak());
+        if (kilauAjakanAktif) return;
+        kilauAjakanAktif = true;
+        handler.postDelayed(kilauAjakanSekali, jedaKilauAcak());
     }
 
-    private void hentikanDenyutAjakan() {
-        denyutAjakanAktif = false;
-        handler.removeCallbacks(denyutAjakanSekali);
-        if (denyutAjakan == null) return;
-        denyutAjakan.cancel();
-        Object sasaran = denyutAjakan.getTarget();
-        if (sasaran instanceof View) {
-            ((View) sasaran).setScaleX(1f);
-            ((View) sasaran).setScaleY(1f);
+    private void hentikanKilauAjakan() {
+        kilauAjakanAktif = false;
+        handler.removeCallbacks(kilauAjakanSekali);
+        if (sapuanKilau != null) {
+            sapuanKilau.cancel();
+            sapuanKilau = null;
         }
-        denyutAjakan = null;
+        if (kilauAjakan != null) kilauAjakan.aturPosisi(-1f);
+    }
+
+    /** Pita cahaya miring yang menyapu sebuah pil dari kiri ke kanan. */
+    private static final class KilauDrawable extends android.graphics.drawable.Drawable {
+        private final android.graphics.Paint cat =
+                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Path tepi = new android.graphics.Path();
+        private final float radius;
+        private int warna = Color.WHITE;
+        /** 0..1 sepanjang sapuan; negatif berarti tidak tampil. */
+        private float posisi = -1f;
+
+        KilauDrawable(float radius) {
+            this.radius = radius;
+        }
+
+        void aturWarna(int baru) {
+            warna = baru;
+            invalidateSelf();
+        }
+
+        void aturPosisi(float baru) {
+            posisi = baru;
+            invalidateSelf();
+        }
+
+        @Override
+        public void draw(android.graphics.Canvas kanvas) {
+            android.graphics.Rect b = getBounds();
+            if (posisi < 0f || b.isEmpty()) return;
+            float pita = Math.max(b.height() * 1.6f, b.width() * 0.22f);
+            float tengah = b.left - pita + (b.width() + pita * 2f) * posisi;
+            int bening = warna & 0x00FFFFFF;
+            int puncak = bening | 0xB4000000;
+            cat.setShader(new android.graphics.LinearGradient(
+                    tengah - pita / 2f, b.top, tengah + pita / 2f, b.bottom,
+                    new int[]{bening, puncak, bening}, null,
+                    android.graphics.Shader.TileMode.CLAMP));
+            tepi.reset();
+            tepi.addRoundRect(new android.graphics.RectF(b), radius, radius,
+                    android.graphics.Path.Direction.CW);
+            kanvas.save();
+            kanvas.clipPath(tepi);
+            kanvas.drawRect(b, cat);
+            kanvas.restore();
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter filter) {
+        }
+
+        @Override
+        public int getOpacity() {
+            return android.graphics.PixelFormat.TRANSLUCENT;
+        }
     }
 
     // =================================================================
@@ -4040,6 +4156,8 @@ public final class MainActivity extends Activity {
             terapkanTemaBilaBerubah();
         });
         tampilan.addView(pilihanTema);
+        tampilan.addView(labelPengaturan("Warna kilau petunjuk"));
+        tampilan.addView(barisWarnaKilau());
         // Berlaku seketika, terpisah dari tombol Simpan: tidak menyentuh
         // alamat server atau token.
         sumber.setOnCheckedChangeListener((group, checkedId) -> {
@@ -4180,6 +4298,53 @@ public final class MainActivity extends Activity {
         isian.setBackground(roundedOutline(LATAR, GARIS, dp(12), dp(1)));
         bagian.addView(isian, new LinearLayout.LayoutParams(-1, -2));
         return isian;
+    }
+
+    /**
+     * Pilihan warna kilau sebagai satu baris bulatan, bukan daftar radio:
+     * dialog Pengaturan sudah panjang. Menyentuh bulatan langsung
+     * memperlihatkan sapuannya pada petunjuk di belakang dialog.
+     */
+    private View barisWarnaKilau() {
+        android.widget.HorizontalScrollView gulir = new android.widget.HorizontalScrollView(this);
+        gulir.setHorizontalScrollBarEnabled(false);
+        LinearLayout baris = new LinearLayout(this);
+        baris.setGravity(Gravity.CENTER_VERTICAL);
+        baris.setPadding(0, dp(4), 0, dp(4));
+        gulir.addView(baris);
+        TextView keterangan = text("", 12, MUTED, false);
+        List<TextView> bulatan = new ArrayList<>();
+        Runnable segarkan = () -> {
+            String aktif = preferences.getString(WARNA_KILAU, KILAU_TEMA);
+            for (int i = 0; i < bulatan.size(); i++) {
+                TextView b = bulatan.get(i);
+                String kunci = PILIHAN_KILAU[i][0];
+                boolean dipilih = kunci.equals(aktif);
+                Integer warna = warnaKilau(kunci);
+                int isi = warna == null ? KARTU : warna;
+                b.setBackground(roundedOutline(isi, dipilih ? INK : GARIS, dp(18),
+                        dp(dipilih ? 3 : 1)));
+                if (dipilih) keterangan.setText(PILIHAN_KILAU[i][1]);
+            }
+        };
+        for (String[] pilihan : PILIHAN_KILAU) {
+            TextView b = text("mati".equals(pilihan[0]) ? "✕"
+                    : KILAU_TEMA.equals(pilihan[0]) ? "T" : "", 13, MUTED, true);
+            b.setGravity(Gravity.CENTER);
+            b.setContentDescription(pilihan[1]);
+            b.setOnClickListener(v -> {
+                preferences.edit().putString(WARNA_KILAU, pilihan[0]).apply();
+                segarkan.run();
+                sapukanKilau();
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(36), dp(36));
+            params.rightMargin = dp(8);
+            baris.addView(b, params);
+            bulatan.add(b);
+        }
+        baris.addView(keterangan);
+        segarkan.run();
+        return gulir;
     }
 
     private RadioButton radioPengaturan(String isi) {
@@ -4710,7 +4875,7 @@ public final class MainActivity extends Activity {
             // Belum terdaftar.
         }
         handler.removeCallbacksAndMessages(null);
-        hentikanDenyutAjakan();
+        hentikanKilauAjakan();
         hentikanDenyutAjakanIklan();
         antreanUcapan.clear();
         lepasPemutarKlip();
