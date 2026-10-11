@@ -37,18 +37,22 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
+      # .venv di dalam proyek dan requirements-dev.txt, sama dengan komputer
+      # pengembang: tests/test_environment.py memeriksa keduanya (termasuk
+      # PyInstaller untuk build).
       - name: Pasang dependency tes
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pytest==9.1.1 pytest-qt==4.5.0 httpx==0.28.1 ruff==0.17.0
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 
       - name: Lint
-        run: python -m ruff check .
+        run: .\.venv\Scripts\python.exe -m ruff check .
 
       - name: Tes harian
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest tests -q --tb=line
+        run: .\.venv\Scripts\python.exe -m pytest tests -q --tb=line
 
   postgresql:
     name: PostgreSQL
@@ -66,10 +70,14 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
+      # .venv di dalam proyek dan requirements-dev.txt, sama dengan komputer
+      # pengembang: tests/test_environment.py memeriksa keduanya (termasuk
+      # PyInstaller untuk build).
       - name: Pasang dependency tes
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pytest==9.1.1 pytest-qt==4.5.0 httpx==0.28.1
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 
       # Image runner menyertakan PostgreSQL dengan layanan yang belum
       # menyala; PGBIN, PGUSER, dan PGPASSWORD sudah disetel oleh image.
@@ -91,5 +99,5 @@ jobs:
           # Dibentuk di sini: konteks `env` workflow tidak memuat variabel
           # bawaan image runner seperti PGUSER/PGPASSWORD.
           $env:ANTRIAN_DB_URL = "postgresql+psycopg://$($env:PGUSER):$($env:PGPASSWORD)@localhost:5432/antrian_uji"
-          python -X faulthandler -m pytest tests -q --tb=line -o faulthandler_timeout=300
+          .\.venv\Scripts\python.exe -X faulthandler -m pytest tests -q --tb=line -o faulthandler_timeout=300
 
