@@ -594,7 +594,9 @@ QPushButton#navPil:checked {{
     background: white;
     border: none;
     color: #3730A3;
-    font-weight: 700;
+    /* Sama dengan keadaan biasa. Lebar pil dihitung dari huruf 600; huruf
+       700 saat terpilih membuat "Pengaduan" terpotong menjadi "Pengaduar". */
+    font-weight: 600;
 }}
 
 QPushButton#navPil:checked:hover {{

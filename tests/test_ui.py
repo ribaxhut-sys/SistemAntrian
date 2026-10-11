@@ -850,6 +850,23 @@ def test_klik_pil_navigasi_mengganti_halaman(qtbot, admin_auth):
     assert jendela.navigasi.currentRow() == 1
 
 
+def test_pil_terpilih_tidak_menebal():
+    """
+    Lebar pil dihitung dari huruf keadaan biasa. Huruf yang lebih tebal
+    saat terpilih tidak muat lagi: "Pengaduan" tampil "Pengaduar".
+    """
+    import re
+
+    from app.ui.style import STYLESHEET
+
+    tebal = {
+        pemilih.strip(): bobot
+        for pemilih, isi in re.findall(r"(QPushButton#navPil[^{]*)\{([^}]*)\}", STYLESHEET)
+        for bobot in re.findall(r"font-weight:\s*(\d+)", isi)
+    }
+    assert set(tebal.values()) == {"600"}, tebal
+
+
 def test_ctrl_angka_mengganti_menu(qtbot, admin_auth):
     """Petugas loket jarang menyentuh mouse; Ctrl+angka berpindah menu."""
     from PySide6.QtGui import QKeySequence, QShortcut

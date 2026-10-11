@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -245,7 +246,10 @@ class _DaftarPutar(QWidget):
         self.daftar.itemDoubleClicked.connect(lambda _item: self.atur_jadwal())
         susunan.addWidget(self.daftar)
 
-        tombol_baris = QHBoxLayout()
+        # Dua baris, bukan satu: empat tombol berdampingan butuh ~400px,
+        # sedangkan kolom kontrol hanya LEBAR_KONTROL — "Atur jadwal…" dan
+        # "Muat ulang" terpotong menjadi "r jadwa" dan "uat ular".
+        tombol_baris = QGridLayout()
         tombol_baris.setSpacing(6)
         naik = tombol("Naik")
         naik.clicked.connect(lambda: self._geser(-1))
@@ -258,9 +262,8 @@ class _DaftarPutar(QWidget):
         muat = tombol("Muat ulang")
         muat.setToolTip("Baca ulang isi folder media/kiosk")
         muat.clicked.connect(self.muat_ulang_folder)
-        for item in (naik, turun, jadwal, muat):
-            tombol_baris.addWidget(item)
-        tombol_baris.addStretch()
+        for indeks, item in enumerate((naik, turun, jadwal, muat)):
+            tombol_baris.addWidget(item, indeks // 2, indeks % 2)
         susunan.addLayout(tombol_baris)
 
     # -- antarmuka seperti QLineEdit, dipakai _BarisPengaturan ----------

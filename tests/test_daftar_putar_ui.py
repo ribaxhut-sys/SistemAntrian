@@ -159,3 +159,23 @@ def test_angka_tayang_dan_tablet_yang_gagal_tampil(halaman):
     _, b = _item(daftar, "b.mp4")
     assert "Gagal diputar di Tablet Lobi" in b.text()
     assert "video what=1" in b.toolTip()
+
+
+def test_tombol_daftar_putar_muat_di_kolom_kontrol(qtbot, halaman):
+    """Empat tombol sebaris memotong "Atur jadwal…" dan "Muat ulang"."""
+    from PySide6.QtWidgets import QApplication, QPushButton
+
+    from app.ui.style import STYLESHEET
+
+    QApplication.instance().setStyleSheet(STYLESHEET)
+    halaman.resize(1366, 768)
+    halaman.show()
+    qtbot.waitExposed(halaman)
+    (butir,) = halaman.rail.findItems("Iklan Anjungan", Qt.MatchFlag.MatchExactly)
+    halaman.rail.setCurrentItem(butir)
+    daftar = _daftar(halaman)
+    QApplication.processEvents()
+    assert daftar.isVisible()
+
+    for tombol in daftar.findChildren(QPushButton):
+        assert tombol.width() >= tombol.sizeHint().width(), tombol.text()
