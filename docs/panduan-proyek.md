@@ -263,6 +263,23 @@ PostgreSQL memasang alat tersebut pada folder `bin`-nya. Jika aplikasi tidak
 menemukannya otomatis, isi pengaturan **Folder perkakas PostgreSQL** dengan
 contoh `C:\Program Files\PostgreSQL\17\bin`.
 
+Setiap backup baru disertai berkas checksum `<nama-backup>.sha256` (format
+`sha256sum`), yang ikut disalin ke folder salinan kedua dan ikut terhapus
+bersama backup-nya oleh retensi. Layar **Backup** menampilkan waktu backup
+terakhir yang berhasil; bila percobaan terakhir gagal, penyebabnya tampil
+dengan kalimat yang dapat ditindaklanjuti (disk penuh, folder tidak dapat
+ditulis, `pg_dump` gagal, dan sebagainya). Catatan ini disimpan di
+`backup\.status-backup.json`.
+
+Tombol **Uji Backup** memeriksa backup terpilih tanpa menyentuh database
+aktif: checksum dicocokkan, lalu isinya diuji. Untuk SQLite, backup
+dipulihkan ke berkas sementara dan diperiksa dengan `PRAGMA
+integrity_check`. Untuk PostgreSQL, seluruh isi dump dibaca oleh
+`pg_restore` tanpa sambungan ke server; pemulihan ke database sementara
+tidak dilakukan karena membutuhkan hak `CREATE DATABASE` yang sengaja tidak
+dimiliki user aplikasi. Pemulihan menolak backup yang checksumnya tidak
+cocok. Backup lama tanpa checksum tetap dapat diuji dan dipulihkan.
+
 Untuk pemulihan, login sebagai Administrator, buka menu **Backup**, pilih
 arsip yang benar, lalu ikuti konfirmasi. Setelah pemulihan, tutup dan buka
 kembali aplikasi. Data transaksi setelah tanggal backup akan hilang.

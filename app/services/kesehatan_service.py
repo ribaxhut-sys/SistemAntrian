@@ -158,6 +158,8 @@ def nilai_backup(
     otomatis_aktif: bool = True,
     folder_salinan: Path | None = None,
     salinan_ada: bool | None = None,
+    gagal_pada: datetime | None = None,
+    pesan_gagal: str = "",
     sekarang: datetime | None = None,
 ) -> Pemeriksaan:
     sekarang = sekarang or clock.now()
@@ -169,10 +171,11 @@ def nilai_backup(
                 INFO,
                 "Backup database dibuat di komputer server, bukan di komputer ini.",
             )
+        gagal = f" Percobaan terakhir gagal: {pesan_gagal}" if gagal_pada else ""
         return Pemeriksaan(
             nama,
             MASALAH,
-            "Belum ada backup yang berhasil dibuat.",
+            "Belum ada backup yang berhasil dibuat." + gagal,
             ("Buka menu Backup, lalu tekan Backup Sekarang.",),
         )
 
@@ -192,8 +195,15 @@ def nilai_backup(
     if not otomatis_aktif:
         tingkat = PERINGATAN
         saran.append("Backup otomatis dimatikan. Nyalakan di Pengaturan › Backup.")
+    if gagal_pada is not None:
+        tingkat = MASALAH
+        ringkasan = (
+            f"Backup terakhir GAGAL ({_waktu(gagal_pada, sekarang)}): {pesan_gagal} "
+            f"Yang terakhir berhasil: {ringkasan}"
+        )
+        saran.append("Buka menu Backup, perbaiki penyebabnya, lalu tekan Backup Sekarang.")
     if folder_salinan is not None and salinan_ada is not True:
-        tingkat = PERINGATAN
+        tingkat = MASALAH if tingkat == MASALAH else PERINGATAN
         if salinan_ada is None:
             saran.append(
                 f"Folder salinan kedua {folder_salinan} tidak terjangkau. Pastikan "
@@ -466,6 +476,7 @@ def _periksa_printer(settings) -> Pemeriksaan:
 
 def _periksa_backup(backup: BackupService) -> Pemeriksaan:
     daftar = backup.list_backup()
+    status = backup.status_backup()
     terakhir = daftar[0] if daftar else None
     folder_salinan = backup.folder_salinan
     salinan_ada: bool | None = None
@@ -484,6 +495,8 @@ def _periksa_backup(backup: BackupService) -> Pemeriksaan:
         otomatis_aktif=backup.settings.get_bool("backup.auto_enabled", True),
         folder_salinan=folder_salinan,
         salinan_ada=salinan_ada,
+        gagal_pada=status.terakhir_gagal if status.gagal_terakhir else None,
+        pesan_gagal=status.pesan_gagal,
     )
 
 

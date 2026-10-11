@@ -3153,3 +3153,32 @@ def test_halaman_layanan_anjungan_memperingatkan_suara_bukan_indonesia(
     assert halaman.baris_paket.lencana.text() == "Normal"
     assert halaman.baris_paket.teks.toolTip() == ""
 
+
+
+def test_layar_backup_menampilkan_status_gagal_dan_checksum(
+    qtbot, admin_auth, antrian_siap, mesin_backup_tersedia, monkeypatch
+):
+    from app.services.backup_service import BackupService
+    from app.ui.settings.backup_page import BackupPage
+
+    layanan = BackupService(admin_auth)
+    layanan.backup()
+    halaman = BackupPage(layanan)
+    qtbot.addWidget(halaman)
+
+    assert "Backup terakhir berhasil" in halaman.label_status.text()
+    assert halaman.tabel_backup.item(0, 3).text() == "ada"
+    assert not halaman.tombol_uji.isEnabled()
+    halaman.tabel_backup.selectRow(0)
+    assert halaman.tombol_uji.isEnabled()
+
+    def tanpa_izin(_tujuan):
+        raise PermissionError("akses ditolak")
+
+    monkeypatch.setattr(layanan.mesin, "salin", tanpa_izin)
+    with pytest.raises(PermissionError):
+        layanan.backup()
+    halaman.muat_ulang()
+
+    assert "GAGAL" in halaman.label_status.text()
+    assert "tidak dapat ditulis" in halaman.label_status.text()

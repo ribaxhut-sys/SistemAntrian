@@ -323,3 +323,18 @@ def test_menu_kesehatan_hanya_untuk_admin(qtbot, auth, antrian_siap):
         qtbot.addWidget(jendela)
         menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
         assert ("Kesehatan Sistem" in menu) is harapan
+
+
+def test_nilai_backup_kegagalan_terakhir_adalah_masalah():
+    hasil = ks.nilai_backup(
+        terakhir=SEKARANG - timedelta(hours=1),
+        gagal_pada=SEKARANG,
+        pesan_gagal="Disk penuh: backup tidak dapat ditulis.",
+        # Salinan kedua yang tertinggal tidak boleh menurunkan tingkatnya.
+        folder_salinan=Path("E:/backup"),
+        salinan_ada=False,
+        sekarang=SEKARANG,
+    )
+    assert hasil.tingkat == MASALAH
+    assert "Disk penuh" in hasil.ringkasan
+
