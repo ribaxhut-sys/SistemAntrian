@@ -3245,7 +3245,7 @@ public final class MainActivity extends Activity {
      */
     private static final long JEDA_KILAU_MIN_MS = 8_000L;
     private static final long JEDA_KILAU_MAX_MS = 20_000L;
-    private static final long LAMA_SAPUAN_KILAU_MS = 2_400L;
+    private static final long LAMA_SAPUAN_KILAU_MS = 3_600L;
     private final java.util.Random acakKilau = new java.util.Random();
     private boolean kilauAjakanAktif;
     private KilauDrawable kilauAjakan;
