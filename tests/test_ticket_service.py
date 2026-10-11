@@ -570,7 +570,6 @@ def test_gambar_pdf_qt_tidak_ikut_geseran_printer_asli(qt_available, tmp_path):
     painter = QPainter()
     assert painter.begin(printer)
     try:
-        kertas = printer.paperRect(QPrinter.Unit.DevicePixel)
         titik_per_mm = printer.resolution() / 25.4
         assert _geser_atas_printer_px(printer, titik_per_mm, geser_mm=3) == 0
     finally:

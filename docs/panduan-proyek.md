@@ -313,6 +313,18 @@ Jalankan test sebelum perubahan dirilis:
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
+Periksa juga lint ringan (hanya galat nyata, aturannya di `ruff.toml`):
+
+```powershell
+.\.venv\Scripts\python.exe -m ruff check .
+```
+
+Di GitHub Actions (`.github/workflows/tes.yml`), job **SQLite** (lint dan
+test) berjalan setiap push. Job **PostgreSQL** memakai PostgreSQL bawaan
+image runner Windows dan berjalan untuk pull request, push ke `main`, dan
+atas permintaan (*Run workflow*). `tests/test_migration.py` menguji setiap
+migrasi turun lalu naik kembali, di kedua dialect.
+
 Untuk pengujian PostgreSQL tersedia `.\test-postgres.ps1`. Build aplikasi
 Windows dilakukan dengan `.\build.ps1`; pembuatan installer memerlukan Inno
 Setup 6 dan menggunakan `.\build-installer.ps1`. Build APK memerlukan JDK 17

@@ -81,3 +81,60 @@ def test_skema_menjaga_satu_nomor_aktif_per_loket(database):
         "counter_id",
         "queue_date",
     ]
+
+
+def _turunkan(tujuan: str) -> None:
+    from alembic import command
+
+    from app.core.database import dispose_engine
+    from app.core.logger import setup_logging
+    from app.core.migrations import alembic_config
+
+    # Koneksi menganggur menahan kunci tabel di PostgreSQL saat DROP.
+    dispose_engine()
+    command.downgrade(alembic_config(), tujuan)
+    setup_logging(force=True)
+
+
+def _kolom_sesuai_model() -> None:
+    inspector = sa.inspect(get_engine())
+    for table_name, table in Base.metadata.tables.items():
+        actual = {c["name"] for c in inspector.get_columns(table_name)}
+        assert actual == {c.name for c in table.columns}, table_name
+
+
+def test_migrasi_turun_ke_awal_lalu_naik_lagi(database):
+    """
+    Setiap downgrade harus benar-benar berjalan, bukan sekadar ada.
+
+    Downgrade adalah jalan pulang bila rilis baru bermasalah; yang rusak
+    baru ketahuan pada saat paling buruk.
+    """
+    _turunkan("base")
+    assert current_revision() is None
+    assert "queue" not in sa.inspect(get_engine()).get_table_names()
+
+    init_database()
+    assert is_up_to_date()
+    _kolom_sesuai_model()
+
+
+def test_migrasi_turun_naik_satu_langkah_tiap_revisi(database):
+    """Stairway: tiap revisi dapat dibatalkan lalu diterapkan ulang."""
+    from alembic.script import ScriptDirectory
+
+    from app.core.migrations import alembic_config
+
+    skrip = ScriptDirectory.from_config(alembic_config())
+    jumlah = len(list(skrip.walk_revisions()))
+    for _ in range(jumlah):
+        _turunkan("-1")
+        sebelum = current_revision()
+        init_database()
+        assert is_up_to_date()
+        _turunkan(sebelum or "base")
+        assert current_revision() == sebelum
+    assert current_revision() is None
+
+    init_database()
+    _kolom_sesuai_model()

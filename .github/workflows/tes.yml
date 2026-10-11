@@ -1,9 +1,10 @@
 # Tes harian di GitHub.
 #
-# Yang dijalankan sama dengan perintah harian di komputer pengembang:
-# pytest di atas SQLite. PostgreSQL (test-postgres.ps1) tetap wajib
-# sebelum rilis, tetapi tidak di sini — Docker di runner Windows tidak
-# sebanding biayanya dengan lampu hijau setiap push.
+# Job SQLite sama dengan perintah harian di komputer pengembang dan
+# berjalan setiap push. Job PostgreSQL memakai PostgreSQL yang sudah
+# terpasang di image runner Windows (tanpa Docker), dan berjalan untuk pull
+# request, push ke main, dan atas permintaan — suite PostgreSQL lebih lama,
+# dan dialect inilah yang dipakai di kantor.
 #
 # Runner Windows, bukan Ubuntu: aplikasi ini desktop Windows + PySide6.
 # Plugin Qt offscreen di Linux butuh tumpukan library sistem yang tidak
@@ -14,6 +15,7 @@ name: Tes
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: tes-${{ github.workflow }}-${{ github.ref }}
@@ -38,9 +40,56 @@ jobs:
       - name: Pasang dependency tes
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pytest==9.1.1 pytest-qt==4.5.0
+          python -m pip install -r requirements.txt pytest==9.1.1 pytest-qt==4.5.0 ruff==0.17.0
+
+      - name: Lint
+        run: python -m ruff check .
 
       - name: Tes harian
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest tests -q --tb=line
+
+  postgresql:
+    name: PostgreSQL
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Pasang dependency tes
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest==9.1.1 pytest-qt==4.5.0
+
+      # Image runner menyertakan PostgreSQL dengan layanan yang belum
+      # menyala; PGBIN, PGUSER, dan PGPASSWORD sudah disetel oleh image.
+      # Database uji dibuat terpisah: fixture `database` membuang skema
+      # public pada setiap test.
+      - name: Nyalakan PostgreSQL
+        run: |
+          $layanan = Get-Service -Name "postgresql*"
+          Set-Service -InputObject $layanan -Status Running -StartupType Automatic
+          & "$env:PGBIN\psql.exe" -v ON_ERROR_STOP=1 -c "CREATE DATABASE antrian_uji"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # pg_dump/pg_restore di PATH supaya test backup tidak dilewati.
+          Add-Content -Path $env:GITHUB_PATH -Value $env:PGBIN
+
+      - name: Tes PostgreSQL
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          # Dibentuk di sini: konteks `env` workflow tidak memuat variabel
+          # bawaan image runner seperti PGUSER/PGPASSWORD.
+          $env:ANTRIAN_DB_URL = "postgresql+psycopg://$($env:PGUSER):$($env:PGPASSWORD)@localhost:5432/antrian_uji"
+          python -X faulthandler -m pytest tests -q --tb=line -o faulthandler_timeout=300
+
