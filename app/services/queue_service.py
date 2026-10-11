@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import sqlalchemy as sa
 
@@ -224,6 +224,17 @@ class DisplayCounterState:
     counter_name: str
     antrian: QueueInfo | None
     istirahat: bool = False
+
+
+#: Pengaturan loket mana yang tampil di layar antrian dan anjungan.
+KUNCI_LOKET_TAMPIL = "display.loket_tampil"
+LOKET_TAMPIL_PETUGAS = "petugas"
+LOKET_TAMPIL_SEMUA = "semua"
+#: Tanda hidup petugas lebih tua dari ini dianggap tidak ada orangnya: PC
+#: loket yang mati listrik hilang sendiri dari papan. Tiga kali selang
+#: tanda hidup (SELANG_TANDA_HADIR_MS di main_window), supaya satu atau dua
+#: tanda yang terlambat tidak membuat loketnya berkedip.
+BATAS_HADIR_PETUGAS_DETIK = 90
 
 
 @dataclass(frozen=True)
@@ -727,9 +738,27 @@ class QueueService:
                 if antrian.counter_id is not None and antrian.counter_id not in per_loket:
                     per_loket[antrian.counter_id] = antrian
 
+            hanya_berpetugas = (
+                self.settings.get(KUNCI_LOKET_TAMPIL, LOKET_TAMPIL_PETUGAS)
+                != LOKET_TAMPIL_SEMUA
+            )
+            batas_hadir = clock.now() - timedelta(seconds=BATAS_HADIR_PETUGAS_DETIK)
+
             loket = []
             for counter in counters:
                 row = per_loket.get(counter.id)
+                # Loket yang masih memanggil atau melayani nomor tetap tampil
+                # walau petugasnya baru keluar: pengunjung yang sudah
+                # dipanggil tidak boleh kehilangan nomornya dari papan.
+                if (
+                    hanya_berpetugas
+                    and row is None
+                    and not (
+                        counter.petugas_terlihat_pada is not None
+                        and counter.petugas_terlihat_pada >= batas_hadir
+                    )
+                ):
+                    continue
                 loket.append(
                     DisplayCounterState(
                         counter_id=counter.id,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
@@ -61,6 +62,15 @@ class Counter(TimestampMixin, Base):
     #: menerima panggilan baru. Admin tidak perlu dilibatkan untuk hal
     #: sesingkat jam istirahat.
     on_break: Mapped[bool] = mapped_column(sa.Boolean(), nullable=False, default=False)
+    #: Petugas yang sedang login di loket ini, dan kapan aplikasinya terakhir
+    #: memberi tanda hidup (lihat AuthService.tanda_hadir_loket). Layar
+    #: antrian menyembunyikan loket yang tanda hidupnya sudah basi. Sengaja
+    #: tanpa foreign key: app_user sudah menunjuk ke counter lewat
+    #: default_counter_id, dan rujukan melingkar mempersulit create/drop.
+    petugas_user_id: Mapped[int | None] = mapped_column(sa.Integer(), nullable=True)
+    petugas_terlihat_pada: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(), nullable=True
+    )
 
     branch: Mapped[Branch] = relationship(back_populates="counters")
     #: Lihat `counter_category`: daftar kosong berarti boleh memanggil semua.

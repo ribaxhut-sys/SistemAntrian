@@ -77,6 +77,7 @@ BAWAAN: dict[str, str] = {
     "display.rotate_seconds": "3",
     "display.number_font_scale": "100",
     "display.sound_enabled": "true",
+    "display.loket_tampil": "petugas",
     "queue.max_call_attempts": "3",
     "queue.registration_open": "true",
     "queue.registration_closed_date": "",
@@ -240,6 +241,18 @@ SKEMA: tuple[Pengaturan, ...] = (
             ("sorotan", "Sorotan"),
             ("split", "Split Informasi"),
             ("kontras", "Kontras Tinggi"),
+        ),
+        kelompok="Layar Antrian",
+    ),
+    Pengaturan(
+        "display.loket_tampil",
+        "Loket yang ditampilkan",
+        "Loket tanpa petugas login disembunyikan dari layar antrian dan "
+        "anjungan; yang masih memanggil nomor tetap tampil.",
+        PILIHAN,
+        pilihan=(
+            ("petugas", "Hanya yang ada petugasnya (disarankan)"),
+            ("semua", "Semua loket aktif"),
         ),
         kelompok="Layar Antrian",
     ),

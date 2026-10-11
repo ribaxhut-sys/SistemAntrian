@@ -153,6 +153,30 @@ def pytest_configure(config):
         "layanan_bertingkat: jangan ratakan pohon jenis layanan bawaan "
         "(lihat fixture layanan_bawaan_datar)",
     )
+    config.addinivalue_line(
+        "markers",
+        "loket_berpetugas: layar hanya menampilkan loket yang ada petugasnya "
+        "(bawaan pemasangan; lihat fixture layanan_bawaan_datar)",
+    )
+
+
+def _tampilkan_semua_loket() -> None:
+    """
+    Bawaan pemasangan menyembunyikan loket tanpa petugas login. Test layar
+    yang lama menguji tata letak di atas loket bawaan tanpa ada yang login;
+    perilaku penyaringnya diuji tersendiri dengan marker loket_berpetugas.
+    """
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import ApplicationSetting
+
+    with session_scope() as session:
+        session.execute(
+            sa.update(ApplicationSetting)
+            .where(ApplicationSetting.key == "display.loket_tampil")
+            .values(value="semua")
+        )
 
 
 def _ratakan_jenis_layanan() -> None:
@@ -220,6 +244,8 @@ def layanan_bawaan_datar(request):
     request.getfixturevalue("seeded")
     if request.node.get_closest_marker("layanan_bertingkat") is None:
         _ratakan_jenis_layanan()
+    if request.node.get_closest_marker("loket_berpetugas") is None:
+        _tampilkan_semua_loket()
     yield
 
 

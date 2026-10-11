@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import warnings
 from dataclasses import dataclass
 
@@ -83,6 +84,9 @@ UKURAN_JENDELA_PREFERENSI = QSize(1440, 900)
 #: Cukup jarang agar SELECT 1 dari tiap loket tidak menjadi beban, cukup
 #: rapat agar petugas melihat server mati tanpa harus menekan F5.
 SELANG_PERIKSA_KONEKSI_MS = 10_000
+#: Tanda hadir petugas di loketnya. Lihat BATAS_HADIR_PETUGAS_DETIK di
+#: queue_service: tanda yang lebih tua dari tiga selang ini dianggap basi.
+SELANG_TANDA_HADIR_MS = 30_000
 
 #: Selang pemeriksaan anjungan (API, Firewall, tablet). Lebih jarang dari uji
 #: database karena di komputer server ia ikut menjalankan PowerShell, dan
@@ -988,6 +992,59 @@ class MainWindow(QMainWindow):
         self._pewaktu_db.timeout.connect(self._jadwalkan_periksa_database)
         self._pewaktu_db.start()
 
+        # Papan antrian hanya menampilkan loket yang ada petugasnya
+        # (display.loket_tampil); jendela inilah buktinya. Berjalan apa pun
+        # menu yang terbuka, selama petugas masih login.
+        self._sedang_tanda_hadir = threading.Event()
+        self._utas_hadir: threading.Thread | None = None
+        self._pewaktu_hadir = QTimer(self)
+        self._pewaktu_hadir.setInterval(SELANG_TANDA_HADIR_MS)
+        self._pewaktu_hadir.timeout.connect(self._kirim_tanda_hadir)
+        sesi = self.auth.current_session
+        if not self.mode_kios and sesi is not None and sesi.user_id is not None:
+            self._pewaktu_hadir.start()
+            self._kirim_tanda_hadir()
+
+    def _hentikan_tanda_hadir(self) -> None:
+        """
+        Wajib sebelum logout: tanda yang masih di jalan akan menulis ulang
+        tanda hadir yang baru saja dihapus logout.
+        """
+        pewaktu = getattr(self, "_pewaktu_hadir", None)
+        if pewaktu is not None:
+            pewaktu.stop()
+        utas = getattr(self, "_utas_hadir", None)
+        if utas is not None:
+            utas.join(timeout=2)
+
+    def _kirim_tanda_hadir(self) -> None:
+        """
+        Di utas sendiri: database yang lambat tidak boleh membekukan jendela.
+
+        Utasnya tidak boleh memegang `self`. Bila utas itu yang terakhir
+        melepas rujukan ke jendela, PySide menghapus objek Qt dari utas yang
+        salah dan proses mati (heap corruption).
+        """
+        sedang = self._sedang_tanda_hadir
+        auth = self.auth
+        if sedang.is_set() or not auth.is_authenticated:
+            return
+        sedang.set()
+
+        def kerja() -> None:
+            try:
+                auth.tanda_hadir_loket()
+            except Exception:
+                # Hanya keterangan untuk papan; tanda berikutnya mencoba lagi.
+                logger.debug("Tanda hadir loket gagal", exc_info=True)
+            finally:
+                sedang.clear()
+
+        self._utas_hadir = threading.Thread(
+            target=kerja, name="tanda-hadir-loket", daemon=True
+        )
+        self._utas_hadir.start()
+
     def _jadwalkan_periksa_database(self) -> None:
         """Mulai SELECT 1 di utas sendiri, atau lewati bila yang lalu belum selesai."""
         if self.mode_kios or self._sedang_memeriksa_db:
@@ -1109,6 +1166,7 @@ class MainWindow(QMainWindow):
         )
         if not konfirmasi(self, pertanyaan):
             return
+        self._hentikan_tanda_hadir()
         self.auth.logout()
         self.close()
 
@@ -1127,6 +1185,7 @@ class MainWindow(QMainWindow):
         pewaktu = getattr(self, "_pewaktu_db", None)
         if pewaktu is not None:
             pewaktu.stop()
+        self._hentikan_tanda_hadir()
         for nama, batas_ms in (("_pemeriksa_db", 400), ("_pemeriksa_anjungan", 3000)):
             pemeriksa = getattr(self, nama, None)
             if pemeriksa is None:

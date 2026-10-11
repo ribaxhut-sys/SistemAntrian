@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime
 
+import sqlalchemy as sa
+
 from app.core import clock
 from app.core.database import session_scope
 from app.core.errors import (
@@ -26,7 +28,7 @@ from app.core.errors import (
 )
 from app.core.logger import get_logger
 from app.core.security import hash_password, needs_rehash, validate_password_strength, verify_password
-from app.models import AuditAction, RecordStatus, UserRole
+from app.models import AuditAction, Counter, RecordStatus, UserRole
 from app.repositories.master_repository import CounterRepository
 from app.repositories.queue_repository import QueueRepository
 from app.repositories.user_repository import UserRepository, normalize_username
@@ -187,6 +189,13 @@ class AuthService:
             return
 
         sesi = self._session
+        if sesi.user_id is not None:
+            try:
+                self._lepas_hadir_loket(sesi.user_id)
+            except Exception:
+                # Logout tidak boleh gagal karena ini; tanda hadir yang
+                # tertinggal basi sendiri dalam BATAS_HADIR_PETUGAS_DETIK.
+                logger.warning("Tanda hadir %s tidak terhapus", sesi.username, exc_info=True)
         with session_scope() as session:
             audit_service.record(
                 session,
@@ -519,7 +528,69 @@ class AuthService:
 
         self._session = replace(sesi, default_counter_id=counter_id)
         logger.info("Petugas %s pindah ke loket %s", sesi.username, counter_id)
+        try:
+            # Papan langsung mengikuti, tidak menunggu tanda hidup berikutnya.
+            self.tanda_hadir_loket()
+        except Exception:
+            logger.warning("Tanda hadir sesudah pindah loket gagal", exc_info=True)
         return self._session
+
+    # -----------------------------------------------------------------
+    # Tanda hadir petugas di loket
+    # -----------------------------------------------------------------
+
+    def tanda_hadir_loket(self) -> int | None:
+        """
+        Catat bahwa petugas ini sedang login di loketnya; kembalikan loketnya.
+
+        Dipanggil berkala oleh jendela petugas (MainWindow). Loket dibaca
+        dari database, bukan dari sesi, supaya penugasan ulang oleh admin
+        ikut terbawa; tanda di loket lain milik petugas yang sama dihapus.
+        `updated_at` loket sengaja tidak disentuh: ini keadaan, bukan
+        perubahan data master.
+        """
+        sesi = self.require_session()
+        if sesi.user_id is None:
+            return None
+        with session_scope() as session:
+            user = UserRepository(session).get_by_id(sesi.user_id)
+            if user is None:
+                return None
+            loket_id = user.default_counter_id
+            lepas = sa.update(Counter).where(Counter.petugas_user_id == sesi.user_id)
+            if loket_id is not None:
+                lepas = lepas.where(Counter.id != loket_id)
+            session.execute(
+                lepas.values(
+                    petugas_user_id=None,
+                    petugas_terlihat_pada=None,
+                    updated_at=Counter.updated_at,
+                )
+            )
+            if loket_id is not None:
+                session.execute(
+                    sa.update(Counter)
+                    .where(Counter.id == loket_id)
+                    .values(
+                        petugas_user_id=sesi.user_id,
+                        petugas_terlihat_pada=clock.now(),
+                        updated_at=Counter.updated_at,
+                    )
+                )
+        return loket_id
+
+    @staticmethod
+    def _lepas_hadir_loket(user_id: int) -> None:
+        with session_scope() as session:
+            session.execute(
+                sa.update(Counter)
+                .where(Counter.petugas_user_id == user_id)
+                .values(
+                    petugas_user_id=None,
+                    petugas_terlihat_pada=None,
+                    updated_at=Counter.updated_at,
+                )
+            )
 
     def sinkronkan_loket(self) -> AuthSession:
         """Segarkan loket sesi dari database tanpa mengubah penugasannya."""

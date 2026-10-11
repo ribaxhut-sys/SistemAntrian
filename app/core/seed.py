@@ -94,6 +94,8 @@ _SETTINGS: list[tuple[str, str, str]] = [
     ("display.rotate_seconds", "3", "Jeda pergantian halaman daftar menunggu, detik"),
     ("display.number_font_scale", "100", "Ukuran huruf nomor antrian di layar, dalam persen"),
     ("display.sound_enabled", "true", "Suara saat nomor dipanggil"),
+    ("display.loket_tampil", "petugas",
+     "Loket di layar: petugas = hanya yang ada petugasnya, semua = semua loket aktif"),
     ("queue.max_call_attempts", "3", "Batas pemanggilan sebelum dianggap tidak hadir"),
     ("queue.registration_open", "true", "Loket dan kios sedang menerima nomor baru"),
     ("queue.registration_closed_date", "",
