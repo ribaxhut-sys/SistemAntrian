@@ -190,6 +190,22 @@ def api_terjangkau(host: str, port: int, *, timeout: float = 2.0) -> bool:
         return False
 
 
+def api_siap(host: str, port: int, *, timeout: float = 3.0) -> bool | None:
+    """
+    Apakah API dapat melayani, bukan sekadar menyala (`/health/siap`).
+
+    None bila tidak diketahui: API tidak menjawab, atau API versi lama yang
+    belum mempunyai endpoint itu. Hanya jawaban 503 yang berarti gagal.
+    """
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/health/siap", timeout=timeout) as jawab:
+            return jawab.status == 200
+    except urllib.error.HTTPError as exc:
+        return False if exc.code == 503 else None
+    except (OSError, urllib.error.URLError, TimeoutError, ValueError):
+        return None
+
+
 def periksa_status_anjungan() -> StatusAnjungan | None:
     """
     Kumpulkan fakta lalu nilai. None bila komputer ini tidak memakai anjungan.

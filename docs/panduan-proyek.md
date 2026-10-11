@@ -320,6 +320,20 @@ di UI. Jangan mengubah skema database secara manual tanpa migration Alembic.
 
 ## 11. Diagnostik cepat
 
+Mulailah dari menu **Kesehatan Sistem** (Administrator). Layar itu memeriksa
+koneksi database, revisi migrasi, API anjungan, tablet terakhir terhubung
+beserta versi APK dan printernya, printer tiket komputer ini, backup
+terakhir dan salinan keduanya, sisa disk, serta galat penting 24 jam
+terakhir dari `logs\app.log`. Kata sandi, token, dan untaian mirip rahasia
+disamarkan sebelum ditampilkan.
+
+API anjungan mempunyai dua endpoint tanpa token:
+
+| Endpoint | Arti |
+|---|---|
+| `GET /health` | Proses API menyala. Isinya selalu `{"status":"ok"}` dan tidak boleh diubah: aplikasi (termasuk versi lama di komputer loket) membandingkannya persis. |
+| `GET /health/siap` | API siap melayani: `200` bila database terjangkau dan skemanya sesuai, `503` bila tidak. Isinya hanya kata keadaan (`database`, `skema`), tanpa alamat atau pesan galat. |
+
 | Gejala | Periksa |
 |---|---|
 | Klien menampilkan database tidak terjangkau | Layanan PostgreSQL aktif, IP server, TCP `5432`, `listen_addresses`, `pg_hba.conf`, dan Firewall |

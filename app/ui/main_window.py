@@ -27,6 +27,7 @@ from app.core.config import APP_NAME, get_config, teks_status_database
 from app.core.logger import get_logger
 from app.services.auth_service import AuthService
 from app.services.backup_service import BackupService
+from app.services.kesehatan_service import KesehatanService
 from app.services.dashboard_service import DashboardService
 from app.services.device_service import PerangkatService
 from app.services.report_service import ReportService
@@ -52,6 +53,7 @@ from app.ui.queue.service_page import ServicePage
 from app.ui.registration.registration_page import RegistrationPage
 from app.ui.settings.layanan_anjungan_page import LayananAnjunganPage
 from app.ui.settings.backup_page import BackupPage
+from app.ui.settings.kesehatan_page import KesehatanPage
 from app.ui.settings.active_service_page import ActiveServicePage
 from app.ui.settings.close_day_page import CloseDayPage
 from app.ui.settings.master_data_page import MasterDataPage
@@ -634,6 +636,12 @@ class MainWindow(QMainWindow):
                 "Backup",
                 Permission.BACKUP_MANAGE,
                 lambda: BackupPage(self.backup_service),
+            ),
+            # Sesudah Backup: keduanya dibaca ADMIN sebelum pelayanan dimulai.
+            _Menu(
+                "Kesehatan Sistem",
+                Permission.CONFIG_MANAGE,
+                lambda: KesehatanPage(KesehatanService(self.auth, self.backup_service)),
             ),
             _Menu(
                 "Pelayanan Aktif",

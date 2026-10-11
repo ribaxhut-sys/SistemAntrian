@@ -10,6 +10,7 @@ import socket
 import threading
 import time
 from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated
@@ -24,7 +25,7 @@ from pydantic import BaseModel, Field
 from app import __version__
 from app.core import clock
 from app.core.config import TIMEZONE, base_dir, get_config
-from app.core.database import dispose_engine
+from app.core.database import dispose_engine, periksa_koneksi
 from app.core.errors import (
     AppError,
     AuthenticationError,
@@ -34,7 +35,7 @@ from app.core.errors import (
     ValidationError,
 )
 from app.core.logger import get_logger, setup_logging
-from app.core.migrations import current_revision
+from app.core.migrations import current_revision, head_revision
 from app.core.seed import seed_initial_data
 from app.services.apk_anjungan import (
     TIPE_APK,
@@ -165,6 +166,30 @@ SELANG_TULIS_KONTAK_DETIK = 30
 #: Jarak minimal antar-restart API yang diminta tablet, juga umur minimal
 #: proses API sebelum boleh di-restart dari tablet.
 JEDA_RESTART_API_DETIK = 60
+
+
+@lru_cache(maxsize=1)
+def _revisi_terbaru() -> str | None:
+    """Revisi migrasi milik program ini; tidak berubah selama proses hidup."""
+    return head_revision()
+
+
+def periksa_kesiapan() -> dict[str, str]:
+    """
+    Fakta untuk /health/siap: database terjangkau dan skemanya sesuai.
+
+    Hanya kata keadaan yang keluar. Endpoint ini tanpa token, jadi alamat
+    database, versi, maupun pesan galat tidak boleh ikut; detailnya masuk
+    log (periksa_koneksi mencatatnya sendiri).
+    """
+    if not periksa_koneksi():
+        return {"database": "gagal", "skema": "tidak_diketahui"}
+    try:
+        skema = "ok" if current_revision() == _revisi_terbaru() else "tidak_sesuai"
+    except Exception:
+        logger.exception("Revisi skema tidak terbaca untuk /health/siap")
+        skema = "gagal"
+    return {"database": "ok", "skema": skema}
 
 
 class KioskServices:
@@ -408,7 +433,26 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
 
     @app.get("/health")
     def health():
+        # Isi ini dibandingkan byte demi byte oleh api_sudah_berjalan dan
+        # api_terjangkau, termasuk di komputer loket versi lama. Jangan
+        # ditambah; pemeriksaan sungguhan ada di /health/siap.
         return {"status": "ok"}
+
+    @app.get("/health/siap")
+    def health_siap():
+        """
+        Siap melayani tablet: 200 bila ya, 503 bila tidak.
+
+        /health hanya membuktikan proses menyala. API yang kehilangan
+        database tetap menjawab /health, padahal tablet tidak dapat
+        mengambil nomor — itulah kegagalan yang ditangkap di sini.
+        """
+        fakta = periksa_kesiapan()
+        siap = fakta["database"] == "ok" and fakta["skema"] == "ok"
+        return JSONResponse(
+            status_code=status.HTTP_200_OK if siap else status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"status": "ok" if siap else "gagal", **fakta},
+        )
 
     def require_layar(
         request: Request,
