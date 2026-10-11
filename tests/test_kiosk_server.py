@@ -359,3 +359,21 @@ def test_kegagalan_siapkan_firewall_dilaporkan_ke_pemanggil(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Izin dibatalkan"):
         kiosk_server.siapkan_firewall()
+
+
+def test_powershell_tidak_memunculkan_jendela(monkeypatch):
+    """Jendela hitam sekilas tiap pemeriksaan status mengganggu petugas."""
+    panggilan = []
+
+    def jalankan(args, **kwargs):
+        panggilan.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout="")
+
+    monkeypatch.setattr(kiosk_server.subprocess, "run", jalankan)
+
+    kiosk_server.siapkan_firewall()
+
+    assert len(panggilan) == 2, "pemeriksaan biasa, lalu permintaan elevasi"
+    for args, kwargs in panggilan:
+        assert kwargs["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    assert "-WindowStyle Hidden" in panggilan[-1][0][-1]

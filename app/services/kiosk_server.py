@@ -195,13 +195,19 @@ def perintah_api() -> tuple[str, list[str]]:
     return sys.executable, ["-m", "app.main", "--kios-api"]
 
 
+#: Tanpa ini setiap pemeriksaan status memunculkan jendela PowerShell hitam
+#: sekilas di depan petugas — dan pemeriksaannya berjalan berkala.
+_TANPA_JENDELA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def _jalankan_powershell(script: str, *, timeout: int = 15) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["powershell.exe", "-NoProfile", "-Command", script],
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True,
         text=True,
         check=False,
         timeout=timeout,
+        creationflags=_TANPA_JENDELA,
     )
 
 
@@ -348,8 +354,10 @@ def _jalankan_terangkat(script: str, *, pesan_gagal: str, timeout: int = 120) ->
     encoded_script = base64.b64encode(script.encode("utf-16le")).decode("ascii")
     elevated_command = (
         "$ErrorActionPreference = 'Stop'; "
+        # Dialog UAC tetap muncul (memang harus); jendela PowerShell yang
+        # diangkat tidak.
         "$process = Start-Process -FilePath 'powershell.exe' -Verb RunAs "
-        "-Wait -PassThru -ErrorAction Stop "
+        "-WindowStyle Hidden -Wait -PassThru -ErrorAction Stop "
         f"-ArgumentList @('-NoProfile', '-EncodedCommand', '{encoded_script}'); "
         "exit $process.ExitCode"
     )
@@ -367,6 +375,7 @@ def _jalankan_terangkat(script: str, *, pesan_gagal: str, timeout: int = 120) ->
             text=True,
             check=False,
             timeout=timeout,
+            creationflags=_TANPA_JENDELA,
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError("Permintaan izin Administrator melewati batas waktu.") from exc
