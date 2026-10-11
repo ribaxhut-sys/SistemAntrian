@@ -245,8 +245,8 @@ class LayananAnjunganPage(QWidget):
         luar.addWidget(gulir)
 
         layout = QVBoxLayout(isi_halaman)
-        layout.setContentsMargins(24, 16, 24, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(24, 12, 24, 12)
+        layout.setSpacing(10)
         layout.addWidget(judul("Layanan Anjungan"))
         layout.addWidget(
             keterangan(
@@ -275,16 +275,16 @@ class LayananAnjunganPage(QWidget):
         isi_status.addLayout(grid)
         baris_paket = QHBoxLayout()
         self.buat_paket = tombol("Buat ulang paket suara")
+        # Keterangan di tooltip, bukan di bawah tombol: halaman ini harus muat
+        # 1366 x 768 dengan sisa ruang, bukan pas-pasan.
+        self.buat_paket.setToolTip(
+            "Paket suara dipakai layar antrian yang tidak punya suara Bahasa "
+            "Indonesia sendiri. Buat ulang bila nama loket berubah."
+        )
         self.buat_paket.clicked.connect(self._buat_paket_suara)
         baris_paket.addWidget(self.buat_paket)
         baris_paket.addStretch()
         isi_status.addLayout(baris_paket)
-        isi_status.addWidget(
-            keterangan(
-                "Paket suara dipakai layar antrian yang tidak punya suara Bahasa "
-                "Indonesia sendiri. Buat ulang bila nama loket berubah."
-            )
-        )
         # Dua kolom: pada 1366 x 768 seluruh halaman muat satu layar.
         # Ditumpuk satu kolom, status dan tablet saja sudah melewati tinggi
         # layar sebelum daftar perangkat sempat terlihat.

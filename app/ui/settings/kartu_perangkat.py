@@ -44,7 +44,7 @@ from app.ui.style import DANGER, SUCCESS, TEXT_MUTED, WARNING
 from app.utils.formatting import tanggal_pendek
 
 SELANG_SEGARKAN_MS = 10_000
-TINGGI_BARIS = 46
+TINGGI_BARIS = 40
 TINGGI_TOMBOL_BARIS = 32
 KOLOM = ("Nama", "Jenis", "Terakhir terlihat", "Alamat", "Versi", "Printer", "")
 
@@ -129,7 +129,7 @@ class KartuPerangkat(QFrame):
             " border-radius: 10px; }"
         )
         isi = QVBoxLayout(self)
-        isi.setContentsMargins(18, 14, 18, 14)
+        isi.setContentsMargins(18, 12, 18, 12)
 
         kepala = QHBoxLayout()
         label = QLabel("PERANGKAT")
@@ -154,6 +154,17 @@ class KartuPerangkat(QFrame):
         self.pilih_suara.activated.connect(self._ubah_anjungan_bersuara)
         kepala.addWidget(self.pilih_suara)
         kepala.addSpacing(12)
+        # Sebaris dengan judul, penjelasannya di tooltip: satu baris penuh
+        # untuk satu kotak centang membuat halaman tidak muat 1366 x 768.
+        self.token_bersama = QCheckBox("Terima token bersama")
+        self.token_bersama.setToolTip(
+            "Untuk tablet lama yang belum dipasangkan dengan kode. Matikan setelah "
+            "semua tablet dipasangkan: selama token bersama diterima, perangkat "
+            "yang dicabut masih dapat masuk memakainya."
+        )
+        self.token_bersama.toggled.connect(self._ubah_token_bersama)
+        kepala.addWidget(self.token_bersama)
+        kepala.addSpacing(12)
         self.tambah = tombol("+ Tambah perangkat", variant="primary")
         self.tambah.clicked.connect(self._tambah)
         kepala.addWidget(self.tambah)
@@ -171,6 +182,10 @@ class KartuPerangkat(QFrame):
         kepala_tabel.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         kepala_tabel.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         self.tabel.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.tabel.horizontalHeaderItem(2).setToolTip(
+            "Hijau: menghubungi server dalam 1 menit terakhir · kuning: lebih "
+            "dari 1 menit · abu-abu: dicabut, tidak dapat lagi menerbitkan nomor."
+        )
         isi.addWidget(self.tabel)
 
         self.kosong = keterangan(
@@ -178,17 +193,6 @@ class KartuPerangkat(QFrame):
             "di tablet atau TV."
         )
         isi.addWidget(self.kosong)
-        isi.addWidget(
-            keterangan(
-                "Hijau: menghubungi server dalam 1 menit terakhir · kuning: lebih "
-                "dari 1 menit · abu-abu: dicabut, tidak dapat lagi menerbitkan nomor."
-            )
-        )
-        self.token_bersama = QCheckBox(
-            "Terima token bersama (tablet lama yang belum dipasangkan dengan kode)"
-        )
-        self.token_bersama.toggled.connect(self._ubah_token_bersama)
-        isi.addWidget(self.token_bersama)
         self.peringatan_suara = QLabel()
         self.peringatan_suara.setWordWrap(True)
         self.peringatan_suara.setStyleSheet(f"color: {WARNING}; font-weight: 600;")

@@ -8,7 +8,6 @@ dan dialog wajib tidak boleh dapat dilewati.
 
 from __future__ import annotations
 
-import os
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QFrame, QLabel, QPushButton, QStatusBar
@@ -689,13 +688,6 @@ def test_form_admin_penuh_tanpa_scrollbar_form(qtbot, admin_auth, monkeypatch, s
     from PySide6.QtWidgets import QScrollArea
 
     from app.ui.settings.settings_page import SettingsPage
-
-    if server and os.environ.get("GITHUB_ACTIONS"):
-        # Layanan Anjungan hanya bersisa beberapa piksel pada 1366 x 768 di
-        # Windows 10/11, dan metrik Segoe UI di image Windows Server runner
-        # GitHub sedikit lebih tinggi. Ukuran itu tidak mewakili komputer
-        # loket; varian ini wajib lolos di komputer pengembang.
-        pytest.skip("metrik font runner GitHub tidak mewakili Windows desktop")
 
     monkeypatch.setattr("app.ui.main_window._komputer_server", lambda: server)
     if server:
