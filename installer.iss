@@ -1,5 +1,5 @@
 #define MyAppName "Sistem Antrian CRO"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "Sistem Antrian CRO"
 #define MyAppExeName "AntrianCRO.exe"
 #define SourceDir GetEnv("ANTRIAN_SOURCE_DIR")
@@ -18,7 +18,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 OutputDir={#OutputDir}
-OutputBaseFilename=AntrianCRO-Setup-1.0.2
+OutputBaseFilename=AntrianCRO-Setup-1.0.3
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2
 SolidCompression=yes

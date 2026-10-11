@@ -4,7 +4,7 @@ param(
 )
 
 <#
-    Build installer Windows Sistem Antrian CRO 1.0.2.
+    Build installer Windows Sistem Antrian CRO 1.0.3.
 
         .\build-installer.ps1
 
@@ -129,7 +129,7 @@ finally {
     Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$installer = Join-Path $output "AntrianCRO-Setup-1.0.2.exe"
+$installer = Join-Path $output "AntrianCRO-Setup-1.0.3.exe"
 if (-not (Test-Path $installer)) { throw "Installer tidak ditemukan: $installer" }
 
 Write-Host ""
