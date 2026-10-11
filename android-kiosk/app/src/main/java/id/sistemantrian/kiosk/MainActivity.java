@@ -4061,12 +4061,23 @@ public final class MainActivity extends Activity {
         perawatan.addView(versionInfo);
         Button updateButton = smallButton("Perbarui ke " + latestVersionName);
         if (newer) perawatan.addView(updateButton, tombolPengaturan());
+        // Sebaris, sama lebar. Huruf mengecil bila dialog sempit (tablet
+        // tegak), bukan terpotong.
+        LinearLayout barisAplikasi = new LinearLayout(this);
+        barisAplikasi.setOrientation(LinearLayout.HORIZONTAL);
         Button restartApi = smallButton("Restart API server");
         restartApi.setEnabled(hasServerConfig());
         restartApi.setOnClickListener(v -> confirmRestartApi(restartApi));
-        perawatan.addView(restartApi, tombolPengaturan());
+        pasangSatuBaris(restartApi, 11, 15);
+        barisAplikasi.addView(restartApi, new LinearLayout.LayoutParams(0, dp(44), 1));
         Button keluar = smallButton("Keluar dari aplikasi");
-        perawatan.addView(keluar, tombolPengaturan());
+        pasangSatuBaris(keluar, 11, 15);
+        LinearLayout.LayoutParams keluarParams = new LinearLayout.LayoutParams(0, dp(44), 1);
+        keluarParams.leftMargin = dp(8);
+        barisAplikasi.addView(keluar, keluarParams);
+        LinearLayout.LayoutParams barisParams = new LinearLayout.LayoutParams(-1, -2);
+        barisParams.topMargin = dp(8);
+        perawatan.addView(barisAplikasi, barisParams);
         AlertDialog dialog = pembuatDialog()
                 .setTitle("Pengaturan anjungan")
                 .setView(gulungan(fields))
