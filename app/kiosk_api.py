@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import mimetypes
@@ -678,8 +679,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 logger.warning("Laporan tayang %s gagal dicatat", device_id, exc_info=True)
         return {"status": "ok"}
 
-    @app.get("/v1/kiosk/categories", dependencies=[Depends(require_token)])
-    def categories():
+    def isi_layanan() -> list[dict]:
         return [
             {
                 "id": item.id,
@@ -691,6 +691,15 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             }
             for item in services.master.list_categories(only_active=True)
         ]
+
+    def versi_layanan(isi: list[dict]) -> str:
+        """Sidik daftar layanan; tablet memuat ulang daftarnya bila berubah."""
+        mentah = json.dumps(isi, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(mentah.encode("utf-8")).hexdigest()[:16]
+
+    @app.get("/v1/kiosk/categories", dependencies=[Depends(require_token)])
+    def categories():
+        return isi_layanan()
 
     @app.get("/v1/kiosk/display")
     def display(device_id: str = Depends(perangkat_terpercaya)):  # noqa: B008
@@ -743,6 +752,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 "kiosk.iklan_layar_penuh_detik", 60
             ),
             "registration_open": services.queue.pendaftaran_dibuka(),
+            # Tablet hanya memuat /categories saat menyala. Tanpa sidik ini
+            # layanan yang ditambah, diganti nama, atau dinonaktifkan di
+            # Data Master baru terlihat sesudah tablet dibuka ulang.
+            "categories_version": versi_layanan(isi_layanan()),
             "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(device_id),
             "waiting_queue_numbers": services.queue.nomor_menunggu_untuk_layar(),
             # Baris "SEDANG DILAYANI". Posisinya (otomatis/atas/bawah) dipilih

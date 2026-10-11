@@ -263,6 +263,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
     isi = response.json()
     assert isi.pop("timezone") == "Asia/Jakarta"
     assert abs(isi.pop("server_time_ms") - time.time() * 1000) < 5000
+    assert len(isi.pop("categories_version")) == 16
     assert isi == {
         "title": "KANTOR PELAYANAN",
         "subtitle": "",
@@ -660,3 +661,27 @@ def test_display_menyaring_jadwal_dan_mengirim_lama_tampil(tmp_path, monkeypatch
     ]
     # Iklan yang jadwalnya lewat juga tidak dilayani lagi.
     assert client.get("/v1/kiosk/media/lalu.jpg", headers=headers).status_code == 404
+
+
+def test_versi_layanan_berubah_bila_daftar_layanan_berubah(tmp_path, monkeypatch):
+    """Tablet memuat ulang /categories hanya bila sidik ini berubah."""
+    from app.kiosk_api import create_app
+
+    monkeypatch.setattr("app.kiosk_api.base_dir", lambda: tmp_path)
+    layanan = _Services()
+    client = TestClient(create_app(TOKEN, layanan))
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+
+    def versi() -> str:
+        return client.get("/v1/kiosk/display", headers=headers).json()["categories_version"]
+
+    awal = versi()
+    assert versi() == awal
+
+    asli = layanan.master.list_categories
+    monkeypatch.setattr(
+        layanan.master,
+        "list_categories",
+        lambda *, only_active: [replace(k, name="PKB") for k in asli(only_active=only_active)],
+    )
+    assert versi() != awal
