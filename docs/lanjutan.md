@@ -166,21 +166,17 @@ RETURNING last_number
 
 | Dialect | Hasil |
 |---|---|
-| SQLite | **890 lolos** (29 Agustus 2026, termasuk papan per-layanan, sisa antrian di tiket, lembar pengaduan, penyegaran otomatis layar Pengaduan, dan anjungan tanpa kartu loket) |
-| PostgreSQL | **598 lolos, 25 dilewati** — putaran lama, SEBELUM perubahan papan per-layanan |
+| SQLite | **1499 lolos, 2 dilewati** (11 Oktober 2026; termasuk Kesehatan Sistem, checksum dan uji backup, pencabutan perangkat di semua endpoint, dan migrasi turun-naik) |
+| PostgreSQL | **1493 lolos, 8 dilewati** (11 Oktober 2026, database `antrian_uji`, dengan `pg_dump`/`pg_restore` di PATH) |
 
-**Angka PostgreSQL itu sudah basi.** Suite belum pernah dijalankan ulang
-terhadap PostgreSQL sejak papan per-layanan, `ringkasan_tiket`, dan
-pengaturan per-mesin masuk. Docker Desktop tidak berjalan di mesin
-pengembang saat putaran terakhir, sehingga skrip `test-postgres.ps1` tidak dapat
-dipakai. **Jalankan sebelum rilis** — `ringkasan_tiket` dan
-`_kelompokkan_per_layanan` membaca antrian dengan cara baru, dan itu justru
-lapisan yang dialect-nya paling menentukan.
+Yang dilewati di PostgreSQL hanya test `sqlite_saja`. Backup PostgreSQL —
+pembuatan, pemulihan, checksum, dan uji keutuhan lewat `pg_restore` —
+**sudah terbukti** pada putaran ini. Tanpa folder `bin` PostgreSQL di
+PATH, test backup dilewati (putaran tanpa PATH: 1443 lolos, 29 dilewati).
 
-Skip PostgreSQL lebih banyak dari 6 yang tercatat sebelumnya. Test
-`sqlite_saja` memang dilewati; sisanya hampir seluruhnya backup karena
-`pg_dump`/`pg_restore` tidak ada di PATH mesin pengembang. **Backup
-PostgreSQL belum terbukti pada putaran ini.**
+Sejak Oktober 2026 GitHub Actions juga menjalankan suite PostgreSQL (job
+**PostgreSQL** di `.github/workflows/tes.yml`) untuk pull request dan push
+ke `main`, serta lint `ruff check .` di job SQLite.
 
 Yang paling menentukan dan **sudah terbukti hijau di PostgreSQL**:
 `tests/test_queue_numbering.py::test_penerbitan_bersamaan_tidak_menghasilkan_nomor_kembar`
