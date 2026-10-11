@@ -289,6 +289,39 @@ def nilai_perangkat(
     return Pemeriksaan(nama, tingkat, ringkasan, tuple(saran), tuple(rincian))
 
 
+def nilai_token_bersama(aktif: bool, terpasang: int) -> Pemeriksaan:
+    """
+    Token bersama lama melemahkan pencabutan perangkat.
+
+    Selama token bersama diterima, tablet yang dicabut tetap dapat masuk
+    memakai token itu (tanpa menyebut device_id-nya). Begitu semua tablet
+    dipasangkan dengan kode, token bersama sebaiknya dimatikan.
+    """
+    nama = "Token bersama"
+    if not aktif:
+        return Pemeriksaan(
+            nama, NORMAL, "Dimatikan: hanya perangkat yang dipasangkan yang diterima."
+        )
+    langkah = (
+        "Pasangkan setiap tablet dengan kode dari Pengaturan › Layanan Anjungan, "
+        "lalu matikan token bersama di halaman yang sama."
+    )
+    if terpasang:
+        return Pemeriksaan(
+            nama,
+            PERINGATAN,
+            "Masih diterima, padahal sudah ada tablet yang dipasangkan. Perangkat "
+            "yang dicabut masih dapat masuk dengan token bersama.",
+            (langkah,),
+        )
+    return Pemeriksaan(
+        nama,
+        INFO,
+        "Masih diterima untuk tablet lama yang belum dipasangkan.",
+        (langkah,),
+    )
+
+
 def ringkas_galat(baris: list[str], sekarang: datetime | None = None) -> Pemeriksaan:
     """Hitung galat penting pada `JENDELA_GALAT` dari baris-baris app.log."""
     sekarang = sekarang or clock.now()
@@ -423,11 +456,13 @@ def _apk_terbaru() -> dict[str, int]:
 
 
 def _periksa_perangkat(auth: AuthService) -> list[Pemeriksaan]:
-    from app.services.device_service import PerangkatService
+    from app.services.device_service import PerangkatService, token_bersama_aktif
 
     if get_config().memakai_sqlite:
         return []
     daftar = PerangkatService(auth).daftar()
+    jumlah_terpasang = sum(1 for p in daftar if p.dipasangkan and not p.dicabut)
+    token = nilai_token_bersama(token_bersama_aktif(), jumlah_terpasang)
     aktif = [p for p in daftar if not p.dicabut and p.dipasangkan]
     dicabut = [p for p in daftar if p.dicabut]
     if not aktif and not dicabut:
@@ -436,7 +471,8 @@ def _periksa_perangkat(auth: AuthService) -> list[Pemeriksaan]:
                 "Perangkat Android",
                 INFO,
                 "Belum ada tablet yang dipasangkan.",
-            )
+            ),
+            token,
         ]
     apk = _apk_terbaru()
     sekarang = clock.now()
@@ -449,6 +485,7 @@ def _periksa_perangkat(auth: AuthService) -> list[Pemeriksaan]:
                 f"{len(dicabut)} perangkat dicabut dan tidak dapat mengakses API.",
             )
         )
+    hasil.append(token)
     return hasil
 
 

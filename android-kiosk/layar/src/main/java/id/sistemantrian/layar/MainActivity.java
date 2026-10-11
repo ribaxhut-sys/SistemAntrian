@@ -853,6 +853,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     /** Sambungan ke server dengan kepala permintaan perangkat ini. */
     private HttpURLConnection open(String path, int readTimeoutMs) throws IOException {
         String base = preferences.getString(SERVER, "").trim().replaceAll("/+$", "");
+        // Token tidak dikirim tanpa enkripsi ke luar jaringan lokal (AlamatServer).
+        if (!AlamatServer.aman(base)) throw new IOException(AlamatServer.PESAN_DITOLAK);
         HttpURLConnection connection = (HttpURLConnection) new URL(base + path).openConnection();
         connection.setConnectTimeout(3000);
         connection.setReadTimeout(readTimeoutMs);
@@ -1399,6 +1401,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             String digits = code.getText().toString().replaceAll("[^0-9]", "");
             if (!(address.startsWith("http://") || address.startsWith("https://"))) {
                 server.setError("Alamat harus diawali http://");
+                return;
+            }
+            if (!AlamatServer.aman(address)) {
+                server.setError(AlamatServer.PESAN_DITOLAK);
                 return;
             }
             if (digits.isEmpty() && isPaired() && address.equals(preferences.getString(SERVER, ""))) {

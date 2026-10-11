@@ -338,3 +338,11 @@ def test_nilai_backup_kegagalan_terakhir_adalah_masalah():
     assert hasil.tingkat == MASALAH
     assert "Disk penuh" in hasil.ringkasan
 
+
+def test_nilai_token_bersama():
+    assert ks.nilai_token_bersama(False, 3).tingkat == NORMAL
+    # Masih ada tablet lama tanpa pasangan: wajar, hanya keterangan.
+    assert ks.nilai_token_bersama(True, 0).tingkat == ks.INFO
+    sudah = ks.nilai_token_bersama(True, 2)
+    assert sudah.tingkat == PERINGATAN
+    assert "dicabut" in sudah.ringkasan

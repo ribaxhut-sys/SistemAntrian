@@ -1352,7 +1352,7 @@ public final class MainActivity extends Activity {
                 video.setVideoURI(Uri.fromFile(lokal));
             } else {
                 videoLewatJaringan = filename;
-                video.setVideoURI(Uri.parse(url), authHeaders());
+                video.setVideoURI(Uri.parse(url), authHeaders(url));
             }
         } else {
             // Gambar baru memudar di atas tampilan lama, lalu yang lama dibuang:
@@ -1709,9 +1709,11 @@ public final class MainActivity extends Activity {
         return base + "/v1/kiosk/media/" + Uri.encode(filename);
     }
 
-    private java.util.Map<String, String> authHeaders() {
+    private java.util.Map<String, String> authHeaders(String url) {
         java.util.Map<String, String> headers = new java.util.HashMap<>();
-        headers.put("Authorization", "Bearer " + preferences.getString(TOKEN, ""));
+        if (AlamatServer.aman(url)) {
+            headers.put("Authorization", "Bearer " + preferences.getString(TOKEN, ""));
+        }
         return headers;
     }
 
@@ -3425,6 +3427,9 @@ public final class MainActivity extends Activity {
             HttpURLConnection connection = null;
             try {
                 String base = preferences.getString(SERVER, "").trim().replaceAll("/+$", "");
+                if (!AlamatServer.aman(base)) {
+                    throw new IllegalStateException(AlamatServer.PESAN_DITOLAK);
+                }
                 connection = (HttpURLConnection) new URL(base + path).openConnection();
                 connection.setRequestMethod(method);
                 connection.setConnectTimeout(5000);
@@ -3490,8 +3495,12 @@ public final class MainActivity extends Activity {
 
     /** Kepala yang dikirim pada setiap permintaan ke server. */
     private void applyHeaders(HttpURLConnection connection) {
-        connection.setRequestProperty("Authorization",
-                "Bearer " + preferences.getString(TOKEN, ""));
+        // Pertahanan terakhir: token tidak ikut ke alamat di luar jaringan lokal
+        // lewat http://. Server akan menolak dengan 401, bukan aplikasi yang macet.
+        if (AlamatServer.aman(connection.getURL().toString())) {
+            connection.setRequestProperty("Authorization",
+                    "Bearer " + preferences.getString(TOKEN, ""));
+        }
         connection.setRequestProperty("X-Device-Id", deviceId());
         connection.setRequestProperty("X-Device-Name", deviceName());
         connection.setRequestProperty("X-Device-Kind", DEVICE_KIND);
@@ -3883,6 +3892,10 @@ public final class MainActivity extends Activity {
                     String code = pairCode.getText().toString().replaceAll("[^0-9]", "");
                     if (!(address.startsWith("http://") || address.startsWith("https://"))) {
                         server.setError("Alamat harus diawali http:// atau https://");
+                        return;
+                    }
+                    if (!AlamatServer.aman(address)) {
+                        server.setError(AlamatServer.PESAN_DITOLAK);
                         return;
                     }
                     preferences.edit().putString(DEVICE_NAME, name.getText().toString().trim())

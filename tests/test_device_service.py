@@ -508,3 +508,48 @@ def test_anjungan_dicabut_tidak_menghalangi_pilihan_otomatis(layanan):
     _pasang_lewat_kode(layanan, "kios-baru", "anjungan")
     assert device_service.anjungan_bersuara() == "kios-baru"
 
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/kiosk/categories",
+        "/v1/kiosk/display",
+        "/v1/kiosk/calls",
+        "/v1/kiosk/sound",
+        "/v1/kiosk/sound/klip.ogg",
+        "/v1/kiosk/ticket-sample",
+        "/v1/kiosk/media/iklan.png",
+        "/v1/kiosk/app/apk",
+    ],
+)
+def test_anjungan_dicabut_ditolak_di_semua_endpoint(layanan, path):
+    klien = _klien()
+    token = _pasang(klien, layanan, DEVICE, "anjungan")
+    (info,) = layanan.daftar()
+    layanan.cabut(info.id)
+
+    jawab = klien.get(path, headers={"Authorization": f"Bearer {token}"})
+
+    assert jawab.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/layar/state",
+        "/v1/layar/calls",
+        "/v1/layar/sound",
+        "/v1/layar/sound/klip.ogg",
+        "/v1/layar/app/apk",
+    ],
+)
+def test_layar_dicabut_ditolak_di_semua_endpoint(layanan, path):
+    klien = _klien()
+    token = _pasang(klien, layanan, "tv-0000-0000-0099", "layar_antrian")
+    (info,) = layanan.daftar()
+    layanan.cabut(info.id)
+
+    jawab = klien.get(path, headers={"Authorization": f"Bearer {token}"})
+
+    assert jawab.status_code == 401

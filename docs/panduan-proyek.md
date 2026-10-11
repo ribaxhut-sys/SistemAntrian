@@ -35,6 +35,9 @@ Untuk jaringan lokal tepercaya:
 
 Jangan teruskan port tersebut dari router ke internet. API menggunakan HTTP
 lokal tanpa enkripsi; gunakan hanya pada jaringan privat yang tepercaya.
+Aplikasi Android hanya mau memakai `http://` ke alamat jaringan lokal;
+alamat lain wajib `https://` (lihat [panduan anjungan
+Android](android-kiosk.md#http-lokal-dan-https-mulai-anjungan-2424-layar-12)).
 
 ## 2. Pilih bentuk pemasangan
 

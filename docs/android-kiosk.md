@@ -275,7 +275,31 @@ berturut-turut menghanguskan semua kode yang masih terbuka.
 Selama peralihan, token bersama yang lama tetap diterima (centang **Terima
 token bersama** di kartu Perangkat). Tablet yang memakainya tetap tercatat
 di daftar, ditandai belum dipasangkan. Matikan centang itu setelah semua
-tablet dipasangkan dengan kode.
+tablet dipasangkan dengan kode. Selama token bersama diterima, tablet yang
+dicabut masih dapat masuk memakai token itu; menu **Kesehatan Sistem**
+memberi peringatan bila token bersama masih aktif padahal sudah ada tablet
+yang dipasangkan.
+
+## HTTP lokal dan HTTPS (mulai anjungan 2.4.24, layar 1.2)
+
+API anjungan memakai HTTP biasa di jaringan kantor, karena sertifikat HTTPS
+belum tersedia di sana. Aplikasi Android karena itu tetap mengizinkan
+cleartext, tetapi **hanya ke alamat jaringan lokal**:
+
+- `10.x.x.x`, `172.16–31.x.x`, `192.168.x.x`, `127.x.x.x`, `169.254.x.x`,
+  IPv6 lokal (`::1`, `fe80::/10`, `fc00::/7`);
+- nama komputer tanpa titik (`http://server-antrian:8765`), atau nama
+  berakhiran `.local`, `.lan`, `.home.arpa`, `.localdomain`.
+
+Alamat lain (nama domain internet atau IP publik) wajib `https://`. Tablet
+menolak menyimpan alamat seperti itu, dan token tidak pernah dikirim ke sana
+lewat HTTP. Aturan ini ada di `AlamatServer.java` (salinan identik di modul
+anjungan dan layar). `network_security_config` tidak dipakai karena hanya
+mengenal nama domain, bukan rentang IP.
+
+Bila kelak ada sertifikat, cukup isi alamat `https://…` di tablet; tidak ada
+perubahan aplikasi yang diperlukan, asalkan sertifikatnya dipercaya Android.
+Jangan meneruskan port `8765` ke internet sebagai pengganti HTTPS.
 
 ## Pembaruan APK dari server
 
