@@ -191,7 +191,11 @@ def test_lewati_membebaskan_loket_dan_dapat_dipanggil_kembali(
 
     assert dilewati.status is QueueStatus.SKIPPED
     assert dilewati.completed_at is None
-    assert set(dilewati.aksi_tersedia()) == {"panggil_kembali", "batal"}
+    assert set(dilewati.aksi_tersedia()) == {
+        "panggil_kembali",
+        "tidak_hadir",
+        "batal",
+    }
     assert cro_queue.current_for_counter(loket) is None
     assert [q.id for q in cro_queue.list_skipped()] == [pertama.id]
 
@@ -218,6 +222,54 @@ def test_panggil_kembali_ditolak_bila_loket_masih_menangani_nomor(
         cro_queue.recall_skipped(dilewati.id, loket)
 
     assert "masih menangani" in gagal.value.user_message
+
+
+def test_nomor_dilewati_dapat_ditandai_tidak_hadir(cro_queue, terbitkan, antrian_siap):
+    terbitkan("A", 2)
+    loket = antrian_siap["loket"][0]
+    dilewati = cro_queue.skip(cro_queue.call_next(loket).id)
+    # Loket sudah memegang pengunjung lain; menutup nomor dilewati tetap boleh.
+    cro_queue.call_next(loket)
+
+    hasil = cro_queue.no_show(dilewati.id)
+
+    assert hasil.status is QueueStatus.NO_SHOW
+    assert hasil.completed_at is not None
+    assert cro_queue.list_skipped() == []
+
+
+def test_nomor_dilewati_dapat_dibatalkan(cro_queue, terbitkan, antrian_siap):
+    terbitkan("A")
+    dilewati = cro_queue.skip(cro_queue.call_next(antrian_siap["loket"][0]).id)
+
+    assert cro_queue.cancel(dilewati.id).status is QueueStatus.CANCELLED
+    assert cro_queue.list_skipped() == []
+
+
+def test_nomor_dilewati_petugas_lain_dapat_ditutup(cro_queue, terbitkan, antrian_siap):
+    """Daftar dilewati milik bersama cabang, seperti panggilan kembalinya."""
+    from app.core.database import session_scope
+    from app.models import Queue
+
+    terbitkan("A")
+    dilewati = cro_queue.skip(cro_queue.call_next(antrian_siap["loket"][0]).id)
+    _admin, petugas_lain = _buat_target_pengalihan(antrian_siap["loket"][1])
+    with session_scope() as session:
+        session.get(Queue, dilewati.id).served_by_user_id = petugas_lain
+
+    assert cro_queue.no_show(dilewati.id).status is QueueStatus.NO_SHOW
+
+
+def test_admin_dapat_membatalkan_paksa_nomor_dilewati(
+    cro_queue, terbitkan, antrian_siap
+):
+    terbitkan("A")
+    dilewati = cro_queue.skip(cro_queue.call_next(antrian_siap["loket"][0]).id)
+    admin, _target_id = _buat_target_pengalihan(antrian_siap["loket"][1])
+
+    hasil = QueueService(admin).batalkan_paksa(dilewati.id, "Pengunjung pulang")
+
+    assert hasil.status is QueueStatus.CANCELLED
 
 
 # ---------------------------------------------------------------------

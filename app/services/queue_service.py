@@ -54,7 +54,7 @@ logger = get_logger("queue")
 #:
 #:     WAITING -> CALLED -> SERVING -> COMPLETED
 #:
-#: Jalur lain: CALLED -> SKIPPED -> CALLED, CALLED -> NO_SHOW,
+#: Jalur lain: CALLED -> SKIPPED -> CALLED, CALLED/SKIPPED -> NO_SHOW,
 #: WAITING/CALLED/SKIPPED -> CANCELLED, dan SERVING <-> PAUSED.
 TRANSISI_SAH: dict[QueueStatus, frozenset[QueueStatus]] = {
     QueueStatus.WAITING: frozenset({QueueStatus.CALLED, QueueStatus.CANCELLED}),
@@ -66,7 +66,9 @@ TRANSISI_SAH: dict[QueueStatus, frozenset[QueueStatus]] = {
             QueueStatus.CANCELLED,
         }
     ),
-    QueueStatus.SKIPPED: frozenset({QueueStatus.CALLED, QueueStatus.CANCELLED}),
+    QueueStatus.SKIPPED: frozenset(
+        {QueueStatus.CALLED, QueueStatus.NO_SHOW, QueueStatus.CANCELLED}
+    ),
     QueueStatus.SERVING: frozenset({QueueStatus.PAUSED, QueueStatus.COMPLETED}),
     QueueStatus.PAUSED: frozenset({QueueStatus.SERVING}),
     # Status akhir. Tidak ada jalan keluar dari sini.
@@ -171,7 +173,7 @@ class QueueInfo:
                 "batal",
             ]
         if self.status is QueueStatus.SKIPPED:
-            return ["panggil_kembali", "batal"]
+            return ["panggil_kembali", "tidak_hadir", "batal"]
         if self.status is QueueStatus.SERVING:
             return ["selesai", "tunda"]
         if self.status is QueueStatus.PAUSED:
@@ -1437,7 +1439,7 @@ class QueueService:
                 antrian is None
                 or antrian.branch_id != sesi.branch_id
                 or antrian.queue_date != clock.today()
-                or antrian.status not in STATUS_SIBUK
+                or antrian.status not in (*STATUS_SIBUK, QueueStatus.SKIPPED)
             ):
                 raise BusinessRuleError(
                     "Antrian tidak lagi aktif hari ini. Muat ulang daftar."
@@ -1678,8 +1680,10 @@ class QueueService:
             )
 
     @staticmethod
-    def _ambil(repo: QueueRepository, queue_id: int) -> Queue:
-        antrian = repo.get_by_id(queue_id)
+    def _ambil(
+        repo: QueueRepository, queue_id: int, *, for_update: bool = False
+    ) -> Queue:
+        antrian = repo.get_by_id(queue_id, for_update=for_update)
         if antrian is None:
             raise NotFoundError("Antrian tidak ditemukan.")
         return antrian
@@ -1734,8 +1738,16 @@ class QueueService:
 
         with session_scope() as session:
             repo = QueueRepository(session)
-            antrian = self._ambil(repo, queue_id)
-            self._pastikan_penanggung_jawab(antrian, sesi.user_id)
+            # Dikunci: nomor dilewati dapat dipanggil kembali loket lain pada
+            # saat yang sama, dan perubahan ini tidak boleh menimpanya.
+            antrian = self._ambil(repo, queue_id, for_update=True)
+            if antrian.status is QueueStatus.SKIPPED:
+                # Nomor dilewati tidak lagi memegang loket mana pun dan boleh
+                # dipanggil kembali oleh loket mana saja; menutupnya juga.
+                if antrian.branch_id != sesi.branch_id:
+                    raise NotFoundError("Antrian tidak ditemukan.")
+            else:
+                self._pastikan_penanggung_jawab(antrian, sesi.user_id)
 
             self._pindah_status(antrian, tujuan)
             if selesai:

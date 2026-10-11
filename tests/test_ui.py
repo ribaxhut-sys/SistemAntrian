@@ -909,6 +909,10 @@ def test_menutup_jendela_membatalkan_pemeriksa_anjungan_awal(
     from app.ui import main_window as modul
 
     monkeypatch.setattr(modul, "TUNDA_PERIKSA_ANJUNGAN_AWAL_MS", 20)
+    # Pemeriksa hanya dipasang di komputer server atau pemasangan
+    # PostgreSQL; tanpa ini hasil tes bergantung pada mesin yang menjalankan.
+    monkeypatch.setattr(modul, "_komputer_server", lambda: True)
+    monkeypatch.setattr(modul.MainWindow, "_periksa_api", lambda _self: None)
     dimulai = []
     monkeypatch.setattr(
         modul._PemeriksaAnjungan,
@@ -1449,6 +1453,56 @@ def test_lewati_sementara_masuk_daftar_dan_dapat_dipanggil_kembali(
     assert "2x" in halaman_layanan.label_status.text()
     assert halaman_layanan.tabel_dilewati.rowCount() == 0
     assert not halaman_layanan.tombol_panggil.isEnabled()
+
+
+def test_nomor_dilewati_dapat_ditandai_tidak_hadir_dari_tabnya(
+    halaman_layanan, terbitkan, monkeypatch
+):
+    monkeypatch.setattr(
+        "app.ui.queue.service_page.konfirmasi", lambda *_args, **_kwargs: True
+    )
+    terbitkan("A", 2)
+    halaman_layanan.muat_ulang()
+    halaman_layanan.panggil_berikutnya()
+    halaman_layanan.lewati_sementara()
+    halaman_layanan.panggil_berikutnya()
+
+    assert not halaman_layanan.tombol_dilewati_tidak_hadir.isEnabled()
+    halaman_layanan.tabel_dilewati.selectRow(0)
+    assert not halaman_layanan.tombol_panggil_kembali.isEnabled()
+    assert halaman_layanan.tombol_dilewati_tidak_hadir.isEnabled()
+    assert halaman_layanan.tombol_dilewati_batal.isEnabled()
+
+    halaman_layanan.tidak_hadir_dilewati()
+
+    assert halaman_layanan.tabel_dilewati.rowCount() == 0
+    assert halaman_layanan.tab_kanan.tabText(1) == "Dilewati (0)"
+    assert halaman_layanan.label_nomor.text() == "A-002", "loket tidak terganggu"
+
+
+def test_pilihan_dilewati_tidak_berpindah_ke_nomor_lain(
+    halaman_layanan, terbitkan, monkeypatch
+):
+    monkeypatch.setattr(
+        "app.ui.queue.service_page.konfirmasi", lambda *_args, **_kwargs: True
+    )
+    terbitkan("A", 2)
+    halaman_layanan.muat_ulang()
+    for _ in range(2):
+        halaman_layanan.panggil_berikutnya()
+        halaman_layanan.lewati_sementara()
+    assert halaman_layanan.tabel_dilewati.rowCount() == 2
+
+    # Nomor terpilih (A-002, terbaru di atas) ditutup dari komputer lain.
+    halaman_layanan.tabel_dilewati.selectRow(0)
+    terpilih = halaman_layanan._id_dilewati_terpilih()
+    halaman_layanan.queue.cancel(terpilih)
+    halaman_layanan.muat_ulang()
+
+    assert halaman_layanan.tabel_dilewati.rowCount() == 1
+    assert halaman_layanan._id_dilewati_terpilih() is None
+    assert not halaman_layanan.tombol_panggil_kembali.isEnabled()
+    assert not halaman_layanan.tombol_dilewati_batal.isEnabled()
 
 
 def test_panggil_ulang_menaikkan_hitungan_pada_layar(halaman_layanan, terbitkan, auth):

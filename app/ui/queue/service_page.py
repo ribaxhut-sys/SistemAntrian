@@ -674,6 +674,23 @@ class ServicePage(QWidget):
             self.panggil_kembali_dilewati
         )
         susunan.addWidget(self.tombol_panggil_kembali)
+
+        # Pengunjung yang dilewati dan tidak pernah kembali harus bisa
+        # ditutup sebagai Tidak Hadir, bukan menunggu Tutup Hari yang akan
+        # mencatatnya sebagai Batal.
+        baris_tutup = QHBoxLayout()
+        baris_tutup.setSpacing(8)
+        self.tombol_dilewati_tidak_hadir = tombol("Tidak Hadir", variant="danger")
+        self.tombol_dilewati_tidak_hadir.clicked.connect(
+            self.tidak_hadir_dilewati
+        )
+        self.tombol_dilewati_batal = tombol("Batalkan", variant="danger")
+        self.tombol_dilewati_batal.clicked.connect(self.batalkan_dilewati)
+        for btn in (self.tombol_dilewati_tidak_hadir, self.tombol_dilewati_batal):
+            btn.setMinimumHeight(38)
+            btn.setEnabled(False)
+            baris_tutup.addWidget(btn, stretch=1)
+        susunan.addLayout(baris_tutup)
         self._dilewati_by_id: dict[int, QueueInfo] = {}
         return panel
 
@@ -1356,6 +1373,12 @@ class ServicePage(QWidget):
         """Perbarui tab dilewati sambil mempertahankan pilihan petugas."""
         terpilih = self._id_dilewati_terpilih()
         self._dilewati_by_id = {antrian.id: antrian for antrian in dilewati}
+        # Pilihan dihapus dulu: bila nomor terpilih sudah hilang (misalnya
+        # dipanggil kembali loket lain), baris aktif tidak boleh diam-diam
+        # berpindah ke nomor yang tidak dipilih petugas.
+        self.tabel_dilewati.blockSignals(True)
+        self.tabel_dilewati.clearSelection()
+        self.tabel_dilewati.setCurrentCell(-1, -1)
         self.tabel_dilewati.setRowCount(len(dilewati))
         for baris, antrian in enumerate(dilewati):
             nilai = [
@@ -1375,6 +1398,7 @@ class ServicePage(QWidget):
                 self.tabel_dilewati.setItem(baris, kolom, sel)
             if antrian.id == terpilih:
                 self.tabel_dilewati.selectRow(baris)
+        self.tabel_dilewati.blockSignals(False)
 
         ada = bool(dilewati)
         self.tabel_dilewati.setVisible(ada)
@@ -1391,9 +1415,9 @@ class ServicePage(QWidget):
 
     def _perbarui_tombol_panggil_kembali(self) -> None:
         """Panggilan kembali hanya boleh dilakukan oleh loket yang kosong."""
-        tombol_kembali = getattr(self, "tombol_panggil_kembali", None)
-        if tombol_kembali is None:
+        if getattr(self, "tombol_dilewati_batal", None) is None:
             return
+        tombol_kembali = self.tombol_panggil_kembali
         tombol_kembali.setEnabled(
             self._id_dilewati_terpilih() is not None
             and self.antrian is None
@@ -1403,6 +1427,15 @@ class ServicePage(QWidget):
             and not self._sedang_sibuk
             and not self._sinkron_gagal
         )
+        # Menutup nomor dilewati tidak memakai loket, jadi tetap boleh
+        # walau loket sedang memegang pengunjung lain atau beristirahat.
+        bisa_tutup = (
+            self._id_dilewati_terpilih() is not None
+            and not self._sedang_sibuk
+            and not self._sinkron_gagal
+        )
+        self.tombol_dilewati_tidak_hadir.setEnabled(bisa_tutup)
+        self.tombol_dilewati_batal.setEnabled(bisa_tutup)
 
     def _perbarui_judul_tab_menunggu(
         self, jumlah: int, lama_menit: list[int]
@@ -1471,6 +1504,8 @@ class ServicePage(QWidget):
             for btn in self.aksi.values():
                 btn.setEnabled(False)
             self.tombol_panggil_kembali.setEnabled(False)
+            self.tombol_dilewati_tidak_hadir.setEnabled(False)
+            self.tombol_dilewati_batal.setEnabled(False)
             self.label_petunjuk_aksi.setText(
                 "Tindakan dikunci sampai koneksi pulih"
                 if self._sinkron_gagal
@@ -1673,6 +1708,40 @@ class ServicePage(QWidget):
         self._jalankan(
             lambda: self.queue.recall_skipped(antrian_id, loket_id),
             "Gagal memanggil kembali antrian",
+        )
+
+    def _dilewati_terpilih(self, btn) -> QueueInfo | None:
+        antrian_id = self._id_dilewati_terpilih()
+        if antrian_id is None or not btn.isEnabled():
+            return None
+        return self._dilewati_by_id.get(antrian_id)
+
+    def tidak_hadir_dilewati(self) -> None:
+        antrian = self._dilewati_terpilih(self.tombol_dilewati_tidak_hadir)
+        if antrian is None:
+            return
+        if not konfirmasi(
+            self,
+            f"Tandai {antrian.queue_number} sebagai tidak hadir?\n\n"
+            f"Nomor ini sudah dipanggil {antrian.jumlah_panggilan}x.",
+        ):
+            return
+        antrian_id = antrian.id
+        self._jalankan(
+            lambda: self.queue.no_show(antrian_id),
+            "Gagal menandai antrian tidak hadir",
+        )
+
+    def batalkan_dilewati(self) -> None:
+        antrian = self._dilewati_terpilih(self.tombol_dilewati_batal)
+        if antrian is None:
+            return
+        if not konfirmasi(self, f"Batalkan antrian {antrian.queue_number}?"):
+            return
+        antrian_id = antrian.id
+        self._jalankan(
+            lambda: self.queue.cancel(antrian_id),
+            "Gagal membatalkan antrian",
         )
 
     def lanjutkan(self) -> None:
