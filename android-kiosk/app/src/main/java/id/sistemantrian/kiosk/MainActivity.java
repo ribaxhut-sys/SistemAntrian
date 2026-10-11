@@ -4121,41 +4121,17 @@ public final class MainActivity extends Activity {
         kelolaMedia.setOnClickListener(v -> showMediaTablet());
         tampilan.addView(kelolaMedia, tombolPengaturan());
         tampilan.addView(labelPengaturan("Posisi baris loket di tablet ini"));
-        RadioGroup posisi = new RadioGroup(this);
-        String posisiTersimpan = preferences.getString(POSISI_LOKET_TABLET, IKUTI_SERVER);
-        for (String[] pilihan : PILIHAN_POSISI_LOKET) {
-            RadioButton tombolPosisi = radioPengaturan(pilihan[1]);
-            tombolPosisi.setTag(pilihan[0]);
-            posisi.addView(tombolPosisi);
-            if (pilihan[0].equals(posisiTersimpan)) posisi.check(tombolPosisi.getId());
-        }
-        if (posisi.getCheckedRadioButtonId() == -1) {
-            posisi.check(posisi.getChildAt(0).getId());
-        }
-        posisi.setOnCheckedChangeListener((group, checkedId) -> {
-            Object nilai = group.findViewById(checkedId).getTag();
-            preferences.edit().putString(POSISI_LOKET_TABLET, String.valueOf(nilai)).apply();
-            terapkanBarisLoket();
-        });
-        tampilan.addView(posisi);
+        tampilan.addView(pilihanTarik(PILIHAN_POSISI_LOKET,
+                preferences.getString(POSISI_LOKET_TABLET, IKUTI_SERVER), nilai -> {
+                    preferences.edit().putString(POSISI_LOKET_TABLET, nilai).apply();
+                    terapkanBarisLoket();
+                }), new LinearLayout.LayoutParams(-1, -2));
         tampilan.addView(labelPengaturan("Tema tablet ini"));
-        RadioGroup pilihanTema = new RadioGroup(this);
-        String temaTersimpan = preferences.getString(TEMA_TABLET, IKUTI_SERVER_TEMA);
-        for (String[] pilihan : PILIHAN_TEMA) {
-            RadioButton tombolTema = radioPengaturan(pilihan[1]);
-            tombolTema.setTag(pilihan[0]);
-            pilihanTema.addView(tombolTema);
-            if (pilihan[0].equals(temaTersimpan)) pilihanTema.check(tombolTema.getId());
-        }
-        if (pilihanTema.getCheckedRadioButtonId() == -1) {
-            pilihanTema.check(pilihanTema.getChildAt(0).getId());
-        }
-        pilihanTema.setOnCheckedChangeListener((group, checkedId) -> {
-            Object nilai = group.findViewById(checkedId).getTag();
-            preferences.edit().putString(TEMA_TABLET, String.valueOf(nilai)).apply();
-            terapkanTemaBilaBerubah();
-        });
-        tampilan.addView(pilihanTema);
+        tampilan.addView(pilihanTarik(PILIHAN_TEMA,
+                preferences.getString(TEMA_TABLET, IKUTI_SERVER_TEMA), nilai -> {
+                    preferences.edit().putString(TEMA_TABLET, nilai).apply();
+                    terapkanTemaBilaBerubah();
+                }), new LinearLayout.LayoutParams(-1, -2));
         tampilan.addView(labelPengaturan("Warna kilau petunjuk"));
         tampilan.addView(barisWarnaKilau());
         // Berlaku seketika, terpisah dari tombol Simpan: tidak menyentuh
@@ -4196,9 +4172,43 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams barisParams = new LinearLayout.LayoutParams(-1, -2);
         barisParams.topMargin = dp(8);
         perawatan.addView(barisAplikasi, barisParams);
+        // Satu kartu per tab: empat kartu bertumpuk membuat dialog harus
+        // digulir jauh, dan teknisi mencari-cari bagian yang dimaksud.
+        View[] kartuTab = {koneksi, printer, tampilan, perawatan};
+        String[] namaTab = {"Koneksi", "Printer", "Tampilan", "Aplikasi"};
+        LinearLayout barisTab = new LinearLayout(this);
+        barisTab.setPadding(dp(16), dp(4), dp(16), 0);
+        List<TextView> tombolTab = new ArrayList<>();
+        java.util.function.IntConsumer pilihTab = indeks -> {
+            tabPengaturan = indeks;
+            for (int i = 0; i < kartuTab.length; i++) {
+                boolean aktif = i == indeks;
+                kartuTab[i].setVisibility(aktif ? View.VISIBLE : View.GONE);
+                TextView t = tombolTab.get(i);
+                t.setTextColor(aktif ? TEKS_TOMBOL : INK);
+                t.setBackground(aktif ? rounded(UTAMA, dp(18))
+                        : roundedOutline(KARTU, GARIS, dp(18), dp(1)));
+            }
+        };
+        for (int i = 0; i < namaTab.length; i++) {
+            TextView t = text(namaTab[i], 14, INK, true);
+            t.setGravity(Gravity.CENTER);
+            pasangSatuBaris(t, 10, 14);
+            int indeks = i;
+            t.setOnClickListener(v -> pilihTab.accept(indeks));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(38), 1);
+            if (i > 0) params.leftMargin = dp(6);
+            barisTab.addView(t, params);
+            tombolTab.add(t);
+        }
+        pilihTab.accept(tabPengaturan);
+        LinearLayout isiDialog = new LinearLayout(this);
+        isiDialog.setOrientation(LinearLayout.VERTICAL);
+        isiDialog.addView(barisTab);
+        isiDialog.addView(gulungan(fields), new LinearLayout.LayoutParams(-1, -2));
         AlertDialog dialog = pembuatDialog()
                 .setTitle("Pengaturan anjungan")
-                .setView(gulungan(fields))
+                .setView(isiDialog)
                 .setPositiveButton("Simpan", null)
                 .setNeutralButton("Uji cetak", null)
                 .setNegativeButton("Batal", null).create();
@@ -4213,10 +4223,12 @@ public final class MainActivity extends Activity {
                     String apiToken = token.getText().toString().trim();
                     String code = pairCode.getText().toString().replaceAll("[^0-9]", "");
                     if (!(address.startsWith("http://") || address.startsWith("https://"))) {
+                        pilihTab.accept(0);
                         server.setError("Alamat harus diawali http:// atau https://");
                         return;
                     }
                     if (!AlamatServer.aman(address)) {
+                        pilihTab.accept(0);
                         server.setError(AlamatServer.PESAN_DITOLAK);
                         return;
                     }
@@ -4224,6 +4236,7 @@ public final class MainActivity extends Activity {
                             .apply();
                     if (!code.isEmpty()) {
                         if (code.length() != 6) {
+                            pilihTab.accept(0);
                             pairCode.setError("Kode pasang 6 angka");
                             return;
                         }
@@ -4232,6 +4245,7 @@ public final class MainActivity extends Activity {
                         return;
                     }
                     if (apiToken.length() < 8) {
+                        pilihTab.accept(0);
                         token.setError("Token minimal 8 karakter");
                         return;
                     }
@@ -4345,6 +4359,55 @@ public final class MainActivity extends Activity {
         baris.addView(keterangan);
         segarkan.run();
         return gulir;
+    }
+
+    /** Tab Pengaturan terakhir; dibuka lagi di tab yang sama selama aplikasi hidup. */
+    private int tabPengaturan;
+
+    /**
+     * Menu tarik-turun satu baris untuk pilihan {kunci, label}. Dipanggil
+     * hanya bila pengguna benar-benar mengganti pilihan, bukan saat menu
+     * pertama kali dipasang.
+     */
+    private android.widget.Spinner pilihanTarik(
+            String[][] pilihan, String terpilih, java.util.function.Consumer<String> saatDipilih) {
+        String[] label = new String[pilihan.length];
+        int awal = 0;
+        for (int i = 0; i < pilihan.length; i++) {
+            label[i] = pilihan[i][1];
+            if (pilihan[i][0].equals(terpilih)) awal = i;
+        }
+        android.widget.Spinner menu = new android.widget.Spinner(this);
+        android.widget.ArrayAdapter<String> isi = new android.widget.ArrayAdapter<String>(
+                this, android.R.layout.simple_spinner_item, label) {
+            @Override
+            public View getView(int posisi, View lama, android.view.ViewGroup induk) {
+                TextView t = (TextView) super.getView(posisi, lama, induk);
+                t.setTextColor(INK);
+                t.setTextSize(15 * uiScale);
+                return t;
+            }
+        };
+        isi.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        menu.setAdapter(isi);
+        menu.setSelection(awal, false);
+        menu.setPadding(dp(6), dp(4), dp(6), dp(4));
+        menu.setBackground(roundedOutline(LATAR, GARIS, dp(12), dp(1)));
+        int[] terakhir = {awal};
+        menu.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> induk, View tampilan,
+                                       int posisi, long id) {
+                if (posisi == terakhir[0]) return;
+                terakhir[0] = posisi;
+                saatDipilih.accept(pilihan[posisi][0]);
+            }
+
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> induk) {
+            }
+        });
+        return menu;
     }
 
     private RadioButton radioPengaturan(String isi) {
