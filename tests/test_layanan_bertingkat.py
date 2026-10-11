@@ -261,3 +261,25 @@ def test_baris_pertama_kelompok_tidak_dapat_naik(master_service):
     pbb = next(k for k in master_service.list_categories() if k.code == "PBB")
     with pytest.raises(BusinessRuleError, match="teratas"):
         master_service.pindahkan_category(pbb.id, naik=True)
+
+
+def test_anak_aktif_berinduk_nonaktif_tampil_di_menu_awal_anjungan(master_service):
+    """
+    Menonaktifkan Konsultasi lalu menyalakan PBB saja: PBB naik ke tingkat
+    teratas. `parent_id`-nya harus ikut kosong, karena anjungan menyusun
+    menu awalnya dari `parent_id is None` — selama masih menyebut induk
+    yang nonaktif, PBB aktif tetapi tidak tampil di tablet mana pun.
+    """
+    semua = {k.code: k for k in master_service.list_categories()}
+    master_service.set_category_status(semua["KONSULTASI"].id, False)
+    master_service.set_category_status(semua["PBB"].id, True)
+
+    aktif = {k.code: k for k in master_service.list_categories(only_active=True)}
+    assert "KONSULTASI" not in aktif
+    assert aktif["PBB"].parent_id is None
+    assert aktif["PBB"].level == 0
+
+    # Daftar admin (tanpa saringan) tetap menyebut induk aslinya: dialog
+    # Ubah Jenis Layanan membaca induk dari sana.
+    admin = {k.code: k for k in master_service.list_categories()}
+    assert admin["PBB"].parent_id == semua["KONSULTASI"].id

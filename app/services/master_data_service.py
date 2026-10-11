@@ -14,7 +14,7 @@ ketik saat pemasangan tidak tertinggal selamanya sebagai baris nonaktif.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import sqlalchemy as sa
 
@@ -188,7 +188,9 @@ def _susun_hierarki(rows: list[ServiceCategory]) -> list[CategoryInfo]:
 
     Anak yang induknya tidak ikut tersaring (induk nonaktif, anaknya
     aktif) naik ke tingkat teratas, bukan hilang. Jenis layanan yang masih
-    aktif harus selalu dapat dicapai.
+    aktif harus selalu dapat dicapai. `parent_id`-nya ikut dikosongkan:
+    anjungan menyusun menu awalnya dari `parent_id is None`, sehingga anak
+    yang masih menyebut induk nonaktif tidak pernah tampil di tablet.
     """
     ada = {row.id for row in rows}
     anak_dari: dict[int | None, list[ServiceCategory]] = {}
@@ -201,7 +203,12 @@ def _susun_hierarki(rows: list[ServiceCategory]) -> list[CategoryInfo]:
     def telusuri(induk: int | None, level: int) -> None:
         for row in anak_dari.get(induk, []):
             hasil.append(
-                _as_category(row, punya_anak=bool(anak_dari.get(row.id)), level=level)
+                replace(
+                    _as_category(
+                        row, punya_anak=bool(anak_dari.get(row.id)), level=level
+                    ),
+                    parent_id=induk,
+                )
             )
             telusuri(row.id, level + 1)
 
