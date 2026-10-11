@@ -329,8 +329,10 @@ connect the POS80/IWare IW-J200 II printer using a USB host/OTG adapter. At
 first launch the kiosk screen appears without requiring server details.
 The kiosk searches the local network automatically. If no server is found,
 open the gear icon and tap **Cari** beside the server field, or use **Cari
-Server Otomatis** on the screen. Enter the token if it differs from
-`bapendacro`. Until a server is found the display stays on its setup message and
+Server Otomatis** on the screen. Then pair the tablet with the 6-digit code
+from **Layanan Anjungan → Perangkat → + Tambah perangkat**. There is no
+working default token: the server generates a random one, so the
+`bapendacro` placeholder in old APKs is always rejected. Until a server is found the display stays on its setup message and
 shows the ticket-taking workflow preview; actual service choices and ticket
 issuance remain unavailable until the server connects.
 

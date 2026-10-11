@@ -865,6 +865,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         connection.setRequestProperty("X-Device-Name", deviceName());
         connection.setRequestProperty("X-Device-Kind", DEVICE_KIND);
         connection.setRequestProperty("X-App-Version-Code", String.valueOf(appVersionCode()));
+        connection.setRequestProperty("X-App-Version-Name", appVersionName());
         return connection;
     }
 

@@ -507,6 +507,17 @@ public final class MainActivity extends Activity {
     private boolean showingConfirmation;
     private boolean showingResult;
     private boolean categoriesLoaded;
+    /** categories_version server saat daftar layanan terakhir dimuat. */
+    private String versiLayanan = "";
+    /**
+     * Pesan yang bertahan beberapa detik. Tanpa ini petunjuk biasa menimpanya
+     * pada detik berikutnya (updateAvailability berjalan tiap detik), sehingga
+     * "Pilihan dibatalkan..." atau penolakan server nyaris tidak terbaca.
+     */
+    private String pesanSementara = "";
+    private String nadaSementara = "ajak";
+    private long pesanSementaraSampai;
+    private static final long LAMA_PESAN_SEMENTARA_MS = 6000L;
     private String mediaSignature = "";
     private List<String> welcomeMedia = new ArrayList<>();
     private int welcomeSlideSeconds = 10;
@@ -706,6 +717,24 @@ public final class MainActivity extends Activity {
 
     private interface Failure {
         void accept(String message);
+    }
+
+    /**
+     * Jawaban 4xx: server sudah memutuskan (pendaftaran ditutup, layanan
+     * nonaktif, perlu pembaruan). Mengulang permintaan yang sama tidak akan
+     * mengubah jawabannya, berbeda dengan jaringan putus atau galat 5xx.
+     */
+    private interface Ditolak {
+        void accept(int kode, String detail);
+    }
+
+    private static final class PenolakanServer extends IllegalStateException {
+        final int kode;
+
+        PenolakanServer(int kode, String detail) {
+            super(detail);
+            this.kode = kode;
+        }
     }
 
     // Jam selalu waktu Indonesia dari server, bukan setelan tablet: tablet
@@ -1040,6 +1069,15 @@ public final class MainActivity extends Activity {
     }
 
     private void loadCategories() {
+        loadCategories(false);
+    }
+
+    /**
+     * `latar`: penyegaran karena categories_version berubah. Gagal di latar
+     * tidak menghapus daftar yang sedang dipakai; dicoba lagi pada
+     * /display berikutnya.
+     */
+    private void loadCategories(boolean latar) {
         if (!hasServerConfig()) {
             showServerPlaceholder(
                     "Server belum diatur. Hubungkan melalui tombol Pengaturan.");
@@ -1052,11 +1090,38 @@ public final class MainActivity extends Activity {
                 categories.add(new Category(rows.getJSONObject(i)));
             }
             categoriesLoaded = true;
+            sesuaikanJalur();
             if (!showingConfirmation && !showingResult) showCategories();
         }, message -> {
+            if (latar && categoriesLoaded) {
+                versiLayanan = "";
+                return;
+            }
             categoriesLoaded = false;
             showServerPlaceholder("Tidak dapat memuat layanan: " + message);
         });
+    }
+
+    /**
+     * Sub-menu yang sedang dibuka mengikuti daftar baru: nama kelompok yang
+     * diganti ikut berganti, dan kelompok yang hilang atau berhenti menjadi
+     * kelompok mengembalikan pengunjung ke tingkat di atasnya.
+     */
+    private void sesuaikanJalur() {
+        List<Category> jalur = new ArrayList<>();
+        for (Category lama : path) {
+            Category baru = null;
+            for (Category item : categories) {
+                if (item.id == lama.id) {
+                    baru = item;
+                    break;
+                }
+            }
+            if (baru == null || !baru.group) break;
+            jalur.add(baru);
+        }
+        path.clear();
+        path.addAll(jalur);
     }
 
     private void loadDisplay() {
@@ -1114,6 +1179,13 @@ public final class MainActivity extends Activity {
             terapkanMediaSambutan();
             if (!sumberTablet()) sinkronkanSalinan();
             registrationOpen = display.optBoolean("registration_open", true);
+            String versi = display.optString("categories_version", "");
+            if (!versi.isEmpty() && !versi.equals(versiLayanan)) {
+                // Daftar yang dimuat saat menyala sudah sesuai versi pertama.
+                boolean pertama = versiLayanan.isEmpty();
+                versiLayanan = versi;
+                if (!pertama && categoriesLoaded) loadCategories(true);
+            }
             JSONArray waitingRows = display.optJSONArray("waiting_queue_numbers");
             List<String> terbaru = new ArrayList<>();
             if (waitingRows != null) {
@@ -2877,7 +2949,7 @@ public final class MainActivity extends Activity {
         Runnable kembali = () -> {
             if (showingConfirmation || showingResult || requestInFlight) return;
             showCategories();
-            if (pesan != null) setHint(pesan, "ajak");
+            if (pesan != null) tampilkanPesanSementara(pesan, "tunggu");
         };
         if (halaman == null) {
             kembali.run();
@@ -2894,7 +2966,7 @@ public final class MainActivity extends Activity {
         requestInFlight = true;
         if (pendingRequestId == null) pendingRequestId = UUID.randomUUID().toString();
         setHint("Mengambil nomor…", "tunggu");
-        request("POST", "/v1/kiosk/tickets",
+        request(worker, "POST", "/v1/kiosk/tickets",
                 new JSONObjectBuilder()
                         .put("category_id", pendingCategory.id)
                         .put("request_id", pendingRequestId)
@@ -2933,6 +3005,20 @@ public final class MainActivity extends Activity {
                     requestInFlight = false;
                     setHint("Nomor belum dapat dipastikan. Sentuh ulang untuk mencoba lagi.", "salah");
                     showRetry();
+                },
+                (kode, detail) -> {
+                    // Server menolak dengan alasan yang jelas; tombol Ulangi
+                    // hanya akan mendapat jawaban yang sama. Tampilkan
+                    // alasannya, lalu kembali ke daftar layanan yang segar.
+                    requestInFlight = false;
+                    showingConfirmation = false;
+                    pendingCategory = null;
+                    pendingRequestId = null;
+                    showIdleResult();
+                    keluarDariKonfirmasi(null);
+                    tampilkanPesanSementara(detail, "salah");
+                    loadCategories(true);
+                    loadDisplay();
                 });
     }
 
@@ -3038,6 +3124,10 @@ public final class MainActivity extends Activity {
             choice.animate().alpha(enabled ? 1f : 0.45f).setDuration(200).start();
         }
         if (showingResult) return;
+        if (System.currentTimeMillis() < pesanSementaraSampai) {
+            setHint(pesanSementara, nadaSementara);
+            return;
+        }
         if (!registrationOpen) {
             setHint("Pendaftaran nomor antrian sedang ditutup sementara.", "tunggu");
         } else if (seconds > 0) {
@@ -3050,6 +3140,13 @@ public final class MainActivity extends Activity {
                             + " — pilih layanan, atau sentuh Kembali";
             setHint(message, "ajak");
         }
+    }
+
+    private void tampilkanPesanSementara(String pesan, String nada) {
+        pesanSementara = pesan;
+        nadaSementara = nada;
+        pesanSementaraSampai = System.currentTimeMillis() + LAMA_PESAN_SEMENTARA_MS;
+        setHint(pesan, nada);
     }
 
     private void setHint(String message, String tone) {
@@ -3082,24 +3179,49 @@ public final class MainActivity extends Activity {
     }
 
     /**
-     * Petunjuk "Sentuh jenis layanan…" berdenyut sangat pelan selama
-     * anjungan menunggu pengunjung; berhenti begitu ada yang memilih.
+     * Petunjuk "Sentuh jenis layanan..." diam, lalu sesekali berdenyut dua
+     * kali dengan jeda acak. Denyut tanpa henti melelahkan mata dan lama-lama
+     * tidak diperhatikan; gerak yang jarang dan tak terduga justru menarik
+     * pandangan. Berhenti begitu ada yang memilih layanan.
      */
+    private static final long JEDA_DENYUT_MIN_MS = 8_000L;
+    private static final long JEDA_DENYUT_MAX_MS = 20_000L;
+    private final java.util.Random acakDenyut = new java.util.Random();
+    private boolean denyutAjakanAktif;
+
+    private final Runnable denyutAjakanSekali = new Runnable() {
+        @Override
+        public void run() {
+            if (!denyutAjakanAktif || hint == null) return;
+            denyutAjakan = android.animation.ObjectAnimator.ofPropertyValuesHolder(hint,
+                    android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.05f),
+                    android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.05f));
+            denyutAjakan.setDuration(420);
+            denyutAjakan.setRepeatCount(3);  // naik-turun dua kali
+            denyutAjakan.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+            denyutAjakan.setInterpolator(
+                    new android.view.animation.AccelerateDecelerateInterpolator());
+            denyutAjakan.start();
+            handler.postDelayed(this, jedaDenyutAcak());
+        }
+    };
+
+    private long jedaDenyutAcak() {
+        return JEDA_DENYUT_MIN_MS
+                + (long) (acakDenyut.nextDouble() * (JEDA_DENYUT_MAX_MS - JEDA_DENYUT_MIN_MS));
+    }
+
     private void mulaiDenyutAjakan() {
-        if (denyutAjakan != null && denyutAjakan.getTarget() == hint) return;
-        hentikanDenyutAjakan();
-        denyutAjakan = android.animation.ObjectAnimator.ofPropertyValuesHolder(hint,
-                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.04f),
-                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.04f));
-        denyutAjakan.setDuration(1400);
-        denyutAjakan.setRepeatCount(android.animation.ValueAnimator.INFINITE);
-        denyutAjakan.setRepeatMode(android.animation.ValueAnimator.REVERSE);
-        denyutAjakan.setInterpolator(
-                new android.view.animation.AccelerateDecelerateInterpolator());
-        denyutAjakan.start();
+        // Dipanggil tiap detik lewat updateAvailability; jadwal yang sudah
+        // berjalan dibiarkan.
+        if (denyutAjakanAktif) return;
+        denyutAjakanAktif = true;
+        handler.postDelayed(denyutAjakanSekali, jedaDenyutAcak());
     }
 
     private void hentikanDenyutAjakan() {
+        denyutAjakanAktif = false;
+        handler.removeCallbacks(denyutAjakanSekali);
         if (denyutAjakan == null) return;
         denyutAjakan.cancel();
         Object sasaran = denyutAjakan.getTarget();
@@ -3417,12 +3539,19 @@ public final class MainActivity extends Activity {
     private void request(
             String method, String path, org.json.JSONObject body,
             Success success, Failure failure) {
-        request(worker, method, path, body, success, failure);
+        request(worker, method, path, body, success, failure, null);
     }
 
     private void request(
             ExecutorService pelaksana, String method, String path, org.json.JSONObject body,
             Success success, Failure failure) {
+        request(pelaksana, method, path, body, success, failure, null);
+    }
+
+    /** `ditolak` menerima jawaban 4xx; tanpa itu 4xx ikut ke `failure`. */
+    private void request(
+            ExecutorService pelaksana, String method, String path, org.json.JSONObject body,
+            Success success, Failure failure, Ditolak ditolak) {
         pelaksana.execute(() -> {
             HttpURLConnection connection = null;
             try {
@@ -3445,19 +3574,29 @@ public final class MainActivity extends Activity {
                 int code = connection.getResponseCode();
                 InputStream stream = code < 400
                         ? connection.getInputStream() : connection.getErrorStream();
+                // Jawaban galat tanpa isi membuat getErrorStream() null.
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
-                byte[] buffer = new byte[4096];
-                int length;
-                while ((length = stream.read(buffer)) != -1) output.write(buffer, 0, length);
-                stream.close();
-                Object response = new JSONTokener(
-                        new String(output.toByteArray(), StandardCharsets.UTF_8))
-                        .nextValue();
+                if (stream != null) {
+                    byte[] buffer = new byte[4096];
+                    int length;
+                    while ((length = stream.read(buffer)) != -1) output.write(buffer, 0, length);
+                    stream.close();
+                }
+                String teks = new String(output.toByteArray(), StandardCharsets.UTF_8).trim();
+                Object response = null;
+                try {
+                    response = teks.isEmpty() ? null : new JSONTokener(teks).nextValue();
+                } catch (org.json.JSONException e) {
+                    if (code < 400) throw e;
+                }
                 if (code >= 400) {
                     String detail = response instanceof JSONObject
-                            ? ((JSONObject) response).optString(
-                                    "detail", "Server menolak permintaan.")
-                            : "Server menolak permintaan.";
+                            ? ((JSONObject) response).optString("detail", "")
+                            : "";
+                    if (detail.trim().isEmpty()) {
+                        detail = "Server menolak permintaan (HTTP " + code + ").";
+                    }
+                    if (code < 500) throw new PenolakanServer(code, detail);
                     throw new IllegalStateException(detail);
                 }
                 JSONObject wrapped = new JSONObject().put("data", response);
@@ -3471,7 +3610,12 @@ public final class MainActivity extends Activity {
             } catch (Exception e) {
                 String message = e.getMessage() == null
                         ? "Server tidak dapat dihubungi." : e.getMessage();
-                handler.post(() -> failure.accept(message));
+                if (e instanceof PenolakanServer && ditolak != null) {
+                    int kode = ((PenolakanServer) e).kode;
+                    handler.post(() -> ditolak.accept(kode, message));
+                } else {
+                    handler.post(() -> failure.accept(message));
+                }
             } finally {
                 if (connection != null) connection.disconnect();
             }
