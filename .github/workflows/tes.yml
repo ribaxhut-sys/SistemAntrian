@@ -52,7 +52,11 @@ jobs:
       - name: Tes harian
         env:
           QT_QPA_PLATFORM: offscreen
-        run: .\.venv\Scripts\python.exe -m pytest tests -q --tb=line
+        run: |
+          .\.venv\Scripts\python.exe -m pytest tests -q --tb=line
+          $kode = $LASTEXITCODE
+          Write-Host "Kode keluar pytest: $kode"
+          exit $kode
 
   postgresql:
     name: PostgreSQL
@@ -100,4 +104,10 @@ jobs:
           # bawaan image runner seperti PGUSER/PGPASSWORD.
           $env:ANTRIAN_DB_URL = "postgresql+psycopg://$($env:PGUSER):$($env:PGPASSWORD)@localhost:5432/antrian_uji"
           .\.venv\Scripts\python.exe -X faulthandler -m pytest tests -q --tb=line -o faulthandler_timeout=300
+          # Kode keluar dicatat sendiri: proses yang lolos semua test tetapi
+          # keluar bukan 0 (misalnya Qt atau utas yang macet saat berhenti)
+          # harus terbaca jelas di log, bukan hanya "exit code 1".
+          $kode = $LASTEXITCODE
+          Write-Host "Kode keluar pytest: $kode"
+          exit $kode
 
