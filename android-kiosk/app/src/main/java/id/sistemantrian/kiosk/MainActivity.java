@@ -36,6 +36,7 @@ import android.transition.TransitionManager;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
@@ -649,7 +650,7 @@ public final class MainActivity extends Activity {
      * ini pengunjung berikutnya mendapati pilihan orang lain, dan tablet
      * tidak pernah dianggap menganggur.
      */
-    private static final long KEMBALI_KE_MENU_AWAL_MS = 30_000L;
+    private static final long KEMBALI_KE_MENU_AWAL_MS = 20_000L;
     private long sentuhTerakhirMillis = System.currentTimeMillis();
     private boolean sedangBertransaksi;
     private float targetTirai = 0f;
@@ -2881,8 +2882,9 @@ public final class MainActivity extends Activity {
         TextView serviceName = text(pendingCategory.name, 23, INK, true);
         serviceName.setTypeface(huruf(800));
         namaLayanan.addView(serviceName);
+        TextView info = null;
         if (!pendingCategory.info.trim().isEmpty()) {
-            TextView info = text(pendingCategory.info.trim(), 13, MUTED, false);
+            info = text(pendingCategory.info.trim(), 13, MUTED, false);
             info.setMaxLines(2);
             info.setEllipsize(TextUtils.TruncateAt.END);
             namaLayanan.addView(info);
@@ -2914,6 +2916,9 @@ public final class MainActivity extends Activity {
         actions.addView(yes, yesParams);
         page.addView(actions, new LinearLayout.LayoutParams(-1, -2));
         contentSlot.addView(page);
+        TextView keterangan = info;
+        contentSlot.post(() -> pasKanKonfirmasi(
+                page, langkah, keterangan, identity, actions, cancel, yes));
         page.setAlpha(0f);
         page.setTranslationX(dp(24));
         page.animate().alpha(1f).translationX(0f).setDuration(240)
@@ -2922,6 +2927,43 @@ public final class MainActivity extends Activity {
         handler.postDelayed(confirmTimeout, 15000);
         batasKonfirmasiMillis = System.currentTimeMillis() + 15000;
         perbaruiHitungMundurKonfirmasi();
+    }
+
+    /**
+     * Halaman konfirmasi harus muat di panel tengah. Panel itu bisa pendek
+     * karena iklan dan baris loket ikut berbagi tinggi layar; tanpa ini
+     * isinya meluap dan tombol Kembali / Ya terpangkas di tepi bawah.
+     * Yang paling tidak penting dilepas lebih dulu.
+     */
+    private void pasKanKonfirmasi(LinearLayout page, View langkah, View info,
+                                  View identity, View actions, Button... tombol) {
+        int tinggi = contentSlot.getHeight();
+        if (tinggi <= 0 || page.getParent() != contentSlot) return;
+        int lebar = contentSlot.getWidth();
+        if (muatDi(page, lebar, tinggi)) return;
+        langkah.setVisibility(View.GONE);
+        if (muatDi(page, lebar, tinggi)) return;
+        if (info != null) info.setVisibility(View.GONE);
+        if (muatDi(page, lebar, tinggi)) return;
+        page.setPadding(dp(4), 0, dp(4), 0);
+        identity.setPadding(dp(10), dp(6), dp(10), dp(6));
+        actions.setPadding(0, dp(6), 0, 0);
+        if (muatDi(page, lebar, tinggi)) return;
+        // Terakhir: tombol memendek, tetapi tidak di bawah sasaran sentuh wajar.
+        int lebih = page.getMeasuredHeight() - tinggi;
+        for (Button b : tombol) {
+            ViewGroup.LayoutParams params = b.getLayoutParams();
+            params.height = Math.max(dp(44), params.height - lebih);
+            b.setLayoutParams(params);
+        }
+    }
+
+    /** Tinggi yang dibutuhkan `view` pada lebar ini muat dalam `tinggi`. */
+    private boolean muatDi(View view, int lebar, int tinggi) {
+        view.measure(
+                View.MeasureSpec.makeMeasureSpec(lebar, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        return view.getMeasuredHeight() <= tinggi;
     }
 
     /** Sisa waktu sebelum pilihan dibatalkan sendiri, terlihat oleh pengunjung. */
@@ -2938,6 +2980,10 @@ public final class MainActivity extends Activity {
             showingConfirmation = false;
             pendingCategory = null;
             pendingRequestId = null;
+            // Pengunjung yang diam selama ini kemungkinan sudah pergi; orang
+            // berikutnya harus mendapati menu awal, bukan sub-menu pilihan
+            // orang lain. Tombol Kembali tetap mundur satu tingkat.
+            path.clear();
             keluarDariKonfirmasi("Pilihan dibatalkan karena tidak ada aktivitas.");
         }
     };
@@ -4019,12 +4065,15 @@ public final class MainActivity extends Activity {
         restartApi.setEnabled(hasServerConfig());
         restartApi.setOnClickListener(v -> confirmRestartApi(restartApi));
         perawatan.addView(restartApi, tombolPengaturan());
+        Button keluar = smallButton("Keluar dari aplikasi");
+        perawatan.addView(keluar, tombolPengaturan());
         AlertDialog dialog = pembuatDialog()
                 .setTitle("Pengaturan anjungan")
                 .setView(gulungan(fields))
                 .setPositiveButton("Simpan", null)
                 .setNeutralButton("Uji cetak", null)
                 .setNegativeButton("Batal", null).create();
+        keluar.setOnClickListener(v -> konfirmasiKeluar(dialog));
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(rounded(LATAR, dp(28)));
         }
@@ -4131,6 +4180,28 @@ public final class MainActivity extends Activity {
         tombol.setButtonTintList(android.content.res.ColorStateList.valueOf(UTAMA));
         tombol.setPadding(dp(4), dp(6), 0, dp(6));
         return tombol;
+    }
+
+    /**
+     * Tutup aplikasi sepenuhnya, misalnya untuk membuka Pengaturan Android
+     * atau mematikan tablet. Dikonfirmasi dulu: tombolnya berada di dialog
+     * yang dapat dibuka siapa pun lewat ikon roda gigi.
+     */
+    private void konfirmasiKeluar(AlertDialog pengaturan) {
+        AlertDialog tanya = pembuatDialog()
+                .setTitle("Keluar dari aplikasi?")
+                .setMessage("Anjungan berhenti menerbitkan nomor sampai aplikasi "
+                        + "dibuka lagi dari layar utama tablet.")
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Keluar", (d, w) -> {
+                    pengaturan.dismiss();
+                    finishAndRemoveTask();
+                })
+                .create();
+        if (tanya.getWindow() != null) {
+            tanya.getWindow().setBackgroundDrawable(rounded(LATAR, dp(28)));
+        }
+        tanya.show();
     }
 
     private LinearLayout.LayoutParams tombolPengaturan() {

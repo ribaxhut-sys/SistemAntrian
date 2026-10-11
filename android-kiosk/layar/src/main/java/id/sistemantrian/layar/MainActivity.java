@@ -1311,6 +1311,31 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 && manager.getLockTaskModeState() != ActivityManager.LOCK_TASK_MODE_NONE;
     }
 
+    /**
+     * Tutup aplikasi sepenuhnya. Kunci aplikasi dilepas dulu: aplikasi yang
+     * masih disematkan tidak dapat ditinggalkan. Menyala lagi saat perangkat
+     * dinyalakan ulang (BootReceiver) atau dibuka dari daftar aplikasi.
+     */
+    private void konfirmasiKeluar(AlertDialog pengaturan) {
+        new AlertDialog.Builder(this)
+                .setTitle("Keluar dari aplikasi?")
+                .setMessage("Layar berhenti menampilkan antrian dan membunyikan "
+                        + "panggilan sampai aplikasi dibuka lagi.")
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Keluar", (d, w) -> {
+                    pengaturan.dismiss();
+                    if (isLocked()) {
+                        try {
+                            stopLockTask();
+                        } catch (RuntimeException ignored) {
+                            // Tidak disematkan oleh aplikasi ini.
+                        }
+                    }
+                    finishAndRemoveTask();
+                })
+                .show();
+    }
+
     private void toggleLock() {
         try {
             if (isLocked()) {
@@ -1372,6 +1397,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         update.setVisibility(updateAvailable() ? View.VISIBLE : View.GONE);
         fields.addView(update);
 
+        Button keluar = new Button(this);
+        keluar.setText("Keluar dari aplikasi");
+        fields.addView(keluar);
+
         find.setOnClickListener(v -> {
             find.setEnabled(false);
             find.setText("Mencari…");
@@ -1397,6 +1426,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             dialog.dismiss();
             startUpdate();
         });
+        keluar.setOnClickListener(v -> konfirmasiKeluar(dialog));
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             String address = server.getText().toString().trim();
             String digits = code.getText().toString().replaceAll("[^0-9]", "");
