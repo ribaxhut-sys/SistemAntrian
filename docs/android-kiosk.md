@@ -73,7 +73,9 @@ kiosk on the same trusted LAN; the HTTP connection is not encrypted.
 Anjungan Android hanya mengambil nomor. API memberinya daftar layanan aktif,
 status pendaftaran (buka/tutup dan jeda antar-pengambilan), media sambutan,
 dan penerbitan tiket, ditambah daftar nomor yang menunggu dan nomor yang
-sedang dilayani tiap loket. Baris "SEDANG DILAYANI" diletakkan menurut
+di tiap loket. Baris "NOMOR DI LOKET" (dulu "Sedang dilayani"; sejak 2.4.32
+kartu loket yang baru memanggil berlatar hijau dengan tulisan "Dipanggil")
+diletakkan menurut
 pengaturan **Posisi baris loket di anjungan**: *Otomatis* menaruhnya di panel
 bawah bila panel atas memutar media, dan di panel atas bila tidak ada media
 atau semua berkasnya gagal diputar; *Pindahkan ke panel bawah/atas* menetapkan

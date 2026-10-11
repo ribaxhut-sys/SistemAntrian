@@ -708,7 +708,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         yang sedang dilayani tiap loket.
 
         Keduanya hanya nomor anonim pada hari ini. Anjungan menampilkannya
-        sebagai satu baris ringkas "SEDANG DILAYANI"; papan loket besar tetap
+        sebagai satu baris ringkas "NOMOR DI LOKET"; papan loket besar tetap
         urusan layar antrian. Panggilan bersuara juga, kecuali admin memilih
         anjungan ini sebagai pengganti sementara (`call_sound`).
         """
@@ -758,7 +758,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "categories_version": versi_layanan(isi_layanan()),
             "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(device_id),
             "waiting_queue_numbers": services.queue.nomor_menunggu_untuk_layar(),
-            # Baris "SEDANG DILAYANI". Posisinya (otomatis/atas/bawah) dipilih
+            # Baris "NOMOR DI LOKET". Posisinya (otomatis/atas/bawah) dipilih
             # di server supaya semua tablet seragam; tablet sendiri yang
             # memutuskan "otomatis", karena hanya tablet yang tahu apakah
             # media iklannya benar-benar dapat diputar.

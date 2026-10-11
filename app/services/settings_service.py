@@ -504,7 +504,7 @@ SKEMA: tuple[Pengaturan, ...] = (
     Pengaturan(
         "kiosk.posisi_loket",
         "Posisi baris loket di anjungan",
-        "Letak baris SEDANG DILAYANI (nomor tiap loket) pada tablet "
+        "Letak baris NOMOR DI LOKET (nomor tiap loket) pada tablet "
         "anjungan. Otomatis: pindah ke panel bawah bila panel atas memutar "
         "iklan, kembali ke panel atas bila tidak ada iklan atau iklannya "
         "gagal diputar. Sembunyikan bila layar antrian TV sudah terlihat "

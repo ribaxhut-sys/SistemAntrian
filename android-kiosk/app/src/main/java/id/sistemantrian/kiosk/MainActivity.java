@@ -2233,8 +2233,8 @@ public final class MainActivity extends Activity {
     }
 
     // -----------------------------------------------------------------
-    // Baris "SEDANG DILAYANI": di panel atas atau bawah    // -----------------------------------------------------------------
-    // Baris "SEDANG DILAYANI": di panel atas atau bawah
+    // Baris "NOMOR DI LOKET": di panel atas atau bawah    // -----------------------------------------------------------------
+    // Baris "NOMOR DI LOKET": di panel atas atau bawah
     // -----------------------------------------------------------------
 
     private LinearLayout barisLoketKosong() {
@@ -2307,7 +2307,9 @@ public final class MainActivity extends Activity {
 
     private void isiBarisLoket(LinearLayout strip, boolean besar) {
         strip.setPadding(0, dp(besar ? 8 : 4), 0, dp(4));
-        TextView judul = text("Sedang dilayani", besar ? 14 : 12, MUTED, true);
+        // Bukan "Sedang dilayani": nomor di sini bisa baru dipanggil (orangnya
+        // belum datang), dilayani, atau ditunda; loketnya bisa istirahat.
+        TextView judul = text("Nomor di loket", besar ? 14 : 12, MUTED, true);
         judul.setGravity(Gravity.CENTER);
         strip.addView(judul, new LinearLayout.LayoutParams(-1, -2));
 
@@ -2376,15 +2378,25 @@ public final class MainActivity extends Activity {
      * jarak atas dan bawah yang SAMA, sedangkan nama loket (atas) dan nama
      * layanan (bawah) menempel di tepinya tanpa ikut menggeser nomor.
      */
+    /** Hijau "silakan datang" untuk kartu loket yang baru memanggil. */
+    private static final int HIJAU_PANGGIL = Color.rgb(4, 120, 87);
+    private static final int HIJAU_PANGGIL_LATAR = Color.rgb(220, 245, 232);
+
     private View kartuLoket(Loket loket, boolean besar) {
         FrameLayout kartu = new FrameLayout(this);
         kartu.setPadding(dp(4), dp(3), dp(4), dp(3));
         boolean melayani = !loket.nomor.isEmpty();
-        kartu.setBackground(rounded(melayani ? LEMBUT : ABU_LEMBUT, dp(16)));
+        // Nomor yang baru dipanggil menunggu pemiliknya berjalan ke loket:
+        // itu yang paling perlu dilihat pengunjung, jadi kartunya dibedakan.
+        boolean dipanggil = melayani && "Dipanggil".equalsIgnoreCase(loket.status);
+        kartu.setBackground(dipanggil
+                ? roundedOutline(HIJAU_PANGGIL_LATAR, HIJAU_PANGGIL, dp(16), dp(2))
+                : rounded(melayani ? LEMBUT : ABU_LEMBUT, dp(16)));
 
         String isi = melayani ? loket.nomor
                 : "ISTIRAHAT".equals(loket.status) ? "Istirahat" : "—";
-        int maks = melayani ? (besar ? 40 : 18) : (besar ? 18 : 12);
+        // Kartu ringkas setinggi 54 dp memuat nama, nomor, dan keadaannya.
+        int maks = melayani ? (besar ? 40 : 16) : (besar ? 18 : 12);
         TextView nomor = text(isi, maks, melayani ? INK : MUTED, true);
         if (melayani) {
             nomor.setTypeface(huruf(800));
@@ -2405,11 +2417,23 @@ public final class MainActivity extends Activity {
         kartu.addView(nama, new FrameLayout.LayoutParams(-1, -2,
                 Gravity.TOP | Gravity.CENTER_HORIZONTAL));
 
-        if (besar && melayani && !loket.layanan.isEmpty()) {
-            TextView layanan = text(loket.layanan, 13, UTAMA, false);
-            layanan.setGravity(Gravity.CENTER);
-            pasangSatuBaris(layanan, 8, 13);
-            kartu.addView(layanan, new FrameLayout.LayoutParams(-1, -2,
+        // Keadaan tiap kartu mengikuti yang sedang terjadi di loketnya:
+        // Dipanggil, Dilayani, atau Ditunda (label dari server).
+        String bawah = "";
+        if (melayani) {
+            String keadaan = loket.status.isEmpty() ? "" : loket.status;
+            bawah = besar && !loket.layanan.isEmpty()
+                    ? (keadaan.isEmpty() ? loket.layanan : keadaan + " · " + loket.layanan)
+                    : keadaan;
+        }
+        if (!bawah.isEmpty()) {
+            int ukuran = besar ? 13 : 9;
+            boolean ditunda = "Ditunda".equalsIgnoreCase(loket.status);
+            int warna = dipanggil ? HIJAU_PANGGIL : ditunda ? MUTED : UTAMA;
+            TextView keterangan = text(bawah, ukuran, warna, dipanggil);
+            keterangan.setGravity(Gravity.CENTER);
+            pasangSatuBaris(keterangan, 8, ukuran);
+            kartu.addView(keterangan, new FrameLayout.LayoutParams(-1, -2,
                     Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
         }
         return kartu;
