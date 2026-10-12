@@ -907,7 +907,7 @@ Pasang Inno Setup 6, lalu dari PowerShell di folder proyek jalankan:
 ```
 
 Skrip menjalankan seluruh test, membangun dan menguji aplikasi di folder
-sementara, lalu menghasilkan `dist\AntrianCRO-Setup-1.0.6.exe`. Installer
+sementara, lalu menghasilkan `dist\AntrianCRO-Setup-1.0.7.exe`. Installer
 dipasang untuk pengguna saat ini ke `%LOCALAPPDATA%\Programs\AntrianCRO`,
 membuat pintasan Start Menu, dan menawarkan pintasan Desktop. Data aplikasi
 tidak dihapus saat aplikasi di-uninstall.
