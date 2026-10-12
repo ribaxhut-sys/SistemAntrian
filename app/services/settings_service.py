@@ -82,6 +82,7 @@ BAWAAN: dict[str, str] = {
     "queue.registration_open": "true",
     "queue.registration_closed_date": "",
     "survey.enabled": "true",
+    "privasi.retensi_pengaduan_bulan": "24",
     "ticket.header": "BAPENDA DKI JAKARTA",
     "ticket.footer": "Silakan menunggu nomor Anda dipanggil.",
     "ticket.printer": "pdf",
@@ -560,6 +561,20 @@ SKEMA: tuple[Pengaturan, ...] = (
         "Bila dimatikan, layar survey dan tombol Minta Survey ikut padam.",
         BOOLEAN,
         kelompok="Survey",
+    ),
+    Pengaturan(
+        "privasi.retensi_pengaduan_bulan",
+        "Masa simpan identitas pelapor",
+        "Sesudah masa ini, nama, nomor pelanggan, telepon, email, dan alamat "
+        "pada lembar pengaduan dikosongkan otomatis. Isi pengaduan dan catatan "
+        "petugas tetap disimpan untuk laporan. Dihitung dari tanggal "
+        "antriannya, diperiksa saat aplikasi dibuka dan saat tanggal berganti.",
+        ANGKA,
+        minimum=0,
+        maksimum=120,
+        satuan="bulan",
+        nilai_khusus="Disimpan selamanya",
+        kelompok="Pengaduan",
     ),
     Pengaturan(
         "dashboard.refresh_seconds",

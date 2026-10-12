@@ -15,12 +15,15 @@ Dua akibatnya yang harus dijaga di sini, bukan di UI:
 2. **Menghapus bukan hak penulisnya.** Petugas menulis, ADMIN menghapus.
    Penulis yang sekaligus dapat menghilangkan tulisannya membuat catatan
    itu tidak berguna sebagai bukti apa pun.
+3. **Identitas pelapor punya masa simpan.** Sesudah
+   `privasi.retensi_pengaduan_bulan` (bawaan 24 bulan) identitasnya
+   dikosongkan otomatis — lihat `anonimkan_kedaluwarsa`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from app.core import clock
 from app.core.database import session_scope
@@ -54,6 +57,26 @@ PANJANG_CATATAN = 2000
 #: yang menunggu, dan menolak nomor yang bentuknya tidak biasa lebih
 #: merugikan daripada menyimpan nomor yang kurang rapi.
 DIGIT_TELEPON_MINIMUM = 6
+
+#: Pengaturan masa simpan identitas pelapor, dalam bulan. 0 = selamanya.
+KUNCI_RETENSI = "privasi.retensi_pengaduan_bulan"
+
+
+def batas_retensi(hari_ini: date, bulan: int) -> date:
+    """
+    Tanggal antrian paling awal yang identitas pelapornya masih disimpan.
+
+    Mundur `bulan` bulan kalender, dengan tanggal dipangkas ke akhir bulan
+    tujuan (31 Mei mundur 3 bulan = 28/29 Februari). Bukan 30 hari per
+    bulan: dua tahun yang dijanjikan kepada pelapor adalah dua tahun
+    kalender, bukan 720 hari.
+    """
+    indeks = hari_ini.year * 12 + hari_ini.month - 1 - bulan
+    tahun, bulan_ke = divmod(indeks, 12)
+    berikut = indeks + 1
+    awal_bulan_berikut = date(berikut // 12, berikut % 12 + 1, 1)
+    hari_terakhir = (awal_bulan_berikut - timedelta(days=1)).day
+    return date(tahun, bulan_ke + 1, min(hari_ini.day, hari_terakhir))
 
 
 @dataclass(frozen=True)
@@ -275,8 +298,9 @@ class NoteService:
         """
         Hapus satu lembar beserta seluruh data pribadi di dalamnya.
 
-        Tidak ada pembersihan otomatis di aplikasi ini: lembar disimpan
-        selamanya sampai ada yang menghapusnya. Karena itu penghapusan
+        Sapuan otomatis hanya mengosongkan identitas pelapor (lihat
+        `anonimkan_kedaluwarsa`); lembarnya sendiri disimpan sampai ada
+        yang menghapusnya. Karena itu penghapusan
         harus benar-benar menghilangkan barisnya, bukan menandainya
         nonaktif — baris yang "dihapus" tetapi masih tersimpan hanya
         memindahkan data pribadi ke tempat yang tidak lagi diperiksa siapa
@@ -304,6 +328,54 @@ class NoteService:
                 pengaduan=ada_pengaduan,
             )
             logger.info("Lembar antrian %s dihapus oleh %s", nomor, sesi.username)
+
+    def anonimkan_kedaluwarsa(self) -> int:
+        """
+        Kosongkan identitas pelapor yang sudah melewati masa simpannya.
+
+        Mengapa dianonimkan, bukan dihapus: isi pengaduan tetap dibutuhkan
+        untuk laporan dan untuk melihat keluhan yang berulang, sedangkan
+        nama, nomor pelanggan, telepon, email, dan alamat tidak lagi punya
+        kegunaan sesudah tindak lanjutnya lama selesai — menyimpannya
+        terus hanya memperpanjang risiko bocornya lewat backup.
+
+        Tidak menuntut hak akses dan auditnya tidak beratas nama siapa pun,
+        dengan alasan yang sama seperti `QueueService.hanguskan_hari_lalu`:
+        ini sapuan yang berjalan saat aplikasi mulai dan saat tanggal
+        berganti, bukan perbuatan petugas yang kebetulan login.
+
+        Kata-kata pelapor di kolom deskripsi tidak disentuh. Bila pelapor
+        menulis nomor teleponnya di sana, nomor itu tetap tersimpan —
+        mesin tidak dapat memilah kalimat bebas dengan aman.
+        """
+        from app.services.settings_service import SettingsService
+
+        bulan = SettingsService(self.auth).get_int(KUNCI_RETENSI, 24)
+        if bulan <= 0:
+            return 0
+        batas = batas_retensi(clock.today(), bulan)
+
+        with session_scope() as session:
+            per_cabang = QueueNoteRepository(session).anonimkan_sebelum(batas)
+            for branch_id, jumlah in per_cabang.items():
+                # Hanya jumlah dan tanggal batas, tidak satu pun isi lembar
+                # (aturan nomor 1 di atas berlaku juga untuk sapuan ini).
+                audit_service.record(
+                    session,
+                    AuditAction.ANONYMIZE_NOTE,
+                    user_id=None,
+                    entity_type="queue_note",
+                    entity_id=None,
+                    jumlah=jumlah,
+                    branch_id=branch_id,
+                    sebelum=str(batas),
+                )
+        total = sum(per_cabang.values())
+        if total:
+            logger.info(
+                "Identitas pelapor dianonimkan: %d lembar sebelum %s", total, batas
+            )
+        return total
 
     # =================================================================
     # Pembacaan

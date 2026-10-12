@@ -1,11 +1,11 @@
 """
 Akses data pengaduan dan catatan petugas.
 
-Pencarian dikerjakan di SQL dan selalu dibatasi jumlahnya. Tabel ini tidak
-pernah dibersihkan otomatis — pemilik memilih menyimpannya selamanya dan
-menghapus sendiri bila perlu — sehingga isinya hanya bertambah, dan sebuah
-layar yang menarik seluruh baris akan menjadi lambat justru setelah
-setahun dipakai, ketika tidak ada lagi yang ingat mengapa.
+Pencarian dikerjakan di SQL dan selalu dibatasi jumlahnya. Baris tabel ini
+tidak pernah dihapus otomatis — yang dikosongkan sesudah masa simpannya
+hanya identitas pelapor (lihat `anonimkan_sebelum`) — sehingga isinya hanya
+bertambah, dan sebuah layar yang menarik seluruh baris akan menjadi lambat
+justru setelah setahun dipakai, ketika tidak ada lagi yang ingat mengapa.
 """
 
 from __future__ import annotations
@@ -132,3 +132,39 @@ class QueueNoteRepository:
     def hapus(self, note: QueueNote) -> None:
         self.session.delete(note)
         self.session.flush()
+
+    def anonimkan_sebelum(self, batas: date) -> dict[int, int]:
+        """
+        Kosongkan identitas pelapor pada lembar antrian SEBELUM `batas`.
+
+        Satu UPDATE, bukan membaca lalu menulis per baris: setelah dua
+        tahun dipakai yang tersapu pada hari pertama bisa ribuan lembar.
+        Yang dikosongkan hanya kolom identitas; isi pengaduan dan catatan
+        petugas tetap, supaya statistik pengaduan tidak ikut hilang.
+        Lembar yang identitasnya sudah kosong tidak disentuh, sehingga
+        jumlah yang dikembalikan — per cabang — adalah yang benar-benar
+        berubah hari ini.
+        """
+        identitas = (
+            QueueNote.nama,
+            QueueNote.nomor_pelanggan,
+            QueueNote.telepon,
+            QueueNote.email,
+            QueueNote.alamat,
+        )
+        hasil = self.session.execute(
+            sa.update(QueueNote)
+            .where(
+                QueueNote.queue_id.in_(
+                    sa.select(Queue.id).where(Queue.queue_date < batas)
+                ),
+                sa.or_(*(kolom.is_not(None) for kolom in identitas)),
+            )
+            .values({kolom.key: None for kolom in identitas})
+            .returning(QueueNote.branch_id)
+            .execution_options(synchronize_session=False)
+        )
+        per_cabang: dict[int, int] = {}
+        for (branch_id,) in hasil:
+            per_cabang[branch_id] = per_cabang.get(branch_id, 0) + 1
+        return per_cabang

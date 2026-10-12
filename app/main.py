@@ -96,6 +96,24 @@ def hanguskan_antrian_hari_lalu() -> int:
     return jumlah
 
 
+def anonimkan_pengaduan_lama() -> int:
+    """
+    Kosongkan identitas pelapor yang melewati masa simpannya.
+
+    Terpisah dari sapuan nomor antrian supaya gagalnya yang satu tidak
+    membatalkan yang lain, dan sama-sama tidak pernah menghentikan
+    aplikasi.
+    """
+    from app.services.auth_service import get_auth_service
+    from app.services.note_service import NoteService
+
+    try:
+        return NoteService(get_auth_service()).anonimkan_kedaluwarsa()
+    except Exception:
+        logger.exception("Anonimisasi identitas pelapor gagal")
+        return 0
+
+
 class PenyapuHarian:
     """
     Menjalankan sapuan begitu tanggal berganti, tanpa aplikasi dibuka ulang.
@@ -132,7 +150,9 @@ class PenyapuHarian:
         # semenit lagi tidak boleh mencobanya berulang-ulang sepanjang
         # hari; sapuan berikutnya toh berjalan saat aplikasi dibuka lagi.
         self.hari = hari
-        return hanguskan_antrian_hari_lalu()
+        jumlah = hanguskan_antrian_hari_lalu()
+        anonimkan_pengaduan_lama()
+        return jumlah
 
 
 def _laporkan_kegagalan_database(config, *, berjendela: bool) -> bool:
@@ -422,6 +442,7 @@ def main(argv: list[str] | None = None) -> int:
             # SESUDAH backup: bila sapuan ini ternyata keliru, keadaan sebelum
             # disapu masih tersimpan pada backup pagi ini.
             hanguskan_antrian_hari_lalu()
+            anonimkan_pengaduan_lama()
             break
         except Exception:
             # Traceback hanya masuk log, tidak pernah ditampilkan ke petugas.

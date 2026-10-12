@@ -116,6 +116,7 @@ KETERANGAN_KELOMPOK: dict[str, str] = {
     "Panel Anjungan": "Isi panel besar di atas tombol layanan: teks atau media.",
     "Iklan Anjungan": "Urutan, jadwal, dan cara iklan diputar di tablet.",
     "Survey": "Penilaian kepuasan yang diminta setelah pelayanan selesai.",
+    "Pengaduan": "Berapa lama identitas pelapor pengaduan disimpan.",
     "Ringkasan Harian": "Layar rekap yang dibaca penyelia sepanjang hari.",
     "Backup": "Salinan database dan berapa lama salinan itu disimpan.",
 }
