@@ -867,15 +867,21 @@ def _tata_letak(
     y += JARAK_BLOK_BAWAH_MM
 
     sisa = data.baris_sisa_antrian()
+    perkiraan = data.baris_perkiraan_tunggu()
     if sisa:
         satu(y, sisa, 12, True)
         y += JARAK_BLOK_BAWAH_MM
-        perkiraan = data.baris_perkiraan_tunggu()
         if perkiraan:
             # Tepat di bawah sisa antrian, lebih kecil: keduanya menjawab
             # "berapa lama lagi", dan sisa antrian adalah angka pastinya.
             satu(y - 0.5, perkiraan, 10, False)
             y += JARAK_BLOK_BAWAH_MM - 0.5
+    elif perkiraan:
+        # Tiket anjungan Android sengaja tanpa sisa antrian (lihat
+        # kiosk_api), tetapi perkiraan tetap dicetak — justru di sanalah
+        # sebagian besar tiket terbit. Mengambil tempat baris sisa.
+        satu(y, perkiraan, 11, True)
+        y += JARAK_BLOK_BAWAH_MM
     else:
         y += JARAK_BLOK_BAWAH_MM
 
@@ -951,6 +957,9 @@ class TicketService:
         Ditelan seperti `_ringkasan`, dan dibaca terpisah darinya: gagalnya
         perkiraan tidak boleh ikut menghapus baris sisa antrian.
         """
+        # Tiket contoh (Uji cetak di tablet) bukan antrian sungguhan.
+        if getattr(antrian, "id", None) is None:
+            return None
         if self.queue is None or not self.settings.get_bool(
             "ticket.perkiraan_tunggu", True
         ):

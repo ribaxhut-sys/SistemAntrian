@@ -271,3 +271,56 @@ def test_tiket_terpanjang_dengan_perkiraan_tetap_muat_88_mm(
     assert teks.index("Sisa antrian: 12") + 1 == teks.index("Perkiraan tunggu: ±90–95 menit")
     assert [b.y_mm for b in baris] == sorted(b.y_mm for b in baris)
     assert PdfTicketPrinter.TINGGI_MM - baris[-1].y_mm >= 12
+
+
+def test_cetak_ulang_tiket_yang_sudah_dipanggil(
+    ticket_pdf, cro_queue, terbitkan, antrian_siap, auth
+):
+    """Tiket sudah dipanggil: tidak ada yang di depannya lagi."""
+    from tests.conftest import TEST_PASSWORD
+
+    _riwayat(antrian_siap, "A", [6] * 5)
+    pertama = terbitkan("A")[0]
+    terbitkan("A", 3)
+    cro_queue.call_next(antrian_siap["loket"][0])
+    _loket(antrian_siap, 1)
+
+    auth.logout()
+    auth.login("registration", TEST_PASSWORD)
+    tiket = ticket_pdf.susun(pertama)
+    assert tiket.perkiraan_tunggu_detik is None
+    assert tiket.sisa_antrian == 0
+
+
+def test_tiket_anjungan_tanpa_sisa_tetap_mencetak_perkiraan(
+    ticket_pdf, reg_queue, antrian_siap
+):
+    """kiosk_api membuang sisa antrian; perkiraan harus tetap tergambar."""
+    from dataclasses import replace
+
+    from app.services.ticket_service import tata_letak_tiket_anjungan
+
+    _riwayat(antrian_siap, "A", [6] * 5)
+    _loket(antrian_siap, 1)
+    reg_queue.create_queue(antrian_siap["kategori"]["A"])
+    nomor = reg_queue.create_queue(antrian_siap["kategori"]["A"])
+
+    tiket = replace(ticket_pdf.susun(nomor), sisa_antrian=None)
+    teks = [b["text"] for b in tata_letak_tiket_anjungan(tiket)["rows"]]
+    assert "Perkiraan tunggu: ±5–10 menit" in teks
+    assert not any(t.startswith("Sisa antrian") for t in teks)
+    assert "Perkiraan tunggu: ±5–10 menit" in tiket.baris_teks()
+
+
+def test_tiket_contoh_tidak_menghitung_perkiraan(ticket_pdf, monkeypatch):
+    from types import SimpleNamespace
+
+    def jangan(_):
+        raise AssertionError("tiket contoh tidak boleh dihitung")
+
+    monkeypatch.setattr(ticket_pdf.queue, "perkiraan_tunggu", jangan)
+    contoh = SimpleNamespace(
+        queue_number="UJI-000", category_name="Uji", created_at=clock.now(),
+        counter_name=None,
+    )
+    assert ticket_pdf._perkiraan(contoh) is None

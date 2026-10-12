@@ -727,6 +727,11 @@ class QueueService:
                 if antre.id == antrian.id:
                     break
                 sisa += 1
+            else:
+                # Cetak ulang tiket yang sudah dipanggil: tidak ada lagi
+                # yang di depannya. Tanpa ini seluruh yang menunggu
+                # terhitung sebagai "di depan".
+                sisa = 0
 
         return RingkasanTiket(sisa_antrian=sisa)
 
@@ -783,6 +788,10 @@ class QueueService:
                 if antre.id == antrian.id:
                     break
                 di_depan.append(antre.category_id)
+            else:
+                # Tidak lagi menunggu — cetak ulang tiket yang sudah
+                # dipanggil. Tanpa ini SEMUA yang menunggu terhitung di depan.
+                return None
             if not di_depan:
                 return 0.0
 
