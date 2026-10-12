@@ -43,6 +43,9 @@ data/anjungan-token.txt.tmp
 backup/*.db
 backup/*.dump
 backup/*.zip
+# Ditulis aplikasi setiap backup: sidik berkas dan waktu backup terakhir.
+backup/*.sha256
+backup/.status-backup.json
 tiket/
 Print hasil/
 assets/sounds/*.wav
