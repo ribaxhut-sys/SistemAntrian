@@ -350,11 +350,11 @@ Periksa juga lint ringan (hanya galat nyata, aturannya di `ruff.toml`):
 .\.venv\Scripts\python.exe -m ruff check .
 ```
 
-Di GitHub Actions (`.github/workflows/tes.yml`), job **SQLite** (lint dan
-test) berjalan setiap push. Job **PostgreSQL** memakai PostgreSQL bawaan
-image runner Windows dan berjalan untuk pull request, push ke `main`, dan
-atas permintaan (*Run workflow*). `tests/test_migration.py` menguji setiap
-migrasi turun lalu naik kembali, di kedua dialect.
+Di GitHub Actions (`.github/workflows/tes.yml`) hanya ada job
+**PostgreSQL**: lint lalu seluruh suite, memakai PostgreSQL bawaan image
+runner Windows, di setiap push dan atas permintaan (*Run workflow*). Proteksi
+branch `main` mewajibkan pemeriksaan ini. `tests/test_migration.py` menguji
+setiap migrasi turun lalu naik kembali.
 
 Untuk pengujian PostgreSQL tersedia `.\test-postgres.ps1`. Build aplikasi
 Windows dilakukan dengan `.\build.ps1`; pembuatan installer memerlukan Inno

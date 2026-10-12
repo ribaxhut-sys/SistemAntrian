@@ -174,9 +174,10 @@ pembuatan, pemulihan, checksum, dan uji keutuhan lewat `pg_restore` —
 **sudah terbukti** pada putaran ini. Tanpa folder `bin` PostgreSQL di
 PATH, test backup dilewati (putaran tanpa PATH: 1443 lolos, 29 dilewati).
 
-Sejak Oktober 2026 GitHub Actions juga menjalankan suite PostgreSQL (job
-**PostgreSQL** di `.github/workflows/tes.yml`) untuk pull request dan push
-ke `main`, serta lint `ruff check .` di job SQLite.
+GitHub Actions hanya menjalankan job **PostgreSQL**
+(`.github/workflows/tes.yml`): lint `ruff check .` lalu seluruh suite, di
+setiap push. Job SQLite dihapus Oktober 2026, dan proteksi branch `main`
+hanya mewajibkan pemeriksaan "PostgreSQL".
 
 Yang paling menentukan dan **sudah terbukti hijau di PostgreSQL**:
 `tests/test_queue_numbering.py::test_penerbitan_bersamaan_tidak_menghasilkan_nomor_kembar`
