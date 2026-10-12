@@ -613,37 +613,52 @@ def test_papan_kios_menyambut_sebelum_layanan_disentuh(papan_kios):
     assert papan_kios.label_info_kios.text() == TEKS_SAMBUTAN_KIOS
 
 
+#: Batas tunggu animasi info anjungan. Longgar dengan sengaja: jeda tetap
+#: (durasi pudar + 100 ms) gagal saat komputer sedang sibuk menjalankan
+#: seluruh test, padahal transisinya sendiri benar.
+BATAS_MS = 5000
+
+
 def test_tampilkan_info_kios_berganti_lewat_transisi_pudar(qtbot, papan_kios):
     """
     Isinya berganti SETELAH pudar-keluar selesai, bukan seketika dipanggil
     — supaya pergantiannya terbaca sebagai transisi, bukan kedipan.
     """
-    from app.ui.display.display_page import TEKS_SAMBUTAN_KIOS, DURASI_FADE_INFO_KIOS_MS
+    from app.ui.display.display_page import TEKS_SAMBUTAN_KIOS
 
     papan_kios.tampilkan_info_kios("Bawa fotokopi KTP dan KK.")
     assert papan_kios.label_info_kios.text() == TEKS_SAMBUTAN_KIOS
 
-    qtbot.wait(DURASI_FADE_INFO_KIOS_MS + 100)
-    assert papan_kios.label_info_kios.text() == "Bawa fotokopi KTP dan KK."
+    qtbot.waitUntil(
+        lambda: papan_kios.label_info_kios.text() == "Bawa fotokopi KTP dan KK.",
+        timeout=BATAS_MS,
+    )
 
     # Kembali ke sambutan bawaan saat dipanggil dengan None.
     papan_kios.tampilkan_info_kios(None)
-    qtbot.wait(DURASI_FADE_INFO_KIOS_MS + 100)
-    assert papan_kios.label_info_kios.text() == TEKS_SAMBUTAN_KIOS
+    qtbot.waitUntil(
+        lambda: papan_kios.label_info_kios.text() == TEKS_SAMBUTAN_KIOS,
+        timeout=BATAS_MS,
+    )
 
 
 def test_tampilkan_info_kios_kosong_kembali_ke_sambutan(qtbot, papan_kios):
     """Layanan tanpa info anjungan tidak boleh menyisakan panel kosong."""
-    from app.ui.display.display_page import TEKS_SAMBUTAN_KIOS, DURASI_FADE_INFO_KIOS_MS
+    from app.ui.display.display_page import TEKS_SAMBUTAN_KIOS
 
     papan_kios.tampilkan_info_kios("Layanan ini tidak butuh berkas apa pun.")
-    qtbot.wait(DURASI_FADE_INFO_KIOS_MS * 2 + 200)
-    assert papan_kios.label_info_kios.text() == "Layanan ini tidak butuh berkas apa pun."
+    qtbot.waitUntil(
+        lambda: papan_kios.label_info_kios.text()
+        == "Layanan ini tidak butuh berkas apa pun.",
+        timeout=BATAS_MS,
+    )
 
     # Layanan berikutnya tidak mengisi info anjungan sama sekali.
     papan_kios.tampilkan_info_kios("")
-    qtbot.wait(DURASI_FADE_INFO_KIOS_MS * 2 + 200)
-    assert papan_kios.label_info_kios.text() == TEKS_SAMBUTAN_KIOS
+    qtbot.waitUntil(
+        lambda: papan_kios.label_info_kios.text() == TEKS_SAMBUTAN_KIOS,
+        timeout=BATAS_MS,
+    )
 
 
 def test_path_media_kios_menolak_rayapan_keluar_folder(tmp_path, monkeypatch):

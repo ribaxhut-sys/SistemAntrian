@@ -161,13 +161,19 @@ def test_angka_tayang_dan_tablet_yang_gagal_tampil(halaman):
     assert "video what=1" in b.toolTip()
 
 
-def test_tombol_daftar_putar_muat_di_kolom_kontrol(qtbot, halaman):
+def test_tombol_daftar_putar_muat_di_kolom_kontrol(qtbot, halaman, request):
     """Empat tombol sebaris memotong "Atur jadwal…" dan "Muat ulang"."""
     from PySide6.QtWidgets import QApplication, QPushButton
 
     from app.ui.style import STYLESHEET
 
-    QApplication.instance().setStyleSheet(STYLESHEET)
+    # Stylesheet berlaku untuk seluruh QApplication yang dipakai bersama
+    # semua test. Tanpa dikembalikan, test sesudahnya (test_display,
+    # test_ui) ikut memakai huruf aplikasi dan gagal karena meluap.
+    aplikasi = QApplication.instance()
+    sebelumnya = aplikasi.styleSheet()
+    aplikasi.setStyleSheet(STYLESHEET)
+    request.addfinalizer(lambda: aplikasi.setStyleSheet(sebelumnya))
     halaman.resize(1366, 768)
     halaman.show()
     qtbot.waitExposed(halaman)
