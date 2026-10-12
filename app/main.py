@@ -48,6 +48,22 @@ logger = get_logger("main")
 SELANG_PERIKSA_HARI_MS = 60_000
 
 
+def pasang_ikon(app) -> None:
+    """
+    Ikon jendela dan taskbar. Ikon .exe sendiri dipasang PyInstaller.
+
+    Berkas yang hilang tidak menghentikan apa pun: aplikasi tetap jalan
+    dengan ikon bawaan Qt.
+    """
+    from PySide6.QtGui import QIcon
+
+    from app.core.config import resource_dir
+
+    berkas = resource_dir() / "assets" / "ikon" / "antrian.ico"
+    if berkas.is_file():
+        app.setWindowIcon(QIcon(str(berkas)))
+
+
 def siapkan_database() -> dict[str, int]:
     """Jalankan migration dan isi data master awal."""
     init_database()
@@ -192,6 +208,7 @@ def _laporkan_kegagalan_database(config, *, berjendela: bool) -> bool:
 
         app = QApplication.instance() or QApplication(sys.argv)
         app.setApplicationName(APP_NAME)
+        pasang_ikon(app)
         app.setStyleSheet(STYLESHEET)
         kotak = QMessageBox()
         kotak.setIcon(QMessageBox.Icon.Critical)
@@ -240,6 +257,7 @@ def _jalankan_ui(
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    pasang_ikon(app)
     app.setStyleSheet(STYLESHEET)
 
     # Diinduk pada `app`, bukan pada jendela: jendela dibuka dan ditutup
@@ -409,6 +427,7 @@ def _jalankan_dialog_mesin() -> bool:
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    pasang_ikon(app)
     app.setStyleSheet(STYLESHEET)
 
     dialog = SetupMesinDialog()

@@ -358,3 +358,15 @@ def test_mesin_publik_tanpa_folder_database_tidak_menebak(tmp_path):
 
     assert _mesin_publik_tanpa_jaga([]) is False
     assert _mesin_publik_tanpa_jaga(["--tv"]) is True
+
+
+def test_ikon_aplikasi_terpasang(qtbot):
+    """Ikon bawaan PyInstaller/Qt tidak lagi dipakai (docs/lanjutan.md §9)."""
+    from PySide6.QtWidgets import QApplication
+
+    import app.main as main_module
+
+    aplikasi = QApplication.instance()
+    main_module.pasang_ikon(aplikasi)
+    assert not aplikasi.windowIcon().isNull()
+    assert aplikasi.windowIcon().availableSizes()

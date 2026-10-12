@@ -24,6 +24,8 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 datas = [
     ("alembic.ini", "."),
     ("alembic", "alembic"),
+    # Ikon jendela (QApplication.setWindowIcon); ikon .exe dipasang di EXE().
+    ("assets/ikon/antrian.ico", "assets/ikon"),
 ]
 # Berkas zona waktu ikut sebagai data, bukan sekadar hidden import: isinya
 # tabel biner, bukan modul Python.
@@ -104,6 +106,7 @@ exe = EXE(
     # console=False: aplikasi berjendela, tidak boleh memunculkan jendela
     # hitam di belakang layar antrian yang menghadap publik.
     console=False,
+    icon="assets/ikon/antrian.ico",
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

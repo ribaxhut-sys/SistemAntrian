@@ -20,6 +20,7 @@ ArchitecturesInstallIn64BitMode=x64
 OutputDir={#OutputDir}
 OutputBaseFilename=AntrianCRO-Setup-1.0.6
 UninstallDisplayIcon={app}\{#MyAppExeName}
+SetupIconFile=assets\ikon\antrian.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
