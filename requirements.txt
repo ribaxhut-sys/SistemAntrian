@@ -32,6 +32,11 @@ pydantic==2.13.4
 # Generator PDF untuk tiket antrian & laporan cetak
 reportlab==5.0.1
 
+# Menggambar tiket anjungan Android sebagai bitmap (raster_tiket_anjungan).
+# Disebut sendiri walau ikut terpasang bersama reportlab: tanpa Pillow tiket
+# tablet diam-diam kembali ke tata letak lama yang lebih kecil.
+Pillow==12.3.0
+
 # Ekspor laporan ke Excel (.xlsx) dari layar Laporan.
 openpyxl==3.1.5
 

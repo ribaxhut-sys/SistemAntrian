@@ -812,7 +812,12 @@ class QueueService:
                 .join(Queue, Queue.id == QueueCall.queue_id)
                 .where(Queue.branch_id == sesi.branch_id, Queue.queue_date == hari)
             ) or 0
-            if setelah_id is None:
+            # `setelah_id` di atas id terakhir hari ini: tanggal baru belum
+            # punya panggilan, atau id panggilan turun karena database
+            # dipulihkan dari backup. Perangkat diarahkan ke id terakhir yang
+            # sebenarnya; mengembalikan `setelah_id` membuatnya menunggu id
+            # yang tidak akan datang dan diam selamanya.
+            if setelah_id is None or setelah_id > terakhir:
                 return terakhir, []
             baris = session.execute(
                 dasar.where(QueueCall.id > setelah_id).order_by(QueueCall.id).limit(batas)
@@ -828,7 +833,7 @@ class QueueService:
             )
             for i, nomor, loket, ke, waktu in baris
         ]
-        return (hasil[-1].id if hasil else max(terakhir, setelah_id)), hasil
+        return (hasil[-1].id if hasil else terakhir), hasil
 
     @staticmethod
     def _kelompokkan_per_layanan(

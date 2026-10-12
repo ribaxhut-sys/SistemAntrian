@@ -309,6 +309,33 @@ def test_layar_antrian_tidak_membunyikan_panggilan_lama(layanan, antrian_siap, t
     assert kosong["calls"] == []
 
 
+def test_panggilan_tetap_sampai_sesudah_id_panggilan_turun(
+    layanan, antrian_siap, terbitkan, cro_queue
+):
+    """
+    Sesudah database dipulihkan dari backup, id panggilan bisa lebih kecil
+    daripada id terakhir yang diingat perangkat. Perangkat diarahkan ke id
+    terakhir yang sebenarnya, bukan dibiarkan menunggu id yang tak datang.
+    """
+    klien = _klien()
+    tv = _pasang(klien, layanan, "tv-0000-0000-0010", "layar_antrian")
+    kepala = {"Authorization": f"Bearer {tv}"}
+    terbitkan("A", 2)
+    pertama = cro_queue.call_next(antrian_siap["loket"][0])
+    sebenarnya = klien.get("/v1/layar/calls", headers=kepala).json()["last_id"]
+
+    basi = klien.get(
+        "/v1/layar/calls", params={"after": sebenarnya + 1000}, headers=kepala
+    ).json()
+    assert basi == {"last_id": sebenarnya, "calls": []}
+
+    cro_queue.recall(pertama.id)
+    baru = klien.get(
+        "/v1/layar/calls", params={"after": basi["last_id"]}, headers=kepala
+    ).json()
+    assert [p["queue_number"] for p in baru["calls"]] == ["A-001"]
+
+
 def test_layar_mengunduh_paket_suara_dan_apk(layanan, antrian_siap, tmp_path, monkeypatch):
     import json as _json
 

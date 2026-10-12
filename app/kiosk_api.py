@@ -221,6 +221,9 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
     # database (constraint unik device_id + request_id), yang tetap
     # berlaku walau proses API dinyalakan ulang.
     ticket_lock = threading.Lock()
+    # Kunci restart terpisah: pemeriksaan tugas lewat PowerShell makan 1–3
+    # detik, dan selama itu penerbitan tiket tidak boleh ikut tertahan.
+    restart_lock = threading.Lock()
     #: Waktu (monotonic) API ini mulai, lalu restart terakhir yang diterima.
     #: Diisi sejak awal: restart mematikan proses ini, sehingga catatan
     #: restart ikut hilang — yang tersisa sebagai pembatas adalah umur
@@ -832,7 +835,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                     "dari Layanan Anjungan."
                 ),
             )
-        with ticket_lock:
+        with restart_lock:
             sekarang = time.monotonic()
             if sekarang - restart_terakhir[0] < JEDA_RESTART_API_DETIK:
                 sisa = int(JEDA_RESTART_API_DETIK - (sekarang - restart_terakhir[0])) + 1
