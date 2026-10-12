@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import json
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
+    QLineEdit,
+    QMessageBox,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -83,6 +87,26 @@ class BackupPage(QWidget):
         self.label_status.setWordWrap(True)
         susunan.addWidget(self.label_status)
 
+        # Backup berisi identitas pelapor pengaduan. Tanpa enkripsi,
+        # flashdisk salinan kedua yang hilang berarti data itu ikut hilang
+        # ke tangan siapa pun yang menemukannya.
+        baris_kunci = QHBoxLayout()
+        baris_kunci.setSpacing(8)
+        self.label_enkripsi = keterangan("")
+        self.label_enkripsi.setWordWrap(True)
+        baris_kunci.addWidget(self.label_enkripsi, stretch=1)
+        self.tombol_aktifkan_enkripsi = tombol("Aktifkan Enkripsi")
+        self.tombol_aktifkan_enkripsi.clicked.connect(self.aktifkan_enkripsi)
+        baris_kunci.addWidget(self.tombol_aktifkan_enkripsi)
+        self.tombol_masukkan_kunci = tombol("Masukkan Kunci")
+        self.tombol_masukkan_kunci.setToolTip(
+            "Untuk komputer pengganti: ketik kunci yang dicatat saat enkripsi "
+            "diaktifkan, supaya backup lama dapat dibuka."
+        )
+        self.tombol_masukkan_kunci.clicked.connect(self.masukkan_kunci)
+        baris_kunci.addWidget(self.tombol_masukkan_kunci)
+        susunan.addLayout(baris_kunci)
+
         baris = QHBoxLayout()
         baris.setSpacing(8)
 
@@ -111,9 +135,9 @@ class BackupPage(QWidget):
         baris.addStretch()
         susunan.addLayout(baris)
 
-        self.tabel_backup = QTableWidget(0, 4)
+        self.tabel_backup = QTableWidget(0, 5)
         self.tabel_backup.setHorizontalHeaderLabels(
-            ["Berkas", "Dibuat", "Ukuran", "Checksum"]
+            ["Berkas", "Dibuat", "Ukuran", "Checksum", "Enkripsi"]
         )
         self.tabel_backup.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
@@ -167,8 +191,25 @@ class BackupPage(QWidget):
     def muat_ulang(self) -> None:
         self.label_folder.setText(f"Folder backup: {self.backup.folder}")
         self._muat_status()
+        self._muat_enkripsi()
         self._muat_backup()
         self._muat_audit()
+
+    def _muat_enkripsi(self) -> None:
+        aktif = self.backup.enkripsi_aktif
+        if aktif:
+            self.label_enkripsi.setText(
+                "Enkripsi backup AKTIF. Backup baru hanya dapat dibuka dengan "
+                "kunci yang sudah Anda catat."
+            )
+            self.label_enkripsi.setStyleSheet(f"color: {TEXT_MUTED};")
+        else:
+            self.label_enkripsi.setText(
+                "Backup TIDAK dienkripsi, padahal berisi identitas pelapor "
+                "pengaduan. Siapa pun yang menyalin folder backup dapat membacanya."
+            )
+            self.label_enkripsi.setStyleSheet(f"color: {DANGER};")
+        self.tombol_aktifkan_enkripsi.setVisible(not aktif)
 
     def _muat_status(self) -> None:
         berhasil, status = jalankan_aman(
@@ -207,6 +248,7 @@ class BackupPage(QWidget):
                 f"{hari_dan_tanggal(info.dibuat_pada.date())}, {jam(info.dibuat_pada)}",
                 info.label_ukuran,
                 "ada" if info.checksum_ada else "-",
+                "terenkripsi" if info.terenkripsi else "tidak",
             )
             for kolom, teks in enumerate(nilai):
                 self.tabel_backup.setItem(baris, kolom, QTableWidgetItem(teks))
@@ -336,6 +378,62 @@ class BackupPage(QWidget):
             "Tutup dan buka kembali aplikasi agar seluruh layar membaca "
             "data yang baru.",
         )
+        self.muat_ulang()
+
+    def aktifkan_enkripsi(self) -> None:
+        """
+        Buat kunci enkripsi dan tampilkan SEKALI untuk dicatat.
+
+        Dialog modal di sini disengaja: layar ini dibuka administrator yang
+        sedang duduk di depannya, dan kunci yang terlewat dibaca berarti
+        backup yang tidak dapat dibuka bila disk server rusak.
+        """
+        if not konfirmasi(
+            self,
+            "Aktifkan enkripsi backup?\n\n"
+            "Kunci akan ditampilkan satu kali. CATAT kunci itu di kertas dan "
+            "simpan di tempat aman yang terpisah dari komputer ini. Tanpa "
+            "kunci itu, backup tidak dapat dipulihkan di komputer lain.",
+            "Enkripsi Backup",
+        ):
+            return
+        berhasil, frasa = jalankan_aman(
+            self, self.backup.buat_kunci_enkripsi, "Gagal mengaktifkan enkripsi"
+        )
+        if not berhasil or not frasa:
+            return
+        kotak = QMessageBox(self)
+        kotak.setIcon(QMessageBox.Icon.Warning)
+        kotak.setWindowTitle("Catat Kunci Enkripsi")
+        kotak.setText(
+            "Kunci enkripsi backup:\n\n"
+            f"{frasa}\n\n"
+            "Catat sekarang. Kunci juga tersimpan di komputer ini, tetapi "
+            "bila disk komputer ini rusak, hanya catatan Anda yang tersisa."
+        )
+        kotak.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        kotak.setStandardButtons(QMessageBox.StandardButton.Ok)
+        kotak.button(QMessageBox.StandardButton.Ok).setText("Sudah Saya Catat")
+        kotak.exec()
+        self.muat_ulang()
+
+    def masukkan_kunci(self) -> None:
+        frasa, ok = QInputDialog.getText(
+            self,
+            "Masukkan Kunci Enkripsi",
+            "Ketik kunci enkripsi backup yang tercatat:",
+            QLineEdit.EchoMode.Normal,
+        )
+        if not ok or not frasa.strip():
+            return
+        berhasil, _ = jalankan_aman(
+            self,
+            lambda: self.backup.pasang_kunci_enkripsi(frasa),
+            "Kunci tidak dapat dipasang",
+        )
+        if not berhasil:
+            return
+        tampilkan_info(self, "Kunci enkripsi tersimpan di komputer ini.")
         self.muat_ulang()
 
 

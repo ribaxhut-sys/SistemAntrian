@@ -40,6 +40,11 @@ data/peran.json
 # Token API anjungan. Rahasia; ditulis aplikasi untuk tugas SYSTEM.
 data/anjungan-token.txt
 data/anjungan-token.txt.tmp
+# Kunci enkripsi backup. Rahasia; yang ikut ter-commit membuka seluruh backup.
+data/kunci-backup.txt
+data/kunci-backup.txt.tmp
+backup/*.enc
+backup/*.sementara
 backup/*.db
 backup/*.dump
 backup/*.zip
