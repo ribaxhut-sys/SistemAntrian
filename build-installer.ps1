@@ -132,5 +132,11 @@ finally {
 $installer = Join-Path $output "AntrianCRO-Setup-1.0.5.exe"
 if (-not (Test-Path $installer)) { throw "Installer tidak ditemukan: $installer" }
 
+# Nama tetap untuk dibagikan ke petugas: panduannya tidak perlu berubah
+# setiap rilis ("klik dua kali Pembaruan-AntrianCRO.exe").
+$pembaruan = Join-Path $output "Pembaruan-AntrianCRO.exe"
+Copy-Item -LiteralPath $installer -Destination $pembaruan -Force
+
 Write-Host ""
 Write-Host "Selesai: $installer" -ForegroundColor Green
+Write-Host "Untuk petugas: $pembaruan" -ForegroundColor Green
