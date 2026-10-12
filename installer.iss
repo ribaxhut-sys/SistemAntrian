@@ -1,5 +1,5 @@
 #define MyAppName "Sistem Antrian CRO"
-#define MyAppVersion "1.0.5"
+#define MyAppVersion "1.0.6"
 #define MyAppPublisher "Sistem Antrian CRO"
 #define MyAppExeName "AntrianCRO.exe"
 #define SourceDir GetEnv("ANTRIAN_SOURCE_DIR")
@@ -18,7 +18,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 OutputDir={#OutputDir}
-OutputBaseFilename=AntrianCRO-Setup-1.0.5
+OutputBaseFilename=AntrianCRO-Setup-1.0.6
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2
 SolidCompression=yes
@@ -80,7 +80,7 @@ const
 var
   VersiTerpasang: String;
 
-{ Bagian angka ke-Indeks (0, 1, 2, ...) dari "1.0.5"; 0 bila tidak ada. }
+{ Bagian angka ke-Indeks (0, 1, 2, ...) dari "1.0.6"; 0 bila tidak ada. }
 function BagianVersi(Versi: String; Indeks: Integer): Integer;
 var
   Posisi: Integer;
