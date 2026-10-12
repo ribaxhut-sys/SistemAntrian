@@ -503,6 +503,37 @@ class QueueRepository:
             None if rata_layanan is None else float(rata_layanan),
         )
 
+    def sampel_lama_layanan(
+        self, branch_id: int, sampai: date, *, hari: int = 30, batas: int = 2000
+    ) -> list[tuple[int, date, float]]:
+        """
+        Lama pelayanan (detik) antrian SELESAI, terbaru lebih dulu.
+
+        Bahan perkiraan waktu tunggu di tiket. Hanya COMPLETED: nomor yang
+        hangus mendapat `completed_at` akhir hari (lihat AKHIR_HARI) dan
+        akan terbaca sebagai pelayanan berjam-jam. Durasi nol atau negatif
+        (jam komputer bergeser) dibuang di sini, bukan di pemakainya.
+        """
+        durasi = self._selisih_detik(Queue.serving_at, Queue.completed_at)
+        stmt = (
+            sa.select(Queue.category_id, Queue.queue_date, durasi)
+            .where(
+                Queue.branch_id == branch_id,
+                Queue.queue_date > sampai - timedelta(days=hari),
+                Queue.queue_date <= sampai,
+                Queue.status == QueueStatus.COMPLETED,
+                Queue.serving_at.is_not(None),
+                Queue.completed_at.is_not(None),
+            )
+            .order_by(Queue.completed_at.desc())
+            .limit(batas)
+        )
+        return [
+            (kategori, tanggal, float(detik))
+            for kategori, tanggal, detik in self.session.execute(stmt)
+            if detik is not None and float(detik) > 0
+        ]
+
     def _selisih_detik(self, awal, akhir):
         """
         Selisih dua kolom waktu dalam detik, sesuai dialect yang dipakai.

@@ -9,6 +9,7 @@ tabel transisi di bawah kehilangan artinya dan status tidak sah bisa lolos.
 from __future__ import annotations
 
 import json
+import statistics
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
@@ -235,6 +236,46 @@ LOKET_TAMPIL_SEMUA = "semua"
 #: tanda hidup (SELANG_TANDA_HADIR_MS di main_window), supaya satu atau dua
 #: tanda yang terlambat tidak membuat loketnya berkedip.
 BATAS_HADIR_PETUGAS_DETIK = 90
+
+
+#: Sampel paling sedikit sebelum median dianggap mewakili. Di bawah ini
+#: satu pelayanan yang kebetulan lama atau singkat menentukan angkanya.
+SAMPEL_MINIMUM_LAMA_LAYANAN = 5
+#: Hanya sekian pelayanan terbaru hari ini yang dipakai: ritme pagi tidak
+#: selalu sama dengan ritme siang.
+SAMPEL_TERBARU_LAMA_LAYANAN = 20
+
+
+def _median_terbaru(sampel: list[tuple[date, float]], hari_ini: date) -> float | None:
+    """
+    Median dari pelayanan hari ini; bila terlalu sedikit, ditambah riwayat.
+
+    Median, bukan rata-rata: satu pengaduan 90 menit tidak boleh membuat
+    semua pengunjung berikutnya tampak harus menunggu sejam lebih.
+    `sampel` sudah terurut dari yang terbaru.
+    """
+    hari_ini_saja = [lama for tanggal, lama in sampel if tanggal == hari_ini]
+    if len(hari_ini_saja) >= SAMPEL_MINIMUM_LAMA_LAYANAN:
+        return statistics.median(hari_ini_saja[:SAMPEL_TERBARU_LAMA_LAYANAN])
+    if len(sampel) >= SAMPEL_MINIMUM_LAMA_LAYANAN:
+        return statistics.median(lama for _, lama in sampel)
+    return None
+
+
+def _lama_layanan_tipikal(
+    sampel: list[tuple[int, date, float]], hari_ini: date
+) -> tuple[dict[int, float], float | None]:
+    """Lama layanan tipikal per jenis layanan, beserta median gabungannya."""
+    per_kategori: dict[int, list[tuple[date, float]]] = {}
+    for kategori, tanggal, lama in sampel:
+        per_kategori.setdefault(kategori, []).append((tanggal, lama))
+    tipikal = {}
+    for kategori, isi in per_kategori.items():
+        median = _median_terbaru(isi, hari_ini)
+        if median is not None:
+            tipikal[kategori] = median
+    gabungan = _median_terbaru([(t, lama) for _, t, lama in sampel], hari_ini)
+    return tipikal, gabungan
 
 
 @dataclass(frozen=True)
@@ -688,6 +729,75 @@ class QueueService:
                 sisa += 1
 
         return RingkasanTiket(sisa_antrian=sisa)
+
+    def perkiraan_tunggu(self, antrian: QueueInfo) -> float | None:
+        """
+        Perkiraan lama menunggu pemegang tiket, dalam detik.
+
+        Rumusnya: jumlah lama layanan tipikal setiap orang di depan, dibagi
+        banyaknya loket yang sanggup melayani tiket ini. "Orang di depan"
+        lintas jenis layanan, karena loket memanggil lintas jenis layanan
+        (lihat `berikutnya_untuk_dipanggil`), tetapi hanya jenis layanan
+        yang memang dapat dipanggil loket-loket tersebut.
+
+        None berarti TIDAK ADA perkiraan yang jujur: tidak ada loket yang
+        sedang berpetugas untuk layanan ini, atau belum cukup riwayat
+        pelayanan. Tiket lebih baik diam daripada mencetak angka karangan.
+
+        Memakai hak TICKET_PRINT dengan alasan yang sama seperti
+        `ringkasan_tiket`, dan hanya mengembalikan satu angka.
+        """
+        sesi = self.auth.require_permission(Permission.TICKET_PRINT)
+        batas_hadir = clock.now() - timedelta(seconds=BATAS_HADIR_PETUGAS_DETIK)
+
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            melayani = [
+                counter
+                for counter in CounterRepository(session).list_for_branch(
+                    sesi.branch_id, only_active=True
+                )
+                if not counter.on_break
+                and counter.petugas_terlihat_pada is not None
+                and counter.petugas_terlihat_pada >= batas_hadir
+                and (
+                    not counter.categories
+                    or antrian.category_id in {c.id for c in counter.categories}
+                )
+            ]
+            if not melayani:
+                return None
+
+            # Loket tanpa daftar layanan boleh memanggil semuanya.
+            jangkauan: set[int] | None = set()
+            for counter in melayani:
+                if not counter.categories:
+                    jangkauan = None
+                    break
+                jangkauan.update(c.id for c in counter.categories)
+
+            di_depan: list[int] = []
+            for antre in repo.list_menunggu(
+                sesi.branch_id, antrian.queue_date, category_ids=jangkauan
+            ):
+                if antre.id == antrian.id:
+                    break
+                di_depan.append(antre.category_id)
+            if not di_depan:
+                return 0.0
+
+            tipikal, gabungan = _lama_layanan_tipikal(
+                repo.sampel_lama_layanan(sesi.branch_id, antrian.queue_date),
+                antrian.queue_date,
+            )
+
+        total = 0.0
+        for kategori in di_depan:
+            lama = tipikal.get(kategori, gabungan)
+            if lama is None:
+                return None
+            total += lama
+        return total / len(melayani)
 
     def display_state(
         self, jumlah_berikutnya: int = 3, jumlah_per_layanan: int = 0
