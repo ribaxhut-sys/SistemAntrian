@@ -295,13 +295,18 @@ arsip yang benar, lalu ikuti konfirmasi. Setelah pemulihan, tutup dan buka
 kembali aplikasi. Data transaksi setelah tanggal backup akan hilang.
 Sebelum operasional, lakukan uji pemulihan pada salinan/lingkungan uji.
 
-**Enkripsi backup.** Backup berisi identitas pelapor pengaduan. Di server,
-buka **Backup → Aktifkan Enkripsi** satu kali: kunci acak dibuat,
-disimpan di `kunci-backup.txt` di folder database, dan **ditampilkan
-sekali — catat di kertas dan simpan terpisah dari server**. Sejak itu
-backup baru berakhiran `.enc`. Di komputer pengganti, ketik kunci itu
-lewat **Masukkan Kunci** sebelum memulihkan. Tanpa catatan kunci, backup
-terenkripsi dari server yang rusak tidak dapat dibuka siapa pun.
+**Melindungi backup.** Backup berisi identitas pelapor pengaduan, tetapi
+tidak dienkripsi oleh aplikasi: di server ia terletak di sebelah database
+aktif, jadi yang dilindungi adalah aksesnya dan salinan yang keluar.
+
+- Folder `backup\` dan `data\` di server: Properties → Security, hanya
+  akun admin Windows yang boleh membaca.
+- Flashdisk/disk **salinan kedua**: klik kanan drive → *Turn on BitLocker*
+  (BitLocker To Go). Simpan *recovery key*-nya di amplop terpisah dari
+  server. Flashdisk tetap dapat dibuka di komputer Windows mana pun dengan
+  sandinya.
+- Bila server berupa PC biasa yang mudah diangkat orang, aktifkan juga
+  BitLocker pada disknya.
 
 **Masa simpan identitas pelapor.** Nama, nomor pelanggan, telepon, email,
 dan alamat pada lembar pengaduan dikosongkan otomatis setelah 24 bulan

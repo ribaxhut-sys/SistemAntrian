@@ -19,8 +19,6 @@ import hashlib
 import json
 import shutil
 import subprocess
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -31,7 +29,7 @@ from app.core.database import dispose_engine, init_database, session_scope
 from app.core.errors import AppError, BusinessRuleError, NotFoundError, ValidationError
 from app.core.logger import get_logger
 from app.models import AuditAction
-from app.services import audit_service, enkripsi_backup
+from app.services import audit_service
 from app.services.auth_service import AuthService
 from app.services.backup_engines import MesinBackup, buat_mesin
 from app.services.permissions import Permission
@@ -89,8 +87,6 @@ class BackupInfo:
     urutan: int = 1
     #: Ada berkas .sha256 di sampingnya. Backup lama belum mempunyainya.
     checksum_ada: bool = False
-    #: Berkas .enc: isinya hanya terbaca dengan kunci enkripsi backup.
-    terenkripsi: bool = False
 
     @property
     def nama(self) -> str:
@@ -242,9 +238,6 @@ def _bagian_nama(berkas: Path, akhiran: str) -> tuple[datetime, int]:
 
 
 def _sebagai_info(berkas: Path, akhiran: str) -> BackupInfo:
-    terenkripsi = berkas.name.endswith(akhiran + enkripsi_backup.AKHIRAN)
-    if terenkripsi:
-        akhiran += enkripsi_backup.AKHIRAN
     waktu, urutan = _bagian_nama(berkas, akhiran)
     return BackupInfo(
         berkas=berkas,
@@ -252,7 +245,6 @@ def _sebagai_info(berkas: Path, akhiran: str) -> BackupInfo:
         urutan=urutan,
         ukuran_byte=berkas.stat().st_size,
         checksum_ada=berkas_checksum(berkas).is_file(),
-        terenkripsi=terenkripsi,
     )
 
 
@@ -354,8 +346,7 @@ class BackupService:
         akhiran = self.mesin.akhiran
         berkas = [
             p
-            for pola in (akhiran, akhiran + enkripsi_backup.AKHIRAN)
-            for p in folder.glob(f"{AWALAN}*{pola}")
+            for p in folder.glob(f"{AWALAN}*{akhiran}")
             # Berkas sampingan SQLite ikut terjaring pola di atas, padahal
             # bukan backup dan tidak dapat dipulihkan.
             if p.is_file() and not p.name.endswith(("-wal.db", "-shm.db"))
@@ -434,18 +425,10 @@ class BackupService:
     def _salin(self, *, alasan: str) -> BackupInfo:
         config = get_config()
         config.backup_dir.mkdir(parents=True, exist_ok=True)
-        frasa = enkripsi_backup.muat_frasa()
-        akhiran = self.mesin.akhiran + (enkripsi_backup.AKHIRAN if frasa else "")
-        tujuan = _nama_bebas(config.backup_dir, clock.now(), akhiran)
-        # Salinan polos sebelum dienkripsi. Akhirannya sengaja tidak cocok
-        # dengan pola daftar backup, sehingga tidak pernah tampil sebagai
-        # backup walau tertinggal oleh proses yang mati di tengah jalan.
-        polos = tujuan.with_name(tujuan.name + ".sementara") if frasa else tujuan
+        tujuan = _nama_bebas(config.backup_dir, clock.now(), self.mesin.akhiran)
 
         try:
-            self.mesin.salin(polos)
-            if frasa:
-                enkripsi_backup.enkripsi(polos, tujuan, frasa)
+            self.mesin.salin(tujuan)
             # Checksum dihitung segera, selagi berkasnya pasti utuh. Rusak
             # sesudahnya (disk, salinan ke flashdisk) akan tampak saat diuji.
             tulis_checksum(tujuan)
@@ -460,9 +443,6 @@ class BackupService:
                 gagal_terakhir=True,
             )
             raise
-        finally:
-            if polos != tujuan:
-                polos.unlink(missing_ok=True)
 
         info = _sebagai_info(tujuan, self.mesin.akhiran)
         self._catat_status(
@@ -567,23 +547,22 @@ class BackupService:
             )
         if cocokkan_checksum(sumber) is False:
             raise ValidationError(_PESAN_CHECKSUM_RUSAK)
-        with self._terbuka(sumber) as isi:
-            if not self.mesin.sah(isi):
-                raise ValidationError(
-                    "Berkas yang dipilih bukan database antrian yang sah."
-                )
+        if not self.mesin.sah(sumber):
+            raise ValidationError(
+                "Berkas yang dipilih bukan database antrian yang sah."
+            )
 
-            pengaman = self._salin(alasan="sebelum-restore")
+        pengaman = self._salin(alasan="sebelum-restore")
 
-            # Koneksi wajib ditutup lebih dahulu. Pada SQLite karena Windows
-            # menolak menimpa berkas yang masih terbuka; pada PostgreSQL supaya
-            # koneksi menganggur tidak menghalangi pg_restore membuang tabel.
-            dispose_engine()
-            try:
-                self.mesin.pulihkan(isi)
-            finally:
-                reset_config()
-                init_database()
+        # Koneksi wajib ditutup lebih dahulu. Pada SQLite karena Windows
+        # menolak menimpa berkas yang masih terbuka; pada PostgreSQL supaya
+        # koneksi menganggur tidak menghalangi pg_restore membuang tabel.
+        dispose_engine()
+        try:
+            self.mesin.pulihkan(sumber)
+        finally:
+            reset_config()
+            init_database()
 
         with session_scope() as session:
             audit_service.record(
@@ -597,26 +576,6 @@ class BackupService:
         logger.warning(
             "Database dipulihkan dari %s (pengaman: %s)", sumber.name, pengaman.nama
         )
-
-    @contextmanager
-    def _terbuka(self, sumber: Path) -> Iterator[Path]:
-        """
-        Berkas backup yang isinya dapat dibaca mesin dialect.
-
-        Backup polos dipakai apa adanya. Backup terenkripsi dibuka ke berkas
-        sementara di sampingnya, lalu berkas itu dihapus begitu selesai —
-        juga bila pemulihan atau ujinya gagal — supaya salinan polos data
-        pelapor tidak tertinggal di folder yang sengaja dienkripsi.
-        """
-        if not enkripsi_backup.terenkripsi(sumber):
-            yield sumber
-            return
-        polos = sumber.with_name(sumber.name + ".sementara")
-        enkripsi_backup.dekripsi(sumber, polos, enkripsi_backup.muat_frasa())
-        try:
-            yield polos
-        finally:
-            polos.unlink(missing_ok=True)
 
     def _sumber(self, berkas: Path | str) -> Path:
         sumber = Path(berkas)
@@ -654,14 +613,11 @@ class BackupService:
         )
 
         try:
-            with self._terbuka(sumber) as isi:
-                if isi != sumber:
-                    rincian.append("Terenkripsi; terbuka dengan kunci di komputer ini.")
-                if not self.mesin.sah(isi):
-                    return HasilUjiBackup(
-                        False, "Berkas ini bukan database antrian yang sah.", tuple(rincian)
-                    )
-                rincian.append(self.mesin.uji_pulih(isi))
+            if not self.mesin.sah(sumber):
+                return HasilUjiBackup(
+                    False, "Berkas ini bukan database antrian yang sah.", tuple(rincian)
+                )
+            rincian.append(self.mesin.uji_pulih(sumber))
         except AppError as exc:
             return HasilUjiBackup(False, exc.user_message, tuple(rincian))
         except Exception:
@@ -675,66 +631,6 @@ class BackupService:
 
         logger.info("Uji backup %s berhasil", sumber.name)
         return HasilUjiBackup(True, "Backup utuh dan dapat dipulihkan.", tuple(rincian))
-
-
-    # =================================================================
-    # Kunci enkripsi
-    # =================================================================
-
-    @property
-    def enkripsi_aktif(self) -> bool:
-        """Backup baru dienkripsi: berkas kunci ada di komputer ini."""
-        return enkripsi_backup.muat_frasa() is not None
-
-    def buat_kunci_enkripsi(self) -> str:
-        """
-        Aktifkan enkripsi dengan kunci acak baru, dan kembalikan kuncinya.
-
-        Hanya bila belum ada kunci. Mengganti kunci diam-diam membuat
-        seluruh backup lama tidak terbuka lagi di komputer ini; yang mau
-        memakai kunci lain harus mengetiknya lewat `pasang_kunci_enkripsi`,
-        yang memeriksanya terhadap backup yang sudah ada.
-
-        Kuncinya tidak pernah masuk audit maupun log.
-        """
-        sesi = self.auth.require_permission(Permission.BACKUP_MANAGE)
-        if self.enkripsi_aktif:
-            raise BusinessRuleError("Enkripsi backup sudah aktif di komputer ini.")
-        frasa = enkripsi_backup.frasa_baru()
-        enkripsi_backup.simpan_frasa(frasa)
-        self._catat_kunci(sesi.user_id, "dibuat")
-        return frasa
-
-    def pasang_kunci_enkripsi(self, frasa: str) -> None:
-        """
-        Simpan kunci yang diketik administrator.
-
-        Dipakai di komputer pengganti untuk membuka backup lama. Ditolak
-        bila tidak membuka backup terenkripsi terbaru di folder ini: kunci
-        keliru yang diterima membuat backup berikutnya terkunci dengan
-        frasa yang tidak dicatat siapa pun.
-        """
-        sesi = self.auth.require_permission(Permission.BACKUP_MANAGE)
-        frasa = enkripsi_backup.normalkan_frasa(frasa)
-        terkunci = [i for i in self._daftar_berkas() if i.terenkripsi]
-        if terkunci and not enkripsi_backup.cocok(terkunci[0].berkas, frasa):
-            raise ValidationError(
-                f"Kunci ini tidak membuka backup terenkripsi terbaru "
-                f"({terkunci[0].nama}). Periksa kembali catatan kuncinya."
-            )
-        enkripsi_backup.simpan_frasa(frasa)
-        self._catat_kunci(sesi.user_id, "dipasang")
-
-    def _catat_kunci(self, user_id: int, tindakan: str) -> None:
-        with session_scope() as session:
-            audit_service.record(
-                session,
-                AuditAction.CHANGE_CONFIGURATION,
-                user_id=user_id,
-                entity_type="backup",
-                kunci_enkripsi=tindakan,
-            )
-        logger.info("Kunci enkripsi backup %s", tindakan)
 
 
 _PESAN_CHECKSUM_RUSAK = (

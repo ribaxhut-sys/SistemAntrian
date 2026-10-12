@@ -63,8 +63,9 @@ mesin yang berdiri di ruang publik tanpa diawasi.
 
 Akibat yang tidak boleh dilupakan: **berkas backup kini berisi data
 pribadi.** Folder backup setara lemari arsip, bukan lagi salinan angka.
-Karena itu backup dapat **dienkripsi** (menu **Backup → Aktifkan
-Enkripsi**), dan identitas pelapor **dikosongkan otomatis** sesudah masa
+Karena itu salinan backup yang keluar dari server (flashdisk/disk kedua)
+dilindungi dengan BitLocker To Go, dan identitas pelapor **dikosongkan
+otomatis** sesudah masa
 simpannya (`privasi.retensi_pengaduan_bulan`, bawaan 24 bulan; isi
 pengaduan dan catatan petugas tetap disimpan untuk laporan).
 
@@ -402,15 +403,15 @@ belum masuk ke file utama; salinan mentahnya bisa tertinggal atau rusak.
 backup satu hari jauh lebih ringan akibatnya daripada loket yang tidak bisa
 melayani sama sekali.
 
-**Enkripsi backup.** Setelah ADMIN menekan **Aktifkan Enkripsi** di menu
-Backup, setiap backup baru disimpan sebagai `….db.enc` / `….dump.enc`
-(AES-256-GCM, kunci diturunkan dengan scrypt dari frasa acak). Frasanya
-tersimpan di `kunci-backup.txt` di folder database server — supaya backup
-otomatis tetap berjalan tanpa diketik — dan **ditampilkan sekali untuk
-dicatat**. Catatan itu satu-satunya jalan membuka backup bila disk server
-rusak; di komputer pengganti, ketikkan lewat **Masukkan Kunci**. Kunci yang
-diketik diperiksa terhadap backup terenkripsi terbaru sebelum diterima.
-Backup lama yang tidak terenkripsi tetap dapat diuji dan dipulihkan.
+**Backup tidak dienkripsi aplikasi, dengan sengaja.** Backup di server
+terletak di sebelah database aktif; siapa pun yang dapat membukanya juga
+dapat membaca PostgreSQL langsung, sehingga enkripsi di sana tidak
+menambah perlindungan, sedangkan kunci yang hilang saat install ulang
+dapat membuat backup tidak terpulihkan. Yang dilindungi adalah salinan
+yang KELUAR dari server: enkripsi flashdisk/disk salinan kedua dengan
+**BitLocker To Go**, batasi folder `backup\` dan `data\` hanya untuk akun
+admin Windows, dan pertimbangkan BitLocker pada disk server bila servernya
+PC yang mudah dibawa orang.
 
 Backup yang lebih tua dari `backup.retention_days` dihapus otomatis.
 Nilai nol atau negatif diabaikan, agar salah konfigurasi tidak menghapus
@@ -936,8 +937,7 @@ cadangan pengaman, sehingga salah pilih berkas masih dapat diperbaiki.
 
 Berkas backup dapat disalin ke media lain untuk arsip: `.db` pada SQLite
 adalah database yang dapat dibuka langsung, `.dump` pada PostgreSQL adalah
-arsip `pg_dump` format custom, dan berakhiran `.enc` bila enkripsi aktif —
-yang terakhir hanya dapat dibuka aplikasi ini dengan kunci yang tercatat. **Menaruhnya di komputer yang sama dengan
+arsip `pg_dump` format custom. **Menaruhnya di komputer yang sama dengan
 aslinya tidak melindungi apa pun bila komputer itu rusak.**
 
 Pada PostgreSQL, pemulihan memakai `pg_restore --clean --single-transaction`

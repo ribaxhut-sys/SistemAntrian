@@ -424,10 +424,17 @@ Belum dikerjakan sama sekali, sesuai urutan kepentingannya:
    menggantikannya.
 2. ~~Ikon aplikasi~~ — **selesai** (Oktober 2026): `assets/ikon/antrian.ico`,
    dipasang di jendela, `.exe`, dan installer.
-5. ~~Perkiraan waktu tunggu di tiket, enkripsi backup, masa simpan
-   identitas pelapor, pita "server tidak terjangkau" di loket~~ —
-   **selesai** (Oktober 2026). Lihat README bagian tiket dan backup, serta
+5. ~~Perkiraan waktu tunggu di tiket, masa simpan identitas pelapor, pita
+   "server tidak terjangkau" di loket~~ — **selesai** (Oktober 2026). Lihat
+   README bagian tiket dan backup, serta
    [prosedur-darurat.md](prosedur-darurat.md).
+6. **Enkripsi backup di aplikasi sengaja TIDAK dibuat** (dicoba lalu
+   dicabut atas keputusan pemilik, Oktober 2026). Di server, backup
+   terletak di sebelah database aktif sehingga enkripsi tidak menambah
+   perlindungan, sementara kunci yang hilang saat install ulang dapat
+   membuat backup tidak terpulihkan. Perlindungannya di tingkat Windows:
+   izin folder dan BitLocker To Go untuk salinan kedua. Jangan
+   menambahkannya kembali tanpa membaca alasan ini.
 3. ~~Laporan historis per rentang tanggal dan export PDF~~ — **selesai**
    (Oktober 2026): menu **Laporan** (SUPERVISOR), ekspor PDF dan Excel,
    `app/services/report_service.py`.

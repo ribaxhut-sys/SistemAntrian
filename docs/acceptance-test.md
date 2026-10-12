@@ -169,11 +169,10 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | I9 | **PostgreSQL:** backup dari komputer loket tanpa pg_dump | Pesan jelas yang menyebut pengaturan folder perkakas, bukan traceback | |
 | I10 | **PostgreSQL:** pulihkan dari `.dump`, lalu periksa dari loket lain | Seluruh loket melihat data yang sudah dipulihkan | |
 | I11 | Periksa daftar proses saat backup berjalan | Kata sandi database TIDAK terlihat pada argumen perintah | |
-| I12 | Di server, **Backup → Aktifkan Enkripsi** | Kunci tampil satu kali; dicatat di kertas dan disimpan terpisah dari server | |
-| I13 | Backup Sekarang, lalu buka berkasnya dengan Notepad | Berakhiran `.enc`; isinya acak, tidak ada nama atau nomor antrian yang terbaca | |
-| I14 | Uji Backup pada backup `.enc` | "Backup utuh dan dapat dipulihkan", dengan keterangan terenkripsi | |
-| I15 | Salin satu backup `.enc` ke komputer lain yang terpasang aplikasi, ketik kunci dari kertas lewat **Masukkan Kunci**, lalu pulihkan | Data kembali utuh. Kunci yang salah ketik ditolak dengan pesan yang jelas | |
-| I16 | Periksa folder backup setelah I13–I15 | Tidak ada berkas `.sementara` yang tertinggal | |
+| I12 | Di server, masuk sebagai akun Windows petugas biasa (bukan admin), buka folder `backup\` dan `data\` | Akses ditolak | |
+| I13 | Aktifkan BitLocker To Go di flashdisk salinan kedua, lalu Backup Sekarang | Backup ikut tersalin ke flashdisk; sandi dan *recovery key* tercatat dan disimpan terpisah dari server | |
+| I14 | Cabut flashdisk, colokkan ke komputer lain | Isinya hanya terbuka setelah sandi BitLocker diketik | |
+| I15 | Dari flashdisk itu, pulihkan satu backup di komputer lain yang terpasang aplikasi | Data kembali utuh | |
 
 ## J. Hak akses
 
@@ -361,7 +360,8 @@ Tidak semua bagian di atas harus dikerjakan sekaligus. Untuk satu hari uji
 coba sebelum melayani pengunjung sungguhan, urutan yang disarankan:
 
 1. **Pagi, sebelum jam layanan** — A2 (5 PC + server), O (peran tiap
-   komputer), I12–I13 (enkripsi + backup pertama), I15 di komputer lain.
+   komputer), I12–I13 (izin folder, flashdisk BitLocker, backup pertama), I15 di
+   komputer lain.
 2. **Simulasi pelayanan 1–2 jam** dengan pegawai sebagai pengunjung:
    L (anjungan + printer IW-J200), M dan F (televisi + suara), D, E, G, N.
    Dengarkan suara panggilan dari kursi ruang tunggu.

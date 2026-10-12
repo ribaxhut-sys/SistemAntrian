@@ -52,9 +52,9 @@ normal, masalahnya di komputer atau kabel loket itu, bukan di server.
    ringkasan database, API anjungan, backup, dan disk.
 5. Bila server tidak dapat dipulihkan dalam waktu wajar dan ada komputer
    pengganti, pulihkan backup terbaru di sana (lihat
-   [panduan-proyek.md](panduan-proyek.md) bagian 8). **Kunci enkripsi
-   backup** dibutuhkan: lihat catatan kunci yang disimpan saat enkripsi
-   diaktifkan, lalu masukkan lewat **Backup → Masukkan Kunci**.
+   [panduan-proyek.md](panduan-proyek.md) bagian 8). Bila backup diambil
+   dari flashdisk salinan kedua yang ber-BitLocker, siapkan sandi atau
+   *recovery key*-nya.
 6. Setelah pulih, umumkan ke loket. Nomor manual yang masih menunggu
    dilayani lebih dahulu; tidak perlu dimasukkan sebagai nomor antrian
    baru.
@@ -86,5 +86,6 @@ tercatat di aplikasi.
 - Pastikan backup harian terbentuk dan **folder salinan kedua** terisi
   (menu **Backup**). Lakukan uji pemulihan ke komputer lain setidaknya
   sekali sebelum operasional dan setiap tiga bulan.
-- Simpan catatan **kunci enkripsi backup** di tempat terpisah dari server
-  (misalnya amplop tertutup di lemari penyelia).
+- Simpan sandi dan *recovery key* **BitLocker flashdisk salinan kedua**
+  di tempat terpisah dari server (misalnya amplop tertutup di lemari
+  penyelia).

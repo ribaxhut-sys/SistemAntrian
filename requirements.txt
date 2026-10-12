@@ -40,10 +40,6 @@ Pillow==12.3.0
 # Ekspor laporan ke Excel (.xlsx) dari layar Laporan.
 openpyxl==3.1.5
 
-# Enkripsi berkas backup (AES-GCM, kunci dari scrypt). Backup berisi
-# identitas pelapor pengaduan; lihat app/services/enkripsi_backup.py.
-cryptography==50.0.2
-
 # Database timezone IANA.
 # WAJIB: Windows tidak menyediakan tz database sistem, sehingga
 # zoneinfo.ZoneInfo("Asia/Jakarta") akan gagal tanpa paket ini.
