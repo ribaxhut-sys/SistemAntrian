@@ -445,6 +445,38 @@ def test_bilah_status_saat_tidak_terjangkau(qtbot, admin_auth):
     assert str(get_config().teks_lokasi) in teks
 
 
+def test_pita_server_muncul_setelah_dua_kegagalan_dan_hilang_saat_pulih(
+    qtbot, auth, antrian_siap
+):
+    """Server mati menghentikan semua loket: petugas biasa pun harus melihatnya."""
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+    pita = jendela.pita_database
+
+    assert pita.isHidden()
+    jendela._tampilkan_status_database(False)
+    assert pita.isHidden(), "satu kegagalan bisa sekadar paket hilang"
+    jendela._tampilkan_status_database(False)
+    assert not pita.isHidden()
+    assert "nomor manual" in pita.saran.text()
+    assert "PostgreSQL" not in pita.saran.text(), "saran teknis hanya untuk admin"
+
+    jendela._tampilkan_status_database(True)
+    assert pita.isHidden()
+    jendela._tampilkan_status_database(False)
+    assert pita.isHidden(), "hitungan kegagalan mulai lagi sesudah pulih"
+
+
+def test_pita_server_untuk_admin_menyebut_langkah_teknis(qtbot, admin_auth):
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    jendela._tampilkan_status_database(False)
+    jendela._tampilkan_status_database(False)
+    assert "PostgreSQL" in jendela.pita_database.saran.text()
+
+
 def test_bilah_status_tetap_setelah_muat_ulang(qtbot, admin_auth):
     """F5 tidak boleh menghapus lokasi database dari bilah status."""
     jendela = MainWindow(admin_auth)

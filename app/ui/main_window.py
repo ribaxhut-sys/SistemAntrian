@@ -48,6 +48,7 @@ from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.settings.dialogs import LABEL_PERAN
 from app.ui.dashboard.report_page import LaporanPage
 from app.ui.indikator_anjungan import PitaAnjungan
+from app.ui.pita_database import PitaDatabase
 from app.ui.display.display_page import DisplayPage
 from app.ui.notes.note_page import NotePage
 from app.ui.queue.service_page import ServicePage
@@ -498,6 +499,13 @@ class MainWindow(QMainWindow):
                 self._buka_layanan_anjungan if boleh_buka_layanan else None,
             )
             susunan_utama.addWidget(self.pita_anjungan)
+        # Server mati menghentikan semua loket; berbeda dari anjungan, ini
+        # urusan setiap petugas, bukan hanya admin.
+        if not self.mode_kios:
+            self.pita_database = PitaDatabase(
+                self._jadwalkan_periksa_database, untuk_admin=self._info_teknis
+            )
+            susunan_utama.addWidget(self.pita_database)
 
         self.halaman = QStackedWidget()
         susunan_utama.addWidget(self.halaman, stretch=1)
@@ -1118,6 +1126,9 @@ class MainWindow(QMainWindow):
                 return
 
     def _tampilkan_status_database(self, terhubung: bool) -> None:
+        pita = getattr(self, "pita_database", None)
+        if pita is not None:
+            pita.perbarui(terhubung)
         label = getattr(self, "_label_database", None)
         if label is None:
             return
