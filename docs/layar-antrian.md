@@ -97,6 +97,12 @@ Di pengaturan panel tertulis suara mana yang sedang dipakai.
 - Mengikuti pengaturan **display.sound_enabled** di server.
 - Panel yang baru menyala atau baru tersambung lagi **tidak** membunyikan
   panggilan yang sudah lewat.
+- Mulai APK layar 1.5 panggilan yang lebih tua dari 60 detik menurut jam
+  server (`age_seconds` ditambah lama antre di panel) tidak diucapkan, dan
+  antrean ucapan paling banyak 10 panggilan — sama dengan anjungan. Kartu
+  loketnya tetap disorot.
+- Sesudah database dipulihkan dari backup, server mengarahkan panel ke id
+  panggilan terakhir yang sebenarnya, sehingga suara tidak diam selamanya.
 - Bila layar antrian Windows (`--tv`) masih menyala di ruangan yang sama,
   matikan suara salah satunya supaya panggilan tidak terdengar dua kali.
 

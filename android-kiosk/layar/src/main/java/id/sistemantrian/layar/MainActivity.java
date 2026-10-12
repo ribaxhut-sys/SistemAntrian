@@ -127,6 +127,13 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private static final long TITLE_HOLD_MS = 3000;
     private static final long PACK_RETRY_MS = 60000;
     private static final int FAILURES_BEFORE_BANNER = 3;
+    /**
+     * Panggilan yang lebih tua dari ini (umur menurut jam server ditambah
+     * lama antre di panel) tidak diucapkan lagi; sama dengan anjungan.
+     */
+    private static final double MAX_CALL_AGE_SECONDS = 60;
+    /** Antrean ucapan paling panjang; yang tertua dibuang lebih dulu. */
+    private static final int MAX_SPEECH_QUEUE = 10;
 
     // Daftar "Berikutnya": paling banyak 12 nomor, maksimal 45% tinggi papan,
     // dan kartu loket tidak pernah lebih pendek dari 1/8 tinggi layar.
@@ -980,7 +987,13 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             card.setBackground(bg);
         }
         if (!soundEnabled) return;
+        try {
+            call.put("_received_ms", System.currentTimeMillis());
+        } catch (org.json.JSONException ignored) {
+            // Tanpa catatan waktu, panggilan dianggap baru.
+        }
         speechQueue.add(call);
+        while (speechQueue.size() > MAX_SPEECH_QUEUE) speechQueue.poll();
         speakNext();
     }
 
@@ -991,8 +1004,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
      *   3. nada saja.
      */
     private void speakNext() {
-        if (speaking || speechQueue.isEmpty()) return;
-        JSONObject call = speechQueue.poll();
+        if (speaking) return;
+        JSONObject call = nextFreshCall();
+        if (call == null) return;
         speaking = true;
         if (tone != null) tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 600);
         // Jeda sesudah nada, supaya kata pertama tidak tertelan nadanya.
@@ -1009,6 +1023,23 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 finishSpeech(1500);
             }
         }, 900);
+    }
+
+    /**
+     * Panggilan berikutnya yang belum basi. Panel yang tertinggal (lima loket
+     * memanggil bersamaan, atau Wi-Fi sempat putus) melewati yang sudah lama
+     * daripada mengumumkan nomor yang orangnya mungkin sudah di loket.
+     */
+    private JSONObject nextFreshCall() {
+        long now = System.currentTimeMillis();
+        while (!speechQueue.isEmpty()) {
+            JSONObject call = speechQueue.poll();
+            if (call == null) continue;
+            double age = call.optDouble("age_seconds", 0)
+                    + (now - call.optLong("_received_ms", now)) / 1000.0;
+            if (age <= MAX_CALL_AGE_SECONDS) return call;
+        }
+        return null;
     }
 
     private void finishSpeech(long delayMs) {
