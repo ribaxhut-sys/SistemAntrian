@@ -317,12 +317,15 @@ def tata_letak_tiket_anjungan(data: TicketData) -> dict:
         )
 
     rows = _tata_letak(data, pas, ukuran_nomor=44)
+    # Geseran yang sama dengan raster_tiket_anjungan: tanpa ini tiket dari
+    # tata letak cadangan mengabaikan pengaturan "Turunkan isi tiket anjungan".
+    geser_mm = max(0, data.turun_anjungan_mm) - max(0, data.geser_atas_mm)
     return {
         "width_mm": lebar,
         "height_mm": PdfTicketPrinter.TINGGI_MM,
         "rows": [
             {
-                "y_mm": row.y_mm,
+                "y_mm": row.y_mm + geser_mm,
                 "text": row.teks,
                 "size": row.ukuran,
                 "bold": row.tebal,

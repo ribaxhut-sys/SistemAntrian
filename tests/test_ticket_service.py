@@ -859,3 +859,23 @@ def test_tata_letak_anjungan_android_tidak_memotong_tiket_biasa():
     assert baris["C-002"] == 44
     assert baris["Silakan menunggu nomor Anda dipanggil."] == 9
     assert not any("…" in teks for teks in baris)
+
+
+def test_tata_letak_anjungan_ikut_turun_seperti_raster():
+    """Pengaturan "Turunkan isi tiket anjungan" berlaku di kedua jalur Android."""
+    from datetime import datetime
+
+    from app.services.ticket_service import tata_letak_tiket_anjungan
+
+    dasar = dict(
+        queue_number="C-002",
+        category_name="Informasi",
+        office_name="Kantor Pelayanan",
+        issued_at=datetime(2026, 10, 12, 10, 0),
+    )
+    rata = tata_letak_tiket_anjungan(TicketData(**dasar))["rows"]
+    turun = tata_letak_tiket_anjungan(
+        TicketData(**dasar, turun_anjungan_mm=4, geser_atas_mm=1)
+    )["rows"]
+
+    assert [b["y_mm"] - a["y_mm"] for a, b in zip(rata, turun)] == [3] * len(rata)
