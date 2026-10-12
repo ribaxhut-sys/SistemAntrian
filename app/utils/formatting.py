@@ -35,6 +35,11 @@ def tanggal_panjang(nilai: date) -> str:
     return f"{nilai.day} {BULAN[nilai.month - 1]} {nilai.year}"
 
 
+def tanggal_pendek(nilai: date) -> str:
+    """3 Okt — untuk kolom tabel yang sempit."""
+    return f"{nilai.day} {BULAN[nilai.month - 1][:3]}"
+
+
 def hari_dan_tanggal(nilai: date) -> str:
     """Rabu, 26 Agustus 2026."""
     return f"{HARI[nilai.weekday()]}, {tanggal_panjang(nilai)}"

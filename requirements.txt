@@ -32,7 +32,19 @@ pydantic==2.13.4
 # Generator PDF untuk tiket antrian & laporan cetak
 reportlab==5.0.1
 
+# Menggambar tiket anjungan Android sebagai bitmap (raster_tiket_anjungan).
+# Disebut sendiri walau ikut terpasang bersama reportlab: tanpa Pillow tiket
+# tablet diam-diam kembali ke tata letak lama yang lebih kecil.
+Pillow==12.3.0
+
+# Ekspor laporan ke Excel (.xlsx) dari layar Laporan.
+openpyxl==3.1.5
+
 # Database timezone IANA.
 # WAJIB: Windows tidak menyediakan tz database sistem, sehingga
 # zoneinfo.ZoneInfo("Asia/Jakarta") akan gagal tanpa paket ini.
 tzdata==2026.3
+
+# Local API used by the Android ticket kiosk.
+fastapi==0.135.1
+uvicorn==0.41.0

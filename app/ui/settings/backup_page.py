@@ -29,8 +29,10 @@ from app.ui.common import (
     keterangan,
     konfirmasi,
     tampilkan_info,
+    tampilkan_peringatan,
     tombol,
 )
+from app.ui.style import DANGER, TEXT_MUTED
 from app.utils.formatting import hari_dan_tanggal, jam
 
 #: Banyaknya baris audit yang ditampilkan. Cukup untuk menelusuri kejadian
@@ -74,12 +76,28 @@ class BackupPage(QWidget):
         self.label_folder = keterangan("")
         susunan.addWidget(self.label_folder)
 
+        # Waktu backup terakhir yang berhasil, dan kegagalan sesudahnya.
+        # Tanpa ini backup otomatis yang gagal tiap pagi baru ketahuan
+        # ketika backup itu dibutuhkan.
+        self.label_status = keterangan("")
+        self.label_status.setWordWrap(True)
+        susunan.addWidget(self.label_status)
+
         baris = QHBoxLayout()
         baris.setSpacing(8)
 
         buat = tombol("Backup Sekarang", variant="primary")
         buat.clicked.connect(self.buat_backup)
         baris.addWidget(buat)
+
+        self.tombol_uji = tombol("Uji Backup")
+        self.tombol_uji.setToolTip(
+            "Periksa checksum dan coba pulihkan ke database sementara. "
+            "Database yang sedang dipakai tidak disentuh."
+        )
+        self.tombol_uji.setEnabled(False)
+        self.tombol_uji.clicked.connect(self.uji)
+        baris.addWidget(self.tombol_uji)
 
         self.tombol_pulihkan = tombol("Pulihkan", variant="danger")
         self.tombol_pulihkan.setEnabled(False)
@@ -93,8 +111,10 @@ class BackupPage(QWidget):
         baris.addStretch()
         susunan.addLayout(baris)
 
-        self.tabel_backup = QTableWidget(0, 3)
-        self.tabel_backup.setHorizontalHeaderLabels(["Berkas", "Dibuat", "Ukuran"])
+        self.tabel_backup = QTableWidget(0, 4)
+        self.tabel_backup.setHorizontalHeaderLabels(
+            ["Berkas", "Dibuat", "Ukuran", "Checksum"]
+        )
         self.tabel_backup.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
         )
@@ -146,8 +166,31 @@ class BackupPage(QWidget):
 
     def muat_ulang(self) -> None:
         self.label_folder.setText(f"Folder backup: {self.backup.folder}")
+        self._muat_status()
         self._muat_backup()
         self._muat_audit()
+
+    def _muat_status(self) -> None:
+        berhasil, status = jalankan_aman(
+            self, self.backup.status_backup, "Gagal membaca status backup"
+        )
+        if not berhasil or status is None:
+            return
+        if status.terakhir_berhasil is None:
+            teks = "Belum ada backup yang berhasil dibuat."
+        else:
+            w = status.terakhir_berhasil
+            teks = f"Backup terakhir berhasil: {hari_dan_tanggal(w.date())}, {jam(w)}."
+        warna = TEXT_MUTED
+        if status.gagal_terakhir and status.terakhir_gagal is not None:
+            g = status.terakhir_gagal
+            teks += (
+                f"\nBackup terakhir GAGAL ({hari_dan_tanggal(g.date())}, {jam(g)}): "
+                f"{status.pesan_gagal}"
+            )
+            warna = DANGER
+        self.label_status.setText(teks)
+        self.label_status.setStyleSheet(f"color: {warna};")
 
     def _muat_backup(self) -> None:
         berhasil, data = jalankan_aman(
@@ -163,6 +206,7 @@ class BackupPage(QWidget):
                 info.nama,
                 f"{hari_dan_tanggal(info.dibuat_pada.date())}, {jam(info.dibuat_pada)}",
                 info.label_ukuran,
+                "ada" if info.checksum_ada else "-",
             )
             for kolom, teks in enumerate(nilai):
                 self.tabel_backup.setItem(baris, kolom, QTableWidgetItem(teks))
@@ -206,6 +250,7 @@ class BackupPage(QWidget):
 
     def _saat_pilihan_berubah(self) -> None:
         self.tombol_pulihkan.setEnabled(self.terpilih is not None)
+        self.tombol_uji.setEnabled(self.terpilih is not None)
 
     # -----------------------------------------------------------------
     # Tindakan
@@ -219,6 +264,21 @@ class BackupPage(QWidget):
             return
         tampilkan_info(self, f"Backup dibuat: {info.nama} ({info.label_ukuran})")
         self.muat_ulang()
+
+    def uji(self) -> None:
+        info = self.terpilih
+        if info is None:
+            return
+        berhasil, hasil = jalankan_aman(
+            self, lambda: self.backup.uji_backup(info.berkas), "Gagal menguji backup"
+        )
+        if not berhasil or hasil is None:
+            return
+        pesan = "\n".join([hasil.ringkasan, "", *hasil.rincian]).strip()
+        if hasil.berhasil:
+            tampilkan_info(self, pesan, "Uji Backup")
+        else:
+            tampilkan_peringatan(self, pesan, "Uji Backup")
 
     def bersihkan(self) -> None:
         berhasil, dihapus = jalankan_aman(

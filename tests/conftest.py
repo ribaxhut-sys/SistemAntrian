@@ -17,6 +17,12 @@ import pytest
 # Widget Qt harus dapat dibuat tanpa layar fisik agar test dapat berjalan
 # di terminal maupun pada mesin build. Harus diset sebelum Qt diimpor.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Qt offscreen tidak membawa font sendiri. Tanpa folder font setiap huruf
+# digambar sebagai kotak selebar "M", sehingga test tata letak ("muat satu
+# layar 1366 x 768") mengukur teks dua kali lebih lebar dari kenyataan.
+_FONT_WINDOWS = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+if _FONT_WINDOWS.is_dir():
+    os.environ.setdefault("QT_QPA_FONTDIR", str(_FONT_WINDOWS))
 from sqlalchemy.orm import Session
 
 from app.core import config as config_module
@@ -81,6 +87,36 @@ def app_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config_module.reset_config()
 
 
+@pytest.fixture
+def env_mesin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """
+    Setel environment variable per-mesin lalu bangun ulang konfigurasi.
+
+    Pencetak dan pengeras suara adalah sifat MESIN, sehingga jalur yang
+    diuji memang jalur environment variable — bukan pengaturan database.
+    Konfigurasi dikembalikan setelah test supaya nilainya tidak bocor ke
+    test berikutnya lewat cache `get_config()`.
+
+    `peran.json` diarahkan ke folder sementara yang kosong. Tanpa itu test
+    membaca `data/peran.json` milik komputer pengembang: begitu komputer
+    itu dipasang sebagai loket dengan pencetak `system`, test yang
+    mengharapkan "mesin tidak berpendapat" gagal hanya di komputer itu.
+    """
+    monkeypatch.setenv("ANTRIAN_PERAN_PATH", str(tmp_path / "peran.json"))
+
+    def setel(**nilai: str | None):
+        for kunci, isi in nilai.items():
+            if isi is None:
+                monkeypatch.delenv(kunci, raising=False)
+            else:
+                monkeypatch.setenv(kunci, isi)
+        config_module.reset_config()
+        return config_module.get_config()
+
+    yield setel
+    config_module.reset_config()
+
+
 def _kosongkan_schema() -> None:
     """
     Kembalikan database PostgreSQL ke keadaan benar-benar kosong.
@@ -90,7 +126,6 @@ def _kosongkan_schema() -> None:
     ini, data satu test bocor ke test berikutnya dan kegagalannya bergantung
     pada urutan — jenis kegagalan yang paling sulit ditelusuri.
     """
-    import sqlalchemy as sa
 
     from app.core.database import get_engine
 
@@ -110,6 +145,108 @@ def database(app_config):
 
     init_database()
     return app_config
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "layanan_bertingkat: jangan ratakan pohon jenis layanan bawaan "
+        "(lihat fixture layanan_bawaan_datar)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "loket_berpetugas: layar hanya menampilkan loket yang ada petugasnya "
+        "(bawaan pemasangan; lihat fixture layanan_bawaan_datar)",
+    )
+
+
+def _tampilkan_semua_loket() -> None:
+    """
+    Bawaan pemasangan menyembunyikan loket tanpa petugas login. Test layar
+    yang lama menguji tata letak di atas loket bawaan tanpa ada yang login;
+    perilaku penyaringnya diuji tersendiri dengan marker loket_berpetugas.
+    """
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import ApplicationSetting
+
+    with session_scope() as session:
+        session.execute(
+            sa.update(ApplicationSetting)
+            .where(ApplicationSetting.key == "display.loket_tampil")
+            .values(value="semua")
+        )
+
+
+def _ratakan_jenis_layanan() -> None:
+    """Buang seluruh jenis layanan yang punya induk, dari yang terdalam."""
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import ServiceCategory
+
+    with session_scope() as session:
+        for _ in range(10):  # kedalaman menu selalu jauh di bawah ini
+            induk = {
+                id_
+                for id_ in session.scalars(
+                    sa.select(ServiceCategory.parent_id).where(
+                        ServiceCategory.parent_id.is_not(None)
+                    )
+                )
+            }
+            daun = [
+                baris
+                for baris in session.scalars(
+                    sa.select(ServiceCategory).where(
+                        ServiceCategory.parent_id.is_not(None)
+                    )
+                )
+                if baris.id not in induk
+            ]
+            if not daun:
+                return
+            for baris in daun:
+                session.delete(baris)
+            session.flush()
+
+
+@pytest.fixture(autouse=True)
+def layanan_bawaan_datar(request):
+    """
+    Ratakan pohon jenis layanan bawaan sebelum test berjalan.
+
+    Seed memasang susunan konsultasi perpajakan — PBB, PKB, PAT, Reklame,
+    dan PBJT beserta isinya — di bawah "Konsultasi". Itu benar untuk
+    pemasangan sungguhan, tetapi akibatnya Konsultasi menjadi KELOMPOK dan
+    berhenti menerbitkan nomor, sedangkan hampir seluruh test di berkas
+    lain menguji mekanika antrian di atas tiga layanan datar A/B/C.
+
+    Susunan layanan sebuah kantor adalah KONFIGURASI, bukan perilaku
+    aplikasi. Meratakannya di satu tempat jauh lebih jujur daripada
+    menyebar pengetahuan tentang pohon perpajakan ke ratusan assertion
+    yang sebenarnya hanya peduli bahwa A-001 menyusul A-001 berikutnya.
+
+    Test yang memang menguji susunan bertingkat — seed, anjungan, aturan
+    kelompok — memakai marker `layanan_bertingkat` untuk melewati ini.
+    """
+    # Yang diminta `seeded`, bukan `database`: init_database() hanya
+    # menyiapkan skema, dan jenis layanan bawaan baru ditulis oleh
+    # seed_initial_data(). Meratakan sebelum seed berjalan tidak
+    # meratakan apa pun.
+    if "seeded" not in request.fixturenames:
+        # Test yang tidak pernah menyentuh data master; tidak ada yang
+        # perlu diratakan, dan menyeed database di sini hanya akan
+        # memperlambat seluruh suite.
+        yield
+        return
+    request.getfixturevalue("seeded")
+    if request.node.get_closest_marker("layanan_bertingkat") is None:
+        _ratakan_jenis_layanan()
+    if request.node.get_closest_marker("loket_berpetugas") is None:
+        _tampilkan_semua_loket()
+    yield
 
 
 @pytest.fixture
@@ -323,12 +460,16 @@ def settings_service(auth):
 def ticket_pdf(tmp_path, auth, seeded):
     """TicketService yang menulis tiket sebagai PDF ke folder sementara."""
     from app.services.master_data_service import MasterDataService
+    from app.services.queue_service import QueueService
     from app.services.settings_service import SettingsService
     from app.services.ticket_service import PdfTicketPrinter, TicketService
 
     folder = tmp_path / "tiket"
     return TicketService(
-        PdfTicketPrinter(folder), SettingsService(auth), MasterDataService(auth)
+        PdfTicketPrinter(folder),
+        SettingsService(auth),
+        MasterDataService(auth),
+        QueueService(auth),
     )
 
 
@@ -370,3 +511,18 @@ def layani_sampai_selesai(antrian_siap, cro_queue, terbitkan):
         return cro_queue.complete(antrian.id)
 
     return _layani
+
+
+@pytest.fixture(autouse=True)
+def efek_grafis_menyala():
+    """
+    Pulihkan efek grafis sesudah setiap test.
+
+    Pratinjau totem mematikannya untuk seluruh proses (app/ui/efek.py).
+    Tanpa pemulihan ini, test yang berjalan sesudah test pratinjau mewarisi
+    bayangan yang nonaktif, dan hasilnya bergantung pada urutan test.
+    """
+    from app.ui.efek import setel_efek_grafis
+
+    yield
+    setel_efek_grafis(True)

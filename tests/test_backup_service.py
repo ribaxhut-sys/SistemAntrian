@@ -288,3 +288,235 @@ def test_peran_lain_tidak_boleh_memulihkan(auth, antrian_siap):
 
     with pytest.raises(AuthorizationError):
         BackupService(auth).restore("apa pun.db")
+
+
+# ---------------------------------------------------------------------
+# Tahap 1: backup benar-benar jalan di server
+# ---------------------------------------------------------------------
+
+
+def test_pg_dump_dicari_di_program_files_versi_tertinggi(tmp_path):
+    from app.services.backup_engines import folder_postgresql_terpasang
+
+    akar = tmp_path / "PostgreSQL"
+    for versi in ("15", "17", "16", "bukan-versi"):
+        (akar / versi / "bin").mkdir(parents=True)
+    (akar / "18").mkdir()  # tanpa bin: bukan pemasangan lengkap
+
+    hasil = folder_postgresql_terpasang([akar])
+
+    assert [p.parent.name for p in hasil] == ["17", "16", "15"]
+
+
+def test_pg_dump_ditemukan_tanpa_pengaturan(tmp_path, monkeypatch, app_config):
+    from app.services import backup_engines
+
+    bin_pg = tmp_path / "PostgreSQL" / "17" / "bin"
+    bin_pg.mkdir(parents=True)
+    (bin_pg / "pg_dump.exe").write_bytes(b"")
+    monkeypatch.setattr(backup_engines.shutil, "which", lambda nama: None)
+    monkeypatch.setattr(
+        backup_engines, "folder_postgresql_terpasang", lambda: [bin_pg]
+    )
+
+    mesin = backup_engines.PostgresBackup(app_config, "")
+
+    assert mesin._alat("pg_dump") == str(bin_pg / "pg_dump.exe")
+
+
+def test_backup_otomatis_dilewati_di_komputer_loket(backup, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.backup_service._boleh_backup_di_sini", lambda: False
+    )
+
+    hasil = backup.backup_otomatis_bila_perlu()
+
+    assert not hasil.berhasil
+    assert "komputer server" in hasil.pesan
+    assert backup._daftar_berkas() == []
+
+
+def test_backup_disalin_ke_folder_kedua(backup, admin_auth, tmp_path):
+    from app.services.settings_service import SettingsService
+
+    kedua = tmp_path / "flashdisk" / "backup-antrian"
+    SettingsService(admin_auth).set("backup.salinan_folder", str(kedua))
+
+    info = backup.backup()
+
+    assert (kedua / info.nama).is_file()
+    assert (kedua / info.nama).stat().st_size == info.ukuran_byte
+
+
+def test_folder_kedua_yang_gagal_tidak_membatalkan_backup(
+    backup, admin_auth, tmp_path, monkeypatch
+):
+    from app.services import backup_service as modul
+    from app.services.settings_service import SettingsService
+
+    SettingsService(admin_auth).set("backup.salinan_folder", str(tmp_path / "x"))
+
+    def gagal(*args, **kwargs):
+        raise OSError("flashdisk dicabut")
+
+    monkeypatch.setattr(modul.shutil, "copy2", gagal)
+
+    info = backup.backup()
+
+    assert info.berkas.is_file()
+
+
+# ---------------------------------------------------------------------
+# Checksum, status backup terakhir, dan uji keutuhan
+# ---------------------------------------------------------------------
+
+
+def test_backup_menulis_checksum_yang_cocok(backup):
+    from app.services.backup_service import berkas_checksum, cocokkan_checksum
+
+    info = backup.backup()
+
+    samping = berkas_checksum(info.berkas)
+    assert samping.is_file()
+    # Format sha256sum, supaya dapat diperiksa dengan perkakas umum.
+    assert samping.read_text(encoding="ascii").strip().endswith(f"  {info.nama}")
+    assert cocokkan_checksum(info.berkas) is True
+    assert backup.list_backup()[0].checksum_ada
+
+
+def test_checksum_ikut_ke_folder_kedua_dan_terhapus_bersama_retensi(
+    backup, admin_auth, tmp_path, akhiran
+):
+    from app.services.backup_service import berkas_checksum, tulis_checksum
+    from app.services.settings_service import SettingsService
+
+    kedua = tmp_path / "flashdisk"
+    SettingsService(admin_auth).set("backup.salinan_folder", str(kedua))
+    info = backup.backup()
+    assert (kedua / berkas_checksum(info.berkas).name).is_file()
+
+    SettingsService(admin_auth).set("backup.retention_days", "1")
+    lama = backup.folder / f"queue-20200101-080000{akhiran}"
+    lama.write_bytes(b"berkas lama")
+    tulis_checksum(lama)
+
+    backup.hapus_kedaluwarsa()
+
+    assert not lama.exists()
+    assert not berkas_checksum(lama).exists()
+
+
+def test_restore_menolak_backup_yang_berubah_sejak_dibuat(backup):
+    info = backup.backup()
+    with info.berkas.open("ab") as f:
+        f.write(b"rusak")
+
+    with pytest.raises(ValidationError, match="checksum"):
+        backup.restore(info.berkas)
+
+
+def test_uji_backup_berhasil_tanpa_menyentuh_database_aktif(backup, terbitkan):
+    terbitkan("A", 2)
+    info = backup.backup()
+    sebelum = _jumlah_antrian_aktif()
+
+    hasil = backup.uji_backup(info.nama)
+
+    assert hasil.berhasil, hasil.ringkasan
+    assert any("Checksum cocok" in r for r in hasil.rincian)
+    assert _jumlah_antrian_aktif() == sebelum
+
+
+def test_uji_backup_lama_tanpa_checksum_tetap_diuji(backup):
+    from app.services.backup_service import berkas_checksum
+
+    info = backup.backup()
+    berkas_checksum(info.berkas).unlink()
+
+    hasil = backup.uji_backup(info.berkas)
+
+    assert hasil.berhasil
+    assert any("Tidak ada checksum" in r for r in hasil.rincian)
+
+
+def test_uji_backup_menolak_checksum_tidak_cocok(backup):
+    info = backup.backup()
+    with info.berkas.open("ab") as f:
+        f.write(b"rusak")
+
+    hasil = backup.uji_backup(info.berkas)
+
+    assert not hasil.berhasil
+    assert "checksum" in hasil.ringkasan
+
+
+def test_uji_backup_sqlite_rusak_ditolak(sqlite_saja, backup, terbitkan):
+    from app.services.backup_service import berkas_checksum
+
+    terbitkan("A", 3)
+    info = backup.backup()
+    berkas_checksum(info.berkas).unlink()
+    data = bytearray(info.berkas.read_bytes())
+    # Timpa halaman-halaman data, sisakan kepala berkas.
+    data[4096:] = b"\x00" * (len(data) - 4096)
+    info.berkas.write_bytes(bytes(data))
+
+    hasil = backup.uji_backup(info.berkas)
+
+    assert not hasil.berhasil
+
+
+def test_uji_backup_hanya_admin(auth, antrian_siap):
+    auth.login("cro", TEST_PASSWORD)
+    with pytest.raises(AuthorizationError):
+        BackupService(auth).uji_backup("queue-x.db")
+
+
+def test_status_backup_mencatat_berhasil_lalu_gagal(backup, monkeypatch):
+    import errno
+
+    info = backup.backup()
+    status = backup.status_backup()
+    assert status.terakhir_berhasil is not None
+    assert not status.gagal_terakhir
+
+    def penuh(_tujuan):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(backup.mesin, "salin", penuh)
+    with pytest.raises(OSError):
+        backup.backup()
+
+    status = backup.status_backup()
+    assert status.gagal_terakhir
+    assert "Disk penuh" in status.pesan_gagal
+    # Berkas separuh jadi beserta checksumnya tidak tertinggal.
+    assert [i.nama for i in backup.list_backup()] == [info.nama]
+
+    monkeypatch.undo()
+    backup.backup()
+    assert not backup.status_backup().gagal_terakhir
+
+
+def test_backup_otomatis_gagal_menyebut_penyebab(backup, monkeypatch):
+    def tanpa_izin(**_kwargs):
+        raise PermissionError("akses ditolak")
+
+    monkeypatch.setattr(backup, "_salin", tanpa_izin)
+
+    hasil = backup.backup_otomatis_bila_perlu()
+
+    assert not hasil.berhasil
+    assert "tidak dapat ditulis" in hasil.pesan
+
+
+def test_pesan_kegagalan_manusiawi():
+    import subprocess
+
+    from app.core.errors import BusinessRuleError
+    from app.services.backup_service import pesan_kegagalan
+
+    assert pesan_kegagalan(BusinessRuleError("pg_dump gagal.")) == "pg_dump gagal."
+    assert "terlalu lama" in pesan_kegagalan(subprocess.TimeoutExpired("pg_dump", 600))
+    # Exception tak dikenal tidak membocorkan isinya ke layar.
+    assert "rahasia" not in pesan_kegagalan(RuntimeError("password=rahasia"))

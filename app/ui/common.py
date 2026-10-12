@@ -9,10 +9,12 @@ ke file log.
 
 from __future__ import annotations
 
+import warnings
+
 from collections.abc import Callable
 from typing import TypeVar
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QWidget
 
 from app.core.errors import AppError
@@ -22,10 +24,61 @@ logger = get_logger("ui")
 
 T = TypeVar("T")
 
+_PEKERJA_TERTINGGAL: set["PekerjaLatar"] = set()
+
 PESAN_TAK_TERDUGA = (
     "Terjadi kesalahan yang tidak terduga. Silakan coba kembali.\n"
     "Bila terus berulang, hubungi administrator."
 )
+
+
+class PekerjaLatar(QThread):
+    """Jalankan satu fungsi lambat tanpa menahan event loop Qt."""
+
+    berhasil = Signal(object)
+    gagal = Signal(object)
+
+    def __init__(self, aksi: Callable[[], object], parent=None) -> None:
+        super().__init__(parent)
+        self.aksi = aksi
+
+    def run(self) -> None:
+        try:
+            hasil = self.aksi()
+        except Exception as exc:  # noqa: BLE001 - exception dikirim ke thread UI
+            logger.exception("Pekerjaan latar UI gagal")
+            self.gagal.emit(exc)
+            return
+        self.berhasil.emit(hasil)
+
+
+def lepaskan_pekerja(pekerja: PekerjaLatar) -> None:
+    """Biarkan worker yang macet selesai tanpa bergantung pada halaman UI."""
+    if not pekerja.isRunning():
+        return
+
+    # Halaman induk sedang ditutup. Putuskan semua callback agar hasil yang
+    # datang terlambat tidak mengakses widget yang sudah dihancurkan.
+    for sinyal in (pekerja.berhasil, pekerja.gagal, pekerja.finished):
+        # Sinyal yang belum pernah disambung tidak melempar galat, tetapi
+        # PySide mengeluarkan RuntimeWarning "Failed to disconnect".
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            try:
+                sinyal.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+
+    pekerja.setParent(None)
+    _PEKERJA_TERTINGGAL.add(pekerja)
+
+    def selesai() -> None:
+        _PEKERJA_TERTINGGAL.discard(pekerja)
+        pekerja.deleteLater()
+
+    pekerja.finished.connect(selesai)
+    if pekerja.isFinished():
+        selesai()
 
 
 def pesan_untuk_user(exc: Exception) -> str:
@@ -59,6 +112,25 @@ def tampilkan_error(parent: QWidget | None, exc: Exception, judul: str = "Gagal"
 def tampilkan_info(parent: QWidget | None, pesan: str, judul: str = "Berhasil") -> None:
     kotak = QMessageBox(parent)
     kotak.setIcon(QMessageBox.Icon.Information)
+    kotak.setWindowTitle(judul)
+    kotak.setText(pesan)
+    kotak.setStandardButtons(QMessageBox.StandardButton.Ok)
+    kotak.exec()
+
+
+def tampilkan_peringatan(
+    parent: QWidget | None, pesan: str, judul: str = "Perhatian"
+) -> None:
+    """
+    Kabar yang perlu dibaca, tetapi bukan kegagalan.
+
+    Dibedakan dari `tampilkan_info` karena ikonnya: tindakan yang berhasil
+    disimpan namun meninggalkan keadaan yang keliru — loket yang baru
+    dibatasi sehingga satu jenis layanan tidak dilayani siapa pun — tidak
+    boleh tampil dengan ikon yang sama seperti "berhasil".
+    """
+    kotak = QMessageBox(parent)
+    kotak.setIcon(QMessageBox.Icon.Warning)
     kotak.setWindowTitle(judul)
     kotak.setText(pesan)
     kotak.setStandardButtons(QMessageBox.StandardButton.Ok)
@@ -110,6 +182,20 @@ def tombol(teks: str, *, variant: str = "", default: bool = False) -> QPushButto
     btn.setAutoDefault(default)
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     return btn
+
+
+def setel_variant(btn: QPushButton, variant: str = "") -> None:
+    """
+    Ganti gaya sebuah tombol setelah tombol itu terlanjur tampil.
+
+    Mengubah property saja TIDAK cukup: Qt sudah menghitung gaya tombol
+    ketika pertama kali digambar dan tidak menghitungnya ulang dengan
+    sendirinya. Tanpa unpolish/polish, tombol Istirahat berganti tulisan
+    tetapi warnanya tetap seperti semula.
+    """
+    btn.setProperty("variant", variant)
+    btn.style().unpolish(btn)
+    btn.style().polish(btn)
 
 
 def judul(teks: str) -> QLabel:

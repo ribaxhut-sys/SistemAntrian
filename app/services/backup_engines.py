@@ -23,6 +23,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Protocol
 
@@ -56,6 +57,14 @@ class MesinBackup(Protocol):
 
     def sah(self, berkas: Path) -> bool:
         """Benar bila berkas benar-benar backup database antrian."""
+
+    def uji_pulih(self, berkas: Path) -> str:
+        """
+        Buktikan backup dapat dipulihkan tanpa menyentuh database aktif.
+
+        Mengembalikan ringkasan untuk petugas; melempar BusinessRuleError
+        bila backup tidak dapat dipulihkan.
+        """
 
 
 class SqliteBackup:
@@ -120,6 +129,42 @@ class SqliteBackup:
             return False
         return TABEL_PENANDA <= nama
 
+    def uji_pulih(self, berkas: Path) -> str:
+        """
+        Pulihkan ke berkas sementara, lalu periksa isinya.
+
+        Backup disalin dahulu: integrity_check pada berkas aslinya tidak
+        membuktikan bahwa SALINAN-nya (yang sesungguhnya dipakai saat
+        pemulihan) dapat dibuka. Database aktif tidak disentuh sama sekali.
+        """
+        with tempfile.TemporaryDirectory(prefix="uji-pulih-") as folder:
+            sementara = Path(folder) / "uji.db"
+            sementara.write_bytes(berkas.read_bytes())
+            try:
+                koneksi = sqlite3.connect(sementara)
+                try:
+                    hasil = koneksi.execute("PRAGMA integrity_check").fetchone()
+                    if not hasil or hasil[0] != "ok":
+                        logger.error("Uji pulih %s: integrity_check %s", berkas.name, hasil)
+                        raise BusinessRuleError(
+                            "Backup rusak: pemeriksaan keutuhan SQLite gagal."
+                        )
+                    jumlah = koneksi.execute("SELECT COUNT(*) FROM queue").fetchone()[0]
+                    revisi = koneksi.execute(
+                        "SELECT version_num FROM alembic_version"
+                    ).fetchone()
+                finally:
+                    koneksi.close()
+            except sqlite3.Error as exc:
+                logger.error("Uji pulih %s gagal: %s", berkas.name, exc)
+                raise BusinessRuleError(
+                    "Backup tidak dapat dibuka sebagai database antrian."
+                ) from exc
+        return (
+            "Pemulihan ke database sementara berhasil: "
+            f"{jumlah} antrian, revisi skema {revisi[0] if revisi else '-'}."
+        )
+
 
 class PostgresBackup:
     """
@@ -158,11 +203,16 @@ class PostgresBackup:
         if ditemukan:
             return ditemukan
 
+        for folder in folder_postgresql_terpasang():
+            calon = folder / f"{nama}.exe"
+            if calon.exists():
+                return str(calon)
+
         raise NotFoundError(
             f"{nama} tidak ditemukan. Backup PostgreSQL membutuhkan perkakas "
-            "bawaan PostgreSQL. Isi pengaturan 'backup.pg_dump_path' dengan "
-            "folder bin PostgreSQL, misalnya "
-            r"C:\Program Files\PostgreSQL\17\bin."
+            "bawaan PostgreSQL dan tidak ditemukan di PATH maupun di "
+            r"C:\Program Files\PostgreSQL. Isi pengaturan 'backup.pg_dump_path' "
+            "dengan folder bin PostgreSQL."
         )
 
     def _lingkungan(self) -> dict[str, str]:
@@ -259,6 +309,72 @@ class PostgresBackup:
 
         isi = hasil.stdout.upper()
         return all(tabel.upper() in isi for tabel in TABEL_PENANDA)
+
+    def uji_pulih(self, berkas: Path) -> str:
+        """
+        Baca SELURUH isi dump, bukan hanya daftar isinya.
+
+        `pg_restore --list` (dipakai `sah`) hanya membaca daftar objek di
+        awal berkas; dump yang terpotong di tengah tetap lolos. Mengubah
+        seluruh dump menjadi skrip SQL ke perangkat null memaksa setiap
+        blok data dibaca dan didekompresi, tanpa sambungan ke server.
+
+        Pemulihan ke database sementara sengaja tidak dilakukan: itu
+        membutuhkan hak CREATE DATABASE, yang tidak dimiliki user
+        aplikasi dan tidak boleh diberikan hanya untuk keperluan ini.
+        """
+        alat = self._alat("pg_restore")
+        try:
+            self._jalankan([alat, "--file", os.devnull, str(berkas)])
+        except BusinessRuleError as exc:
+            raise BusinessRuleError(
+                "Backup rusak atau terpotong: pg_restore tidak dapat membaca "
+                "seluruh isinya. Detailnya tersimpan pada file log."
+            ) from exc
+        return (
+            "Seluruh isi arsip terbaca utuh oleh pg_restore. Pemulihan ke "
+            "database sementara tidak dilakukan karena memerlukan hak "
+            "membuat database di server."
+        )
+
+
+def _versi(folder: Path) -> tuple[int, ...]:
+    angka = []
+    for bagian in folder.name.split("."):
+        if not bagian.isdigit():
+            return ()
+        angka.append(int(bagian))
+    return tuple(angka)
+
+
+def folder_postgresql_terpasang(akar: list[Path] | None = None) -> list[Path]:
+    """
+    Folder bin PostgreSQL yang terpasang lewat installer Windows, terbaru dulu.
+
+    Installer resmi memasang ke Program Files\\PostgreSQL\\<versi>\\bin dan
+    tidak menambahkannya ke PATH. Tanpa pencarian ini backup gagal setiap
+    hari sampai ada yang ingat mengisi pengaturan foldernya. Versi
+    tertinggi didahulukan: pg_dump boleh lebih baru dari servernya, tidak
+    boleh lebih lama.
+    """
+    if akar is None:
+        akar = [
+            Path(os.environ.get(kunci, cadangan)) / "PostgreSQL"
+            for kunci, cadangan in (
+                ("ProgramFiles", r"C:\Program Files"),
+                ("ProgramW6432", r"C:\Program Files"),
+            )
+        ]
+    hasil: list[Path] = []
+    for induk in dict.fromkeys(akar):
+        try:
+            anak = [p for p in induk.iterdir() if p.is_dir() and _versi(p)]
+        except OSError:
+            continue
+        for folder in sorted(anak, key=_versi, reverse=True):
+            if (folder / "bin").is_dir():
+                hasil.append(folder / "bin")
+    return hasil
 
 
 def buat_mesin(config: AppConfig, folder_alat: str = "") -> MesinBackup:

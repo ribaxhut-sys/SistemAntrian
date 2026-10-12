@@ -28,9 +28,17 @@ class Permission(str, Enum):
     QUEUE_COMPLETE = "QUEUE_COMPLETE"
     QUEUE_CANCEL = "QUEUE_CANCEL"
     QUEUE_NO_SHOW = "QUEUE_NO_SHOW"
+    QUEUE_CLOSE_DAY = "QUEUE_CLOSE_DAY"
+    QUEUE_REASSIGN = "QUEUE_REASSIGN"
+    QUEUE_TOGGLE_INTAKE = "QUEUE_TOGGLE_INTAKE"
 
     # Layar antrian
     DISPLAY_VIEW = "DISPLAY_VIEW"
+
+    # Pengaduan dan catatan petugas
+    NOTE_WRITE = "NOTE_WRITE"
+    NOTE_VIEW = "NOTE_VIEW"
+    NOTE_DELETE = "NOTE_DELETE"
 
     # Survey
     SURVEY_SUBMIT = "SURVEY_SUBMIT"
@@ -54,6 +62,7 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
             Permission.QUEUE_CREATE,
             Permission.TICKET_PRINT,
             Permission.QUEUE_VIEW,
+            Permission.QUEUE_TOGGLE_INTAKE,
         }
     ),
     # Petugas yang memanggil dan melayani pengunjung.
@@ -66,6 +75,11 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
             Permission.QUEUE_CANCEL,
             Permission.QUEUE_NO_SHOW,
             Permission.SURVEY_SUBMIT,
+            # Menulis pengaduan dan catatan, serta membaca milik rekannya.
+            # Pengunjung yang sama kembali besok ke loket yang berbeda, dan
+            # petugas di sana perlu tahu apa yang sudah pernah diadukan.
+            Permission.NOTE_WRITE,
+            Permission.NOTE_VIEW,
         }
     ),
     # Pemantauan dan pelaporan, tanpa kewenangan mengubah antrian.
@@ -75,6 +89,7 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
             Permission.DASHBOARD_VIEW,
             Permission.REPORT_VIEW,
             Permission.SURVEY_VIEW,
+            Permission.NOTE_VIEW,
         }
     ),
     # Pengelolaan data master, user, konfigurasi, dan backup.
@@ -84,6 +99,15 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
             Permission.USER_MANAGE,
             Permission.CONFIG_MANAGE,
             Permission.BACKUP_MANAGE,
+            Permission.QUEUE_CLOSE_DAY,
+            Permission.QUEUE_REASSIGN,
+            Permission.QUEUE_TOGGLE_INTAKE,
+            # Menghapus pengaduan adalah tindakan administratif, dan
+            # sengaja TIDAK diberikan kepada petugas yang menulisnya:
+            # penulis yang sekaligus dapat menghilangkan tulisannya
+            # membuat catatan itu tidak berguna sebagai bukti apa pun.
+            Permission.NOTE_VIEW,
+            Permission.NOTE_DELETE,
         }
     ),
     # Hanya layar antrian, tanpa fungsi administrasi apa pun.

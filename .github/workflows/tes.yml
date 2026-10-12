@@ -1,0 +1,80 @@
+# Tes di GitHub — hanya PostgreSQL.
+#
+# PostgreSQL adalah satu-satunya dialect yang dipakai kantor, dan SQLite
+# menyembunyikan bug nyata (`FOR UPDATE` diabaikan, GROUP BY berparameter
+# lolos). Job SQLite dihapus atas keputusan pemilik (Oktober 2026); test
+# yang khusus SQLite otomatis dilewati di sini.
+#
+# Berjalan setiap push (termasuk branch PR — hasilnya menempel pada commit
+# yang sama sehingga ikut terbaca di PR) dan atas permintaan. Tidak memicu
+# `pull_request` juga: suite ±25 menit akan berjalan dua kali per commit.
+#
+# Runner Windows, bukan Ubuntu: aplikasi ini desktop Windows + PySide6.
+# Plugin Qt offscreen di Linux butuh tumpukan library sistem yang tidak
+# ada di komputer petugas, dan kegagalannya bukan kegagalan aplikasi.
+
+name: Tes
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: tes-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgresql:
+    name: PostgreSQL
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      # .venv di dalam proyek dan requirements-dev.txt, sama dengan komputer
+      # pengembang: tests/test_environment.py memeriksa keduanya (termasuk
+      # PyInstaller untuk build).
+      - name: Pasang dependency tes
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: .\.venv\Scripts\python.exe -m ruff check .
+
+      # Image runner menyertakan PostgreSQL dengan layanan yang belum
+      # menyala; PGBIN, PGUSER, dan PGPASSWORD sudah disetel oleh image.
+      # Database uji dibuat terpisah: fixture `database` membuang skema
+      # public pada setiap test.
+      - name: Nyalakan PostgreSQL
+        run: |
+          $layanan = Get-Service -Name "postgresql*"
+          Set-Service -InputObject $layanan -Status Running -StartupType Automatic
+          & "$env:PGBIN\psql.exe" -v ON_ERROR_STOP=1 -c "CREATE DATABASE antrian_uji"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # pg_dump/pg_restore di PATH supaya test backup tidak dilewati.
+          Add-Content -Path $env:GITHUB_PATH -Value $env:PGBIN
+
+      - name: Tes PostgreSQL
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          # Dibentuk di sini: konteks `env` workflow tidak memuat variabel
+          # bawaan image runner seperti PGUSER/PGPASSWORD.
+          $env:ANTRIAN_DB_URL = "postgresql+psycopg://$($env:PGUSER):$($env:PGPASSWORD)@localhost:5432/antrian_uji"
+          .\.venv\Scripts\python.exe -X faulthandler -m pytest tests -q --tb=line -o faulthandler_timeout=300
+          # Kode keluar dicatat sendiri: proses yang lolos semua test tetapi
+          # keluar bukan 0 (misalnya Qt atau utas yang macet saat berhenti)
+          # harus terbaca jelas di log, bukan hanya "exit code 1".
+          $kode = $LASTEXITCODE
+          Write-Host "Kode keluar pytest: $kode"
+          exit $kode

@@ -9,7 +9,7 @@ ini ditelan dan dicatat ke log, tidak pernah dilemparkan ke atas.
 Nada panggilan dibangkitkan sendiri saat dibutuhkan, sehingga aplikasi
 tidak bergantung pada berkas audio yang harus ikut dipaketkan.
 
-Setelah nada, pengumuman lisan penuh ("Nomor antrian A, dua puluh tiga,
+Setelah nada, pengumuman lisan penuh ("Nomor antrian A, nol dua tiga,
 silakan menuju Loket 2") diucapkan lewat text-to-speech bawaan Windows
 (SAPI/WinRT via QtTextToSpeech, bagian dari PySide6 — tanpa dependency
 tambahan dan tanpa internet). Suara dipilih otomatis dalam Bahasa
@@ -20,9 +20,11 @@ sekali, cukup nada saja yang berbunyi.
 from __future__ import annotations
 
 import math
+import re
 import struct
 import tempfile
 import wave
+from collections import deque
 from pathlib import Path
 from typing import Protocol
 
@@ -35,6 +37,22 @@ logger = get_logger("sound")
 LAJU_SAMPEL = 44_100
 NADA_HZ = (880.0, 1174.7)  # A5 lalu D6 — dua nada naik, khas bel antrian
 DURASI_NADA = 0.18  # detik per nada
+
+#: Jeda antara nada selesai dan ucapan dimulai.
+#:
+#: Nada dan ucapan dilepas dari `announce()` yang sama. Bila keduanya
+#: dimulai bersamaan, suara TTS langsung menutupi nada yang cuma 0,36
+#: detik — nada tetap berbunyi, tetapi tidak lagi terdengar sebagai
+#: "ting" yang mendahului kalimatnya. Padahal justru itu gunanya:
+#: menarik perhatian pengunjung supaya sempat menoleh ke layar sebelum
+#: nomornya disebut.
+JEDA_UCAPAN_MS = int(len(NADA_HZ) * DURASI_NADA * 1000) + 150
+
+#: Pengumuman lisan menunggu di antrean maksimal sebanyak ini. Panggilan
+#: beruntun yang lebih banyak dari ini biasanya berarti sesuatu sudah
+#: telat diucapkan; membuang yang tertua lebih berguna bagi petugas
+#: daripada memutar pengumuman basi setelah loket lain sudah maju.
+MAKS_ANTREAN_UCAPAN = 5
 
 
 # ---------------------------------------------------------------------
@@ -124,24 +142,43 @@ class NullSoundPlayer:
         return False
 
 
+def _eja_digit(digit: str) -> str:
+    """Eja satu deret digit satu per satu ("006" -> "nol nol enam")."""
+    return " ".join(angka_ke_kata(int(d)) for d in digit)
+
+
+def _ucapkan_angka_dalam_teks(teks: str) -> str:
+    """
+    Ganti setiap deret digit dalam teks bebas menjadi ejaan digit lepas.
+
+    Nama loket sering ditulis dengan angka Barat ("Loket 02"); dieja per
+    digit ("Loket nol dua") supaya nol yang tertulis tidak pernah hilang
+    dari yang diucapkan.
+    """
+    return re.sub(r"\d+", lambda m: _eja_digit(m.group()), teks)
+
+
 def _teks_pengumuman(queue_number: str, counter_name: str | None) -> str:
     """
     Susun kalimat pengumuman dari nomor antrian.
 
-    "A-023" -> "Nomor antrian A, dua puluh tiga, silakan menuju Loket 2."
-    Prefix dieja huruf lepas dan angkanya diucapkan sebagai bilangan wajar,
-    bukan dieja per digit, supaya terdengar seperti pengumuman sungguhan.
+    "A-006" -> "Nomor antrian A, nol nol enam, silakan menuju Loket 2."
+    Prefix dan nomor sama-sama dieja per karakter/digit, bukan diucapkan
+    sebagai bilangan wajar, supaya angka nol yang tertulis selalu ikut
+    terdengar.
     """
     prefix, _, sisa = queue_number.partition("-")
-    try:
-        nomor = angka_ke_kata(int(sisa))
-    except ValueError:
-        nomor = sisa
+    nomor = _eja_digit(sisa) if sisa.isdigit() else sisa
 
     kalimat = f"Nomor antrian {eja_prefix(prefix)}, {nomor}"
     if counter_name:
-        kalimat += f", silakan menuju {counter_name}"
+        kalimat += f", silakan menuju {_ucapkan_angka_dalam_teks(counter_name)}"
     return kalimat + "."
+
+
+def teks_pengumuman(queue_number: str, counter_name: str | None) -> str:
+    """Kalimat pengumuman; dipakai juga layar antrian Android lewat API."""
+    return _teks_pengumuman(queue_number, counter_name)
 
 
 class ChimeSoundPlayer:
@@ -164,6 +201,7 @@ class ChimeSoundPlayer:
         self.berkas_nada = self.folder / "panggilan.wav"
         self._efek = None
         self._tts = None
+        self._antrean_ucapan: deque[str] = deque()
         self._siap = self._siapkan_nada()
         self._siapkan_tts()
 
@@ -208,10 +246,71 @@ class ChimeSoundPlayer:
                     "Suara Bahasa Indonesia tidak tersedia untuk text-to-speech; "
                     "memakai suara bawaan mesin"
                 )
+            # QTextToSpeech.say() memutus ucapan yang sedang berjalan begitu
+            # dipanggil lagi — dua loket memanggil berdekatan akan saling
+            # menimpa bila say() dipanggil langsung. stateChanged dipakai
+            # untuk tahu kapan ucapan sebelumnya selesai, supaya pengumuman
+            # berikutnya menunggu gilirannya di `_antrean_ucapan` alih-alih
+            # memotong yang masih berjalan.
+            tts.stateChanged.connect(self._lanjutkan_antrean)
             self._tts = tts
         except Exception:  # noqa: BLE001 - audio tidak boleh menggagalkan aplikasi
             logger.info("Text-to-speech tidak tersedia; panggilan berjalan tanpa ucapan lisan")
             self._tts = None
+
+    def _lanjutkan_antrean(self, *_diabaikan: object) -> None:
+        """
+        Ucapkan pengumuman berikutnya di antrean, bila mesin TTS sedang diam.
+
+        Dipanggil baik lewat sinyal `stateChanged` (parameter statusnya
+        diabaikan, dibaca ulang lewat `state()` supaya satu sumber
+        kebenaran) maupun langsung dari `announce()` saat antrean baru
+        terisi.
+        """
+        if self._tts is None or not self._antrean_ucapan:
+            return
+
+        # Seluruh badannya dijaga, bukan `say()` saja. Membaca `state()` —
+        # dan mengimpor Qt untuk membandingkannya — sama-sama menyentuh
+        # mesin TTS bawaan sistem, dan mesin yang cacat gagal justru di
+        # situ. Modul ini berjanji tidak pernah melempar apa pun ke atas:
+        # suara hanyalah pelengkap, sedangkan nomor yang gagal dipanggil
+        # karenanya berarti pengunjung tidak dilayani.
+        try:
+            from PySide6.QtTextToSpeech import QTextToSpeech
+
+            if self._tts.state() != QTextToSpeech.State.Ready:
+                return
+
+            # Dikeluarkan dari antrean sebelum diucapkan: pengumuman yang
+            # gagal tidak boleh dicoba terus-menerus dan menahan giliran
+            # nomor berikutnya.
+            self._tts.say(self._antrean_ucapan.popleft())
+        except Exception:  # noqa: BLE001 - suara tidak boleh menggagalkan panggilan
+            logger.exception("Gagal mengucapkan pengumuman panggilan")
+
+    def _jadwalkan_ucapan(self, setelah_nada: bool) -> None:
+        """
+        Lepas ucapan berikutnya, menunggu nada selesai bila nada berbunyi.
+
+        Tanpa jeda ini nada tertimpa ucapan dan terdengar seolah hilang —
+        lihat `JEDA_UCAPAN_MS`. Ketika nada TIDAK berbunyi (komputer tanpa
+        perangkat audio yang layak), menunda tidak ada gunanya: tidak ada
+        apa pun yang perlu didahulukan.
+        """
+        if not setelah_nada:
+            self._lanjutkan_antrean()
+            return
+
+        try:
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(JEDA_UCAPAN_MS, self._lanjutkan_antrean)
+        except Exception:  # noqa: BLE001 - suara tidak boleh menggagalkan panggilan
+            # Tanpa timer, lebih baik terucap bersamaan nada daripada tidak
+            # terucap sama sekali: nomornya tetap sampai ke pengunjung.
+            logger.exception("Gagal menjadwalkan ucapan; diucapkan langsung")
+            self._lanjutkan_antrean()
 
     def announce(self, queue_number: str, counter_name: str | None = None) -> bool:
         """
@@ -222,6 +321,10 @@ class ChimeSoundPlayer:
         yang masih berguna bagi pengunjung, ucapan hanyalah pelengkap.
         Kegagalan tidak pernah dilemparkan: nomor tetap tampil di layar dan
         petugas tetap dapat memanggil secara lisan sendiri.
+
+        Ucapan tidak langsung diputar, melainkan masuk antrean dan menunggu
+        nada selesai serta ucapan sebelumnya (bila ada) habis — lihat
+        `_jadwalkan_ucapan` dan `_lanjutkan_antrean`.
         """
         berhasil = False
 
@@ -234,12 +337,38 @@ class ChimeSoundPlayer:
                 logger.exception("Gagal membunyikan nada panggilan")
 
         if self._tts is not None:
-            try:
-                self._tts.say(_teks_pengumuman(queue_number, counter_name))
-            except Exception:  # noqa: BLE001
-                logger.exception("Gagal mengucapkan pengumuman panggilan")
+            if len(self._antrean_ucapan) >= MAKS_ANTREAN_UCAPAN:
+                terbuang = self._antrean_ucapan.popleft()
+                logger.warning("Antrean ucapan penuh; pengumuman lama dibuang: %s", terbuang)
+            self._antrean_ucapan.append(_teks_pengumuman(queue_number, counter_name))
+            self._jadwalkan_ucapan(setelah_nada=berhasil)
 
         return berhasil
+
+
+def suara_diaktifkan(settings, *, anjungan: bool = False) -> bool:
+    """
+    Apakah MESIN INI membunyikan panggilan.
+
+    Pengeras suara menempel pada satu komputer, bukan pada sistem, sehingga
+    `display.sound_enabled` di database — satu nilai untuk semua mesin —
+    tidak cukup begitu layar antrian dan anjungan ambil nomor berdiri
+    sebagai dua komputer terpisah. ANTRIAN_SUARA pada mesin yang
+    bersangkutan menimpanya.
+
+    Anjungan diam secara bawaan. Bila ia ikut bersuara sementara layar
+    antrian juga bersuara, pengunjung mendengar dua pengumuman yang saling
+    menyusul setengah detik — masing-masing mesin menyegarkan sendiri tiap
+    dua detik, sehingga keduanya tidak akan pernah sinkron. Pemasangan
+    satu-mesin yang lama, yang anjungannya merangkap papan nomor,
+    menyalakannya kembali dengan ANTRIAN_SUARA=1.
+    """
+    mesin = get_config().suara
+    if mesin is not None:
+        return mesin
+    if anjungan:
+        return False
+    return settings.get_bool("display.sound_enabled", True)
 
 
 def buat_pemutar(aktifkan: bool) -> SoundPlayer:

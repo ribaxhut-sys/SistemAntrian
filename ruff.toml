@@ -1,0 +1,9 @@
+# Lint ringan: hanya galat nyata (nama tak terdefinisi, impor dan variabel
+# tak terpakai, galat sintaks). Gaya penulisan sengaja tidak diatur di sini;
+# kode ini sudah konsisten, dan aturan gaya ribuan baris hanya menimbun
+# perubahan yang tidak mengubah perilaku apa pun.
+target-version = "py313"
+extend-exclude = ["build", "dist", "android-kiosk", "media", "apk", "tiket"]
+
+[lint]
+select = ["F", "E9"]

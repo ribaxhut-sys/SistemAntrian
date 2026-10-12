@@ -17,7 +17,7 @@ from app.core.config import APP_NAME
 from app.core.errors import AppError
 from app.core.logger import get_logger
 from app.services.auth_service import AuthService, AuthSession
-from app.ui.common import keterangan, label_error, pesan_untuk_user, tombol
+from app.ui.common import keterangan, label_error, tombol
 
 logger = get_logger("ui.login")
 
@@ -29,6 +29,10 @@ class LoginWindow(QDialog):
     Kesalahan kredensial ditampilkan sebaris di dalam form, bukan sebagai
     kotak dialog. Petugas yang salah ketik cukup mengetik ulang tanpa
     harus menutup dialog terlebih dahulu.
+
+    Aplikasi Windows sekarang khusus petugas. Karena itu tidak ada lagi
+    layar pemilih mode di depannya: menutup dialog berarti menutup aplikasi,
+    sedangkan pengaturan koneksi mesin tersedia langsung dari sini.
     """
 
     def __init__(self, auth: AuthService, parent: QWidget | None = None) -> None:
@@ -79,18 +83,24 @@ class LoginWindow(QDialog):
         self.pesan_kesalahan = label_error()
         susunan.addWidget(self.pesan_kesalahan)
 
-        self.tombol_masuk = tombol("MASUK", variant="primary", default=True)
+        self.tombol_masuk = tombol("MASUK", variant="primary")
         self.tombol_masuk.clicked.connect(self.coba_masuk)
         susunan.addWidget(self.tombol_masuk)
 
-        self.tombol_keluar = tombol("Keluar")
-        self.tombol_keluar.clicked.connect(self.reject)
-        susunan.addWidget(self.tombol_keluar)
+        self.tombol_atur_komputer = tombol("Atur komputer ini")
+        self.tombol_atur_komputer.setToolTip(
+            "Atur komputer ini sebagai server, klien, atau satu komputer."
+        )
+        self.tombol_atur_komputer.clicked.connect(self.atur_komputer)
+        susunan.addWidget(self.tombol_atur_komputer)
 
-        # Enter pada salah satu isian langsung mencoba masuk: petugas
-        # mengetik nama pengguna, Tab, kata sandi, Enter — tanpa menyentuh mouse.
+        # Enter pada isian, bukan tombol default dialog. Bila keduanya
+        # aktif, Qt menjalankan login dua kali: yang kedua melihat isian
+        # yang baru dikosongkan dan menampilkan "Kata sandi belum diisi."
         self.input_username.returnPressed.connect(self.coba_masuk)
         self.input_password.returnPressed.connect(self.coba_masuk)
+        self.input_username.textChanged.connect(self._bersihkan_kesalahan)
+        self.input_password.textChanged.connect(self._bersihkan_kesalahan)
 
         self.input_username.setFocus()
 
@@ -99,10 +109,14 @@ class LoginWindow(QDialog):
     def _tampilkan_kesalahan(self, pesan: str) -> None:
         self.pesan_kesalahan.setText(pesan)
         self.pesan_kesalahan.setVisible(True)
+        # Pengosongan memicu textChanged. Tanpa pemblokiran, pesan yang
+        # baru tampil langsung dihapus lagi.
+        self.input_password.blockSignals(True)
         self.input_password.clear()
+        self.input_password.blockSignals(False)
         self.input_password.setFocus()
 
-    def _bersihkan_kesalahan(self) -> None:
+    def _bersihkan_kesalahan(self, _teks: str = "") -> None:
         self.pesan_kesalahan.setVisible(False)
         self.pesan_kesalahan.setText("")
 
@@ -137,3 +151,30 @@ class LoginWindow(QDialog):
             self.tombol_masuk.setEnabled(True)
 
         self.accept()
+
+    def atur_komputer(self) -> None:
+        """Buka pengaturan mesin tanpa harus berhasil masuk lebih dahulu."""
+        from PySide6.QtWidgets import QDialog
+
+        from app.core.mesin import env_url_mengalahkan
+        from app.ui.common import tampilkan_info, tampilkan_peringatan
+        from app.ui.login.setup_mesin_dialog import SetupMesinDialog
+
+        dialog = SetupMesinDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if env_url_mengalahkan():
+            tampilkan_peringatan(
+                self,
+                "Isian disimpan, tetapi ANTRIAN_DB_URL masih mengalahkan "
+                "pengaturan komputer. Hapus variabel itu, lalu buka ulang aplikasi.",
+                "Koneksi belum berubah",
+            )
+            return
+        if dialog.memerlukan_buka_ulang:
+            tampilkan_info(
+                self,
+                "Pengaturan komputer telah disimpan. Tutup aplikasi, lalu buka "
+                "kembali agar koneksi baru dipakai.",
+                "Komputer ini",
+            )

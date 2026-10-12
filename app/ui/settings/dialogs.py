@@ -2,19 +2,38 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from PySide6.QtCore import QDate, QSize, Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
+    QDateEdit,
     QDialog,
+    QFileDialog,
+    QFrame,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
+    QPlainTextEdit,
+    QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from app.core.security import MIN_PASSWORD_LENGTH
 from app.models import UserRole
+from app.services import daftar_putar
 from app.ui.common import judul, keterangan, label_error, tombol
+from app.ui.kiosk.sambutan import (
+    FILTER_BERKAS_ANJUNGAN,
+    folder_media_layanan,
+    hapus_media_layanan,
+    media_layanan,
+    salin_ke_media_layanan,
+)
 
 #: Nama peran dalam bahasa yang dipakai sehari-hari di kantor.
 LABEL_PERAN: dict[UserRole, str] = {
@@ -26,13 +45,94 @@ LABEL_PERAN: dict[UserRole, str] = {
 }
 
 
+class PemilihMediaLayanan(QWidget):
+    """
+    Berkas gambar/video yang tampil di anjungan saat layanan ini disentuh.
+
+    Berkasnya hidup di mesin anjungan, bukan di database — aturan yang
+    sama dengan media sambutan — jadi tidak ada yang perlu ikut disimpan
+    bersama form ini. Karena itu tombolnya bekerja SEKETIKA, tidak
+    menunggu Simpan, dan penjelasannya mengatakan begitu.
+
+    `ringkas` untuk tempat yang memasang beberapa widget ini berjajar —
+    layar Pengaturan memasang satu untuk setiap jenis layanan. Di sana
+    penjelasan yang sama terulang tiga kali dan berhenti dibaca pada
+    kalinya yang kedua, jadi penjelasannya ditulis sekali di atas
+    kelompoknya dan yang di sini hanya menyebut letak foldernya.
+    """
+
+    def __init__(
+        self, code: str, parent: QWidget | None = None, *, ringkas: bool = False
+    ) -> None:
+        super().__init__(parent)
+        self.code = code
+        self.ringkas = ringkas
+
+        susunan = QVBoxLayout(self)
+        susunan.setContentsMargins(0, 0, 0, 0)
+        susunan.setSpacing(6)
+
+        baris = QHBoxLayout()
+        baris.setSpacing(8)
+        self.label_berkas = QLabel()
+        self.label_berkas.setWordWrap(True)
+        baris.addWidget(self.label_berkas, stretch=1)
+
+        self.btn_pilih = tombol("Pilih berkas…")
+        self.btn_pilih.clicked.connect(self._pilih)
+        baris.addWidget(self.btn_pilih)
+
+        self.btn_hapus = tombol("Hapus")
+        self.btn_hapus.clicked.connect(self._hapus)
+        baris.addWidget(self.btn_hapus)
+        susunan.addLayout(baris)
+
+        folder = folder_media_layanan(code)
+        panjang = (
+            "Berkas langsung dipasang tanpa menunggu Simpan, dan menggantikan "
+            "berkas sebelumnya. Video diulang terus sampai pengunjung menekan "
+            "YA atau BATAL, jadi klip pendek 5-10 detik justru paling baik — "
+            "usahakan frame awal dan akhirnya mirip supaya sambungannya tidak "
+            "berkedip. Suara tidak diputar."
+        )
+        self.keterangan = keterangan(
+            ("" if ringkas else panjang)
+            + (f" Folder: {folder}" if folder is not None else "")
+        )
+        self.keterangan.setWordWrap(True)
+        susunan.addWidget(self.keterangan)
+
+        self._perbarui()
+
+    def _perbarui(self) -> None:
+        berkas = media_layanan(self.code)
+        self.label_berkas.setText(
+            berkas.name if berkas is not None else "Belum ada berkas — memakai Info Anjungan."
+        )
+        self.btn_hapus.setEnabled(berkas is not None)
+
+    def _pilih(self) -> None:
+        folder = folder_media_layanan(self.code)
+        awal = str(folder) if folder is not None and folder.is_dir() else ""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Pilih gambar atau video layanan", awal, FILTER_BERKAS_ANJUNGAN
+        )
+        if not path:
+            return
+        salin_ke_media_layanan(self.code, Path(path))
+        self._perbarui()
+
+    def _hapus(self) -> None:
+        hapus_media_layanan(self.code)
+        self._perbarui()
+
+
 class _DialogIsian(QDialog):
     """Kerangka bersama seluruh dialog isian: form, pesan sebaris, dua tombol."""
 
     def __init__(self, parent: QWidget | None, judul_teks: str, penjelasan: str = "") -> None:
         super().__init__(parent)
         self.setWindowTitle(judul_teks)
-        self.setMinimumWidth(440)
 
         self._susunan = QVBoxLayout(self)
         self._susunan.setContentsMargins(28, 24, 28, 24)
@@ -41,9 +141,23 @@ class _DialogIsian(QDialog):
         if penjelasan:
             self._susunan.addWidget(keterangan(penjelasan))
 
-        self.form = QFormLayout()
+        self._gulir_form = QScrollArea()
+        self._gulir_form.setObjectName("gulirFormDialog")
+        self._gulir_form.setWidgetResizable(True)
+        self._gulir_form.setFrameShape(QFrame.Shape.NoFrame)
+        self._gulir_form.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._gulir_form.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+
+        self._isi_form = QWidget()
+        self.form = QFormLayout(self._isi_form)
+        self.form.setContentsMargins(0, 0, 8, 0)
         self.form.setSpacing(12)
-        self._susunan.addLayout(self.form)
+        self._gulir_form.setWidget(self._isi_form)
+        self._susunan.addWidget(self._gulir_form, stretch=1)
 
         self.pesan_kesalahan = label_error()
         self._susunan.addWidget(self.pesan_kesalahan)
@@ -57,6 +171,20 @@ class _DialogIsian(QDialog):
         self.tombol_simpan.clicked.connect(self.simpan)
         baris.addWidget(self.tombol_simpan)
         self._susunan.addLayout(baris)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - nama Qt
+        """Batasi dialog ke area monitor; isi panjang tetap dapat digulir."""
+        super().showEvent(event)
+        layar = self.screen()
+        if layar is None:
+            return
+        area = layar.availableGeometry()
+        maksimum = QSize(max(1, area.width() - 32), max(1, area.height() - 32))
+        self.setMinimumWidth(min(440, maksimum.width()))
+        self.setMaximumSize(maksimum)
+        ideal = self.sizeHint().boundedTo(maksimum)
+        ideal.setWidth(min(maksimum.width(), max(self.minimumWidth(), ideal.width())))
+        self.resize(ideal)
 
     def tampilkan_kesalahan(self, pesan: str, fokus: QWidget | None = None) -> None:
         self.pesan_kesalahan.setText(pesan)
@@ -111,10 +239,76 @@ class CounterDialog(_DialogIsian):
         self.accept()
 
 
+class CounterCategoryDialog(_DialogIsian):
+    """
+    Pilih jenis layanan yang boleh dipanggil sebuah loket.
+
+    Tidak ada yang dicentang berarti loket melayani SEMUA jenis layanan.
+    Itu ditulis terang-terangan di dialognya karena kotak yang semuanya
+    kosong biasanya dibaca sebagai "tidak melayani apa pun", padahal
+    artinya justru sebaliknya.
+    """
+
+    def __init__(
+        self, parent: QWidget | None = None, *, counter, categories: list
+    ) -> None:
+        super().__init__(
+            parent,
+            f"Jenis Layanan {counter.name}",
+            "Centang jenis layanan yang boleh dipanggil loket ini. Bila "
+            "tidak ada yang dicentang, loket melayani SEMUA jenis layanan — "
+            "itu pilihan yang disarankan kecuali loket ini memang khusus.",
+        )
+        self.counter = counter
+        self.kotak: list[tuple[int, QCheckBox]] = []
+
+        terpilih = set(counter.category_ids)
+        for kategori in categories:
+            # Jorok mengikuti tingkatnya, sama seperti tabel jenis layanan:
+            # "Restoran" sendirian tidak memberi tahu bahwa ia berada di
+            # bawah PBJT, di bawah Konsultasi.
+            jorok = "    " * getattr(kategori, "level", 0)
+            kotak = QCheckBox(f"{jorok}{kategori.name} ({kategori.prefix})")
+            kotak.setChecked(kategori.id in terpilih)
+            if getattr(kategori, "punya_anak", False):
+                # Kelompok tidak pernah menerbitkan nomor, jadi mencentangnya
+                # tidak pernah mengubah antrian mana pun yang dapat dipanggil
+                # loket ini. Tetap ditampilkan supaya centang lama yang
+                # tersimpan tidak lenyap diam-diam saat dialog disimpan.
+                kotak.setText(f"{kotak.text()} — kelompok, tanpa nomor")
+            if not kategori.is_active:
+                # Jenis layanan nonaktif tetap ditampilkan supaya loket
+                # khusus tidak kehilangan pengaturannya saat layanannya
+                # sedang dihentikan sementara.
+                kotak.setText(f"{kotak.text()} — nonaktif")
+            self.form.addRow("", kotak)
+            self.kotak.append((kategori.id, kotak))
+
+    @property
+    def terpilih(self) -> list[int]:
+        return [id_ for id_, kotak in self.kotak if kotak.isChecked()]
+
+    def simpan(self) -> None:
+        self.accept()
+
+
 class CategoryDialog(_DialogIsian):
     """Tambah atau ubah jenis layanan."""
 
-    def __init__(self, parent: QWidget | None = None, *, category=None, prefix_terkunci: bool = False) -> None:
+    #: Sebanyak tingkat yang dapat dicapai menu anjungan. Sama dengan
+    #: TINGKAT_MAKS di master_data_service, yang menegakkannya sungguhan;
+    #: di sini hanya dipakai untuk tidak menawarkan induk yang pasti
+    #: ditolak, supaya admin tidak menabrak pesan kesalahan tanpa perlu.
+    TINGKAT_MAKS = 3
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        category=None,
+        prefix_terkunci: bool = False,
+        semua: list | None = None,
+    ) -> None:
         self.category = category
         ubah = category is not None
         super().__init__(
@@ -134,6 +328,26 @@ class CategoryDialog(_DialogIsian):
         self.input_nama.setPlaceholderText("mis. Pengembalian")
         self.form.addRow("Nama Layanan", self.input_nama)
 
+        self.pilih_induk = QComboBox()
+        self.pilih_induk.addItem("— Menu utama anjungan —", None)
+        for pilihan in self._calon_induk(semua or [], category):
+            self.pilih_induk.addItem(
+                "    " * pilihan.level + pilihan.name, pilihan.id
+            )
+        if ubah and category.parent_id is not None:
+            posisi = self.pilih_induk.findData(category.parent_id)
+            if posisi >= 0:
+                self.pilih_induk.setCurrentIndex(posisi)
+        self.form.addRow("Induk", self.pilih_induk)
+        self.form.addRow(
+            "",
+            keterangan(
+                "Jenis layanan yang menaungi jenis layanan lain berubah "
+                "menjadi KELOMPOK: di anjungan ia membuka daftar isinya dan "
+                "berhenti menerbitkan nomor sendiri."
+            ),
+        )
+
         self.input_prefix = QLineEdit(category.prefix if ubah else "")
         self.input_prefix.setPlaceholderText("A")
         self.input_prefix.setMaxLength(2)
@@ -144,6 +358,34 @@ class CategoryDialog(_DialogIsian):
         self.contoh = keterangan("")
         self.form.addRow("", self.contoh)
         self._perbarui_contoh(self.input_prefix.text())
+
+        self.input_info = QPlainTextEdit(category.info_text if ubah else "")
+        self.input_info.setPlaceholderText(
+            "Ditampilkan di panel anjungan begitu pengunjung menyentuh "
+            "layanan ini. Kosongkan bila tidak perlu."
+        )
+        self.input_info.setMaximumHeight(90)
+        self.form.addRow("Info Anjungan", self.input_info)
+
+        # Media mengalahkan Info Anjungan bila keduanya diisi: panel
+        # anjungan kecil, dan nama layanan sudah tampil besar di panel
+        # konfirmasi di bawahnya, jadi menumpuk gambar dan tulisan hanya
+        # membuat dua-duanya sulit dibaca.
+        #
+        # Hanya tersedia saat mengubah. Foldernya dinamai menurut kode
+        # layanan, dan kode itu belum ada sampai jenis layanannya
+        # tersimpan.
+        if ubah:
+            self.media = PemilihMediaLayanan(category.code)
+            self.form.addRow("Media Anjungan", self.media)
+        else:
+            self.media = None
+            self.form.addRow(
+                "Media Anjungan",
+                keterangan(
+                    "Dapat dipasang setelah jenis layanan ini disimpan."
+                ),
+            )
 
         if prefix_terkunci:
             self.form.addRow(
@@ -162,6 +404,36 @@ class CategoryDialog(_DialogIsian):
             f"Contoh nomor antrian: {bersih}-001" if bersih else "Contoh nomor antrian: —"
         )
 
+    def _calon_induk(self, semua: list, category) -> list:
+        """
+        Jenis layanan yang boleh dipilih sebagai induk.
+
+        Yang dibuang tiga macam: dirinya sendiri, seluruh KETURUNANNYA —
+        memindahkan Konsultasi ke bawah PBJT akan membuat menu berputar
+        tanpa ujung — dan yang sudah berada di tingkat terdalam, karena
+        anaknya tidak akan punya tempat lagi di layar.
+        """
+        buang: set[int] = set()
+        if category is not None:
+            buang.add(category.id)
+            berubah = True
+            while berubah:
+                berubah = False
+                for baris in semua:
+                    if baris.parent_id in buang and baris.id not in buang:
+                        buang.add(baris.id)
+                        berubah = True
+
+        return [
+            baris
+            for baris in semua
+            if baris.id not in buang and baris.level < self.TINGKAT_MAKS - 1
+        ]
+
+    @property
+    def induk_id(self) -> int | None:
+        return self.pilih_induk.currentData()
+
     @property
     def kode(self) -> str:
         return self.input_kode.text().strip()
@@ -173,6 +445,10 @@ class CategoryDialog(_DialogIsian):
     @property
     def prefix(self) -> str:
         return self.input_prefix.text().strip().upper()
+
+    @property
+    def info_text(self) -> str:
+        return self.input_info.toPlainText().strip()
 
     def simpan(self) -> None:
         if self.category is None and not self.kode:
@@ -190,7 +466,9 @@ class CategoryDialog(_DialogIsian):
 class UserDialog(_DialogIsian):
     """Tambah atau ubah akun petugas."""
 
-    def __init__(self, parent: QWidget | None = None, *, user=None) -> None:
+    def __init__(
+        self, parent: QWidget | None = None, *, user=None, counters: list | None = None
+    ) -> None:
         self.user = user
         ubah = user is not None
         super().__init__(
@@ -218,12 +496,27 @@ class UserDialog(_DialogIsian):
             # sandi di komputer publik.
             if role is UserRole.KIOSK:
                 continue
-            self.pilih_peran.addItem(LABEL_PERAN[role], role)
+            # Simpan nilai string, bukan objek enum. QVariant PySide sering
+            # mengubah str Enum menjadi str biasa; service tetap menormalkannya.
+            self.pilih_peran.addItem(LABEL_PERAN[role], role.value)
         if ubah:
-            self.pilih_peran.setCurrentIndex(
-                self.pilih_peran.findData(user.role)
-            )
+            nilai = user.role.value if isinstance(user.role, UserRole) else user.role
+            self.pilih_peran.setCurrentIndex(self.pilih_peran.findData(nilai))
         self.form.addRow("Peran", self.pilih_peran)
+
+        # Loket bawaan: yang langsung terpilih saat petugas ini masuk,
+        # supaya tidak perlu memilihnya lagi setiap hari dan tidak keliru
+        # memanggil atas nama loket sebelah. Petugas tetap boleh berpindah
+        # sendiri saat pindah meja; yang disimpan di sini titik awalnya.
+        self.pilih_loket = QComboBox()
+        self.pilih_loket.addItem("— Tidak diikat ke loket —", None)
+        for loket in counters or []:
+            self.pilih_loket.addItem(loket.name, loket.id)
+        if ubah and getattr(user, "default_counter_id", None) is not None:
+            baris = self.pilih_loket.findData(user.default_counter_id)
+            if baris >= 0:
+                self.pilih_loket.setCurrentIndex(baris)
+        self.form.addRow("Loket Bawaan", self.pilih_loket)
 
         if not ubah:
             self.input_password = QLineEdit()
@@ -244,7 +537,14 @@ class UserDialog(_DialogIsian):
 
     @property
     def peran(self) -> UserRole:
-        return self.pilih_peran.currentData()
+        data = self.pilih_peran.currentData()
+        if isinstance(data, UserRole):
+            return data
+        return UserRole(data)
+
+    @property
+    def loket_bawaan(self) -> int | None:
+        return self.pilih_loket.currentData()
 
     @property
     def password(self) -> str:
@@ -294,5 +594,89 @@ class ResetPasswordDialog(_DialogIsian):
             return
         if self.password != self.input_ulangi.text():
             self.tampilkan_kesalahan("Ulangan kata sandi tidak sama.", self.input_ulangi)
+            return
+        self.accept()
+
+
+class JadwalIklanDialog(_DialogIsian):
+    """
+    Tanggal tayang dan lama tampil satu berkas di daftar putar anjungan.
+
+    Tanggal dibaca menurut jam server, dan keduanya ikut dihitung: iklan
+    1–30 November tayang sejak pagi tanggal 1 sampai malam tanggal 30.
+    """
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        butir: daftar_putar.Butir,
+        *,
+        gambar: bool,
+    ) -> None:
+        super().__init__(
+            parent,
+            "Jadwal Iklan",
+            f"{butir.nama}. Di luar tanggalnya berkas ini tidak diputar, "
+            "tetapi tetap tercentang di daftar putar.",
+        )
+        self._nama = butir.nama
+        hari_ini = QDate.currentDate()
+
+        self.pakai_mulai = QCheckBox("Mulai tanggal")
+        self.tanggal_mulai = self._kotak_tanggal(butir.mulai, hari_ini)
+        self.form.addRow(self.pakai_mulai, self.tanggal_mulai)
+        self.pakai_selesai = QCheckBox("Sampai tanggal")
+        self.tanggal_selesai = self._kotak_tanggal(butir.selesai, hari_ini.addDays(30))
+        self.form.addRow(self.pakai_selesai, self.tanggal_selesai)
+        for centang, kotak, nilai in (
+            (self.pakai_mulai, self.tanggal_mulai, butir.mulai),
+            (self.pakai_selesai, self.tanggal_selesai, butir.selesai),
+        ):
+            centang.toggled.connect(kotak.setEnabled)
+            centang.setChecked(nilai is not None)
+            kotak.setEnabled(nilai is not None)
+
+        self.detik = QSpinBox()
+        # Satu di bawah batas bawah berarti "ikut pengaturan umum".
+        self.detik.setRange(daftar_putar.DETIK_MIN - 1, daftar_putar.DETIK_MAKS)
+        self.detik.setSpecialValueText("Ikut pengaturan umum")
+        self.detik.setSuffix(" detik")
+        self.detik.setValue(butir.detik or self.detik.minimum())
+        if gambar:
+            self.form.addRow("Lama tampil", self.detik)
+        else:
+            # Video selalu diputar sampai selesai.
+            self.detik.setVisible(False)
+
+    @staticmethod
+    def _kotak_tanggal(nilai, cadangan: QDate) -> QDateEdit:
+        kotak = QDateEdit()
+        kotak.setCalendarPopup(True)
+        kotak.setDisplayFormat("d MMM yyyy")
+        kotak.setDate(
+            QDate(nilai.year, nilai.month, nilai.day) if nilai is not None else cadangan
+        )
+        return kotak
+
+    @property
+    def butir(self) -> daftar_putar.Butir:
+        mulai = self.tanggal_mulai.date().toPython() if self.pakai_mulai.isChecked() else None
+        selesai = (
+            self.tanggal_selesai.date().toPython() if self.pakai_selesai.isChecked() else None
+        )
+        detik = self.detik.value()
+        return daftar_putar.Butir(
+            self._nama,
+            mulai,
+            selesai,
+            None if detik < daftar_putar.DETIK_MIN else detik,
+        )
+
+    def simpan(self) -> None:
+        butir = self.butir
+        if butir.mulai and butir.selesai and butir.selesai < butir.mulai:
+            self.tampilkan_kesalahan(
+                "Tanggal selesai lebih awal dari tanggal mulai.", self.tanggal_selesai
+            )
             return
         self.accept()

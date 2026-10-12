@@ -42,10 +42,35 @@ def test_nilai_bawaan_lolos_validasinya_sendiri(settings):
         settings.set(kunci, nilai)
 
 
-def test_setiap_pengaturan_punya_kelompok():
+def test_setiap_pengaturan_yang_tampil_punya_kelompok():
     kelompok = kelompok_pengaturan()
-    assert sum(len(b) for b in kelompok.values()) == len(SKEMA)
+    tampil = [p for p in SKEMA if p.tampil]
+
+    assert sum(len(b) for b in kelompok.values()) == len(tampil)
     assert all(nama for nama in kelompok)
+
+
+def test_pengaturan_tersembunyi_tidak_muncul_di_formulir():
+    """
+    Pasangan buka/tutup pendaftaran WAJIB berubah bersama-sama.
+
+    Formulir Pengaturan hanya menyetel satu kunci sekaligus, sehingga
+    mematikan `queue.registration_open` dari sana tidak menutup apa pun —
+    `pendaftaran_dibuka()` menganggap penutupan tanpa tanggal hari ini
+    sudah kedaluwarsa. Admin akan mengira pendaftaran berhenti padahal
+    nomor terus terbit, dan tidak ada pesan apa pun yang memberi tahu.
+    """
+    tampil = {p.kunci for b in kelompok_pengaturan().values() for p in b}
+
+    assert "queue.registration_open" not in tampil
+    assert "queue.registration_closed_date" not in tampil
+
+
+def test_pengaturan_tersembunyi_tetap_dikenali_service(settings):
+    """Disembunyikan dari formulir, bukan dihapus: service tetap memakainya."""
+    settings.set("queue.registration_open", "false")
+
+    assert settings.get("queue.registration_open") == "false"
 
 
 # ---------------------------------------------------------------------
@@ -121,6 +146,23 @@ def test_cara_cetak_yang_sah_diterima(settings):
     for nilai in ("pdf", "system", "none"):
         settings.set("ticket.printer", nilai)
         assert settings.get("ticket.printer") == nilai
+
+
+def test_geser_atas_tiket_dibatasi(settings):
+    with pytest.raises(ValidationError):
+        settings.set("ticket.geser_atas_mm", "7")
+    settings.set("ticket.geser_atas_mm", "0")
+    assert settings.get("ticket.geser_atas_mm") == "0"
+
+
+def test_jenis_sambutan_anjungan_yang_tidak_dikenal_ditolak(settings):
+    with pytest.raises(ValidationError):
+        settings.set("kiosk.welcome_kind", "youtube")
+
+    settings.set("kiosk.welcome_kind", "gambar")
+    assert settings.get("kiosk.welcome_kind") == "media"
+    settings.set("kiosk.welcome_kind", "media")
+    assert settings.get("kiosk.welcome_kind") == "media"
 
 
 def test_angka_bukan_bilangan_ditolak(settings):

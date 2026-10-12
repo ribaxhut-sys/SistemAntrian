@@ -16,11 +16,35 @@ from app.core.database import session_scope
 from app.core.errors import NotFoundError, ValidationError
 from app.core.logger import get_logger
 from app.models import ApplicationSetting, AuditAction
-from app.services import audit_service
+from app.services import audit_service, daftar_putar
 from app.services.auth_service import AuthService
 from app.services.permissions import Permission
 
 logger = get_logger("settings")
+
+#: Bentuk layar yang menghadap pengunjung. Yang dipilih adalah RUPA layar,
+#: bukan resolusinya: orang yang memasang televisi mengenali layarnya dari
+#: bentuknya, dan tidak seorang pun menghafal rasio aspek perangkat yang
+#: baru saja digantung di dinding.
+#:
+#: "auto" adalah bawaan dan seharusnya cukup untuk hampir semua pemasangan
+#: — papan mengukur layarnya sendiri. Pilihan lainnya ada untuk satu kasus
+#: yang tidak dapat ditebak: panel LED yang menerima HDMI 1920x1080 lalu
+#: memotong sepetak kecil darinya. Windows tetap melaporkan layar 16:9,
+#: sementara yang benar-benar menyala berbentuk pita memanjang.
+BENTUK_LAYAR_OTOMATIS = "auto"
+BENTUK_LAYAR_LEBAR = "lebar"
+BENTUK_LAYAR_MEMANJANG = "memanjang"
+BENTUK_LAYAR_TEGAK = "tegak"
+
+#: Bentuk yang sah sebagai penimpaan per mesin. "auto" tidak ikut: mesin
+#: yang tidak berpendapat cukup tidak menyebut apa-apa, sama seperti
+#: ANTRIAN_PRINTER yang kosong.
+BENTUK_LAYAR_MANUAL = (
+    BENTUK_LAYAR_LEBAR,
+    BENTUK_LAYAR_MEMANJANG,
+    BENTUK_LAYAR_TEGAK,
+)
 
 #: Nilai cadangan bila sebuah pengaturan belum ada di database, misalnya
 #: karena database dibuat sebelum pengaturan tersebut diperkenalkan.
@@ -28,15 +52,43 @@ BAWAAN: dict[str, str] = {
     "backup.auto_enabled": "true",
     "backup.pg_dump_path": "",
     "backup.retention_days": "30",
+    "backup.salinan_folder": "",
     "dashboard.refresh_seconds": "30",
     "kiosk.cooldown_seconds": "10",
+    "kiosk.welcome_kind": "teks",
+    "kiosk.welcome_text": "",
+    "kiosk.judul": "",
+    "kiosk.subjudul": "",
+    "kiosk.welcome_file": "",
+    "kiosk.welcome_slide_seconds": "10",
+    "kiosk.posisi_loket": "otomatis",
+    "kiosk.daftar_putar": "",
+    "kiosk.suara_video": "false",
+    "kiosk.iklan_layar_penuh_detik": "60",
+    "kiosk.tema": "biru",
+    "kiosk.tema_agustus": "true",
+    "display.screen_shape": "auto",
+    "display.theme": "kaca",
     "display.title": "ANTRIAN PELAYANAN CRO",
+    "display.info": "",
     "display.next_count": "3",
+    "display.list_rows": "5",
+    "display.list_font_size": "0",
+    "display.rotate_seconds": "3",
+    "display.number_font_scale": "100",
     "display.sound_enabled": "true",
+    "display.loket_tampil": "petugas",
     "queue.max_call_attempts": "3",
+    "queue.registration_open": "true",
+    "queue.registration_closed_date": "",
     "survey.enabled": "true",
-    "ticket.footer": "Silakan menunggu hingga nomor Anda dipanggil.",
+    "privasi.retensi_pengaduan_bulan": "24",
+    "ticket.header": "BAPENDA DKI JAKARTA",
+    "ticket.footer": "Silakan menunggu nomor Anda dipanggil.",
     "ticket.printer": "pdf",
+    "ticket.geser_atas_mm": "0",
+    "ticket.turun_anjungan_mm": "4",
+    "ticket.perkiraan_tunggu": "true",
 }
 
 _BENAR = {"true", "1", "ya", "yes", "on"}
@@ -46,6 +98,8 @@ TEKS = "teks"
 ANGKA = "angka"
 BOOLEAN = "boolean"
 PILIHAN = "pilihan"
+BERKAS = "berkas"
+DAFTAR_PUTAR = "daftar_putar"
 
 
 @dataclass(frozen=True)
@@ -72,6 +126,21 @@ class Pengaturan:
     #: maupun teks tiket yang kosong hanya membingungkan pembacanya.
     boleh_kosong: bool = False
     kelompok: str = "Umum"
+    #: Tampil di layar Pengaturan. Dimatikan untuk nilai yang ditulis dan
+    #: dibaca sistem sendiri: mengubahnya lewat formulir umum melewati
+    #: aturan yang menyertainya, sehingga hasilnya tidak seperti yang
+    #: dikira pengubahnya. Nilainya tetap sah dan tetap divalidasi — yang
+    #: hilang hanya kotak isiannya.
+    tampil: bool = True
+    #: Satuan angka, ditulis DI DALAM kotak isiannya: "3 detik", bukan
+    #: "Jeda pergantian halaman (detik)" pada namanya. Satuan yang menempel
+    #: pada angkanya terbaca bersama angka itu — pada namanya, ia terbaca
+    #: beberapa detik sebelumnya lalu terlupakan.
+    satuan: str = ""
+    #: Tulisan pengganti untuk nilai TERKECIL, ketika nilai itu berarti
+    #: sesuatu dan bukan sekadar nol. "Otomatis" jauh lebih jelas daripada
+    #: angka 0 yang artinya harus dicari dulu di keterangannya.
+    nilai_khusus: str = ""
 
 
 #: Seluruh pengaturan yang dikenali aplikasi.
@@ -82,14 +151,24 @@ SKEMA: tuple[Pengaturan, ...] = (
     Pengaturan(
         "ticket.printer",
         "Cara mencetak tiket",
-        "Kegagalan mencetak tidak pernah membatalkan antrian; nomor sudah "
-        "terbit sebelum tiket dicetak.",
+        "Berlaku untuk komputer yang tidak menyebut pencetaknya sendiri "
+        "lewat ANTRIAN_PRINTER. Kegagalan mencetak tidak pernah membatalkan "
+        "antrian; nomor sudah terbit sebelum tiket dicetak.",
         PILIHAN,
         pilihan=(
             ("pdf", "Simpan sebagai PDF di folder tiket"),
             ("system", "Cetak ke printer Windows"),
             ("none", "Tidak mencetak, nomor cukup disebutkan"),
         ),
+        kelompok="Tiket",
+    ),
+    Pengaturan(
+        "ticket.header",
+        "Judul tiket",
+        "Baris paling atas tiket antrian, di atas nama kantor. "
+        "Kosongkan bila tiket tidak memerlukan judul.",
+        TEKS,
+        boleh_kosong=True,
         kelompok="Tiket",
     ),
     Pengaturan(
@@ -100,6 +179,96 @@ SKEMA: tuple[Pengaturan, ...] = (
         kelompok="Tiket",
     ),
     Pengaturan(
+        "ticket.geser_atas_mm",
+        "Naikkan isi tiket",
+        "Hanya untuk pencetak Windows. Pada IWare IW-J200, 1 mm saja sudah "
+        "memotong judul — biarkan 0. Ruang kosong di atas judul diatur di "
+        "driver POS80 (margin atas / unprintable / begin feed), bukan di sini.",
+        ANGKA,
+        minimum=0,
+        maksimum=6,
+        satuan="mm",
+        nilai_khusus="Tidak digeser",
+        kelompok="Tiket",
+    ),
+    Pengaturan(
+        "ticket.turun_anjungan_mm",
+        "Turunkan isi tiket anjungan",
+        "Hanya untuk tiket dari tablet anjungan Android. Tablet mencetak "
+        "langsung tanpa driver POS80, jadi tidak mendapat ruang kosong di "
+        "kepala kertas seperti tiket Windows. Naikkan bila judul terlalu "
+        "mepet ke atas.",
+        ANGKA,
+        minimum=0,
+        maksimum=15,
+        satuan="mm",
+        nilai_khusus="Tidak diturunkan",
+        kelompok="Tiket",
+    ),
+    Pengaturan(
+        "ticket.perkiraan_tunggu",
+        "Cetak perkiraan waktu tunggu",
+        "Baris \"Perkiraan tunggu: ±20–25 menit\" di bawah sisa antrian. "
+        "Dihitung dari median lama layanan per jenis layanan dan banyaknya "
+        "loket yang sedang berpetugas. Tidak dicetak bila belum ada cukup "
+        "riwayat pelayanan atau tidak ada loket yang melayani.",
+        BOOLEAN,
+        kelompok="Tiket",
+    ),
+    Pengaturan(
+        "display.screen_shape",
+        "Bentuk layar antrian",
+        "Biarkan Otomatis kecuali papannya terlihat keliru. Papan mengukur "
+        "layarnya sendiri dan hampir selalu benar; yang tidak dapat ditebaknya "
+        "adalah panel LED yang menerima gambar 16:9 lalu memotong sepetak "
+        "memanjang darinya. Pilihan ini berlaku untuk KOMPUTER INI saja bila "
+        "mesinnya menyebut ANTRIAN_BENTUK_LAYAR.",
+        PILIHAN,
+        pilihan=(
+            ("auto", "Otomatis (disarankan)"),
+            ("lebar", "Televisi biasa, lebih lebar daripada tinggi"),
+            ("memanjang", "Papan memanjang, seperti pita di atas pintu"),
+            ("tegak", "Layar berdiri, lebih tinggi daripada lebar"),
+        ),
+        kelompok="Layar Antrian",
+    ),
+    Pengaturan(
+        "display.theme",
+        "Tampilan layar antrian",
+        "Bentuk papan yang menghadap pengunjung. Isinya sama pada semua pilihan — "
+        "seluruh loket tetap tampil; yang berbeda hanya tata letak dan warnanya. "
+        "Pada layar memanjang yang terpakai hanya WARNANYA: tata letak mana pun "
+        "bersusun ke bawah, dan pita setinggi sejengkal tidak memuat susunan apa "
+        "pun, sehingga papan menyusun sendiri kartunya berjajar.",
+        PILIHAN,
+        # Daftar ini sengaja ditulis ulang di sini, tidak diimpor dari
+        # app.ui: service tidak boleh bergantung pada lapisan tampilan.
+        # Agar keduanya tidak diam-diam berbeda, ada test yang membandingkan
+        # daftar ini dengan tema yang benar-benar ada.
+        pilihan=(
+            ("kaca", "Kaca Malam (bawaan)"),
+            ("bento", "Bento Terang"),
+            ("led", "Papan LED"),
+            ("fokus", "Fokus Nomor"),
+            ("sorotan", "Sorotan"),
+            ("split", "Split Informasi"),
+            ("kontras", "Kontras Tinggi"),
+        ),
+        kelompok="Layar Antrian",
+    ),
+    Pengaturan(
+        "display.loket_tampil",
+        "Loket yang ditampilkan",
+        "Loket tanpa petugas login disembunyikan dari layar antrian dan "
+        "anjungan; yang masih memanggil nomor tetap tampil.",
+        PILIHAN,
+        pilihan=(
+            ("petugas", "Hanya yang ada petugasnya (disarankan)"),
+            ("semua", "Semua loket aktif"),
+        ),
+        kelompok="Layar Antrian",
+    ),
+    Pengaturan(
         "display.title",
         "Judul layar antrian",
         "Tulisan besar di bagian atas layar yang menghadap pengunjung.",
@@ -107,20 +276,120 @@ SKEMA: tuple[Pengaturan, ...] = (
         kelompok="Layar Antrian",
     ),
     Pengaturan(
+        "display.info",
+        "Pengumuman layar antrian",
+        "Tulisan pada panel kiri tema Split Informasi, misalnya jam layanan atau "
+        "berkas yang perlu dibawa. Kosongkan bila tidak ada pengumuman.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Layar Antrian",
+    ),
+    Pengaturan(
         "display.next_count",
-        "Jumlah nomor berikutnya",
-        "Banyaknya nomor menunggu yang ikut ditampilkan di layar antrian.",
+        "Jumlah nomor berikutnya di papan kios",
+        "Banyaknya nomor menunggu pada papan kecil di dalam anjungan. "
+        "Televisi ruang tunggu memakai dua pengaturan di bawah ini.",
         ANGKA,
         minimum=0,
         maksimum=10,
-        kelompok="Layar Antrian",
+        satuan="nomor",
+        nilai_khusus="Tidak ditampilkan",
+        kelompok="Nomor Layar Antrian",
+    ),
+    Pengaturan(
+        "display.list_rows",
+        "Baris nomor per kolom",
+        "Setiap jenis layanan mendapat dua kolom, sehingga 5 baris berarti "
+        "10 nomor per layanan pada satu halaman. Sisanya masuk halaman "
+        "berikutnya. Baris yang tidak muat di layar otomatis dikurangi — "
+        "huruf yang terpotong tidak menolong siapa pun.",
+        ANGKA,
+        minimum=1,
+        maksimum=12,
+        satuan="baris",
+        kelompok="Nomor Layar Antrian",
+    ),
+    Pengaturan(
+        "display.list_font_size",
+        "Ukuran huruf nomor menunggu",
+        "Isi 0 agar menyesuaikan sendiri dengan tinggi papan — itu yang "
+        "disarankan. Angka lain diperlakukan sebagai batas ATAS: papan "
+        "tetap memperkecilnya bila barisnya tidak muat, karena nomor yang "
+        "terpotong lebih buruk daripada nomor yang sedikit lebih kecil.",
+        ANGKA,
+        minimum=0,
+        maksimum=96,
+        satuan="px",
+        nilai_khusus="Otomatis",
+        kelompok="Nomor Layar Antrian",
+    ),
+    Pengaturan(
+        "display.rotate_seconds",
+        "Jeda pergantian halaman",
+        "Lama satu halaman daftar menunggu tampil sebelum berganti sendiri. "
+        "Isi 0 bila halaman tidak boleh berpindah sendiri. Pengunjung "
+        "membutuhkan waktu untuk mencari nomornya sendiri dari seberang "
+        "ruangan; terlalu cepat membuat daftar ini tidak terbaca sama sekali.",
+        ANGKA,
+        minimum=0,
+        maksimum=60,
+        satuan="detik",
+        nilai_khusus="Tidak berpindah sendiri",
+        kelompok="Nomor Layar Antrian",
+    ),
+    Pengaturan(
+        "display.number_font_scale",
+        "Ukuran huruf nomor antrian",
+        "Membesarkan atau mengecilkan khusus nomor antrian di layar, tanpa "
+        "mengubah ukuran tulisan lain. 100 adalah ukuran bawaan.",
+        ANGKA,
+        minimum=50,
+        maksimum=200,
+        satuan="%",
+        kelompok="Nomor Layar Antrian",
     ),
     Pengaturan(
         "display.sound_enabled",
         "Bunyikan panggilan",
-        "Komputer tanpa perangkat suara tetap berjalan normal, hanya tanpa bunyi.",
+        "Berlaku untuk komputer layar antrian dan loket. Anjungan ambil "
+        "nomor tetap diam agar tidak berbunyi bersahutan dengan televisi, "
+        "kecuali satu anjungan yang dipilih di Layanan Anjungan → Perangkat "
+        "sebagai pengganti sementara; satu mesin dapat menyimpang dari pengaturan ini lewat "
+        "ANTRIAN_SUARA. Komputer tanpa perangkat suara tetap berjalan "
+        "normal, hanya tanpa bunyi.",
         BOOLEAN,
-        kelompok="Layar Antrian",
+        kelompok="Suara Panggilan",
+    ),
+    # Dua pengaturan berikut sengaja TIDAK tampil di layar Pengaturan.
+    #
+    # Keduanya wajib berubah bersama-sama: menutup pendaftaran berarti
+    # menyetel "open" ke false SEKALIGUS menanggali penutupannya, karena
+    # `pendaftaran_dibuka()` menganggap penutupan tanpa tanggal hari ini
+    # sudah kedaluwarsa. Formulir umum hanya menyetel satu kunci, sehingga
+    # mematikan "open" dari sana tidak menutup apa pun — admin mengira
+    # pendaftaran berhenti padahal nomor terus terbit.
+    #
+    # Jalan yang benar sudah ada dan memakai keduanya sekaligus: tombol
+    # pada layar Terbitkan Nomor, dan layar Tutup Hari.
+    Pengaturan(
+        "queue.registration_open",
+        "Terima pendaftaran antrian baru",
+        "Diubah lewat tombol pada layar Terbitkan Nomor atau layar Tutup "
+        "Hari, bukan dari sini.",
+        BOOLEAN,
+        kelompok="Antrian",
+        tampil=False,
+    ),
+    Pengaturan(
+        "queue.registration_closed_date",
+        "Tanggal pendaftaran terakhir ditutup",
+        "Diisi dan dibaca otomatis oleh sistem. Begitu tanggal berganti, "
+        "pendaftaran otomatis terbuka kembali walau lupa dibuka, supaya "
+        "penutupan kemarin tidak diam-diam terbawa ke hari ini.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Antrian",
+        tampil=False,
     ),
     Pengaturan(
         "queue.max_call_attempts",
@@ -130,18 +399,161 @@ SKEMA: tuple[Pengaturan, ...] = (
         ANGKA,
         minimum=1,
         maksimum=10,
+        satuan="kali",
         kelompok="Antrian",
     ),
     Pengaturan(
         "kiosk.cooldown_seconds",
-        "Jeda ambil nomor di kios (detik)",
+        "Jeda ambil nomor di kios",
         "Menahan satu orang menekan tombol berulang kali dan memenuhi antrian "
         "dengan nomor kosong. Tidak berlaku bagi petugas pendaftaran, yang "
         "melayani rombongan datang bersamaan.",
         ANGKA,
         minimum=0,
         maksimum=300,
+        satuan="detik",
+        nilai_khusus="Tanpa jeda",
         kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.judul",
+        "Judul anjungan",
+        "Tulisan di bagian atas tablet anjungan, misalnya \"Selamat datang di "
+        "Bapenda DKI Jakarta\". Kosongkan untuk memakai Judul layar antrian. "
+        "Tablet dapat menimpanya di Pengaturan tablet.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.subjudul",
+        "Subjudul anjungan",
+        "Satu baris kecil di bawah judul, misalnya nama kantor atau jam "
+        "layanan. Kosongkan bila tidak perlu.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.welcome_kind",
+        "Tampilan panel anjungan",
+        "Isi panel besar di atas tombol A/B/C sebelum pengunjung memilih "
+        "layanan. Folder media memutar gambar dan video yang dicentang di "
+        "Daftar putar media, bergiliran. Bila tidak ada yang dapat diputar, "
+        "panel kembali ke teks.",
+        PILIHAN,
+        pilihan=(
+            ("teks", "Teks sambutan"),
+            ("media", "Folder media (gambar & video bergantian)"),
+        ),
+        kelompok="Panel Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.welcome_text",
+        "Teks sambutan anjungan",
+        "Ditampilkan bila jenisnya teks, dan sebagai cadangan bila folder "
+        "media kosong atau gagal. Kosongkan untuk memakai teks bawaan.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Panel Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.welcome_file",
+        "Tambah berkas ke folder anjungan",
+        "Berkas disalin ke media/kiosk dan masuk ke ujung Daftar putar "
+        "media dalam keadaan dicentang. Memilih berkas juga mengganti "
+        "tampilan panel ke folder media. Tetap klik Simpan.",
+        BERKAS,
+        boleh_kosong=True,
+        kelompok="Panel Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.welcome_slide_seconds",
+        "Lama tampil tiap gambar",
+        "Hanya untuk gambar di folder media. Video diputar sampai selesai "
+        "lalu ganti ke berkas berikutnya. Satu gambar saja tampil terus.",
+        ANGKA,
+        minimum=3,
+        maksimum=60,
+        satuan="detik",
+        kelompok="Panel Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.daftar_putar",
+        "Daftar putar media",
+        "Centang gambar atau video yang diputar di anjungan, lalu atur "
+        "urutannya dengan Naik/Turun. Video diputar sampai selesai; satu "
+        "video saja diulang terus. Yang tidak dicentang tetap "
+        "tersimpan di folder dan dapat dinyalakan lagi kapan saja. "
+        "Atur jadwal… membatasi tanggal tayang dan lama tampil tiap gambar.",
+        DAFTAR_PUTAR,
+        boleh_kosong=True,
+        kelompok="Iklan Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.suara_video",
+        "Suara video anjungan",
+        "Bila dimatikan, video di anjungan diputar tanpa suara. Sebaiknya "
+        "tetap mati bila anjungan dekat layar antrian, supaya suara iklan "
+        "tidak menutupi panggilan nomor. Selama pengunjung sedang memilih "
+        "layanan sampai tiketnya keluar, video selalu dibisukan.",
+        BOOLEAN,
+        kelompok="Iklan Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.iklan_layar_penuh_detik",
+        "Iklan layar penuh saat menganggur",
+        "Bila tablet tidak disentuh selama ini, iklan diperbesar memenuhi "
+        "layar. Sentuhan apa pun mengembalikan pilihan layanan. Hanya "
+        "berlaku bila daftar putar media sedang berputar.",
+        ANGKA,
+        minimum=0,
+        maksimum=600,
+        satuan="detik",
+        nilai_khusus="Mati",
+        kelompok="Iklan Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.posisi_loket",
+        "Posisi baris loket di anjungan",
+        "Letak baris NOMOR DI LOKET (nomor tiap loket) pada tablet "
+        "anjungan. Otomatis: pindah ke panel bawah bila panel atas memutar "
+        "iklan, kembali ke panel atas bila tidak ada iklan atau iklannya "
+        "gagal diputar. Sembunyikan bila layar antrian TV sudah terlihat "
+        "dari depan anjungan. Tablet dapat menimpa pilihan ini di "
+        "Pengaturan tablet.",
+        PILIHAN,
+        pilihan=(
+            ("otomatis", "Otomatis mengikuti iklan (bawah bila ada iklan)"),
+            ("bawah", "Pindahkan loket ke panel bawah"),
+            ("atas", "Pindahkan loket ke panel atas"),
+            ("sembunyi", "Sembunyikan baris loket"),
+        ),
+        kelompok="Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.tema",
+        "Tema anjungan",
+        "Warna tampilan tablet anjungan. Kontras tinggi memakai hitam-kuning "
+        "dan huruf lebih besar untuk pengunjung lansia atau lobi yang silau. "
+        "Tablet dapat menimpa pilihan ini di Pengaturan tablet.",
+        PILIHAN,
+        pilihan=(
+            ("biru", "Biru instansi"),
+            ("hijau", "Hijau segar"),
+            ("kontras", "Kontras tinggi"),
+            ("gelap", "Gelap elegan"),
+            ("merah_putih", "Merah putih (perayaan)"),
+        ),
+        kelompok="Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.tema_agustus",
+        "Merah putih otomatis setiap Agustus",
+        "Selama bulan Agustus anjungan memakai tema merah putih, lalu "
+        "kembali ke tema di atas pada 1 September tanpa perlu diubah.",
+        BOOLEAN,
+        kelompok="Anjungan",
     ),
     Pengaturan(
         "survey.enabled",
@@ -151,12 +563,27 @@ SKEMA: tuple[Pengaturan, ...] = (
         kelompok="Survey",
     ),
     Pengaturan(
+        "privasi.retensi_pengaduan_bulan",
+        "Masa simpan identitas pelapor",
+        "Sesudah masa ini, nama, nomor pelanggan, telepon, email, dan alamat "
+        "pada lembar pengaduan dikosongkan otomatis. Isi pengaduan dan catatan "
+        "petugas tetap disimpan untuk laporan. Dihitung dari tanggal "
+        "antriannya, diperiksa saat aplikasi dibuka dan saat tanggal berganti.",
+        ANGKA,
+        minimum=0,
+        maksimum=120,
+        satuan="bulan",
+        nilai_khusus="Disimpan selamanya",
+        kelompok="Pengaduan",
+    ),
+    Pengaturan(
         "dashboard.refresh_seconds",
         "Jeda penyegaran ringkasan",
-        "Dalam detik. Semakin kecil semakin sering database dibaca.",
+        "Semakin kecil semakin sering database dibaca.",
         ANGKA,
         minimum=5,
         maksimum=3600,
+        satuan="detik",
         kelompok="Ringkasan Harian",
     ),
     Pengaturan(
@@ -171,20 +598,32 @@ SKEMA: tuple[Pengaturan, ...] = (
         "backup.pg_dump_path",
         "Folder perkakas PostgreSQL",
         "Hanya dibutuhkan bila memakai PostgreSQL dan foldernya tidak ada di "
-        r"PATH, misalnya C:\Program Files\PostgreSQL\17\bin. Kosongkan untuk "
-        "SQLite.",
+        r"PATH dan tidak terpasang di C:\Program Files\PostgreSQL (yang dicari "
+        "otomatis). Kosongkan untuk SQLite.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Backup",
+    ),
+    Pengaturan(
+        "backup.salinan_folder",
+        "Folder salinan kedua",
+        "Setiap backup juga disalin ke sini, misalnya disk D: atau flashdisk. "
+        "Backup yang hanya ada di disk database ikut hilang bila disk itu "
+        "rusak. Masa simpannya sama. Kosongkan bila tidak dipakai.",
         TEKS,
         boleh_kosong=True,
         kelompok="Backup",
     ),
     Pengaturan(
         "backup.retention_days",
-        "Lama backup disimpan (hari)",
+        "Lama backup disimpan",
         "Backup yang lebih tua akan dihapus otomatis. Nilai 0 mematikan "
         "penghapusan otomatis.",
         ANGKA,
         minimum=0,
         maksimum=3650,
+        satuan="hari",
+        nilai_khusus="Tidak dihapus otomatis",
         kelompok="Backup",
     ),
 )
@@ -193,9 +632,16 @@ SKEMA_PER_KUNCI: dict[str, Pengaturan] = {p.kunci: p for p in SKEMA}
 
 
 def kelompok_pengaturan() -> dict[str, list[Pengaturan]]:
-    """Pengaturan dikelompokkan menurut layar yang dipengaruhinya."""
+    """
+    Pengaturan dikelompokkan menurut layar yang dipengaruhinya.
+
+    Yang `tampil=False` tidak ikut: nilainya dikelola sistem sendiri dan
+    tidak boleh diubah lewat formulir umum.
+    """
     hasil: dict[str, list[Pengaturan]] = {}
     for butir in SKEMA:
+        if not butir.tampil:
+            continue
         hasil.setdefault(butir.kelompok, []).append(butir)
     return hasil
 
@@ -218,6 +664,10 @@ def _validasi(kunci: str, nilai: str) -> str:
         return "true" if nilai.lower() in _BENAR else "false"
 
     if butir.jenis == PILIHAN:
+        if kunci == "kiosk.welcome_kind" and nilai in {"gambar", "video"}:
+            # Nilai lama: gambar atau video terpisah sekarang sama artinya
+            # dengan seluruh folder media.
+            nilai = "media"
         sah = {v for v, _ in butir.pilihan}
         if nilai not in sah:
             raise ValidationError(
@@ -239,6 +689,9 @@ def _validasi(kunci: str, nilai: str) -> str:
                 f"{butir.label} tidak boleh lebih dari {butir.maksimum}."
             )
         return str(angka)
+
+    if butir.jenis == DAFTAR_PUTAR:
+        return daftar_putar.baku(nilai)
 
     if not nilai and not butir.boleh_kosong:
         raise ValidationError(f"{butir.label} tidak boleh dikosongkan.")
@@ -298,16 +751,21 @@ class SettingsService:
     # Perubahan
     # -----------------------------------------------------------------
 
-    def set(self, key: str, value: str) -> None:
+    def set(
+        self, key: str, value: str, *, permission: Permission = Permission.CONFIG_MANAGE
+    ) -> None:
         """
-        Ubah satu pengaturan. Hanya ADMIN yang berhak.
+        Ubah satu pengaturan. Hanya ADMIN yang berhak, kecuali dipanggil
+        lewat service lain yang sengaja memberi wewenang lebih sempit pada
+        satu kunci tertentu (mis. `queue.registration_open`, yang juga
+        boleh diubah petugas pendaftaran lewat `QueueService`).
 
         Nilainya divalidasi dan dibakukan lebih dahulu sesuai SKEMA, supaya
         pengaturan yang rusak tidak pernah sampai tersimpan.
         """
         if self.auth is None:
             raise NotFoundError("Perubahan pengaturan memerlukan sesi pengguna.")
-        sesi = self.auth.require_permission(Permission.CONFIG_MANAGE)
+        sesi = self.auth.require_permission(permission)
         value = _validasi(key, value)
 
         with session_scope() as session:

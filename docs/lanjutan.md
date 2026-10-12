@@ -3,6 +3,12 @@
 Dokumen serah terima. Berisi tujuan, keadaan sekarang, apa yang belum
 selesai, dan hal-hal yang **jangan** diubah beserta alasannya.
 
+> **Catatan Oktober 2026:** anjungan tidak lagi berjalan di Windows. Peran
+> dan mode `anjungan`/`anjungan-totem` (`--kios`, `--kios-totem`, `--layar`)
+> sudah dihapus; anjungan adalah tablet Android. Lihat
+> [istilah.md](istilah.md). Bagian dokumen ini yang menyebut anjungan
+> Windows adalah catatan sejarah.
+
 ---
 
 ## 1. Apa yang sedang dibangun
@@ -70,6 +76,24 @@ PySide6 UI → Service Layer → Repository Layer → SQLAlchemy → PostgreSQL/
 - UI memanggil service lewat `jalankan_aman()` dari `app/ui/common.py`
 - Detail teknis masuk `logs/app.log`
 
+### Data pribadi hanya di satu tempat
+
+Sejak lembar pengaduan ada, aplikasi ini menyimpan nama, nomor pelanggan,
+telepon, email, dan alamat pelapor. Seluruhnya **hanya** di tabel
+`queue_note`. Yang harus tetap benar:
+
+- **Jangan memindahkannya menjadi kolom di `queue`.** User PostgreSQL
+  anjungan punya `SELECT` pada tabel itu, dan komputernya berdiri di ruang
+  publik tanpa diawasi. Sudah dikunci test:
+  `tests/test_note_service.py::test_anjungan_kios_tidak_dapat_membaca_lembar`.
+- **Jangan memasukkan isinya ke audit log.** Audit dibaca ADMIN dan ikut ke
+  setiap berkas backup. Dikunci
+  `tests/test_note_service.py::test_isi_lembar_tidak_pernah_masuk_audit_log`.
+- **Penulis tidak boleh menghapus.** Menulis milik CRO, menghapus milik
+  ADMIN, dan penghapusan tercatat.
+- **Berkas backup kini berisi data pribadi.** Siapa pun yang menyalin
+  folder backup menyalin arsip pelapor.
+
 ### Jebakan yang sudah pernah menggigit
 
 **Jangan pakai `QMessageBox.exec()` pada layar yang tidak diawasi petugas.**
@@ -83,8 +107,10 @@ yang sudah tidak ada → `libshiboken: Internal C++ object already deleted`.
 Pakai `QTimer(self)` dengan `setSingleShot(True)`.
 
 **`self.statusBar()` MEMBUAT bilah status bila belum ada.** Memanggilnya di
-mode kios memunculkan bilah yang sengaja tidak dibangun, lengkap dengan path
-database di depan pengunjung. Sudah dijaga di `MainWindow.muat_ulang_halaman`.
+mode kios memunculkan bilah yang sengaja tidak dibangun, lengkap dengan
+lokasi database di depan pengunjung. Sudah dijaga di
+`MainWindow.muat_ulang_halaman`. Lokasi itu sendiri adalah *permanent
+widget* (`statusDatabase`) supaya F5 tidak menghapusnya.
 
 **`$ErrorActionPreference = "Stop"` merusak skrip PowerShell.** pytest,
 PyInstaller, dan docker menulis keterangan biasa ke stderr, dan Windows
@@ -102,6 +128,15 @@ proyek ini memakai `"Continue"` dan memeriksa `$LASTEXITCODE`.
 | `7ca5bb2` | Layar antrian sebagai kios layar penuh |
 | `cc377d0` | Penegakan batas panggilan + layar hasil survey supervisor |
 | `535a60e` | **Port PostgreSQL** untuk beberapa loket serentak |
+| `8d30d0b` | Kios pengunjung tanpa login |
+| `152ac4d` | Layar pengunjung terbaca dari seberang ruangan |
+| `2a1f804` | Papan televisi mengikuti ukuran layar + pilihan tema |
+| `3ab265a` | Loket dan jenis layanan per petugas; istirahat dan tutup hari |
+| `0a0a727` | Televisi dipisah dari anjungan; papan menunggu per jenis layanan |
+| `9642b4d` | Ruang kerja pengaduan dan catatan petugas per antrian |
+| `d1e820b` | Panel kanan berpindah otomatis: Menunggu Dilayani <-> Pengaduan |
+| `210f1b6` | Layar Pengaduan & Catatan menyegar sendiri tiap 30 detik |
+| `dff4b3a` | Anjungan tidak lagi menampilkan kartu loket; diganti angka ringkasan |
 
 ### Yang paling penting dari `535a60e`
 
@@ -131,13 +166,18 @@ RETURNING last_number
 
 | Dialect | Hasil |
 |---|---|
-| SQLite | **623 lolos** |
-| PostgreSQL | **598 lolos, 25 dilewati** |
+| SQLite | **1499 lolos, 2 dilewati** (11 Oktober 2026; termasuk Kesehatan Sistem, checksum dan uji backup, pencabutan perangkat di semua endpoint, dan migrasi turun-naik) |
+| PostgreSQL | **1493 lolos, 8 dilewati** (11 Oktober 2026, database `antrian_uji`, dengan `pg_dump`/`pg_restore` di PATH) |
 
-Skip PostgreSQL lebih banyak dari 6 yang tercatat sebelumnya. Test
-`sqlite_saja` memang dilewati; sisanya hampir seluruhnya backup karena
-`pg_dump`/`pg_restore` tidak ada di PATH mesin pengembang. **Backup
-PostgreSQL belum terbukti pada putaran ini.**
+Yang dilewati di PostgreSQL hanya test `sqlite_saja`. Backup PostgreSQL —
+pembuatan, pemulihan, checksum, dan uji keutuhan lewat `pg_restore` —
+**sudah terbukti** pada putaran ini. Tanpa folder `bin` PostgreSQL di
+PATH, test backup dilewati (putaran tanpa PATH: 1443 lolos, 29 dilewati).
+
+GitHub Actions hanya menjalankan job **PostgreSQL**
+(`.github/workflows/tes.yml`): lint `ruff check .` lalu seluruh suite, di
+setiap push. Job SQLite dihapus Oktober 2026, dan proteksi branch `main`
+hanya mewajibkan pemeriksaan "PostgreSQL".
 
 Yang paling menentukan dan **sudah terbukti hijau di PostgreSQL**:
 `tests/test_queue_numbering.py::test_penerbitan_bersamaan_tidak_menghasilkan_nomor_kembar`
@@ -145,23 +185,89 @@ Yang paling menentukan dan **sudah terbukti hijau di PostgreSQL**:
 
 ---
 
-## 5. Kios pengunjung — SUDAH di-commit
+## 5. Mesin publik — SUDAH di-commit
 
-Kios tanpa login, `--layar`, jeda pengambilan, GRANT PostgreSQL, dan
-dokumentasinya sudah masuk tree. Test UI kios sudah dijalankan (bukan
-hanya test service).
+Anjungan dan layar antrian tanpa login, `--kios`/`--tv`, jeda pengambilan,
+GRANT PostgreSQL, dan dokumentasinya sudah masuk tree. Test UI keduanya
+sudah dijalankan (bukan hanya test service).
 
 ### Keputusan desain yang sudah disepakati pemilik
 
-1. **Dialog pilihan saat start** — "Layar Pengunjung" atau "Layar Petugas".
-   Pengunjung langsung masuk tanpa login; petugas wajib login.
-2. **Argumen `--layar`** melewati dialog itu. Dipasang pada shortcut
-   Startup komputer kios supaya mati listrik tidak berhenti di dialog.
-3. **User PostgreSQL terpisah** untuk mesin kios, **tanpa akses `app_user`**.
-   Skripnya: [sql/kios-grant.sql](sql/kios-grant.sql).
+1. **Dialog pilihan saat start** — "Layar Antrian", "Anjungan Ambil Nomor",
+   atau "Layar Petugas". Dua yang pertama langsung masuk tanpa login;
+   petugas wajib login.
+2. **Argumen `--tv` dan `--kios`** melewati dialog itu. Dipasang pada
+   shortcut Startup kedua mesin publik supaya mati listrik tidak berhenti
+   di dialog. `--layar` dipertahankan sebagai nama lama `--kios`.
+3. **User PostgreSQL terpisah** untuk tiap mesin publik, **tanpa akses
+   `app_user`**. Skripnya: [sql/kios-grant.sql](sql/kios-grant.sql) dan
+   [sql/layar-grant.sql](sql/layar-grant.sql) — yang kedua hanya membaca.
 4. **Jeda antar-pengambilan nomor** (`kiosk.cooldown_seconds`, bawaan 10
-   detik). Hanya sesi kios — meja pendaftaran tidak ikut diperlambat.
-5. Kegagalan di layar kios memakai **label sebaris**, bukan `QMessageBox`.
+   detik). Hanya sesi anjungan — meja pendaftaran tidak ikut diperlambat.
+5. Kegagalan di layar anjungan memakai **label sebaris**, bukan `QMessageBox`.
+6. **Pencetak dan pengeras suara adalah sifat MESIN**, ditimpa lewat
+   `ANTRIAN_PRINTER` dan `ANTRIAN_SUARA`. Anjungan diam secara bawaan
+   supaya tidak berbunyi bersahutan dengan televisi.
+7. **Anjungan tidak menampilkan kartu loket** (29 Agustus 2026). Diminta
+   pemilik setelah melihat papan kios yang masih menyalin bentuk televisi
+   — kartu per loket dengan status KOSONG/SEDANG DIPANGGIL — padahal
+   pengunjung yang berdiri di anjungan belum memegang nomor sama sekali
+   dan tidak butuh tahu loket mana yang kosong. Diganti dengan satu angka
+   ringkasan (`DisplayPage._bangun_ringkasan_kios`, dipakai hanya saat
+   `kompak=True`): jumlah antrian yang masih menunggu DITAMBAH yang
+   sedang dilayani — keduanya sama-sama "berlangsung", belum selesai.
+   Daftar Menunggu Giliran di bawahnya mendapat porsi jauh lebih besar
+   (stretch 4:1, dari sebelumnya 5:2 untuk kartu loket) karena ruang yang
+   dulu dipakai kartu loket sekarang kosong. TV (`kompak=False`) sama
+   sekali tidak tersentuh — kartu loketnya tetap seperti semula.
+
+### Keputusan pemilik atas lembar pengaduan (29 Agustus 2026)
+
+Diputuskan setelah tegangannya dengan sifat anonim disampaikan, dan
+ditegaskan ulang oleh pemilik:
+
+1. Lembar menempel pada **nomor antrian**, bukan buku catatan harian.
+2. **Seluruh petugas CRO** boleh membaca, karena itu ada layar
+   **Pengaduan & Catatan** dengan pencarian. Tanpa layar itu, "semua boleh
+   membaca" tidak berarti apa-apa.
+3. Isian: nama, nomor pelanggan, deskripsi (**wajib** bila ada pengaduan);
+   telepon, email, alamat (opsional); catatan petugas (berdiri sendiri).
+4. **Tanpa nomor pengaduan tersendiri** — dirujuk lewat nomor antrian dan
+   tanggalnya.
+5. **Tanpa status tindak lanjut.** Cukup dicatat.
+6. **Pengisiannya dipecah dua**, mengikuti cara petugas bekerja: Data
+   Pelapor sebagai kartu tetap di kolom kiri layar pelayanan (ditulis
+   sambil bertanya), keluhan dan catatan di tab **Pengaduan & Catatan**
+   pada panel kanan (ditulis sambil mendengarkan). Bentuk pertama
+   menempelkan ketujuhnya ke kolom kiri dan tidak muat — barisnya
+   tergencet sampai label dan isian saling menimpa. Bentuk kedua memakai
+   dialog terpisah; bentuk sekarang inline, sebagai tab yang berbagi
+   tempat dengan Menunggu Dilayani. Dikunci test
+   `test_isian_pelapor_tidak_saling_menimpa` dan
+   `test_kotak_pengaduan_tidak_saling_menimpa` di
+   `tests/test_notes_ui.py`.
+7. **Panel kanan berpindah tab SENDIRI** mengikuti status loket —
+   Menunggu Dilayani selagi kosong, Pengaduan & Catatan begitu nomor
+   dipanggil — bukan dikunci di balik modal. Percobaan awal memindahkan
+   Menunggu Dilayani ke dialog terpisah ditolak: kolom lama-menunggunya
+   sengaja berubah warna setelah 10/20 menit supaya terlihat SEKILAS
+   tanpa mengklik apa pun, dan modal akan menguburnya. Judul tab
+   Menunggu Dilayani tetap menyebut jumlah yang sudah lama menunggu
+   sebagai penggantinya begitu tab itu tidak sedang aktif.
+8. **Lembar disimpan, identitas pelapor tidak.** Lembar hanya dihapus
+   manual oleh ADMIN, tetapi nama, nomor pelanggan, telepon, email, dan
+   alamat dikosongkan otomatis sesudah `privasi.retensi_pengaduan_bulan`
+   (bawaan 24 bulan, keputusan pemilik Oktober 2026) — lihat
+   `NoteService.anonimkan_kedaluwarsa`. Barisnya tetap bertambah, jadi
+   pencariannya sengaja selalu dibatasi jumlah.
+9. **Layar Pengaduan & Catatan menyegar sendiri tiap 30 detik**, seperti
+   Ringkasan Harian. Penyegaran berkala memakai kriteria pencarian
+   TERAKHIR DISUBMIT, bukan membaca `isian_cari` secara langsung — kotak
+   itu boleh jadi sedang diketik separuh jalan saat timer kebetulan
+   berbunyi, dan pencarian di layar ini sengaja hanya berjalan saat
+   Enter/Cari ditekan. Baris yang sedang dibaca dipertahankan lintas
+   penyegaran selama lembarnya masih ada di hasil yang baru — dicocokkan
+   lewat id, bukan indeks baris.
 
 ### Langkah berikutnya
 
@@ -177,7 +283,77 @@ Lalu uji terima di komputer sungguhan — lihat bagian 8.
 
 ---
 
-## 6. Yang belum pernah diverifikasi manusia
+## 6. Peran tiap komputer — dua berkas, dua pertanyaan
+
+Setiap komputer menjawab dua pertanyaan yang berbeda. Jawabannya disimpan
+di dua berkas TERPISAH di folder database mesin itu, dan keduanya diabaikan
+git: isinya sifat satu mesin, bukan isi repositori.
+
+| Berkas | Menjawab | Ditulis oleh |
+|---|---|---|
+| `data/mesin.json` | peran terhadap **database**: sendiri / server / klien | dialog "Atur komputer ini" |
+| `data/peran.json` | peran terhadap **pengunjung**: dipakai sebagai apa | dialog yang sama, bagian kedua |
+
+**`mesin.json` JANGAN pernah disalin antar-komputer** — ia memuat kata
+sandi database. `peran.json` justru sebaliknya: ia dirancang untuk disalin
+lewat Notepad, karena lima komputer loket isinya sama persis. Ada test yang
+menjaga sandi dan alamat server tidak pernah bocor ke berkas yang boleh
+disalin itu.
+
+### Peran yang dikenali
+
+| Peran | Layar yang dibuka | Pencetak | Suara | Bentuk layar |
+|---|---|---|---|---|
+| `petugas` / `admin` | layar masing-masing | tidak mencetak | ikut pengaturan | ikut pengukuran |
+| `anjungan` / `anjungan-totem` | anjungan | ikut pengaturan | **diam** | ikut pengukuran |
+| `televisi` | papan antrean | tidak mencetak | ikut pengaturan | ikut pengukuran |
+| `papan-memanjang` | papan antrean | tidak mencetak | **diam** | **memanjang** |
+
+Dua baris yang diam punya alasan yang sama: kantor yang memasang televisi
+DAN pita di atas pintu akan mendapat dua pengeras suara memanggil nomor
+yang sama dengan selisih setengah detik, sepanjang hari.
+
+Peran hanya menyatakan apa yang benar-benar diketahuinya tentang mesin itu.
+"Tidak mencetak" adalah fakta tentang komputer loket; tetapi BAGAIMANA
+mencetak, bagi mesin yang memang mencetak, tetap keputusan seluruh kantor
+lewat `ticket.printer`.
+
+Yang disimpan adalah **pilihan, bukan hasil simpulannya**. `null` berarti
+"ikut peran", sehingga perbaikan tabel simpulan di versi berikutnya sampai
+ke seluruh komputer tanpa satu pun harus didatangi.
+
+### Urutan kewenangan
+
+```
+peran layar         : flag CLI  →  peran.json  →  dialog pilih-mode
+pencetak / suara /
+bentuk layar        : environment  →  peran.json  →  pengaturan database
+koneksi database    : ANTRIAN_DB_URL  →  mesin.json  →  SQLite lokal
+```
+
+Environment sengaja tetap di atas berkas. Pemasangan yang sudah memakai
+`setx ANTRIAN_PRINTER` jauh sebelum berkas peran ada harus berperilaku sama
+persis sesudahnya.
+
+### Bentuk layar
+
+`display.screen_shape` (bawaan `auto`) memilih antara `lebar`, `memanjang`,
+dan `tegak`. Bawaannya hampir selalu cukup — papan mengukur layarnya
+sendiri sesudah tampil, lalu MainWindow membangunnya ulang bila bentuknya
+ternyata lain.
+
+Satu kasus tidak dapat diukur: panel LED yang menerima HDMI 1920x1080 lalu
+memotong sepetak memanjang darinya. Windows melaporkan layar 16:9,
+sementara yang menyala berbentuk pita. Untuk itulah pilihan manual ada.
+
+Papan memanjang melepas judul, jam, dan daftar menunggu, menjajarkan kartu
+loket mendatar, dan berhenti meminta nomor menunggu dari database.
+
+Rancangan lengkapnya: [peran-komputer.md](peran-komputer.md).
+
+---
+
+## 7. Yang belum pernah diverifikasi manusia
 
 Ini penting dan jangan dianggap selesai:
 
@@ -185,7 +361,11 @@ Ini penting dan jangan dianggap selesai:
   (`QT_QPA_PLATFORM=offscreen`). Yang terbukti adalah struktur widget dan
   perilakunya, **bukan** bahwa tata letaknya tidak berantakan, teks tidak
   terpotong, atau `showFullScreen()` benar-benar memenuhi layar.
-- **Suara panggilan TTS** — belum pernah didengarkan.
+- **Suara panggilan TTS** — nada dan urutannya belum pernah didengarkan
+  di komputer sungguhan setelah jeda nada→ucapan ditambahkan.
+- **Pemasangan dua mesin publik sekaligus** (televisi + anjungan). Yang
+  terbukti adalah pemutar anjungan benar-benar diam; bahwa keduanya tidak
+  bersahutan hanya dapat dipastikan dengan mendengarnya di ruangan.
 - **Cetak ke printer Windows sungguhan** (`ticket.printer` = `system`).
 - **Pemasangan 5 komputer + PostgreSQL sungguhan.** Konkurensi terbukti
   lewat 8 utas dalam satu proses, bukan lewat 5 mesin di jaringan.
@@ -193,24 +373,39 @@ Ini penting dan jangan dianggap selesai:
 
 ---
 
-## 7. Perintah penting
+## 8. Perintah penting
 
 ```powershell
-# Test harian (SQLite, cepat)
+# Test — SELALU di PostgreSQL (database uji yang boleh dikosongkan,
+# BUKAN database `antrian` produksi: fixture menjalankan DROP SCHEMA).
+# Folder bin PostgreSQL di PATH supaya test backup tidak dilewati.
+$env:PATH = "C:\Program Files\PostgreSQL\17\bin;$env:PATH"
+$env:ANTRIAN_DB_URL = "postgresql+psycopg://postgres:<sandi>@127.0.0.1:5432/antrian_uji"
 .\.venv\Scripts\python.exe -m pytest tests -q
 
-# Test terhadap PostgreSQL (wajib sebelum rilis)
+# Atau PostgreSQL di Docker
 .\test-postgres.ps1
 docker compose down -v          # menghentikan container uji
 
 # Jalankan aplikasi
 .\.venv\Scripts\python.exe -m app.main
-.\.venv\Scripts\python.exe -m app.main --layar        # langsung kios
+.\.venv\Scripts\python.exe -m app.main --tv           # televisi ruang tunggu
 .\.venv\Scripts\python.exe -m app.main --init-only    # periksa pemasangan
 
 # Build .exe (menjalankan test dan memverifikasi .exe di folder bersih)
 .\build.ps1
 ```
+
+```powershell
+# Penimpaan per mesin (mengalahkan pengaturan bersama di database)
+setx ANTRIAN_PRINTER system         # pdf | system | none
+setx ANTRIAN_SUARA 0                # 1 | 0
+setx ANTRIAN_BENTUK_LAYAR memanjang # lebar | memanjang | tegak
+setx ANTRIAN_DB_URL "postgresql+psycopg://antrian:sandi@192.168.1.10/antrian"
+```
+
+Ketiga yang pertama kini dapat diisi lewat dialog "Atur komputer ini" —
+lihat bagian 6. `setx` tetap bekerja dan tetap menang.
 
 Selalu panggil interpreter `.venv` secara eksplisit. Memanggil `pytest`
 atau `python` langsung berisiko memakai Python global yang versinya berbeda.
@@ -221,24 +416,35 @@ diantisipasi lewat pengaturan `backup.pg_dump_path`.
 
 ---
 
-## 8. Rencana setelah kios selesai
+## 9. Rencana setelah kios selesai
 
 Belum dikerjakan sama sekali, sesuai urutan kepentingannya:
 
 1. **Uji terima di komputer sungguhan.** Ini yang paling menentukan apakah
    sistem layak dipakai, dan tidak ada test otomatis yang bisa
    menggantikannya.
-2. **Ikon aplikasi** — masih ikon bawaan PyInstaller.
-3. **Laporan historis per rentang tanggal** dan export PDF. Sengaja
-   dilewati sebelumnya atas keputusan pemilik; `SurveyService.list_terakhir()`
-   dan `DashboardService` sudah menyediakan datanya.
-4. **Laporan performa per loket/petugas** — kolom denormalisasi di
-   `satisfaction_survey` (`counter_id`, `officer_id`) sudah disiapkan sejak
-   awal justru untuk ini.
+2. ~~Ikon aplikasi~~ — **selesai** (Oktober 2026): `assets/ikon/antrian.ico`,
+   dipasang di jendela, `.exe`, dan installer.
+5. ~~Perkiraan waktu tunggu di tiket, masa simpan identitas pelapor, pita
+   "server tidak terjangkau" di loket~~ — **selesai** (Oktober 2026). Lihat
+   README bagian tiket dan backup, serta
+   [prosedur-darurat.md](prosedur-darurat.md).
+6. **Enkripsi backup di aplikasi sengaja TIDAK dibuat** (dicoba lalu
+   dicabut atas keputusan pemilik, Oktober 2026). Di server, backup
+   terletak di sebelah database aktif sehingga enkripsi tidak menambah
+   perlindungan, sementara kunci yang hilang saat install ulang dapat
+   membuat backup tidak terpulihkan. Perlindungannya di tingkat Windows:
+   izin folder dan BitLocker To Go untuk salinan kedua. Jangan
+   menambahkannya kembali tanpa membaca alasan ini.
+3. ~~Laporan historis per rentang tanggal dan export PDF~~ — **selesai**
+   (Oktober 2026): menu **Laporan** (SUPERVISOR), ekspor PDF dan Excel,
+   `app/services/report_service.py`.
+4. ~~Laporan performa per loket/petugas~~ — **selesai**, tab Per loket dan
+   Per petugas di menu yang sama.
 
 ---
 
-## 9. Cara bekerja yang diharapkan
+## 10. Cara bekerja yang diharapkan
 
 - Kerjakan satu langkah, jalankan test, baru lanjut. Jangan menumpuk
   perubahan besar tanpa menjalankan test.

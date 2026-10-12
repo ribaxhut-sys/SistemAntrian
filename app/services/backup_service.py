@@ -14,14 +14,19 @@ dapat ditulis.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import errno
+import hashlib
+import json
+import shutil
+import subprocess
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from app.core import clock
 from app.core.config import get_config, reset_config
 from app.core.database import dispose_engine, init_database, session_scope
-from app.core.errors import BusinessRuleError, NotFoundError, ValidationError
+from app.core.errors import AppError, BusinessRuleError, NotFoundError, ValidationError
 from app.core.logger import get_logger
 from app.models import AuditAction
 from app.services import audit_service
@@ -32,12 +37,39 @@ from app.services.settings_service import SettingsService
 
 logger = get_logger("backup")
 
+
+def _boleh_backup_di_sini() -> bool:
+    """
+    Backup otomatis hanya dibuat oleh komputer pemilik database.
+
+    SQLite selalu lokal. Untuk PostgreSQL, komputer loket tidak membuatnya:
+    pg_dump biasanya tidak terpasang di sana, sehingga backup gagal setiap
+    hari di setiap loket dan lognya penuh galat yang tidak berarti apa-apa.
+    """
+    config = get_config()
+    if config.memakai_sqlite:
+        return True
+    from app.core.mesin import SERVER, muat_pengaturan
+
+    if muat_pengaturan(config.db_path).peran == SERVER:
+        return True
+    host = (config.url_database.host or "").lower()
+    return host in {"127.0.0.1", "localhost", "::1"}
+
 #: Pola nama berkas backup, tanpa akhiran. Waktu ikut di nama supaya beberapa
 #: backup dalam satu hari tidak saling menimpa, dan urutannya terbaca tanpa
 #: membuka folder. Akhirannya ditentukan mesin: .db untuk SQLite, .dump untuk
 #: PostgreSQL.
 POLA_NAMA = "queue-%Y%m%d-%H%M%S"
 AWALAN = "queue-"
+
+#: Akhiran berkas checksum di samping setiap backup, berformat sha256sum
+#: ("<hex>  <nama>") supaya dapat diperiksa juga dengan perkakas umum.
+AKHIRAN_CHECKSUM = ".sha256"
+
+#: Catatan hasil backup terakhir, di folder backup. Bukan di database:
+#: backup paling sering gagal justru ketika database bermasalah.
+BERKAS_STATUS = ".status-backup.json"
 
 #: Batas bawah retensi. Nilai nol atau negatif akan menghapus backup yang
 #: baru saja dibuat, sehingga diperlakukan sebagai salah konfigurasi.
@@ -53,6 +85,8 @@ class BackupInfo:
     ukuran_byte: int
     #: Pembeda antar backup pada detik yang sama, mulai dari 1.
     urutan: int = 1
+    #: Ada berkas .sha256 di sampingnya. Backup lama belum mempunyainya.
+    checksum_ada: bool = False
 
     @property
     def nama(self) -> str:
@@ -81,6 +115,81 @@ class HasilBackup:
     berhasil: bool
     pesan: str
     info: BackupInfo | None = None
+
+
+@dataclass(frozen=True)
+class StatusBackup:
+    """Hasil backup terakhir yang berhasil dan yang gagal."""
+
+    terakhir_berhasil: datetime | None = None
+    terakhir_gagal: datetime | None = None
+    pesan_gagal: str = ""
+    #: Percobaan backup paling akhir gagal. Bendera, bukan perbandingan
+    #: waktu: gagal dan berhasil dapat terjadi pada detik yang sama.
+    gagal_terakhir: bool = False
+
+
+@dataclass(frozen=True)
+class HasilUjiBackup:
+    """Hasil pemeriksaan keutuhan satu backup."""
+
+    berhasil: bool
+    ringkasan: str
+    rincian: tuple[str, ...] = field(default_factory=tuple)
+
+
+def berkas_checksum(berkas: Path) -> Path:
+    return berkas.with_name(berkas.name + AKHIRAN_CHECKSUM)
+
+
+def hitung_sha256(berkas: Path) -> str:
+    h = hashlib.sha256()
+    with berkas.open("rb") as f:
+        for potongan in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(potongan)
+    return h.hexdigest()
+
+
+def tulis_checksum(berkas: Path) -> str:
+    nilai = hitung_sha256(berkas)
+    berkas_checksum(berkas).write_text(f"{nilai}  {berkas.name}\n", encoding="ascii")
+    return nilai
+
+
+def cocokkan_checksum(berkas: Path) -> bool | None:
+    """True cocok, False rusak/berubah, None bila tidak ada checksum."""
+    samping = berkas_checksum(berkas)
+    if not samping.is_file():
+        return None
+    try:
+        tercatat = samping.read_text(encoding="ascii").split()[0].lower()
+    except (OSError, UnicodeDecodeError, IndexError):
+        return False
+    return tercatat == hitung_sha256(berkas)
+
+
+def pesan_kegagalan(exc: BaseException, folder: Path | None = None) -> str:
+    """
+    Kalimat untuk petugas dari exception backup.
+
+    Detail teknisnya tetap masuk log oleh pemanggil; yang tampil di layar
+    hanya penyebab yang dapat ditindaklanjuti.
+    """
+    if isinstance(exc, AppError):
+        return exc.user_message
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return (
+            "Backup terlalu lama dan dihentikan. Periksa koneksi ke server "
+            "database, lalu coba lagi."
+        )
+    if isinstance(exc, PermissionError):
+        tempat = f" {folder}" if folder else ""
+        return f"Folder backup{tempat} tidak dapat ditulis. Periksa izin foldernya."
+    if isinstance(exc, OSError) and (
+        exc.errno == errno.ENOSPC or getattr(exc, "winerror", None) in (39, 112)
+    ):
+        return "Disk penuh: backup tidak dapat ditulis. Kosongkan ruang disk lalu coba lagi."
+    return "Backup gagal karena kesalahan tak terduga. Detailnya tersimpan pada file log."
 
 
 def _nama_bebas(folder: Path, waktu: datetime, akhiran: str) -> Path:
@@ -135,6 +244,7 @@ def _sebagai_info(berkas: Path, akhiran: str) -> BackupInfo:
         dibuat_pada=waktu,
         urutan=urutan,
         ukuran_byte=berkas.stat().st_size,
+        checksum_ada=berkas_checksum(berkas).is_file(),
     )
 
 
@@ -179,8 +289,57 @@ class BackupService:
         self.auth.require_permission(Permission.BACKUP_MANAGE)
         return self._daftar_berkas()
 
-    def _daftar_berkas(self) -> list[BackupInfo]:
-        folder = self.folder
+    @property
+    def folder_salinan(self) -> Path | None:
+        """Folder salinan kedua, misalnya disk lain atau flashdisk. None bila kosong."""
+        teks = (self.settings.get("backup.salinan_folder", "") or "").strip()
+        return Path(teks).expanduser() if teks else None
+
+    def status_backup(self) -> StatusBackup:
+        """Waktu backup terakhir yang berhasil, dan kegagalan sesudahnya."""
+        self.auth.require_permission(Permission.BACKUP_MANAGE)
+        return self._baca_status()
+
+    def _baca_status(self) -> StatusBackup:
+        def waktu(teks) -> datetime | None:
+            try:
+                return datetime.fromisoformat(teks) if teks else None
+            except (TypeError, ValueError):
+                return None
+
+        data: dict = {}
+        try:
+            data = json.loads((self.folder / BERKAS_STATUS).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+        berhasil = waktu(data.get("terakhir_berhasil"))
+        # Backup yang dibuat sebelum catatan ini ada tetap terhitung.
+        if berhasil is None:
+            daftar = self._daftar_berkas()
+            berhasil = daftar[0].dibuat_pada if daftar else None
+        return StatusBackup(
+            terakhir_berhasil=berhasil,
+            terakhir_gagal=waktu(data.get("terakhir_gagal")),
+            pesan_gagal=str(data.get("pesan_gagal") or ""),
+            gagal_terakhir=bool(data.get("gagal_terakhir")),
+        )
+
+    def _catat_status(self, **ubah) -> None:
+        """Catat hasil backup; kegagalan mencatat tidak boleh menggagalkan backup."""
+        berkas = self.folder / BERKAS_STATUS
+        try:
+            data = json.loads(berkas.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        data.update(ubah)
+        try:
+            berkas.parent.mkdir(parents=True, exist_ok=True)
+            berkas.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            logger.warning("Catatan status backup tidak dapat ditulis", exc_info=True)
+
+    def _daftar_berkas(self, folder: Path | None = None) -> list[BackupInfo]:
+        folder = self.folder if folder is None else folder
         if not folder.exists():
             return []
 
@@ -241,6 +400,12 @@ class BackupService:
         try:
             if not self.settings.get_bool("backup.auto_enabled", True):
                 return HasilBackup(False, "Backup otomatis dinonaktifkan.")
+            if not _boleh_backup_di_sini():
+                return HasilBackup(
+                    False,
+                    "Backup otomatis dilewati: database berada di komputer "
+                    "server, dan backup dibuat di sana.",
+                )
 
             hari = clock.today()
             if any(i.dibuat_pada.date() == hari for i in self._daftar_berkas()):
@@ -250,10 +415,11 @@ class BackupService:
             self._bersihkan_kedaluwarsa()
             logger.info("Backup otomatis dibuat: %s", info.nama)
             return HasilBackup(True, f"Backup otomatis dibuat: {info.nama}", info)
-        except Exception:
+        except Exception as exc:
             logger.exception("Backup otomatis gagal")
             return HasilBackup(
-                False, "Backup otomatis gagal. Detailnya tersimpan pada file log."
+                False,
+                f"Backup otomatis gagal. {pesan_kegagalan(exc, get_config().backup_dir)}",
             )
 
     def _salin(self, *, alasan: str) -> BackupInfo:
@@ -263,15 +429,52 @@ class BackupService:
 
         try:
             self.mesin.salin(tujuan)
-        except Exception:
+            # Checksum dihitung segera, selagi berkasnya pasti utuh. Rusak
+            # sesudahnya (disk, salinan ke flashdisk) akan tampak saat diuji.
+            tulis_checksum(tujuan)
+        except Exception as exc:
             # Berkas separuh jadi tidak boleh tertinggal di daftar backup:
             # ia tampak sah sampai ada yang mencoba memulihkannya.
             tujuan.unlink(missing_ok=True)
+            berkas_checksum(tujuan).unlink(missing_ok=True)
+            self._catat_status(
+                terakhir_gagal=clock.now().isoformat(timespec="seconds"),
+                pesan_gagal=pesan_kegagalan(exc, config.backup_dir),
+                gagal_terakhir=True,
+            )
             raise
 
         info = _sebagai_info(tujuan, self.mesin.akhiran)
+        self._catat_status(
+            terakhir_berhasil=clock.now().isoformat(timespec="seconds"),
+            gagal_terakhir=False,
+        )
         logger.info("Backup %s dibuat: %s (%s)", alasan, info.nama, info.label_ukuran)
+        self._salin_kedua(info)
         return info
+
+    def _salin_kedua(self, info: BackupInfo) -> None:
+        """
+        Salin backup ke folder kedua.
+
+        Backup di disk yang sama dengan database ikut hilang bila disk itu
+        rusak, padahal itulah alasan utama backup dibuat. Kegagalannya
+        (flashdisk dicabut, disk penuh) hanya dicatat: backup utama sudah
+        jadi dan tetap sah.
+        """
+        folder = self.folder_salinan
+        if folder is None:
+            return
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(info.berkas, folder / info.nama)
+            samping = berkas_checksum(info.berkas)
+            if samping.is_file():
+                shutil.copy2(samping, folder / samping.name)
+        except OSError as exc:
+            logger.warning("Salinan kedua backup %s gagal ke %s: %s", info.nama, folder, exc)
+            return
+        logger.info("Salinan kedua backup dibuat: %s", folder / info.nama)
 
     # =================================================================
     # Retensi
@@ -294,12 +497,20 @@ class BackupService:
 
         batas = clock.now().timestamp() - hari * 86400
         dihapus: list[str] = []
-        for info in self._daftar_berkas():
+        kedaluwarsa = list(self._daftar_berkas())
+        salinan = self.folder_salinan
+        if salinan is not None:
+            try:
+                kedaluwarsa += self._daftar_berkas(salinan)
+            except OSError:
+                logger.warning("Folder salinan backup %s tidak terbaca", salinan)
+        for info in kedaluwarsa:
             if info.dibuat_pada.timestamp() >= batas:
                 continue
             try:
                 info.berkas.unlink()
                 dihapus.append(info.nama)
+                berkas_checksum(info.berkas).unlink(missing_ok=True)
             except OSError:
                 # Berkas yang sedang dipakai program lain dilewati saja.
                 # Backup kedaluwarsa yang tertinggal jauh lebih ringan
@@ -327,17 +538,15 @@ class BackupService:
         """
         sesi = self.auth.require_permission(Permission.BACKUP_MANAGE)
 
-        sumber = Path(berkas)
-        if not sumber.is_absolute():
-            sumber = self.folder / sumber
-        if not sumber.exists():
-            raise NotFoundError("Berkas backup tidak ditemukan.")
+        sumber = self._sumber(berkas)
 
         config = get_config()
         if config.memakai_sqlite and sumber.resolve() == config.db_path.resolve():
             raise BusinessRuleError(
                 "Berkas yang dipilih adalah database yang sedang dipakai."
             )
+        if cocokkan_checksum(sumber) is False:
+            raise ValidationError(_PESAN_CHECKSUM_RUSAK)
         if not self.mesin.sah(sumber):
             raise ValidationError(
                 "Berkas yang dipilih bukan database antrian yang sah."
@@ -368,4 +577,63 @@ class BackupService:
             "Database dipulihkan dari %s (pengaman: %s)", sumber.name, pengaman.nama
         )
 
+    def _sumber(self, berkas: Path | str) -> Path:
+        sumber = Path(berkas)
+        if not sumber.is_absolute():
+            sumber = self.folder / sumber
+        if not sumber.exists():
+            raise NotFoundError("Berkas backup tidak ditemukan.")
+        return sumber
 
+    # =================================================================
+    # Uji keutuhan
+    # =================================================================
+
+    def uji_backup(self, berkas: Path | str) -> HasilUjiBackup:
+        """
+        Periksa sebuah backup benar-benar dapat dipulihkan, tanpa memulihkannya.
+
+        Backup yang rusak biasanya baru ketahuan saat dibutuhkan, dan pada
+        saat itu sudah terlambat. Urutannya: checksum (berkas tidak berubah
+        sejak dibuat), lalu isi (database antrian yang sah), lalu pemulihan
+        uji oleh mesin dialect-nya. Database aktif tidak disentuh.
+        """
+        self.auth.require_permission(Permission.BACKUP_MANAGE)
+        sumber = self._sumber(berkas)
+        rincian: list[str] = []
+
+        cocok = cocokkan_checksum(sumber)
+        if cocok is False:
+            logger.error("Uji backup %s: checksum tidak cocok", sumber.name)
+            return HasilUjiBackup(False, _PESAN_CHECKSUM_RUSAK)
+        rincian.append(
+            "Checksum cocok dengan saat backup dibuat."
+            if cocok
+            else "Tidak ada checksum (backup dibuat sebelum fitur ini ada)."
+        )
+
+        try:
+            if not self.mesin.sah(sumber):
+                return HasilUjiBackup(
+                    False, "Berkas ini bukan database antrian yang sah.", tuple(rincian)
+                )
+            rincian.append(self.mesin.uji_pulih(sumber))
+        except AppError as exc:
+            return HasilUjiBackup(False, exc.user_message, tuple(rincian))
+        except Exception:
+            logger.exception("Uji backup %s gagal", sumber.name)
+            return HasilUjiBackup(
+                False,
+                "Uji backup gagal karena kesalahan tak terduga. Detailnya "
+                "tersimpan pada file log.",
+                tuple(rincian),
+            )
+
+        logger.info("Uji backup %s berhasil", sumber.name)
+        return HasilUjiBackup(True, "Backup utuh dan dapat dipulihkan.", tuple(rincian))
+
+
+_PESAN_CHECKSUM_RUSAK = (
+    "Berkas backup rusak atau berubah sejak dibuat (checksum tidak cocok). "
+    "Pilih backup lain."
+)

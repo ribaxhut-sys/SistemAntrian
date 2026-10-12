@@ -36,6 +36,7 @@ class QueueStatus(str, Enum):
         WAITING -> CALLED -> SERVING -> COMPLETED
 
     Alur alternatif:
+        CALLED  -> SKIPPED -> CALLED
         CALLED  -> NO_SHOW
         WAITING -> CANCELLED
         CALLED  -> CANCELLED
@@ -46,6 +47,7 @@ class QueueStatus(str, Enum):
 
     WAITING = "WAITING"
     CALLED = "CALLED"
+    SKIPPED = "SKIPPED"
     SERVING = "SERVING"
     PAUSED = "PAUSED"
     COMPLETED = "COMPLETED"
@@ -74,13 +76,29 @@ class AuditAction(str, Enum):
     UPDATE_USER = "UPDATE_USER"
     CREATE_QUEUE = "CREATE_QUEUE"
     CALL_QUEUE = "CALL_QUEUE"
+    SKIP_QUEUE = "SKIP_QUEUE"
     START_SERVICE = "START_SERVICE"
     PAUSE_QUEUE = "PAUSE_QUEUE"
     RESUME_QUEUE = "RESUME_QUEUE"
     COMPLETE_QUEUE = "COMPLETE_QUEUE"
     NO_SHOW = "NO_SHOW"
     CANCEL_QUEUE = "CANCEL_QUEUE"
+    REASSIGN_QUEUE = "REASSIGN_QUEUE"
+    FORCE_CANCEL_QUEUE = "FORCE_CANCEL_QUEUE"
+    CLOSE_DAY = "CLOSE_DAY"
+    REOPEN_DAY = "REOPEN_DAY"
+    #: Sapuan otomatis nomor sisa hari-hari sebelumnya. Sengaja BUKAN
+    #: CLOSE_DAY: `buka_kembali_hari()` memulihkan Tutup Hari terakhir, dan
+    #: memulihkan nomor kemarin ke hari ini tidak pernah benar.
+    EXPIRE_QUEUE = "EXPIRE_QUEUE"
     SUBMIT_SURVEY = "SUBMIT_SURVEY"
+    SAVE_NOTE = "SAVE_NOTE"
+    DELETE_NOTE = "DELETE_NOTE"
+    ANONYMIZE_NOTE = "ANONYMIZE_NOTE"
     BACKUP = "BACKUP"
     RESTORE = "RESTORE"
     CHANGE_CONFIGURATION = "CHANGE_CONFIGURATION"
+    PAIR_DEVICE = "PAIR_DEVICE"
+    RENAME_DEVICE = "RENAME_DEVICE"
+    REVOKE_DEVICE = "REVOKE_DEVICE"
+    DELETE_DEVICE = "DELETE_DEVICE"

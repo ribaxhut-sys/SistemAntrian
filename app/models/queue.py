@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from app.models.counter import Counter
     from app.models.queue_call import QueueCall
     from app.models.service_category import ServiceCategory
+    from app.models.queue_note import QueueNote
     from app.models.survey import SatisfactionSurvey
     from app.models.user import User
 
@@ -40,6 +41,23 @@ class Queue(TimestampMixin, Base):
             "branch_id", "queue_date", "queue_number", name="uq_queue_date_number"
         ),
         sa.Index("ix_queue_date_status", "branch_id", "queue_date", "status"),
+        # Satu loket hanya boleh memegang satu nomor aktif per hari. SKIPPED
+        # sengaja tidak termasuk: nomor itu tetap menyimpan loket terakhir,
+        # tetapi loketnya sudah boleh memanggil pengunjung berikutnya. Indeks
+        # parsial menjaga invariant ini juga bila dua proses lolos dari
+        # pemeriksaan aplikasi pada saat yang persis bersamaan.
+        sa.Index(
+            "uq_queue_active_counter_date",
+            "counter_id",
+            "queue_date",
+            unique=True,
+            sqlite_where=sa.text(
+                "counter_id IS NOT NULL AND status IN ('CALLED', 'SERVING', 'PAUSED')"
+            ),
+            postgresql_where=sa.text(
+                "counter_id IS NOT NULL AND status IN ('CALLED', 'SERVING', 'PAUSED')"
+            ),
+        ),
         sa.CheckConstraint("sequence_number > 0", name="sequence_positive"),
     )
 
@@ -68,9 +86,9 @@ class Queue(TimestampMixin, Base):
     counter_id: Mapped[int | None] = mapped_column(
         sa.ForeignKey("counter.id", ondelete="RESTRICT"), index=True
     )
-    # Terisi saat pelayanan dimulai. Dipakai laporan per petugas; tidak
-    # diturunkan dari QueueCall karena pemanggilan ulang bisa dilakukan
-    # petugas yang berbeda dan akan mengacaukan atribusi.
+    # Petugas yang bertanggung jawab sejak nomor dipanggil. Dapat dialihkan
+    # ADMIN bila petugas meninggalkan pelayanan; hasil akhirnya dipakai
+    # laporan per petugas dan survey.
     served_by_user_id: Mapped[int | None] = mapped_column(
         sa.ForeignKey("app_user.id", ondelete="RESTRICT"), index=True
     )
@@ -87,6 +105,9 @@ class Queue(TimestampMixin, Base):
         back_populates="queue", order_by="QueueCall.call_number"
     )
     survey: Mapped[SatisfactionSurvey | None] = relationship(back_populates="queue")
+    note: Mapped[QueueNote | None] = relationship(
+        back_populates="queue", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Queue {self.queue_number} {self.status.value}>"

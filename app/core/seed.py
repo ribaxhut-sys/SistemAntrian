@@ -42,12 +42,30 @@ _COUNTERS: list[tuple[str, str]] = [
     ("LOKET-3", "Loket 3"),
 ]
 
-# (code, name, prefix, display_order)
+# (code, name, prefix, display_order, kode induk)
 # prefix menentukan nomor antrian: A-001, B-001, C-001.
-_CATEGORIES: list[tuple[str, str, str, int]] = [
-    ("KONSULTASI", "Konsultasi", "A", 1),
-    ("PENGADUAN", "Pengaduan", "B", 2),
-    ("INFORMASI", "Informasi", "C", 3),
+#
+# Induk disebut dengan KODE, bukan id, karena id-nya belum ada saat daftar
+# ini ditulis. Urutan daftar sekaligus urutan penyisipan: induk selalu
+# berada di atas anaknya, sehingga id induk pasti sudah terbit saat
+# anaknya menyusul.
+#
+# Jenis layanan yang punya anak berubah menjadi KELOMPOK dan berhenti
+# menerbitkan nomor. Prefix-nya tetap diisi supaya tetap unik dan tetap
+# sah bila kelak anaknya dilepas kembali.
+_CATEGORIES: list[tuple[str, str, str, int, str | None]] = [
+    ("KONSULTASI", "Konsultasi", "A", 1, None),
+    ("PBB", "PBB", "PB", 1, "KONSULTASI"),
+    ("PKB", "PKB", "KB", 2, "KONSULTASI"),
+    ("PAT", "PAT", "AT", 3, "KONSULTASI"),
+    ("REKLAME", "Reklame", "RK", 4, "KONSULTASI"),
+    ("PBJT", "PBJT", "PJ", 5, "KONSULTASI"),
+    ("RESTORAN", "Restoran", "RS", 1, "PBJT"),
+    ("PARKIR", "Parkir", "PR", 2, "PBJT"),
+    ("HOTEL", "Hotel", "HT", 3, "PBJT"),
+    ("HIBURAN", "Hiburan", "HB", 4, "PBJT"),
+    ("PENGADUAN", "Pengaduan", "B", 2, None),
+    ("INFORMASI", "Informasi", "C", 3, None),
 ]
 
 # (key, value, description)
@@ -58,19 +76,70 @@ _SETTINGS: list[tuple[str, str, str]] = [
      "Folder perkakas PostgreSQL bila tidak ada di PATH; kosongkan untuk SQLite"),
     ("backup.retention_days", "30",
      "Lama backup disimpan sebelum dihapus, dalam hari"),
+    ("backup.salinan_folder", "",
+     "Folder salinan kedua backup (disk lain/flashdisk); kosongkan bila tidak dipakai"),
     ("dashboard.refresh_seconds", "30",
      "Jeda penyegaran layar ringkasan harian, dalam detik"),
+    (
+        "display.screen_shape",
+        "auto",
+        "Bentuk layar antrian: auto | lebar | memanjang | tegak",
+    ),
+    ("display.theme", "kaca", "Tampilan layar antrian"),
     ("display.title", "ANTRIAN PELAYANAN CRO", "Judul pada layar display"),
-    ("display.next_count", "3", "Jumlah nomor berikutnya yang ditampilkan"),
+    ("display.info", "", "Pengumuman pada tema Split Informasi"),
+    ("display.next_count", "3", "Jumlah nomor berikutnya pada papan kios"),
+    ("display.list_rows", "5", "Baris nomor per kolom pada daftar menunggu"),
+    ("display.list_font_size", "0", "Ukuran huruf nomor menunggu; 0 = otomatis"),
+    ("display.rotate_seconds", "3", "Jeda pergantian halaman daftar menunggu, detik"),
+    ("display.number_font_scale", "100", "Ukuran huruf nomor antrian di layar, dalam persen"),
     ("display.sound_enabled", "true", "Suara saat nomor dipanggil"),
+    ("display.loket_tampil", "petugas",
+     "Loket di layar: petugas = hanya yang ada petugasnya, semua = semua loket aktif"),
     ("queue.max_call_attempts", "3", "Batas pemanggilan sebelum dianggap tidak hadir"),
+    ("queue.registration_open", "true", "Loket dan kios sedang menerima nomor baru"),
+    ("queue.registration_closed_date", "",
+     "Tanggal pendaftaran terakhir ditutup; dikelola otomatis oleh sistem"),
     ("kiosk.cooldown_seconds", "10",
      "Jeda antar-pengambilan nomor di mesin kios, dalam detik"),
+    ("kiosk.welcome_kind", "teks",
+     "Jenis isi panel sambutan anjungan: teks atau folder media"),
+    ("kiosk.judul", "",
+     "Judul tablet anjungan; kosong = ikut judul layar antrian"),
+    ("kiosk.subjudul", "", "Baris kecil di bawah judul tablet anjungan"),
+    ("kiosk.welcome_text", "",
+     "Teks sambutan anjungan; kosong berarti memakai teks bawaan"),
+    ("kiosk.welcome_file", "",
+     "Berkas terakhir yang ditambahkan ke folder media/kiosk"),
+    ("kiosk.welcome_slide_seconds", "10",
+     "Lama tiap gambar di folder media anjungan, dalam detik"),
+    ("kiosk.daftar_putar", "",
+     "Berkas media anjungan yang diputar, berurutan; kosong = semua"),
+    ("kiosk.suara_video", "false",
+     "Video di anjungan diputar dengan suara"),
+    ("kiosk.iklan_layar_penuh_detik", "60",
+     "Detik tanpa sentuhan sebelum iklan anjungan memenuhi layar; 0 = mati"),
+    ("kiosk.posisi_loket", "otomatis",
+     "Letak baris loket di anjungan: otomatis, atas, bawah, atau sembunyi"),
+    ("kiosk.tema", "biru",
+     "Tema anjungan: biru, hijau, kontras, gelap, atau merah_putih"),
+    ("kiosk.tema_agustus", "true",
+     "Anjungan memakai tema merah putih selama bulan Agustus"),
     ("survey.enabled", "true", "Tampilkan survey setelah pelayanan selesai"),
-    ("ticket.footer", "Silakan menunggu hingga nomor Anda dipanggil.",
+    ("ticket.header", "BAPENDA DKI JAKARTA",
+     "Judul di baris paling atas tiket antrian"),
+    ("ticket.footer", "Silakan menunggu nomor Anda dipanggil.",
      "Teks penutup pada tiket antrian"),
     ("ticket.printer", "pdf",
      "Cara mencetak tiket: pdf, system, atau none"),
+    ("ticket.geser_atas_mm", "0",
+     "Geser isi tiket ke atas pada pencetak Windows, dalam milimeter"),
+    ("ticket.turun_anjungan_mm", "4",
+     "Turunkan isi tiket anjungan Android, dalam milimeter"),
+    ("ticket.perkiraan_tunggu", "true",
+     "Cetak perkiraan waktu tunggu di tiket"),
+    ("privasi.retensi_pengaduan_bulan", "24",
+     "Masa simpan identitas pelapor pengaduan, dalam bulan (0 = selamanya)"),
 ]
 
 
@@ -111,24 +180,38 @@ def _seed_counters(session: Session, branch: Branch) -> int:
 
 def _seed_categories(session: Session, branch: Branch) -> int:
     created = 0
-    for code, name, prefix, order in _CATEGORIES:
+    #: kode -> id, terisi sambil berjalan supaya anak menemukan induknya.
+    #: Ikut memuat jenis layanan yang sudah ada agar seed yang diulang
+    #: pada database lama tetap dapat memasang anak di bawah induk yang
+    #: sudah tersimpan lebih dahulu.
+    id_kode: dict[str, int] = {}
+
+    for code, name, prefix, order, kode_induk in _CATEGORIES:
         exists = session.scalar(
             select(ServiceCategory).where(
                 ServiceCategory.branch_id == branch.id, ServiceCategory.code == code
             )
         )
-        if exists is None:
-            session.add(
-                ServiceCategory(
-                    branch_id=branch.id,
-                    code=code,
-                    name=name,
-                    prefix=prefix,
-                    display_order=order,
-                    status=RecordStatus.ACTIVE,
-                )
-            )
-            created += 1
+        if exists is not None:
+            id_kode[code] = exists.id
+            continue
+
+        category = ServiceCategory(
+            branch_id=branch.id,
+            parent_id=id_kode.get(kode_induk) if kode_induk else None,
+            code=code,
+            name=name,
+            prefix=prefix,
+            display_order=order,
+            status=RecordStatus.ACTIVE,
+        )
+        session.add(category)
+        # id induk harus sudah nyata sebelum anaknya disusun; tanpa flush,
+        # seluruh baris baru menunggu di memori tanpa id sampai commit.
+        session.flush()
+        id_kode[code] = category.id
+        created += 1
+
     if created:
         logger.info("Seed: %d jenis layanan dibuat", created)
     return created

@@ -26,7 +26,6 @@ import sqlite3
 import sys
 from pathlib import Path
 
-import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
@@ -233,7 +232,37 @@ def test_reportlab_generates_pdf(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------
-# 7. Alembic
+# 7. LAN API
+# ---------------------------------------------------------------------
+
+def test_android_kiosk_api_dependencies_available():
+    """The authenticated kiosk API is included in the Windows runtime bundle."""
+    import fastapi
+    import uvicorn
+
+    assert fastapi.__version__
+    assert uvicorn.__version__
+
+
+def test_versi_rilis_desktop_seragam():
+    """Versi paket, API, installer, skrip build, dan panduan harus sama."""
+    from app import __version__
+    from app.kiosk_api import create_app
+
+    root = Path(__file__).resolve().parent.parent
+    installer = (root / "installer.iss").read_text(encoding="utf-8")
+    build = (root / "build-installer.ps1").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+
+    assert f'#define MyAppVersion "{__version__}"' in installer
+    assert f"AntrianCRO-Setup-{__version__}" in installer
+    assert f"AntrianCRO-Setup-{__version__}.exe" in build
+    assert f"AntrianCRO-Setup-{__version__}.exe" in readme
+    assert create_app("token-rilis-panjang", object()).version == __version__
+
+
+# ---------------------------------------------------------------------
+# 8. Alembic
 # ---------------------------------------------------------------------
 
 def test_alembic_available_with_cli():
@@ -255,7 +284,7 @@ def test_alembic_available_with_cli():
 
 
 # ---------------------------------------------------------------------
-# 8. PyInstaller
+# 9. PyInstaller
 # ---------------------------------------------------------------------
 
 def test_pyinstaller_available():

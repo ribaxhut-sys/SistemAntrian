@@ -13,6 +13,11 @@ env/
 # ---- Packaging / build ----
 build/
 dist/
+**/build/
+**/.gradle/
+android-kiosk/local.properties
+# APK hasil build-android-kiosk.ps1 yang dibagikan server ke tablet
+/apk/
 *.egg-info/
 *.spec.bak
 
@@ -27,11 +32,40 @@ htmlcov/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data/mesin.json
+# Peran komputer ini terhadap pengunjung. Sifat SATU mesin, bukan isi
+# repositori: peran yang ikut ter-commit akan diwarisi setiap clone, dan
+# komputer berikutnya membuka layar milik komputer sebelumnya.
+data/peran.json
+# Token API anjungan. Rahasia; ditulis aplikasi untuk tugas SYSTEM.
+data/anjungan-token.txt
+data/anjungan-token.txt.tmp
 backup/*.db
+backup/*.dump
+backup/*.zip
+# Ditulis aplikasi setiap backup: sidik berkas dan waktu backup terakhir.
+backup/*.sha256
+backup/.status-backup.json
 tiket/
+Print hasil/
 assets/sounds/*.wav
 logs/
 *.log
+
+# ---- Media anjungan (diganti kapan saja, bukan isi repositori) ----
+# Gambar dan video sambutan maupun per layanan adalah isi yang ditukar
+# petugas sewaktu-waktu, bukan bagian dari aplikasi. Ukurannya puluhan
+# megabyte dan sekali masuk ia tinggal di riwayat selamanya, bahkan
+# sesudah dihapus. `.gitkeep` sengaja dikecualikan supaya foldernya tetap
+# ada sesudah clone — `daftar_media_kios()` memang sanggup menghadapi
+# folder yang hilang, tetapi folder yang ada lebih jelas bagi pemasang.
+media/kiosk/*
+!media/kiosk/.gitkeep
+VID/
+
+# ---- Keluaran tangkapan layar pengaturan ----
+# Ditulis ulang setiap kali tests/test_zz_pratinjau.py dijalankan.
+pengaturan-*.png
 
 # ---- Local config / secrets ----
 .env

@@ -172,6 +172,32 @@ def test_peran_kios_tidak_dapat_diberikan_kepada_akun(user_service):
         )
 
 
+def test_membuat_user_menerima_peran_berupa_string(user_service):
+    """
+    QComboBox PySide sering mengembalikan 'CRO' (str), bukan UserRole.CRO.
+    Tanpa normalisasi, role.value melempar AttributeError ke layar petugas.
+    """
+    user_id = user_service.create_user(
+        username="cro2",
+        full_name="Petugas CRO Dua",
+        password="sandibaru123",
+        role="CRO",
+    )
+
+    dibuat = user_service.get_user(user_id)
+    assert dibuat.role is UserRole.CRO
+
+
+def test_peran_tidak_dikenal_ditolak(user_service):
+    with pytest.raises(ValidationError, match="Peran tidak dikenali"):
+        user_service.create_user(
+            username="aneh",
+            full_name="Aneh",
+            password="sandibaru123",
+            role="bukan-peran",
+        )
+
+
 # ---------------------------------------------------------------------
 # Perubahan
 # ---------------------------------------------------------------------
@@ -200,6 +226,18 @@ def test_admin_tidak_dapat_mengubah_perannya_sendiri(user_service, users):
         )
 
     assert "akun Anda sendiri" in gagal.value.user_message
+
+
+def test_admin_dapat_mengubah_namanya_bila_peran_dari_ui_berupa_string(
+    user_service, users
+):
+    """Perbandingan `is` gagal jika combo mengembalikan 'ADMIN' bukan enum."""
+    diubah = user_service.update_user(
+        users["ADMIN"], full_name="Admin Kantor", role="ADMIN"
+    )
+
+    assert diubah.full_name == "Admin Kantor"
+    assert diubah.role is UserRole.ADMIN
 
 
 def test_admin_aktif_terakhir_tidak_dapat_diturunkan_perannya(user_service, users, auth):

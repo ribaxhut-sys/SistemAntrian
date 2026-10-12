@@ -12,20 +12,25 @@ menyembunyikan tombol, tetapi tidak boleh menjadi satu-satunya penjaga.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
+
+import sqlalchemy as sa
 
 from app.core import clock
 from app.core.database import session_scope
 from app.core.errors import (
     AuthenticationError,
     AuthorizationError,
+    BusinessRuleError,
     NotFoundError,
     ValidationError,
 )
 from app.core.logger import get_logger
 from app.core.security import hash_password, needs_rehash, validate_password_strength, verify_password
-from app.models import AuditAction, RecordStatus, UserRole
+from app.models import AuditAction, Counter, RecordStatus, UserRole
+from app.repositories.master_repository import CounterRepository
+from app.repositories.queue_repository import QueueRepository
 from app.repositories.user_repository import UserRepository, normalize_username
 from app.services import audit_service
 from app.services.permissions import Permission, permissions_for
@@ -47,6 +52,10 @@ class AuthSession:
     branch_id: int
     login_at: datetime
     must_change_password: bool = False
+    #: Loket bawaan petugas ini, dipakai layar pelayanan untuk memilih
+    #: loketnya sendiri begitu masuk. Kosong berarti belum ditetapkan —
+    #: petugas memilih sendiri seperti sebelumnya.
+    default_counter_id: int | None = None
 
     @property
     def permissions(self) -> frozenset[Permission]:
@@ -162,6 +171,7 @@ class AuthService:
                     branch_id=user.branch_id,
                     login_at=clock.now(),
                     must_change_password=user.must_change_password,
+                    default_counter_id=user.default_counter_id,
                 )
 
         if gagal is not None:
@@ -179,6 +189,13 @@ class AuthService:
             return
 
         sesi = self._session
+        if sesi.user_id is not None:
+            try:
+                self._lepas_hadir_loket(sesi.user_id)
+            except Exception:
+                # Logout tidak boleh gagal karena ini; tanda hadir yang
+                # tertinggal basi sendiri dalam BATAS_HADIR_PETUGAS_DETIK.
+                logger.warning("Tanda hadir %s tidak terhapus", sesi.username, exc_info=True)
         with session_scope() as session:
             audit_service.record(
                 session,
@@ -191,12 +208,15 @@ class AuthService:
         logger.info("Logout: %s", sesi.username)
 
     # -----------------------------------------------------------------
-    # Sesi kios
+    # Sesi mesin publik (tanpa login)
     # -----------------------------------------------------------------
 
     def mulai_sesi_kios(self) -> AuthSession:
         """
         Buka sesi mesin kios tanpa login.
+
+        Mesin ini adalah anjungan ambil nomor: pengunjung memilih jenis
+        layanan dan mencetak tiketnya sendiri.
 
         Komputer kios menghadap publik dan tidak diawasi. Menyimpan kata
         sandi petugas di mesin seperti itu — atau menempelkannya di bawah
@@ -213,14 +233,116 @@ class AuthService:
         sesi = AuthSession(
             user_id=None,
             username="kios",
-            full_name="Layar Pengunjung",
+            full_name="Anjungan Ambil Nomor",
             role=UserRole.KIOSK,
             branch_id=cabang,
             login_at=clock.now(),
         )
         self._session = sesi
-        logger.info("Sesi kios dimulai untuk cabang %s", cabang)
+        logger.info("Sesi anjungan dimulai untuk cabang %s", cabang)
         return sesi
+
+    def mulai_sesi_layar(self) -> AuthSession:
+        """
+        Buka sesi layar antrian ruang tunggu tanpa login.
+
+        Televisi ruang tunggu berdiri di tempat yang sama publiknya dengan
+        anjungan, dan alasan untuk tidak menyimpan kata sandi di sana persis
+        sama. Sebelumnya layar itu hanya dapat dibuka lewat akun berperan
+        DISPLAY, sehingga setiap mati listrik meninggalkan papan kosong
+        sampai ada yang datang mengetikkan sandi — dan sandi yang harus
+        diketik setiap pagi di ruang tunggu berakhir tertempel di bawah
+        keyboard.
+
+        Kewenangannya paling sempit di seluruh sistem: peran DISPLAY hanya
+        boleh MELIHAT papan. Ia tidak dapat menerbitkan nomor sekalipun,
+        berbeda dari anjungan.
+        """
+        cabang = self._cabang_pertama()
+        sesi = AuthSession(
+            user_id=None,
+            username="layar",
+            full_name="Layar Antrian",
+            role=UserRole.DISPLAY,
+            branch_id=cabang,
+            login_at=clock.now(),
+        )
+        self._session = sesi
+        logger.info("Sesi layar antrian dimulai untuk cabang %s", cabang)
+        return sesi
+
+    def mulai_sesi_pengembang(self) -> AuthSession:
+        """Masuk sebagai administrator tanpa nama dan sandi, hanya dari source."""
+        return self._mulai_sesi_uji(UserRole.ADMIN)
+
+    def mulai_sesi_petugas(self) -> AuthSession:
+        """Masuk sebagai petugas CRO tanpa nama dan sandi, hanya dari source."""
+        return self._mulai_sesi_uji(UserRole.CRO)
+
+    def _mulai_sesi_uji(self, peran: UserRole) -> AuthSession:
+        """
+        Pintasan uji tampilan: jangan minta nama/sandi, dan jangan paksa
+        ganti sandi bawaan. Pada .exe ditolak, karena komputer petugas
+        tidak boleh terbuka tanpa kunci.
+        """
+        from app.core.config import lewati_login_pengembang
+        from app.core.seed import DEFAULT_ADMIN_USERNAME
+
+        if not lewati_login_pengembang():
+            raise BusinessRuleError(
+                "Pintasan masuk pengembang hanya untuk uji dari source."
+            )
+
+        with session_scope() as session:
+            repo = UserRepository(session)
+            user = None
+            if peran is UserRole.ADMIN:
+                user = repo.get_by_username(DEFAULT_ADMIN_USERNAME)
+            if user is None:
+                kandidat = [
+                    u
+                    for u in repo.list_by_role(peran)
+                    if u.status is RecordStatus.ACTIVE
+                ]
+                terikat = [u for u in kandidat if u.default_counter_id is not None]
+                user = (terikat or kandidat or [None])[0]
+            if user is None or user.status is not RecordStatus.ACTIVE:
+                if peran is UserRole.ADMIN:
+                    raise NotFoundError(
+                        "Akun administrator belum ada. Jalankan aplikasi sekali "
+                        "terlebih dahulu agar data awal terbentuk."
+                    )
+                raise NotFoundError(
+                    "Akun petugas CRO belum ada. Buat akun petugas di Data Master "
+                    "sebelum membuka layar petugas."
+                )
+
+            user.last_login_at = clock.now()
+            audit_service.record(
+                session,
+                AuditAction.LOGIN,
+                user_id=user.id,
+                entity_type="app_user",
+                entity_id=user.id,
+                role=user.role.value,
+                alasan="pintasan pengembang tanpa sandi",
+            )
+            self._session = AuthSession(
+                user_id=user.id,
+                username=user.username,
+                full_name=user.full_name,
+                role=user.role,
+                branch_id=user.branch_id,
+                login_at=clock.now(),
+                must_change_password=False,
+                default_counter_id=user.default_counter_id,
+            )
+
+        logger.warning(
+            "Masuk sebagai %s tanpa sandi (pintasan pengembang)",
+            self._session.username,
+        )
+        return self._session
 
     @staticmethod
     def _cabang_pertama() -> int:
@@ -326,8 +448,168 @@ class AuthService:
             branch_id=sesi.branch_id,
             login_at=sesi.login_at,
             must_change_password=False,
+            default_counter_id=sesi.default_counter_id,
         )
         logger.info("Kata sandi diganti: %s", sesi.username)
+
+    def pindah_loket(self, counter_id: int | None) -> AuthSession:
+        """
+        Pindahkan petugas yang sedang masuk ke loket lain, dan ingat itu.
+
+        Pindah meja terjadi tanpa rencana — petugas menggantikan rekannya,
+        atau loketnya rusak — dan tidak masuk akal menunggu admin untuk hal
+        sesederhana itu. Karena itu petugas boleh mengubah loketnya sendiri,
+        dan pilihannya disimpan sebagai loket bawaan supaya besok tidak
+        perlu diulang.
+
+        Menyimpannya juga mencegah petugas harus memilih ulang setiap kali
+        masuk. Layar pelayanan tidak pernah memilih loket pertama secara
+        diam-diam ketika akun belum memiliki loket bawaan.
+        """
+        sesi = self.require_permission(Permission.QUEUE_CALL)
+        if sesi.user_id is None:
+            raise BusinessRuleError("Sesi kios tidak memiliki loket.")
+
+        with session_scope() as session:
+            user = UserRepository(session).get_by_id(sesi.user_id)
+            if user is None:
+                raise NotFoundError("Akun tidak ditemukan.")
+
+            tujuan = None
+            if counter_id is not None:
+                tujuan = CounterRepository(session).get_by_id(counter_id)
+                if tujuan is None or tujuan.branch_id != sesi.branch_id:
+                    raise NotFoundError("Loket tidak ditemukan.")
+                if tujuan.status is not RecordStatus.ACTIVE:
+                    raise BusinessRuleError(
+                        f"Loket {tujuan.name!r} sedang tidak aktif."
+                    )
+
+            loket_semula = user.default_counter_id
+            if counter_id != loket_semula:
+                antrean = QueueRepository(session)
+                if loket_semula is not None:
+                    sedang = antrean.sedang_ditangani_loket(
+                        loket_semula, clock.today()
+                    )
+                    if (
+                        sedang is not None
+                        and sedang.served_by_user_id in (None, sesi.user_id)
+                    ):
+                        raise BusinessRuleError(
+                            f"Selesaikan antrian {sedang.queue_number} di "
+                            "loket saat ini sebelum berpindah."
+                        )
+
+                if counter_id is not None:
+                    sedang = antrean.sedang_ditangani_loket(
+                        counter_id, clock.today()
+                    )
+                    if (
+                        sedang is not None
+                        and sedang.served_by_user_id != sesi.user_id
+                    ):
+                        nama = tujuan.name if tujuan is not None else "tersebut"
+                        raise BusinessRuleError(
+                            f"Loket {nama!r} masih menangani antrian "
+                            f"{sedang.queue_number}. Pilih loket lain."
+                        )
+
+            user.default_counter_id = counter_id
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="app_user",
+                entity_id=sesi.user_id,
+                tindakan="pindah loket",
+                default_counter_id=counter_id,
+            )
+
+        self._session = replace(sesi, default_counter_id=counter_id)
+        logger.info("Petugas %s pindah ke loket %s", sesi.username, counter_id)
+        try:
+            # Papan langsung mengikuti, tidak menunggu tanda hidup berikutnya.
+            self.tanda_hadir_loket()
+        except Exception:
+            logger.warning("Tanda hadir sesudah pindah loket gagal", exc_info=True)
+        return self._session
+
+    # -----------------------------------------------------------------
+    # Tanda hadir petugas di loket
+    # -----------------------------------------------------------------
+
+    def tanda_hadir_loket(self) -> int | None:
+        """
+        Catat bahwa petugas ini sedang login di loketnya; kembalikan loketnya.
+
+        Dipanggil berkala oleh jendela petugas (MainWindow). Loket dibaca
+        dari database, bukan dari sesi, supaya penugasan ulang oleh admin
+        ikut terbawa; tanda di loket lain milik petugas yang sama dihapus.
+        `updated_at` loket sengaja tidak disentuh: ini keadaan, bukan
+        perubahan data master.
+        """
+        sesi = self.require_session()
+        if sesi.user_id is None:
+            return None
+        with session_scope() as session:
+            user = UserRepository(session).get_by_id(sesi.user_id)
+            if user is None:
+                return None
+            loket_id = user.default_counter_id
+            lepas = sa.update(Counter).where(Counter.petugas_user_id == sesi.user_id)
+            if loket_id is not None:
+                lepas = lepas.where(Counter.id != loket_id)
+            session.execute(
+                lepas.values(
+                    petugas_user_id=None,
+                    petugas_terlihat_pada=None,
+                    updated_at=Counter.updated_at,
+                )
+            )
+            if loket_id is not None:
+                session.execute(
+                    sa.update(Counter)
+                    .where(Counter.id == loket_id)
+                    .values(
+                        petugas_user_id=sesi.user_id,
+                        petugas_terlihat_pada=clock.now(),
+                        updated_at=Counter.updated_at,
+                    )
+                )
+        return loket_id
+
+    @staticmethod
+    def _lepas_hadir_loket(user_id: int) -> None:
+        with session_scope() as session:
+            session.execute(
+                sa.update(Counter)
+                .where(Counter.petugas_user_id == user_id)
+                .values(
+                    petugas_user_id=None,
+                    petugas_terlihat_pada=None,
+                    updated_at=Counter.updated_at,
+                )
+            )
+
+    def sinkronkan_loket(self) -> AuthSession:
+        """Segarkan loket sesi dari database tanpa mengubah penugasannya."""
+        sesi = self.require_permission(Permission.QUEUE_CALL)
+        if sesi.user_id is None:
+            return sesi
+
+        with session_scope() as session:
+            user = UserRepository(session).get_by_id(sesi.user_id)
+            if user is None:
+                raise NotFoundError("Akun tidak ditemukan.")
+            loket_terbaru = user.default_counter_id
+
+        if loket_terbaru != sesi.default_counter_id:
+            self._session = replace(sesi, default_counter_id=loket_terbaru)
+            logger.info(
+                "Loket sesi %s disinkronkan ke %s", sesi.username, loket_terbaru
+            )
+        return self.current_session
 
 
 _auth_service: AuthService | None = None

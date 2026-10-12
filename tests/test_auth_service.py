@@ -9,6 +9,7 @@ from app.core.database import session_scope
 from app.core.errors import (
     AuthenticationError,
     AuthorizationError,
+    BusinessRuleError,
     ValidationError,
 )
 from app.models import AuditLog, RecordStatus, User, UserRole
@@ -40,6 +41,42 @@ def test_login_kata_sandi_salah_ditolak(auth):
     with pytest.raises(AuthenticationError):
         auth.login("cro", "salah-sekali")
     assert not auth.is_authenticated
+
+
+def test_sesi_pengembang_masuk_sebagai_admin_tanpa_sandi(auth, users):
+    """Uji tampilan: jangan minta nama/sandi, dan jangan paksa ganti sandi."""
+    sesi = auth.mulai_sesi_pengembang()
+
+    assert sesi.role is UserRole.ADMIN
+    assert sesi.must_change_password is False
+    assert auth.has_permission(Permission.CONFIG_MANAGE)
+
+
+def test_sesi_pengembang_ditolak_bila_pintasan_mati(auth, users, monkeypatch):
+    monkeypatch.setenv("ANTRIAN_LEWATI_LOGIN", "0")
+    with pytest.raises(BusinessRuleError):
+        auth.mulai_sesi_pengembang()
+
+
+def test_sesi_petugas_masuk_sebagai_cro_tanpa_sandi(auth, users):
+    """
+    Layar petugas harus masuk sebagai CRO, bukan admin.
+
+    Admin tidak punya hak memanggil. Pintasan uji yang selalu membuka
+    admin membuat tombol F2 tidak pernah muncul.
+    """
+    sesi = auth.mulai_sesi_petugas()
+
+    assert sesi.role is UserRole.CRO
+    assert sesi.must_change_password is False
+    assert auth.has_permission(Permission.QUEUE_CALL)
+    assert not auth.has_permission(Permission.CONFIG_MANAGE)
+
+
+def test_sesi_petugas_ditolak_bila_pintasan_mati(auth, users, monkeypatch):
+    monkeypatch.setenv("ANTRIAN_LEWATI_LOGIN", "0")
+    with pytest.raises(BusinessRuleError):
+        auth.mulai_sesi_petugas()
 
 
 def test_login_nama_pengguna_tidak_terdaftar_ditolak(auth):
@@ -293,3 +330,53 @@ def test_audit_log_tidak_memuat_kata_sandi(auth):
     assert TEST_PASSWORD not in isi
     assert "sandibaru123" not in isi
     assert "tebakan-sandi" not in isi
+
+
+# ---------------------------------------------------------------------
+# Sesi layar antrian tanpa login
+# ---------------------------------------------------------------------
+
+def test_sesi_layar_antrian_tanpa_login(auth):
+    """
+    Televisi ruang tunggu berdiri di tempat sepublik anjungan.
+
+    Sebelumnya layar itu hanya dapat dibuka lewat akun DISPLAY, sehingga
+    setiap mati listrik meninggalkan papan kosong sampai ada yang datang
+    mengetikkan sandi — dan sandi yang diketik setiap pagi di ruang tunggu
+    berakhir tertempel di bawah keyboard.
+    """
+    from app.models import UserRole
+
+    sesi = auth.mulai_sesi_layar()
+
+    assert sesi.role is UserRole.DISPLAY
+    assert sesi.user_id is None
+    assert auth.is_authenticated
+
+
+def test_layar_antrian_hanya_boleh_melihat(auth):
+    """
+    Kewenangan paling sempit di seluruh sistem.
+
+    Berbeda dari anjungan, televisi tidak boleh menerbitkan nomor
+    sekalipun: tidak ada seorang pun yang berdiri di depannya untuk itu.
+    """
+    from app.services.permissions import Permission
+
+    auth.mulai_sesi_layar()
+
+    assert auth.has_permission(Permission.DISPLAY_VIEW)
+    assert not auth.has_permission(Permission.QUEUE_CREATE)
+    assert not auth.has_permission(Permission.TICKET_PRINT)
+    assert not auth.has_permission(Permission.QUEUE_CALL)
+
+
+def test_layar_antrian_bukan_sesi_anjungan(auth):
+    """
+    `kios` menentukan menu mana yang muncul. Televisi yang dianggap
+    anjungan akan mendapat tombol ambil nomor yang tidak pernah ada orang
+    di depannya untuk menekannya.
+    """
+    assert auth.mulai_sesi_layar().kios is False
+    auth.logout()
+    assert auth.mulai_sesi_kios().kios is True

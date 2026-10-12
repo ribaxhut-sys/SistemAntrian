@@ -9,21 +9,53 @@ nomor yang sama.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timedelta
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session, selectinload
 
 from app.core import clock
 from app.core.database import transaksi_tulis
-from app.models import Queue, QueueCall, QueueStatus, ServiceCategory
+from app.models import (
+    KioskTicketRequest,
+    Queue,
+    QueueCall,
+    QueueStatus,
+    ServiceCategory,
+)
 
 #: Status yang berarti loket sedang menangani seseorang.
 STATUS_SIBUK = (QueueStatus.CALLED, QueueStatus.SERVING, QueueStatus.PAUSED)
 
 #: Status yang berarti antrian masih akan dilayani.
-STATUS_BELUM_SELESAI = (QueueStatus.WAITING, *STATUS_SIBUK)
+STATUS_BELUM_SELESAI = (QueueStatus.WAITING, QueueStatus.SKIPPED, *STATUS_SIBUK)
+
+#: Saat sebuah nomor dianggap hangus, pada tanggalnya sendiri.
+#:
+#: Bukan waktu sapuannya dijalankan. Nomor kemarin hangus kemarin, dan
+#: menuliskan waktu hari ini membuat `rata_rata_durasi` menghitung lama
+#: pelayanan berhari-hari untuk nomor yang loketnya sudah pulang.
+AKHIR_HARI = time(23, 59, 59)
+
+#: Kunci advisory PostgreSQL yang mengantrekan penulisan baris QueueCall.
+#: Angka bebas yang tidak dipakai kunci lain ("ANTRIPGL" dalam heksadesimal).
+KUNCI_URUTAN_PANGGILAN = 0x414E54524950474C
+
+
+#: Umur kunci idempotensi tiket anjungan sebelum boleh dibuang. Tablet
+#: mengulang permintaan dalam hitungan detik sampai menit; seminggu sudah
+#: jauh melampaui itu dan menjaga tabelnya tetap kecil.
+UMUR_KUNCI_TIKET = timedelta(days=7)
+
+
+@dataclass(frozen=True)
+class KunciTiket:
+    """Kunci idempotensi permintaan tiket: perangkat pengirim dan UUID-nya."""
+
+    device_id: str
+    request_id: str
 
 
 @dataclass(frozen=True)
@@ -37,7 +69,12 @@ class NomorTerbit:
 
 
 def terbitkan_nomor(
-    *, branch_id: int, category_id: int, prefix: str, tanggal: date | None = None
+    *,
+    branch_id: int,
+    category_id: int,
+    prefix: str,
+    tanggal: date | None = None,
+    kunci: KunciTiket | None = None,
 ) -> NomorTerbit:
     """
     Terbitkan satu nomor antrian baru.
@@ -61,6 +98,11 @@ def terbitkan_nomor(
     Nomor dihitung per cabang, per tanggal, per jenis layanan, sehingga
     otomatis mulai dari 1 lagi setiap hari dan A-001 dapat hidup
     berdampingan dengan B-001.
+
+    `kunci` (permintaan dari anjungan Android) ikut disisipkan di transaksi
+    yang sama. Bila pasangan (device_id, request_id) itu sudah ada,
+    IntegrityError diangkat dan SELURUH transaksi batal — urutan nomor
+    tidak ikut naik, dan pemanggil mengembalikan tiket yang sudah terbit.
     """
     hari = tanggal or clock.today()
     sekarang = clock.now()
@@ -118,6 +160,27 @@ def terbitkan_nomor(
             },
         ).scalar_one()
 
+        if kunci is not None:
+            tabel = KioskTicketRequest.__table__
+            # Kunci kedaluwarsa cukup dibuang sekali sehari, pada nomor
+            # pertama jenis layanan ini — bukan di setiap tiket, karena
+            # transaksi ini memegang kunci penomoran yang ditunggu loket
+            # dan anjungan lain.
+            if urutan == 1:
+                conn.execute(
+                    tabel.delete().where(tabel.c.created_at < sekarang - UMUR_KUNCI_TIKET)
+                )
+            conn.execute(
+                tabel.insert().values(
+                    device_id=kunci.device_id,
+                    request_id=kunci.request_id,
+                    category_id=category_id,
+                    queue_id=queue_id,
+                    created_at=sekarang,
+                    updated_at=sekarang,
+                )
+            )
+
     return NomorTerbit(
         queue_id=queue_id, queue_number=nomor, sequence_number=urutan, queue_date=hari
     )
@@ -140,15 +203,36 @@ class QueueRepository:
             selectinload(Queue.served_by),
         )
 
-    def get_by_id(self, queue_id: int) -> Queue | None:
+    def get_by_id(self, queue_id: int, *, for_update: bool = False) -> Queue | None:
+        stmt = sa.select(Queue).where(Queue.id == queue_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        return self.session.scalar(self._dengan_relasi(stmt))
+
+    def tiket_anjungan(self, kunci: KunciTiket) -> KioskTicketRequest | None:
+        """Permintaan tiket anjungan yang sudah pernah diterbitkan, bila ada."""
         return self.session.scalar(
-            self._dengan_relasi(sa.select(Queue).where(Queue.id == queue_id))
+            sa.select(KioskTicketRequest).where(
+                KioskTicketRequest.device_id == kunci.device_id,
+                KioskTicketRequest.request_id == kunci.request_id,
+            )
         )
 
     def list_menunggu(
-        self, branch_id: int, tanggal: date, *, category_id: int | None = None
+        self,
+        branch_id: int,
+        tanggal: date,
+        *,
+        category_id: int | None = None,
+        category_ids: Sequence[int] | None = None,
     ) -> list[Queue]:
-        """Antrian yang belum dipanggil, urut sesuai waktu pengambilan nomor."""
+        """
+        Antrian yang belum dipanggil, urut sesuai waktu pengambilan nomor.
+
+        `category_id` adalah penyaringan yang dipilih petugas saat itu;
+        `category_ids` adalah batas jenis layanan yang boleh dipanggil
+        loketnya. None pada `category_ids` berarti tidak dibatasi.
+        """
         stmt = (
             sa.select(Queue)
             .where(
@@ -160,10 +244,44 @@ class QueueRepository:
         )
         if category_id is not None:
             stmt = stmt.where(Queue.category_id == category_id)
+        if category_ids is not None:
+            stmt = stmt.where(Queue.category_id.in_(list(category_ids)))
         return list(self.session.scalars(self._dengan_relasi(stmt)))
 
+    def list_dilewati(self, branch_id: int, tanggal: date) -> list[Queue]:
+        """Nomor yang dilewati sementara, terbaru lebih dulu."""
+        stmt = (
+            sa.select(Queue)
+            .where(
+                Queue.branch_id == branch_id,
+                Queue.queue_date == tanggal,
+                Queue.status == QueueStatus.SKIPPED,
+            )
+            .order_by(Queue.updated_at.desc(), Queue.id.desc())
+        )
+        return list(self.session.scalars(self._dengan_relasi(stmt)))
+
+    def nomor_menunggu(self, branch_id: int, tanggal: date) -> list[str]:
+        """Nomor antrian yang belum dipanggil, urutan sama dengan `list_menunggu`."""
+        return list(
+            self.session.scalars(
+                sa.select(Queue.queue_number)
+                .where(
+                    Queue.branch_id == branch_id,
+                    Queue.queue_date == tanggal,
+                    Queue.status == QueueStatus.WAITING,
+                )
+                .order_by(Queue.created_at, Queue.id)
+            )
+        )
+
     def berikutnya_untuk_dipanggil(
-        self, branch_id: int, tanggal: date, *, category_id: int | None = None
+        self,
+        branch_id: int,
+        tanggal: date,
+        *,
+        category_id: int | None = None,
+        category_ids: Sequence[int] | None = None,
     ) -> Queue | None:
         """
         Antrian paling depan yang menunggu.
@@ -171,7 +289,9 @@ class QueueRepository:
         Urutannya murni siapa datang lebih dahulu, lintas jenis layanan.
         Prefix hanya membedakan penomoran, bukan menentukan prioritas.
         """
-        daftar = self.list_menunggu(branch_id, tanggal, category_id=category_id)
+        daftar = self.list_menunggu(
+            branch_id, tanggal, category_id=category_id, category_ids=category_ids
+        )
         return daftar[0] if daftar else None
 
     def sedang_ditangani_loket(self, counter_id: int, tanggal: date) -> Queue | None:
@@ -187,6 +307,29 @@ class QueueRepository:
                 .order_by(Queue.called_at.desc())
             )
         )
+
+    def list_sedang_ditangani(
+        self, branch_id: int, tanggal: date, *, for_update: bool = False
+    ) -> list[Queue]:
+        """
+        Antrian yang sedang dipegang seluruh loket cabang, hari ini.
+
+        Diurutkan dari panggilan terbaru supaya pemanggil dapat mengambil
+        satu baris pertama per loket tanpa query tambahan.
+        """
+        stmt = (
+            sa.select(Queue)
+            .where(
+                Queue.branch_id == branch_id,
+                Queue.queue_date == tanggal,
+                Queue.status.in_(STATUS_SIBUK),
+                Queue.counter_id.is_not(None),
+            )
+            .order_by(Queue.called_at.desc())
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        return list(self.session.scalars(self._dengan_relasi(stmt)))
 
     def list_hari_ini(
         self, branch_id: int, tanggal: date, *, status: tuple[QueueStatus, ...] | None = None
@@ -216,6 +359,81 @@ class QueueRepository:
                 )
             )
         )
+
+    def list_by_ids(self, ids: list[int]) -> list[Queue]:
+        """Antrian dari sekumpulan id, tanpa urutan tertentu."""
+        if not ids:
+            return []
+        return list(
+            self.session.scalars(
+                self._dengan_relasi(sa.select(Queue).where(Queue.id.in_(ids)))
+            )
+        )
+
+    def list_belum_selesai(self, branch_id: int, sampai: date) -> list[Queue]:
+        """
+        Antrian yang belum mencapai status akhir, pada tanggal itu atau
+        sebelumnya.
+
+        Dipakai oleh "Tutup Hari": mengumpulkan nomor yang masih menunggu,
+        dilewati, dipanggil, dilayani, atau ditunda, termasuk sisa hari-hari
+        sebelumnya yang tidak sempat ditutup.
+        """
+        stmt = (
+            sa.select(Queue)
+            .where(
+                Queue.branch_id == branch_id,
+                Queue.queue_date <= sampai,
+                Queue.status.in_(STATUS_BELUM_SELESAI),
+            )
+            .order_by(Queue.queue_date, Queue.created_at)
+        )
+        return list(self.session.scalars(self._dengan_relasi(stmt)))
+
+    def batalkan_sisa_sebelum(
+        self, tanggal: date, *, branch_id: int | None = None
+    ) -> list[tuple[int, date, int]]:
+        """
+        Batalkan antrian belum selesai dari tanggal-tanggal SEBELUM `tanggal`.
+
+        Mengembalikan `(branch_id, queue_date, jumlah)` untuk setiap hari
+        yang benar-benar tersapu. `branch_id` None menyapu seluruh cabang —
+        sapuan ini berjalan saat aplikasi mulai, sebelum ada yang masuk,
+        sehingga belum ada cabang yang dapat dijadikan batas.
+
+        Ditulis sebagai UPDATE per hari, bukan baris demi baris lewat ORM,
+        karena dua alasan. `completed_at` harus mengikuti tanggal barisnya
+        sendiri (lihat `AKHIR_HARI`), sehingga satu UPDATE untuk semua hari
+        tidak mungkin. Dan `rowcount` UPDATE menghitung baris yang SUNGGUH
+        berubah: bila lima komputer loket menyala berbarengan dan sama-sama
+        menyapu, hanya yang pertama menerima angka bukan nol, sehingga
+        auditnya tidak tercatat lima kali untuk pekerjaan yang sama.
+        """
+        dasar = [Queue.queue_date < tanggal, Queue.status.in_(STATUS_BELUM_SELESAI)]
+        if branch_id is not None:
+            dasar.append(Queue.branch_id == branch_id)
+
+        kelompok = self.session.execute(
+            sa.select(Queue.branch_id, Queue.queue_date).where(*dasar).distinct()
+        ).all()
+
+        hasil: list[tuple[int, date, int]] = []
+        for cabang, hari in kelompok:
+            jumlah = self.session.execute(
+                sa.update(Queue)
+                .where(
+                    Queue.branch_id == cabang,
+                    Queue.queue_date == hari,
+                    Queue.status.in_(STATUS_BELUM_SELESAI),
+                )
+                .values(
+                    status=QueueStatus.CANCELLED,
+                    completed_at=datetime.combine(hari, AKHIR_HARI),
+                )
+            ).rowcount
+            if jumlah:
+                hasil.append((cabang, hari, jumlah))
+        return hasil
 
     def hitung_per_status(self, branch_id: int, tanggal: date) -> dict[QueueStatus, int]:
         """Jumlah antrian per status untuk satu hari."""
@@ -285,6 +503,37 @@ class QueueRepository:
             None if rata_layanan is None else float(rata_layanan),
         )
 
+    def sampel_lama_layanan(
+        self, branch_id: int, sampai: date, *, hari: int = 30, batas: int = 2000
+    ) -> list[tuple[int, date, float]]:
+        """
+        Lama pelayanan (detik) antrian SELESAI, terbaru lebih dulu.
+
+        Bahan perkiraan waktu tunggu di tiket. Hanya COMPLETED: nomor yang
+        hangus mendapat `completed_at` akhir hari (lihat AKHIR_HARI) dan
+        akan terbaca sebagai pelayanan berjam-jam. Durasi nol atau negatif
+        (jam komputer bergeser) dibuang di sini, bukan di pemakainya.
+        """
+        durasi = self._selisih_detik(Queue.serving_at, Queue.completed_at)
+        stmt = (
+            sa.select(Queue.category_id, Queue.queue_date, durasi)
+            .where(
+                Queue.branch_id == branch_id,
+                Queue.queue_date > sampai - timedelta(days=hari),
+                Queue.queue_date <= sampai,
+                Queue.status == QueueStatus.COMPLETED,
+                Queue.serving_at.is_not(None),
+                Queue.completed_at.is_not(None),
+            )
+            .order_by(Queue.completed_at.desc())
+            .limit(batas)
+        )
+        return [
+            (kategori, tanggal, float(detik))
+            for kategori, tanggal, detik in self.session.execute(stmt)
+            if detik is not None and float(detik) > 0
+        ]
+
     def _selisih_detik(self, awal, akhir):
         """
         Selisih dua kolom waktu dalam detik, sesuai dialect yang dipakai.
@@ -306,6 +555,32 @@ class QueueRepository:
     # Pemanggilan
     # -----------------------------------------------------------------
 
+    def klaim_untuk_dipanggil(self, queue_id: int) -> bool:
+        """
+        Ambil satu antrian WAITING untuk loket ini, atau gagal bila sudah diambil.
+
+        Satu UPDATE bersyarat, bukan baca-lalu-tulis. Dua loket dapat sama-
+        sama MELIHAT nomor yang sama menunggu, tetapi hanya satu UPDATE yang
+        menemukan statusnya masih WAITING:
+
+        * PostgreSQL: UPDATE kedua menunggu kunci baris milik yang pertama,
+          lalu menilai ulang WHERE sesudah yang pertama commit — dan tidak
+          menemukan apa pun.
+        * SQLite: penulis diantrekan oleh kunci tulis database; UPDATE
+          kedua berjalan sesudah yang pertama commit dan juga kosong.
+
+        Objek ORM di session sengaja tidak disinkronkan. Pemanggil tetap
+        memindahkan statusnya lewat `_pindah_status` supaya aturan transisi
+        dan kolom pendampingnya tetap ditulis di satu tempat.
+        """
+        hasil = self.session.execute(
+            sa.update(Queue)
+            .where(Queue.id == queue_id, Queue.status == QueueStatus.WAITING)
+            .values(status=QueueStatus.CALLED, updated_at=clock.now())
+            .execution_options(synchronize_session=False)
+        )
+        return hasil.rowcount == 1
+
     def jumlah_pemanggilan(self, queue_id: int) -> int:
         return (
             self.session.scalar(
@@ -324,7 +599,20 @@ class QueueRepository:
 
         Baris lama tidak pernah ditimpa, sehingga terlihat berapa kali
         sebuah nomor dipanggil sebelum dilayani atau dinyatakan tidak hadir.
+
+        Di PostgreSQL penulisan panggilan diantrekan dengan advisory lock
+        sampai transaksinya selesai. Layar antrian dan anjungan bersuara
+        hanya mengingat id panggilan terakhir yang sudah diucapkannya
+        (`panggilan_sejak`). Tanpa kunci, id dibagikan saat flush, bukan saat
+        commit: Loket 1 mendapat id 37, Loket 2 id 38 dan commit lebih dulu,
+        perangkat bertanya tepat di antaranya dan mencatat 38 — panggilan
+        Loket 1 tidak pernah diucapkan. Dengan kunci, urutan id sama dengan
+        urutan commit. SQLite tidak perlu: penulisnya memang satu per satu.
         """
+        if self.session.get_bind().dialect.name == "postgresql":
+            self.session.execute(
+                sa.select(sa.func.pg_advisory_xact_lock(KUNCI_URUTAN_PANGGILAN))
+            )
         panggilan = QueueCall(
             queue_id=queue_id,
             counter_id=counter_id,

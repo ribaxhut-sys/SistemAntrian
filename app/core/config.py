@@ -8,10 +8,38 @@ sebagai .exe dan lokasi penyimpanan bisa berbeda di tiap komputer.
 Environment variable yang dikenali:
     ANTRIAN_DB_URL       URL SQLAlchemy lengkap. Dipakai bila diisi.
                          Contoh: postgresql+psycopg://user:sandi@server/antrian
+                         Mengalahkan berkas data/mesin.json.
+    ANTRIAN_MESIN_PATH   lokasi berkas peran komputer ini (server/klien).
+                         Kosong berarti data/mesin.json di folder database.
     ANTRIAN_DB_PATH      lokasi file database SQLite, dipakai bila DB_URL kosong
     ANTRIAN_BACKUP_DIR   folder hasil backup
     ANTRIAN_LOG_DIR      folder file log
     ANTRIAN_LOG_LEVEL    DEBUG | INFO | WARNING | ERROR
+    ANTRIAN_PRINTER      pencetak tiket mesin ini: pdf | system | none
+    ANTRIAN_SUARA        1/0 — mesin ini membunyikan panggilan atau tidak
+    ANTRIAN_BENTUK_LAYAR bentuk layar mesin ini: lebar | memanjang | tegak
+    ANTRIAN_LEWATI_LOGIN 1/0 — masuk sebagai admin tanpa nama/sandi
+                         (hanya dari source; .exe mengabaikannya)
+
+ANTRIAN_PRINTER, ANTRIAN_SUARA, dan ANTRIAN_BENTUK_LAYAR menimpa pengaturan
+bersama di database, dan memang harus bisa begitu: pencetak tiket menempel
+pada satu mesin dan pengeras suara pada mesin lain, sedangkan
+`ticket.printer` dan `display.sound_enabled` di database bernilai satu untuk
+seluruh sistem. Tanpa penimpaan per mesin, menyalakan pencetak di anjungan
+berarti kelima komputer loket ikut mencoba mencetak ke pencetak yang tidak
+ada padanya.
+
+Bentuk layar berlaku sama: televisi ruang tunggu dan papan memanjang di atas
+pintu dapat berjalan berdampingan dari database yang sama, dan `display.
+screen_shape` yang berlaku sistem-wide hanya akan membuat salah satunya
+salah bentuk. Mesin yang tidak menyebut apa-apa mengikuti pengaturan
+bersama — yang bawaannya "auto", sehingga papan mengukur layarnya sendiri.
+
+Ketiganya juga dapat datang dari `peran.json`, yang ditulis lewat tampilan
+alih-alih lewat `setx` — lihat app.core.peran. Environment tetap di urutan
+teratas: pemasangan yang sudah memakai `setx ANTRIAN_PRINTER` hari ini
+berperilaku sama persis besok. Berkas peran hanya mengisi yang tidak
+disebut environment, dan pengaturan bersama di database mengisi sisanya.
 
 Beberapa loket yang melayani bersamaan WAJIB memakai PostgreSQL lewat
 ANTRIAN_DB_URL. SQLite hanya sanggup melayani satu komputer: mode WAL
@@ -34,6 +62,27 @@ APP_SLUG = "antrian-cro"
 # Timezone operasional. Seluruh timestamp transaksi memakai zona ini,
 # bukan zona komputer, agar konsisten di mesin mana pun.
 TIMEZONE = "Asia/Jakarta"
+
+#: Lewati dialog pemasangan saat dijalankan dari source.
+#:
+#: Bukan jalan masuk tanpa sandi. Loket selalu minta akun, karena beberapa
+#: petugas berbagi satu komputer. Pada .exe konstanta ini diabaikan.
+LEWATI_LOGIN_PENGEMBANG = True
+
+
+def lewati_login_pengembang() -> bool:
+    """
+    True hanya saat dijalankan dari source dan pintasannya masih menyala.
+
+    Environment `ANTRIAN_LEWATI_LOGIN` menimpa konstanta di atas, supaya
+    tes dapat mematikan pintasan tanpa mengubah berkas.
+    """
+    if getattr(sys, "frozen", False):
+        return False
+    env = _bool_from_env("ANTRIAN_LEWATI_LOGIN")
+    if env is not None:
+        return env
+    return LEWATI_LOGIN_PENGEMBANG
 
 
 def base_dir() -> Path:
@@ -64,9 +113,35 @@ def resource_dir() -> Path:
     return Path(bundel) if bundel else base_dir()
 
 
+#: Nilai yang dibaca sebagai "ya" pada environment variable boolean.
+#: Sama persis dengan yang diterima pengaturan database, supaya admin tidak
+#: perlu mengingat dua daftar kata yang berbeda.
+_BENAR = {"true", "1", "ya", "yes", "on"}
+_SALAH = {"false", "0", "tidak", "no", "off"}
+
+
 def _path_from_env(var: str, default: Path) -> Path:
     raw = os.environ.get(var, "").strip()
     return Path(raw).expanduser().resolve() if raw else default
+
+
+def _bool_from_env(var: str) -> bool | None:
+    """
+    Baca environment variable boolean, atau None bila mesin ini tidak
+    berpendapat.
+
+    None BUKAN sama dengan False. Mesin yang tidak menyebut apa-apa
+    mengikuti pengaturan bersama; hanya mesin yang menyebut secara
+    eksplisit yang menimpanya. Nilai yang tidak dikenali diperlakukan
+    seperti tidak diisi — salah ketik di satu komputer tidak boleh
+    mendiamkan panggilan tanpa jejak.
+    """
+    raw = os.environ.get(var, "").strip().lower()
+    if raw in _BENAR:
+        return True
+    if raw in _SALAH:
+        return False
+    return None
 
 
 @dataclass(frozen=True)
@@ -80,6 +155,15 @@ class AppConfig:
     log_level: str
     #: URL SQLAlchemy lengkap. Kosong berarti memakai SQLite pada db_path.
     db_url: str = ""
+    #: Pencetak tiket mesin ini. Kosong berarti mengikuti `ticket.printer`
+    #: yang berlaku untuk seluruh sistem.
+    printer: str = ""
+    #: Mesin ini membunyikan panggilan atau tidak. None berarti mengikuti
+    #: pengaturan bersama dan bawaan modenya.
+    suara: bool | None = None
+    #: Bentuk layar antrian pada mesin ini. Kosong berarti mengikuti
+    #: `display.screen_shape`, yang bawaannya mengukur sendiri.
+    bentuk_layar: str = ""
     timezone: str = TIMEZONE
 
     @property
@@ -87,8 +171,10 @@ class AppConfig:
         """
         URL SQLAlchemy untuk database aktif.
 
-        Bila ANTRIAN_DB_URL tidak diisi, jatuh ke SQLite pada db_path —
-        bentuk yang dipakai pemasangan satu komputer dan seluruh test.
+        Bila ANTRIAN_DB_URL tidak diisi, berkas mesin.json yang menentukan
+        PostgreSQL di komputer server/klien. Keduanya kosong berarti SQLite
+        pada db_path — bentuk yang dipakai pemasangan satu komputer dan
+        seluruh test.
         """
         return self.db_url or f"sqlite:///{self.db_path}"
 
@@ -117,6 +203,25 @@ class AppConfig:
     def memakai_sqlite(self) -> bool:
         return self.dialect == "sqlite"
 
+    @property
+    def teks_lokasi(self) -> str:
+        """
+        Lokasi database untuk ditampilkan ke petugas.
+
+        Kata sandi tidak pernah ikut: bilah status terbaca siapa saja yang
+        berdiri di dekat meja loket. Untuk PostgreSQL yang ditunjuk adalah
+        host server, bukan berkas SQLite lokal yang memang tidak dipakai.
+        """
+        if self.memakai_sqlite:
+            return str(self.db_path)
+        url = self.url_database
+        host = url.host or "localhost"
+        port = url.port or 5432
+        tujuan = f"{host}:{port}"
+        if url.database:
+            tujuan = f"{tujuan}/{url.database}"
+        return f"PostgreSQL @ {tujuan}"
+
     def ensure_directories(self) -> None:
         """Buat folder yang dibutuhkan bila belum ada."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,14 +231,37 @@ class AppConfig:
 
 def load_config() -> AppConfig:
     """Bangun konfigurasi dari environment variable dengan default yang aman."""
+    from app.core.mesin import path_berkas_mesin, url_dari_berkas_mesin
+
+    from app.core.peran import baca_peran, path_berkas_peran
+
     root = base_dir()
+    db_path = _path_from_env("ANTRIAN_DB_PATH", root / "data" / "queue.db")
+    db_url = os.environ.get("ANTRIAN_DB_URL", "").strip()
+    if not db_url:
+        db_url = url_dari_berkas_mesin(path_berkas_mesin(db_path))
+
+    # Peran mesin ini mengisi yang tidak disebut environment. Urutannya
+    # tidak boleh dibalik: komputer yang sudah disetel lewat `setx` jauh
+    # sebelum berkas peran ada harus tetap berperilaku sama.
+    peran = baca_peran(path_berkas_peran(db_path))
+    suara_env = _bool_from_env("ANTRIAN_SUARA")
+
     return AppConfig(
         base_dir=root,
-        db_path=_path_from_env("ANTRIAN_DB_PATH", root / "data" / "queue.db"),
-        db_url=os.environ.get("ANTRIAN_DB_URL", "").strip(),
+        db_path=db_path,
+        db_url=db_url,
         backup_dir=_path_from_env("ANTRIAN_BACKUP_DIR", root / "backup"),
         log_dir=_path_from_env("ANTRIAN_LOG_DIR", root / "logs"),
         log_level=os.environ.get("ANTRIAN_LOG_LEVEL", "INFO").upper(),
+        printer=(
+            os.environ.get("ANTRIAN_PRINTER", "").strip() or peran.printer_efektif
+        ),
+        suara=suara_env if suara_env is not None else peran.suara_efektif,
+        bentuk_layar=(
+            os.environ.get("ANTRIAN_BENTUK_LAYAR", "").strip().lower()
+            or peran.bentuk_efektif
+        ),
     )
 
 
@@ -152,3 +280,22 @@ def reset_config() -> None:
     """Paksa konfigurasi dibaca ulang. Dipakai oleh test dan fitur restore."""
     global _config
     _config = None
+
+
+def teks_status_database(terhubung: bool, config: AppConfig | None = None) -> str:
+    """
+    Satu baris untuk bilah status: lokasi, plus apakah server terjangkau.
+
+    Aplikasi tidak pernah jatuh ke SQLite lokal hanya karena PostgreSQL
+    sedang mati — split-brain lebih berbahaya daripada loket yang berhenti
+    sejenak. Karena itu status "tidak terjangkau" tetap menunjuk server
+    yang sama, bukan path berkas cadangan.
+    """
+    cfg = config or get_config()
+    if terhubung:
+        return f"Database: {cfg.teks_lokasi}"
+    if cfg.memakai_sqlite:
+        return f"Database tidak terjangkau ({cfg.teks_lokasi})"
+    return (
+        f"Database tidak terjangkau ({cfg.teks_lokasi}) — cek komputer server"
+    )

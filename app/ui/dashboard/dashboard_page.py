@@ -27,7 +27,7 @@ from app.services.dashboard_service import (
 )
 from app.services.queue_service import LABEL_STATUS
 from app.services.settings_service import SettingsService
-from app.ui.common import jalankan_aman, judul, keterangan
+from app.ui.common import PekerjaLatar, jalankan_aman, judul, keterangan, lepaskan_pekerja
 from app.ui.style import (
     BORDER,
     DANGER,
@@ -40,11 +40,12 @@ from app.ui.style import (
 )
 from app.utils.formatting import hari_dan_tanggal
 
-#: Warna penanda per status. Menunggu dan tidak hadir sengaja mencolok:
-#: keduanya yang paling perlu ditindaklanjuti supervisor.
+#: Warna penanda per status. Menunggu, dilewati, dan tidak hadir sengaja
+#: mencolok: ketiganya yang paling perlu ditindaklanjuti supervisor.
 WARNA_STATUS: dict[QueueStatus, str] = {
     QueueStatus.WAITING: WARNING,
     QueueStatus.CALLED: PRIMARY,
+    QueueStatus.SKIPPED: WARNING,
     QueueStatus.SERVING: PRIMARY,
     QueueStatus.PAUSED: TEXT_MUTED,
     QueueStatus.COMPLETED: SUCCESS,
@@ -101,6 +102,7 @@ class DashboardPage(QWidget):
         super().__init__(parent)
         self.dashboard = dashboard
         self.settings = settings
+        self._pekerja: PekerjaLatar | None = None
 
         self._bangun_tampilan()
         self.muat_ulang()
@@ -251,18 +253,49 @@ class DashboardPage(QWidget):
         detik = max(5, self.settings.get_int("dashboard.refresh_seconds", 30))
         self.penyegar = QTimer(self)
         self.penyegar.timeout.connect(self.muat_ulang)
-        self.penyegar.start(detik * 1000)
+        self.penyegar.setInterval(detik * 1000)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - nama Qt
+        super().showEvent(event)
+        self.muat_ulang()
+        self.penyegar.start()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 - nama Qt
+        self.penyegar.stop()
+        super().hideEvent(event)
 
     # -----------------------------------------------------------------
     # Data
     # -----------------------------------------------------------------
 
     def muat_ulang(self) -> None:
+        if self.isVisible():
+            if self._pekerja is not None:
+                return
+            pekerja = PekerjaLatar(self.dashboard.ringkasan_hari_ini, self)
+            pekerja.berhasil.connect(self._tampilkan)
+            pekerja.finished.connect(self._bersihkan_pekerja)
+            self._pekerja = pekerja
+            pekerja.start()
+            return
         berhasil, data = jalankan_aman(
             self, self.dashboard.ringkasan_hari_ini, "Gagal memuat ringkasan"
         )
         if berhasil and data is not None:
             self._tampilkan(data)
+
+    def _bersihkan_pekerja(self) -> None:
+        pekerja = self._pekerja
+        self._pekerja = None
+        if pekerja is not None:
+            pekerja.deleteLater()
+
+    def hentikan(self) -> None:
+        self.penyegar.stop()
+        if self._pekerja is not None and self._pekerja.isRunning():
+            self._pekerja.wait(3_500)
+        if self._pekerja is not None and self._pekerja.isRunning():
+            lepaskan_pekerja(self._pekerja)
 
     def _tampilkan(self, ringkasan: DashboardSummary) -> None:
         self.label_tanggal.setText(hari_dan_tanggal(ringkasan.tanggal))
