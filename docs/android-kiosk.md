@@ -231,6 +231,19 @@ If the tablet loses its connection after requesting a number, use **Ulangi
 permintaan tiket**. The APK reuses the same request ID, so the server returns
 the existing ticket instead of issuing a second number.
 
+Mulai APK 2.4.33:
+
+- Sebelum tombol Ulangi muncul, tablet mencoba lagi dua kali secara senyap
+  (jeda 1,5 detik) dengan `request_id` yang sama.
+- Layar Ulangi bertahan 30 detik. Tanpa sentuhan, tablet mencoba sekali
+  lagi; bila tetap gagal, pilihan dibatalkan dan menu awal kembali. Dulu
+  layar ini bertahan selamanya, dan pengunjung berikutnya yang menyentuhnya
+  menerima nomor milik orang sebelumnya untuk layanan yang tidak ia pilih.
+- Tombol **Kembali** tidak bereaksi selama permintaan masih berjalan,
+  supaya nomor yang mungkin sudah terbit tidak tertinggal tanpa tiket.
+- Penerbitan tiket memakai antrean kerja sendiri, tidak lagi menunggu di
+  belakang pembaruan layar atau laporan yang sedang menggantung.
+
 ### Idempotensi `POST /v1/kiosk/tickets`
 
 * Kuncinya pasangan **(`device_id`, `request_id`)**, disimpan di tabel

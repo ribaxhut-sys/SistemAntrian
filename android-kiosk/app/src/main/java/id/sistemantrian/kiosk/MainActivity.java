@@ -497,6 +497,12 @@ public final class MainActivity extends Activity {
     private static final String DEFAULT_TOKEN = "bapendacro";
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    /**
+     * Antrean khusus penerbitan tiket. `worker` juga melayani pembaruan
+     * layar tiap 5 detik, daftar layanan, dan laporan; satu permintaan yang
+     * menggantung di sana tidak boleh membuat pengunjung ikut menunggu.
+     */
+    private final ExecutorService penerbit = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<Category> categories = new ArrayList<>();
     private final List<Category> path = new ArrayList<>();
@@ -2933,6 +2939,9 @@ public final class MainActivity extends Activity {
         actions.setPadding(0, dp(12), 0, 0);
         Button cancel = actionButton("Kembali", false);
         cancel.setOnClickListener(v -> {
+            // Selama permintaan berjalan nomornya mungkin sudah terbit di
+            // server; membatalkan sekarang meninggalkan nomor tanpa tiket.
+            if (requestInFlight) return;
             v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
             v.setEnabled(false);
             showingConfirmation = false;
@@ -3027,6 +3036,8 @@ public final class MainActivity extends Activity {
     /** Layar konfirmasi meluncur keluar ke kanan, lalu menu layanan tampil. */
     private void keluarDariKonfirmasi(String pesan) {
         handler.removeCallbacks(confirmTimeout);
+        handler.removeCallbacks(batasUlangi);
+        handler.removeCallbacks(cobaTiketLagi);
         View halaman = contentSlot == null ? null : contentSlot.getChildAt(0);
         Runnable kembali = () -> {
             if (showingConfirmation || showingResult || requestInFlight) return;
@@ -3042,37 +3053,74 @@ public final class MainActivity extends Activity {
                 .withEndAction(kembali).start();
     }
 
+    /** Percobaan ulang senyap sebelum tombol Ulangi ditampilkan. */
+    private static final int COBA_TIKET_SENYAP = 2;
+    private static final long JEDA_COBA_TIKET_MS = 1500L;
+    /**
+     * Lama layar Ulangi menunggu sentuhan. Sesudah itu tablet mencoba sekali
+     * lagi; bila tetap gagal, pilihan dibatalkan dan menu awal kembali.
+     * Tanpa batas ini layar Ulangi bertahan selamanya, dan pengunjung
+     * berikutnya yang menyentuhnya menerima nomor milik orang sebelumnya
+     * (request_id yang sama) untuk layanan yang tidak ia pilih.
+     */
+    private static final long BATAS_ULANGI_MS = 30_000L;
+    private int gagalTiketBeruntun;
+    private boolean percobaanTiketTerakhir;
+
+    private final Runnable cobaTiketLagi = () -> kirimPermintaanTiket();
+
+    private final Runnable batasUlangi = () -> {
+        if (!showingConfirmation || requestInFlight || pendingCategory == null) return;
+        percobaanTiketTerakhir = true;
+        kirimPermintaanTiket();
+    };
+
+    /** Sentuhan pengunjung pada "Ya, ambil nomor" atau "Ulangi". */
     private void issueTicket() {
         if (pendingCategory == null || requestInFlight) return;
+        gagalTiketBeruntun = 0;
+        percobaanTiketTerakhir = false;
+        kirimPermintaanTiket();
+    }
+
+    private void kirimPermintaanTiket() {
+        if (pendingCategory == null || requestInFlight) return;
         handler.removeCallbacks(confirmTimeout);
+        handler.removeCallbacks(batasUlangi);
+        handler.removeCallbacks(cobaTiketLagi);
         requestInFlight = true;
         if (pendingRequestId == null) pendingRequestId = UUID.randomUUID().toString();
         setHint("Mengambil nomor…", "tunggu");
-        request(worker, "POST", "/v1/kiosk/tickets",
+        request(penerbit, "POST", "/v1/kiosk/tickets",
                 new JSONObjectBuilder()
                         .put("category_id", pendingCategory.id)
                         .put("request_id", pendingRequestId)
                         .build(),
                 json -> {
-                    requestInFlight = false;
+                    // Seluruh jawaban dibaca dulu. Bila ada yang tidak
+                    // terbaca, pilihan dan request_id masih utuh sehingga
+                    // Ulangi meminta nomor yang SAMA, bukan nomor baru.
                     JSONObject ticket = json.getJSONObject("data");
                     String number = ticket.getString("queue_number");
-                    Category issued = pendingCategory;
-                    pendingCategory = null;
-                    pendingRequestId = null;
                     int cooldownSeconds = Math.max(
                             0, ticket.optInt("cooldown_seconds", 10));
-                    readyAtMillis = System.currentTimeMillis() + cooldownSeconds * 1000L;
                     JSONArray lines = ticket.getJSONArray("ticket_lines");
                     List<String> receipt = new ArrayList<>();
                     for (int i = 0; i < lines.length(); i++) receipt.add(lines.getString(i));
                     JSONObject layout = ticket.optJSONObject("ticket_layout");
                     JSONObject raster = ticket.optJSONObject("ticket_raster");
+                    requestInFlight = false;
+                    gagalTiketBeruntun = 0;
+                    percobaanTiketTerakhir = false;
+                    Category issued = pendingCategory;
+                    pendingCategory = null;
+                    pendingRequestId = null;
+                    readyAtMillis = System.currentTimeMillis() + cooldownSeconds * 1000L;
                     nomorSaya = number;
                     batasSorotMillis = System.currentTimeMillis() + LAMA_HASIL_MS + 10_000L;
                     sorotDidenyutkan = false;
                     sorotDitunjukkan = false;
-                    showResult(number, issued.name);
+                    showResult(number, issued == null ? "" : issued.name);
                     updateAvailability();
                     UsbEscPosPrinter.print(this, number, receipt, layout, raster, message -> {
                         boolean printed = message.contains("tercetak");
@@ -3085,6 +3133,21 @@ public final class MainActivity extends Activity {
                 },
                 message -> {
                     requestInFlight = false;
+                    if (!showingConfirmation || pendingCategory == null) return;
+                    if (percobaanTiketTerakhir) {
+                        batalkanTiketGagal();
+                        return;
+                    }
+                    if (gagalTiketBeruntun < COBA_TIKET_SENYAP) {
+                        // Gangguan jaringan sesaat: coba lagi dengan
+                        // request_id yang sama sebelum pengunjung diminta
+                        // menyentuh Ulangi. Server memberi nomor yang sama
+                        // bila permintaan sebelumnya ternyata sudah sampai.
+                        gagalTiketBeruntun++;
+                        setHint("Menghubungi server lagi…", "tunggu");
+                        handler.postDelayed(cobaTiketLagi, JEDA_COBA_TIKET_MS);
+                        return;
+                    }
                     setHint("Nomor belum dapat dipastikan. Sentuh ulang untuk mencoba lagi.", "salah");
                     showRetry();
                 },
@@ -3093,6 +3156,8 @@ public final class MainActivity extends Activity {
                     // hanya akan mendapat jawaban yang sama. Tampilkan
                     // alasannya, lalu kembali ke daftar layanan yang segar.
                     requestInFlight = false;
+                    gagalTiketBeruntun = 0;
+                    percobaanTiketTerakhir = false;
                     showingConfirmation = false;
                     pendingCategory = null;
                     pendingRequestId = null;
@@ -3102,6 +3167,20 @@ public final class MainActivity extends Activity {
                     loadCategories(true);
                     loadDisplay();
                 });
+    }
+
+    /** Percobaan terakhir sesudah layar Ulangi dibiarkan juga gagal. */
+    private void batalkanTiketGagal() {
+        gagalTiketBeruntun = 0;
+        percobaanTiketTerakhir = false;
+        showingConfirmation = false;
+        pendingCategory = null;
+        pendingRequestId = null;
+        // Pengunjung kemungkinan sudah pergi; orang berikutnya mendapati
+        // menu awal, bukan sub-menu pilihan orang lain.
+        path.clear();
+        showIdleResult();
+        keluarDariKonfirmasi("Permintaan tiket dibatalkan karena server tidak merespons.");
     }
 
     private void showRetry() {
@@ -3115,6 +3194,8 @@ public final class MainActivity extends Activity {
         button.setOnClickListener(v -> issueTicket());
         retry.addView(button, new LinearLayout.LayoutParams(-1, dp(64)));
         resultSlot.addView(retry, new FrameLayout.LayoutParams(-1, -1));
+        handler.removeCallbacks(batasUlangi);
+        handler.postDelayed(batasUlangi, BATAS_ULANGI_MS);
     }
 
     private void showResult(String number, String service) {
@@ -4969,6 +5050,7 @@ public final class MainActivity extends Activity {
         if (tts != null) tts.shutdown();
         if (nada != null) nada.release();
         worker.shutdownNow();
+        penerbit.shutdownNow();
         pengunduh.shutdownNow();
         pemanggil.shutdownNow();
         super.onDestroy();
