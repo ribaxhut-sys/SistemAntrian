@@ -327,6 +327,9 @@ pada baris **APK anjungan** di Layanan Anjungan.
   `app/services/apk_anjungan.py`). Tablet di bawahnya berhenti menerbitkan
   nomor, server menolak tiketnya (HTTP 426), dan layar tablet menawarkan
   **PERBARUI DARI SERVER**.
+- Sejak server ini versi minimalnya 49 (APK 2.4.33): tablet 2.4.32 ke bawah
+  wajib memperbarui sebelum dapat melayani lagi, karena layar Ulangi pada
+  APK lama dapat memberi nomor orang sebelumnya kepada pengunjung berikutnya.
 - Versi baru yang belum wajib hanya diberitahukan di ⚙ Pengaturan tablet.
 - Pertama kali, Android meminta izin "Pasang aplikasi tidak dikenal" untuk
   Anjungan Antrian, lalu meminta konfirmasi pemasangan.

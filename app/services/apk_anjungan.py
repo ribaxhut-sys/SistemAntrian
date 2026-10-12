@@ -30,7 +30,9 @@ logger = logging.getLogger("antrian.apk_anjungan")
 #: versionCode terendah yang cocok dengan API sekarang. Naikkan setiap kali
 #: jawaban API berubah dengan cara yang tidak dipahami APK lama.
 #: 5 = 1.4: /v1/kiosk/display tidak lagi mengirim data loket.
-VERSI_MINIMAL = 5
+#: 49 = 2.4.33: layar Ulangi pada APK lama bertahan selamanya, dan
+#: pengunjung berikutnya bisa menerima nomor milik orang sebelumnya.
+VERSI_MINIMAL = 49
 #: Sama, untuk APK layar antrian (id.sistemantrian.layar).
 VERSI_MINIMAL_LAYAR = 1
 
