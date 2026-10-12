@@ -1528,6 +1528,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 DatagramPacket broadcast = new DatagramPacket(request, request.length,
                         InetAddress.getByName("255.255.255.255"), DISCOVERY_PORT);
                 for (int attempt = 0; attempt < 4; attempt++) socket.send(broadcast);
+                // Semua jawaban dikumpulkan: dua server yang menjawab
+                // berarti salah satunya keliru, dan memilih yang tercepat
+                // bisa mengarahkan panel ke komputer yang salah.
+                java.util.Set<String> addresses = new java.util.LinkedHashSet<>();
                 long deadline = System.currentTimeMillis() + 4500;
                 byte[] buffer = new byte[512];
                 while (System.currentTimeMillis() < deadline) {
@@ -1537,15 +1541,31 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                     } catch (java.net.SocketTimeoutException timeout) {
                         continue;
                     }
-                    JSONObject json = new JSONObject(new String(
-                            response.getData(), 0, response.getLength(), StandardCharsets.UTF_8));
+                    JSONObject json;
+                    try {
+                        json = new JSONObject(new String(
+                                response.getData(), 0, response.getLength(), StandardCharsets.UTF_8));
+                    } catch (org.json.JSONException notServer) {
+                        continue;
+                    }
                     if (!DISCOVERY_RESPONSE.equals(json.optString("service"))) continue;
-                    String address = "http://" + response.getAddress().getHostAddress()
-                            + ":" + json.optInt("api_port", 8765);
-                    handler.post(() -> found.accept(address));
-                    return;
+                    int port = json.optInt("api_port", 8765);
+                    if (port < 1 || port > 65535) continue;
+                    if (addresses.isEmpty()) {
+                        deadline = Math.min(deadline, System.currentTimeMillis() + 1500);
+                    }
+                    addresses.add("http://" + response.getAddress().getHostAddress() + ":" + port);
                 }
-                handler.post(() -> failed.accept("Server tidak ditemukan. Isi alamat secara manual."));
+                if (addresses.size() == 1) {
+                    String address = addresses.iterator().next();
+                    handler.post(() -> found.accept(address));
+                } else if (addresses.size() > 1) {
+                    String list = android.text.TextUtils.join(", ", addresses);
+                    handler.post(() -> failed.accept("Lebih dari satu server menjawab ("
+                            + list + "). Isi alamat server yang benar secara manual."));
+                } else {
+                    handler.post(() -> failed.accept("Server tidak ditemukan. Isi alamat secara manual."));
+                }
             } catch (Exception e) {
                 handler.post(() -> failed.accept("Pencarian gagal: " + e.getMessage()));
             }

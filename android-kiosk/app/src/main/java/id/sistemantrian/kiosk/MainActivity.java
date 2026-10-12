@@ -4764,6 +4764,11 @@ public final class MainActivity extends Activity {
                         InetAddress.getByName("255.255.255.255"), DISCOVERY_PORT);
                 for (int attempt = 0; attempt < 4; attempt++) socket.send(broadcast);
 
+                // Semua jawaban dikumpulkan, bukan yang pertama saja: bila
+                // dua komputer menjawab (API ikut menyala di PC loket, atau
+                // perangkat asing), tablet tidak boleh memilih salah satunya
+                // diam-diam lalu mengirim token ke sana.
+                java.util.Set<String> addresses = new java.util.LinkedHashSet<>();
                 long deadline = System.currentTimeMillis() + 4500;
                 byte[] buffer = new byte[512];
                 while (System.currentTimeMillis() < deadline) {
@@ -4773,19 +4778,35 @@ public final class MainActivity extends Activity {
                     } catch (java.net.SocketTimeoutException timeout) {
                         continue;
                     }
-                    JSONObject data = new JSONObject(new String(
-                            response.getData(), response.getOffset(),
-                            response.getLength(), StandardCharsets.UTF_8));
+                    JSONObject data;
+                    try {
+                        data = new JSONObject(new String(
+                                response.getData(), response.getOffset(),
+                                response.getLength(), StandardCharsets.UTF_8));
+                    } catch (org.json.JSONException bukanServer) {
+                        continue;
+                    }
                     if (!DISCOVERY_RESPONSE.equals(data.optString("service"))) continue;
                     int port = data.optInt("api_port", 8765);
                     if (port < 1 || port > 65535) continue;
-                    String address = "http://" + response.getAddress().getHostAddress()
-                            + ":" + port;
-                    handler.post(() -> found.accept(address));
-                    return;
+                    if (addresses.isEmpty()) {
+                        // Jawaban lain dari jaringan yang sama datang dalam sekejap.
+                        deadline = Math.min(deadline, System.currentTimeMillis() + 1500);
+                    }
+                    addresses.add("http://" + response.getAddress().getHostAddress()
+                            + ":" + port);
                 }
-                handler.post(() -> failed.accept(
-                        "Pastikan server berjalan dan perangkat berada di Wi-Fi/LAN yang sama."));
+                if (addresses.size() == 1) {
+                    String address = addresses.iterator().next();
+                    handler.post(() -> found.accept(address));
+                } else if (addresses.size() > 1) {
+                    String daftar = android.text.TextUtils.join(", ", addresses);
+                    handler.post(() -> failed.accept("Lebih dari satu server menjawab ("
+                            + daftar + "). Isi alamat server yang benar di Pengaturan."));
+                } else {
+                    handler.post(() -> failed.accept(
+                            "Pastikan server berjalan dan perangkat berada di Wi-Fi/LAN yang sama."));
+                }
             } catch (Exception e) {
                 String message = e.getMessage() == null
                         ? "Pencarian jaringan gagal." : e.getMessage();
