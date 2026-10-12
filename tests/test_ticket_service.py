@@ -832,3 +832,30 @@ def test_pencetak_mesin_menang_atas_pengaturan_bersama(env_mesin):
 
     env_mesin(ANTRIAN_PRINTER="none")
     assert mode_pencetak(_SettingsPalsu("system")) == "none"
+
+
+def test_tata_letak_anjungan_android_tidak_memotong_tiket_biasa():
+    """Lebar diukur dalam point; dulu 66 mm dibaca 66 pt dan semua terpotong."""
+    from datetime import datetime
+
+    from app.services.ticket_service import tata_letak_tiket_anjungan
+
+    data = TicketData(
+        queue_number="C-002",
+        category_name="Informasi",
+        office_name="Kantor Pelayanan",
+        issued_at=datetime(2026, 10, 12, 10, 0),
+        footer="Silakan menunggu nomor Anda dipanggil.",
+        header="BAPENDA DKI JAKARTA",
+    )
+    baris = {
+        row["text"]: row["size"]
+        for row in tata_letak_tiket_anjungan(data)["rows"]
+        if not row["line"]
+    }
+
+    assert baris["BAPENDA DKI JAKARTA"] == 12
+    assert baris["Kantor Pelayanan"] == 10
+    assert baris["C-002"] == 44
+    assert baris["Silakan menunggu nomor Anda dipanggil."] == 9
+    assert not any("…" in teks for teks in baris)

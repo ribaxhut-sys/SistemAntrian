@@ -302,7 +302,10 @@ def tata_letak_tiket_anjungan(data: TicketData) -> dict:
     from reportlab.pdfbase.pdfmetrics import stringWidth
 
     lebar = 72.0
-    lebar_isi = lebar - 2 * TEPI_MM
+    # stringWidth mengukur dalam point, bukan mm. Membandingkannya dengan
+    # 66 "mm" membuat semua baris dianggap kelebaran hampir tiga kali lipat:
+    # judul dan catatan kaki terpotong "…" dan nomor mengecil ke 24 pt.
+    lebar_isi = (lebar - 2 * TEPI_MM) * 72 / 25.4
 
     def pas(isi: str, ukuran: int, tebal: bool, maks_baris: int = 1):
         nama_huruf = "Helvetica-Bold" if tebal else "Helvetica"
