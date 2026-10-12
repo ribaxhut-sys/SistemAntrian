@@ -242,6 +242,13 @@ Lihat [README](../README.md) untuk aturan bisnis lengkap dan tabel hak akses.
 
 - Tempatkan PostgreSQL dan API hanya di jaringan kantor/pribadi yang
   dikendalikan.
+- **Pisahkan jaringan perangkat antrian dari Wi-Fi tamu.** API anjungan
+  memakai HTTP biasa dengan token; siapa pun di jaringan yang sama dapat
+  menyadap token itu. Bila tablet tersambung lewat Wi-Fi, pakai SSID
+  khusus (WPA2/WPA3, sandi tidak dibagikan ke pengunjung) atau VLAN
+  tersendiri untuk server, PC loket, televisi, dan tablet. Jangan pernah
+  menyambungkan tablet anjungan ke Wi-Fi yang sandinya ditempel untuk
+  umum.
 - Batasi akses `5432` pada subnet klien yang benar. API `8765` dan
   discovery `8766` dibuka di semua profil jaringan tetapi hanya untuk
   `LocalSubnet`, sehingga Wi-Fi yang tercatat Public tidak memblokir tablet.
@@ -288,6 +295,21 @@ arsip yang benar, lalu ikuti konfirmasi. Setelah pemulihan, tutup dan buka
 kembali aplikasi. Data transaksi setelah tanggal backup akan hilang.
 Sebelum operasional, lakukan uji pemulihan pada salinan/lingkungan uji.
 
+**Enkripsi backup.** Backup berisi identitas pelapor pengaduan. Di server,
+buka **Backup → Aktifkan Enkripsi** satu kali: kunci acak dibuat,
+disimpan di `kunci-backup.txt` di folder database, dan **ditampilkan
+sekali — catat di kertas dan simpan terpisah dari server**. Sejak itu
+backup baru berakhiran `.enc`. Di komputer pengganti, ketik kunci itu
+lewat **Masukkan Kunci** sebelum memulihkan. Tanpa catatan kunci, backup
+terenkripsi dari server yang rusak tidak dapat dibuka siapa pun.
+
+**Masa simpan identitas pelapor.** Nama, nomor pelanggan, telepon, email,
+dan alamat pada lembar pengaduan dikosongkan otomatis setelah 24 bulan
+(Pengaturan → Pengaduan; `0` = selamanya). Isi pengaduan tetap disimpan.
+
+Bila server mati di tengah pelayanan, ikuti
+[prosedur-darurat.md](prosedur-darurat.md).
+
 ## 9. Menjalankan dari source dan pengujian
 
 Persyaratan pengembangan: Windows, Python **3.13**, dan PowerShell.
@@ -307,9 +329,13 @@ Argumen mesin yang umum:
 .\.venv\Scripts\python.exe -m app.main --kios-api
 ```
 
-Jalankan test sebelum perubahan dirilis:
+Jalankan test sebelum perubahan dirilis — di **PostgreSQL**, database uji
+yang boleh dikosongkan (bukan `antrian` produksi), dengan folder `bin`
+PostgreSQL di `PATH` supaya test backup tidak dilewati:
 
 ```powershell
+$env:PATH = "C:\Program Files\PostgreSQL\17\bin;$env:PATH"
+$env:ANTRIAN_DB_URL = "postgresql+psycopg://postgres:<sandi>@127.0.0.1:5432/antrian_uji"
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 

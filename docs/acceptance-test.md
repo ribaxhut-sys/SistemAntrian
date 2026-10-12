@@ -89,6 +89,10 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | D8 | Terbitkan nomor saat sudah ada 3 orang menunggu | Tiket menyebut "Sisa antrian: 3" | |
 | D9 | Terbitkan nomor saat tidak ada seorang pun menunggu | Tiket menyebut "Tidak ada sisa antrian" | |
 | D10 | Terbitkan nomor layanan B saat yang menunggu semuanya layanan A | Angka sisa antrian menghitung SELURUH layanan, bukan layanan B saja | |
+| D11 | Pagi pertama, belum ada pelayanan selesai sama sekali, terbitkan nomor dengan beberapa orang di depan | TIDAK ada baris "Perkiraan tunggu" (belum ada riwayat) | |
+| D12 | Setelah ≥5 pelayanan selesai dan dua loket berpetugas, terbitkan nomor dengan beberapa orang di depan | Tiket menyebut "Perkiraan tunggu: ±… menit", tepat di bawah sisa antrian, dan seluruh tiket masih muat di kertas 88 mm | |
+| D13 | Catat jam ambil nomor dan jam dipanggil untuk 10 tiket sepanjang hari | Sebagian besar dipanggil di dalam atau sebelum rentang perkiraan. Catat selisihnya untuk evaluasi | |
+| D14 | Semua loket istirahat, terbitkan nomor | Tidak ada baris perkiraan | |
 
 ## E. Alur pelayanan
 
@@ -165,6 +169,11 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | I9 | **PostgreSQL:** backup dari komputer loket tanpa pg_dump | Pesan jelas yang menyebut pengaturan folder perkakas, bukan traceback | |
 | I10 | **PostgreSQL:** pulihkan dari `.dump`, lalu periksa dari loket lain | Seluruh loket melihat data yang sudah dipulihkan | |
 | I11 | Periksa daftar proses saat backup berjalan | Kata sandi database TIDAK terlihat pada argumen perintah | |
+| I12 | Di server, **Backup → Aktifkan Enkripsi** | Kunci tampil satu kali; dicatat di kertas dan disimpan terpisah dari server | |
+| I13 | Backup Sekarang, lalu buka berkasnya dengan Notepad | Berakhiran `.enc`; isinya acak, tidak ada nama atau nomor antrian yang terbaca | |
+| I14 | Uji Backup pada backup `.enc` | "Backup utuh dan dapat dipulihkan", dengan keterangan terenkripsi | |
+| I15 | Salin satu backup `.enc` ke komputer lain yang terpasang aplikasi, ketik kunci dari kertas lewat **Masukkan Kunci**, lalu pulihkan | Data kembali utuh. Kunci yang salah ketik ditolak dengan pesan yang jelas | |
+| I16 | Periksa folder backup setelah I13–I15 | Tidak ada berkas `.sementara` yang tertinggal | |
 
 ## J. Hak akses
 
@@ -186,6 +195,9 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | K3 | Jadikan folder `tiket\` hanya-baca, terbitkan nomor | Nomor tetap terbit; hanya pencetakan yang gagal | |
 | K4 | Periksa `logs\app.log` | Kejadian tercatat; tidak ada kata sandi di dalamnya | |
 | K5 | Picu sebuah kegagalan (mis. hapus folder backup saat backup) | Pesan berbahasa Indonesia yang jelas, bukan traceback Python | |
+| K6 | **PostgreSQL:** saat loket sedang login, hentikan layanan PostgreSQL di server (atau cabut kabel server) | Dalam ±20 detik pita merah "Server database tidak terjangkau" muncul di SEMUA loket, berisi langkah nomor manual | |
+| K7 | Nyalakan kembali PostgreSQL / pasang kabel | Pita hilang sendiri tanpa login ulang; loket dapat memanggil lagi | |
+| K8 | Jalankan [prosedur darurat](prosedur-darurat.md) selama K6 sebagai latihan | Petugas tahu letak lembar Catatan Darurat dan awalan nomor manual loketnya | |
 
 ## L. Anjungan ambil nomor (tanpa login)
 
@@ -292,6 +304,8 @@ Jalankan seluruhnya, termasuk yang tampak sepele.
 | N22 | **PostgreSQL:** dari mesin anjungan, `SELECT * FROM queue_note` | Ditolak hak akses | |
 | N23 | **PostgreSQL:** dari mesin televisi, perintah yang sama | Ditolak hak akses | |
 | N24 | Buat satu backup, lalu periksa siapa yang dapat membuka folder backup | Folder backup kini berisi data pribadi — pastikan aksesnya memang terbatas | |
+| N25 | Pengaturan → Pengaduan: masa simpan identitas pelapor | Bawaan 24 bulan; dapat diubah ADMIN | |
+| N26 | Di database UJI, mundurkan tanggal antrian sebuah lembar ke 25 bulan lalu, buka ulang aplikasi | Nama, nomor pelanggan, telepon, email, alamat kosong; isi pengaduan dan catatan tetap. Jejak Aktivitas menyebut `ANONYMIZE_NOTE` tanpa isi lembar | |
 
 ---
 
@@ -338,6 +352,25 @@ laptop pengembang: yang diukur adalah benda yang tergantung di dinding.
 | P7 | Pasang televisi DAN papan memanjang bersamaan, panggil satu nomor | Hanya **satu** pengeras suara berbunyi | |
 | P8 | Setel Bentuk layar ke **Layar berdiri** pada televisi tegak | Kartu loket dua per baris, bukan tiga | |
 | P9 | Ukur pitch panel LED (hitung titik dalam 10 cm, 100 dibagi jumlahnya) | Tercatat; bila P10 ke atas, panel itu kartu teks berjalan dan **bukan** layar untuk aplikasi ini | |
+
+---
+
+## Q. Urutan hari uji lapangan
+
+Tidak semua bagian di atas harus dikerjakan sekaligus. Untuk satu hari uji
+coba sebelum melayani pengunjung sungguhan, urutan yang disarankan:
+
+1. **Pagi, sebelum jam layanan** — A2 (5 PC + server), O (peran tiap
+   komputer), I12–I13 (enkripsi + backup pertama), I15 di komputer lain.
+2. **Simulasi pelayanan 1–2 jam** dengan pegawai sebagai pengunjung:
+   L (anjungan + printer IW-J200), M dan F (televisi + suara), D, E, G, N.
+   Dengarkan suara panggilan dari kursi ruang tunggu.
+3. **Uji ketahanan** saat simulasi masih berjalan — K2, K6–K8 (matikan
+   server, jalankan prosedur darurat, nyalakan lagi).
+4. **Sore** — H (ringkasan), Laporan, D13 (bandingkan perkiraan tunggu
+   dengan kenyataan), lalu Tutup Hari.
+5. Catat setiap ❌ beserta foto layar; perbaiki sebelum hari pertama
+   operasional.
 
 ---
 

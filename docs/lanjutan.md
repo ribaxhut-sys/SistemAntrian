@@ -253,9 +253,12 @@ ditegaskan ulang oleh pemilik:
    tanpa mengklik apa pun, dan modal akan menguburnya. Judul tab
    Menunggu Dilayani tetap menyebut jumlah yang sudah lama menunggu
    sebagai penggantinya begitu tab itu tidak sedang aktif.
-8. **Disimpan selamanya, dihapus manual** oleh ADMIN. Tidak ada pembersihan
-   otomatis — yang berarti tabel ini hanya bertambah, dan pencariannya
-   sengaja selalu dibatasi jumlah.
+8. **Lembar disimpan, identitas pelapor tidak.** Lembar hanya dihapus
+   manual oleh ADMIN, tetapi nama, nomor pelanggan, telepon, email, dan
+   alamat dikosongkan otomatis sesudah `privasi.retensi_pengaduan_bulan`
+   (bawaan 24 bulan, keputusan pemilik Oktober 2026) — lihat
+   `NoteService.anonimkan_kedaluwarsa`. Barisnya tetap bertambah, jadi
+   pencariannya sengaja selalu dibatasi jumlah.
 9. **Layar Pengaduan & Catatan menyegar sendiri tiap 30 detik**, seperti
    Ringkasan Harian. Penyegaran berkala memakai kriteria pencarian
    TERAKHIR DISUBMIT, bukan membaca `isian_cari` secara langsung — kotak
@@ -372,10 +375,14 @@ Ini penting dan jangan dianggap selesai:
 ## 8. Perintah penting
 
 ```powershell
-# Test harian (SQLite, cepat)
+# Test — SELALU di PostgreSQL (database uji yang boleh dikosongkan,
+# BUKAN database `antrian` produksi: fixture menjalankan DROP SCHEMA).
+# Folder bin PostgreSQL di PATH supaya test backup tidak dilewati.
+$env:PATH = "C:\Program Files\PostgreSQL\17\bin;$env:PATH"
+$env:ANTRIAN_DB_URL = "postgresql+psycopg://postgres:<sandi>@127.0.0.1:5432/antrian_uji"
 .\.venv\Scripts\python.exe -m pytest tests -q
 
-# Test terhadap PostgreSQL (wajib sebelum rilis)
+# Atau PostgreSQL di Docker
 .\test-postgres.ps1
 docker compose down -v          # menghentikan container uji
 
@@ -415,7 +422,12 @@ Belum dikerjakan sama sekali, sesuai urutan kepentingannya:
 1. **Uji terima di komputer sungguhan.** Ini yang paling menentukan apakah
    sistem layak dipakai, dan tidak ada test otomatis yang bisa
    menggantikannya.
-2. **Ikon aplikasi** — masih ikon bawaan PyInstaller.
+2. ~~Ikon aplikasi~~ — **selesai** (Oktober 2026): `assets/ikon/antrian.ico`,
+   dipasang di jendela, `.exe`, dan installer.
+5. ~~Perkiraan waktu tunggu di tiket, enkripsi backup, masa simpan
+   identitas pelapor, pita "server tidak terjangkau" di loket~~ —
+   **selesai** (Oktober 2026). Lihat README bagian tiket dan backup, serta
+   [prosedur-darurat.md](prosedur-darurat.md).
 3. ~~Laporan historis per rentang tanggal dan export PDF~~ — **selesai**
    (Oktober 2026): menu **Laporan** (SUPERVISOR), ekspor PDF dan Excel,
    `app/services/report_service.py`.

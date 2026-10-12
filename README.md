@@ -63,6 +63,10 @@ mesin yang berdiri di ruang publik tanpa diawasi.
 
 Akibat yang tidak boleh dilupakan: **berkas backup kini berisi data
 pribadi.** Folder backup setara lemari arsip, bukan lagi salinan angka.
+Karena itu backup dapat **dienkripsi** (menu **Backup → Aktifkan
+Enkripsi**), dan identitas pelapor **dikosongkan otomatis** sesudah masa
+simpannya (`privasi.retensi_pengaduan_bulan`, bawaan 24 bulan; isi
+pengaduan dan catatan petugas tetap disimpan untuk laporan).
 
 ---
 
@@ -132,6 +136,27 @@ banyaknya nomor yang masih menunggu di depan pemegang tiket, dihitung lintas
 seluruh jenis layanan karena urutan pemanggilan memang lintas layanan.
 Angkanya foto sesaat, bukan janji. Bila gagal dibaca, tiket tetap tercetak
 tanpa baris itu.
+
+Di bawahnya tercetak **perkiraan waktu tunggu**, misalnya
+`Perkiraan tunggu: ±20–25 menit` (pengaturan `ticket.perkiraan_tunggu`):
+
+```
+perkiraan = jumlah lama layanan tipikal tiap orang di depan
+            ÷ banyaknya loket yang sedang berpetugas untuk layanan ini
+```
+
+- **Orang di depan**: nomor menunggu yang terbit lebih dulu dan jenis
+  layanannya dapat dipanggil loket-loket tersebut.
+- **Loket berpetugas**: aktif, tidak istirahat, tanda hadir petugas ≤ 90
+  detik, dan melayani jenis layanan tiket ini.
+- **Lama layanan tipikal**: *median* (mulai dilayani → selesai) per jenis
+  layanan, dari 20 pelayanan terakhir hari ini; bila belum ada 5, ditambah
+  riwayat 30 hari. Jenis layanan tanpa data memakai median gabungan.
+- Dibulatkan ke atas per 5 menit dan dicetak sebagai rentang.
+
+Tidak dicetak bila tidak ada loket berpetugas, riwayat belum cukup, atau
+pemegang tiket sudah paling depan — tiket lebih baik diam daripada
+menyebut angka karangan.
 
 Cara mencetaknya diatur lewat pengaturan `ticket.printer`:
 
@@ -376,6 +401,16 @@ belum masuk ke file utama; salinan mentahnya bisa tertinggal atau rusak.
 **Kegagalan backup otomatis tidak pernah menghentikan aplikasi.** Kehilangan
 backup satu hari jauh lebih ringan akibatnya daripada loket yang tidak bisa
 melayani sama sekali.
+
+**Enkripsi backup.** Setelah ADMIN menekan **Aktifkan Enkripsi** di menu
+Backup, setiap backup baru disimpan sebagai `….db.enc` / `….dump.enc`
+(AES-256-GCM, kunci diturunkan dengan scrypt dari frasa acak). Frasanya
+tersimpan di `kunci-backup.txt` di folder database server — supaya backup
+otomatis tetap berjalan tanpa diketik — dan **ditampilkan sekali untuk
+dicatat**. Catatan itu satu-satunya jalan membuka backup bila disk server
+rusak; di komputer pengganti, ketikkan lewat **Masukkan Kunci**. Kunci yang
+diketik diperiksa terhadap backup terenkripsi terbaru sebelum diterima.
+Backup lama yang tidak terenkripsi tetap dapat diuji dan dipulihkan.
 
 Backup yang lebih tua dari `backup.retention_days` dihapus otomatis.
 Nilai nol atau negatif diabaikan, agar salah konfigurasi tidak menghapus
@@ -696,9 +731,13 @@ untuk idempotensi permintaan tiket.
 Selalu panggil interpreter `.venv` secara eksplisit. Menjalankan `pytest`
 langsung berisiko memakai Python global yang versinya berbeda.
 
-Perintah di atas menguji di atas **SQLite** karena jauh lebih cepat. Tetapi
-SQLite bukan yang dipakai kantor dengan beberapa loket, sehingga sebelum
-rilis seluruh test wajib dijalankan juga di PostgreSQL:
+Perintah di atas menguji di atas **SQLite**. Pemasangan kantor memakai
+PostgreSQL, dan SQLite menyembunyikan bug nyata (`FOR UPDATE` diabaikan,
+`GROUP BY` berparameter lolos), jadi **verifikasi yang menentukan selalu
+di PostgreSQL** — arahkan `ANTRIAN_DB_URL` ke database uji yang boleh
+dikosongkan (fixture test menjalankan `DROP SCHEMA public CASCADE`; jangan
+pernah ke database `antrian` produksi), dan pastikan folder `bin`
+PostgreSQL ada di `PATH` supaya test backup tidak dilewati. Atau pakai:
 
 ```powershell
 .\test-postgres.ps1
@@ -897,7 +936,8 @@ cadangan pengaman, sehingga salah pilih berkas masih dapat diperbaiki.
 
 Berkas backup dapat disalin ke media lain untuk arsip: `.db` pada SQLite
 adalah database yang dapat dibuka langsung, `.dump` pada PostgreSQL adalah
-arsip `pg_dump` format custom. **Menaruhnya di komputer yang sama dengan
+arsip `pg_dump` format custom, dan berakhiran `.enc` bila enkripsi aktif —
+yang terakhir hanya dapat dibuka aplikasi ini dengan kunci yang tercatat. **Menaruhnya di komputer yang sama dengan
 aslinya tidak melindungi apa pun bila komputer itu rusak.**
 
 Pada PostgreSQL, pemulihan memakai `pg_restore --clean --single-transaction`
@@ -1012,6 +1052,8 @@ konfirmasi dulu.
 | `backup.retention_days` | `30` | Lama backup disimpan sebelum dihapus |
 | `backup.pg_dump_path` | — | Folder perkakas PostgreSQL bila tidak ada di PATH |
 | `backup.salinan_folder` | — | Folder salinan kedua backup (disk lain/flashdisk) |
+| `ticket.perkiraan_tunggu` | `true` | Cetak perkiraan waktu tunggu di tiket |
+| `privasi.retensi_pengaduan_bulan` | `24` | Masa simpan identitas pelapor; `0` = selamanya |
 
 Jenis dan batas tiap pengaturan dijelaskan sekali saja pada `SKEMA` di
 [app/services/settings_service.py](app/services/settings_service.py). Layar
