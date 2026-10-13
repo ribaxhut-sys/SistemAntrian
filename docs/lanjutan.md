@@ -440,7 +440,8 @@ Belum dikerjakan sama sekali, sesuai urutan kepentingannya:
    (Oktober 2026): menu **Laporan** (SUPERVISOR dan ADMIN), ekspor PDF dan Excel,
    `app/services/report_service.py`.
 4. ~~Laporan performa per loket/petugas~~ — **selesai**, tab Per loket dan
-   Per petugas di menu yang sama.
+   Per petugas di menu yang sama. Ekspor juga memuat **Petugas per layanan**
+   (PDF dan Excel) dan **Riwayat pelayanan** per nomor (Excel saja).
 
 ---
 

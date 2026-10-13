@@ -5,6 +5,9 @@ Keduanya memakai KOLOM_TABEL yang sama dengan layar, sehingga angka di
 kertas tidak pernah berbeda dengan angka yang dilihat supervisor. Excel
 menyimpan angka sebagai angka (menit, desimal), bukan teks "9 menit",
 supaya dapat langsung dijumlah dan dibuat grafik.
+
+Rincian petugas per jenis layanan masuk ke keduanya; riwayat per nomor
+antrian hanya ke Excel, karena setahun penuh bisa ratusan halaman PDF.
 """
 
 from __future__ import annotations
@@ -14,6 +17,10 @@ from pathlib import Path
 from app.core import clock
 from app.services.report_service import (
     JUDUL_TABEL,
+    JUDUL_TABEL_PETUGAS_LAYANAN,
+    JUDUL_TABEL_RIWAYAT,
+    KOLOM_PETUGAS_LAYANAN,
+    KOLOM_RIWAYAT,
     KOLOM_TABEL,
     Laporan,
     angka_ringkasan,
@@ -108,6 +115,43 @@ def ekspor_pdf(laporan: Laporan, tujuan: Path, kantor: str = "") -> Path:
         tabel.setStyle(TableStyle(perintah))
         isi.append(tabel)
 
+    if laporan.petugas_layanan:
+        # Dikelompokkan per petugas: nama hanya di baris pertamanya, lalu
+        # baris jumlah yang sama persis dengan tabel Per petugas.
+        kolom = KOLOM_PETUGAS_LAYANAN
+        isi.append(Spacer(1, 6 * mm))
+        isi.append(Paragraph(JUDUL_TABEL_PETUGAS_LAYANAN, gaya["Heading3"]))
+        data = [[k[0] for k in kolom]]
+        perintah = [
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
+            ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#CBD5E1")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]
+        for total, rincian in laporan.petugas_layanan:
+            for i, baris in enumerate(rincian):
+                data.append([k[1](baris) for k in kolom])
+                if i:
+                    data[-1][0] = ""
+            jumlah = [k[1](total) for k in kolom]
+            jumlah[0], jumlah[1] = "", "Jumlah"
+            data.append(jumlah)
+            r = len(data) - 1
+            perintah += [
+                ("FONTNAME", (1, r), (-1, r), "Helvetica-Bold"),
+                ("LINEABOVE", (1, r), (-1, r), 0.25, colors.HexColor("#CBD5E1")),
+                ("LINEBELOW", (0, r), (-1, r), 0.5, colors.HexColor("#CBD5E1")),
+            ]
+        for i, k in enumerate(kolom):
+            if k[3]:
+                perintah.append(("ALIGN", (i, 0), (i, -1), "RIGHT"))
+        tabel = Table(data, repeatRows=1)
+        tabel.setStyle(TableStyle(perintah))
+        isi.append(tabel)
+
     isi.append(Spacer(1, 6 * mm))
     isi.append(
         Paragraph(
@@ -139,14 +183,14 @@ def ekspor_excel(laporan: Laporan, tujuan: Path) -> Path:
 
     tebal = Font(bold=True)
     latar = PatternFill("solid", fgColor="F1F5F9")
-    for kunci, judul in JUDUL_TABEL.items():
+
+    def isi_lembar(judul: str, kolom: list, daftar: list, saring: bool = False) -> None:
         lembar = buku.create_sheet(judul)
-        kolom = KOLOM_TABEL[kunci]
         lembar.append([k[0] for k in kolom])
         for sel in lembar[1]:
             sel.font = tebal
             sel.fill = latar
-        for baris in getattr(laporan, kunci):
+        for baris in daftar:
             lembar.append([k[2](baris) for k in kolom])
         for i, k in enumerate(kolom, start=1):
             huruf = get_column_letter(i)
@@ -154,8 +198,12 @@ def ekspor_excel(laporan: Laporan, tujuan: Path) -> Path:
             if k[0] == "Tanggal":
                 for sel in lembar[huruf][1:]:
                     sel.number_format = "DD-MM-YYYY"
-            if k[0].startswith("Rata-rata"):
+            if k[0].startswith("Jam "):
+                for sel in lembar[huruf][1:]:
+                    sel.number_format = "HH:MM:SS"
+            if k[0].startswith(("Rata-rata", "Lama ")):
                 lembar.cell(row=1, column=i).value = f"{k[0]} (menit)"
+                lembar.column_dimensions[huruf].width = len(k[0]) + 12
             if k[0] == "Kepuasan":
                 for sel in lembar[huruf][1:]:
                     sel.number_format = "0.00"
@@ -163,6 +211,18 @@ def ekspor_excel(laporan: Laporan, tujuan: Path) -> Path:
                 for sel in lembar[huruf]:
                     sel.alignment = Alignment(horizontal="left")
         lembar.freeze_panes = "A2"
+        if saring and daftar:
+            lembar.auto_filter.ref = lembar.dimensions
+
+    for kunci, judul in JUDUL_TABEL.items():
+        isi_lembar(judul, KOLOM_TABEL[kunci], getattr(laporan, kunci))
+    isi_lembar(
+        JUDUL_TABEL_PETUGAS_LAYANAN,
+        KOLOM_PETUGAS_LAYANAN,
+        [baris for _, rincian in laporan.petugas_layanan for baris in rincian],
+        saring=True,
+    )
+    isi_lembar(JUDUL_TABEL_RIWAYAT, KOLOM_RIWAYAT, laporan.riwayat, saring=True)
 
     tujuan = Path(tujuan)
     buku.save(tujuan)
