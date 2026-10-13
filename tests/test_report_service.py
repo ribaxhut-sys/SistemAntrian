@@ -128,11 +128,12 @@ def test_halaman_laporan_tampil(qtbot, laporan_hari_ini, auth):
     assert halaman.ekspor_pdf.isEnabled()
 
 
-def test_menu_laporan_untuk_supervisor(qtbot, auth, antrian_siap):
+@pytest.mark.parametrize("peran", ["supervisor", "admin"])
+def test_menu_laporan_untuk_supervisor_dan_admin(qtbot, auth, antrian_siap, peran):
     from app.ui.main_window import MainWindow
 
     auth.logout()
-    auth.login("supervisor", TEST_PASSWORD)
+    auth.login(peran, TEST_PASSWORD)
     jendela = MainWindow(auth)
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]

@@ -102,6 +102,10 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
             Permission.QUEUE_CLOSE_DAY,
             Permission.QUEUE_REASSIGN,
             Permission.QUEUE_TOGGLE_INTAKE,
+            # Membaca dan mengekspor laporan rentang tanggal, agar admin
+            # dapat mengunduh rekap tanpa akun supervisor terpisah.
+            # Murni membaca: tidak membuka kewenangan mengubah antrian.
+            Permission.REPORT_VIEW,
             # Menghapus pengaduan adalah tindakan administratif, dan
             # sengaja TIDAK diberikan kepada petugas yang menulisnya:
             # penulis yang sekaligus dapat menghilangkan tulisannya

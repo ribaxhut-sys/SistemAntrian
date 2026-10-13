@@ -437,7 +437,7 @@ Belum dikerjakan sama sekali, sesuai urutan kepentingannya:
    izin folder dan BitLocker To Go untuk salinan kedua. Jangan
    menambahkannya kembali tanpa membaca alasan ini.
 3. ~~Laporan historis per rentang tanggal dan export PDF~~ — **selesai**
-   (Oktober 2026): menu **Laporan** (SUPERVISOR), ekspor PDF dan Excel,
+   (Oktober 2026): menu **Laporan** (SUPERVISOR dan ADMIN), ekspor PDF dan Excel,
    `app/services/report_service.py`.
 4. ~~Laporan performa per loket/petugas~~ — **selesai**, tab Per loket dan
    Per petugas di menu yang sama.
