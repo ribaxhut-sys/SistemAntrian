@@ -87,6 +87,13 @@ class LoginWindow(QDialog):
         self.tombol_masuk.clicked.connect(self.coba_masuk)
         susunan.addWidget(self.tombol_masuk)
 
+        self.tombol_lupa = tombol("Lupa kata sandi admin?")
+        self.tombol_lupa.setToolTip(
+            "Pulihkan akun admin dengan kunci dari pengembang."
+        )
+        self.tombol_lupa.clicked.connect(self.lupa_kata_sandi)
+        susunan.addWidget(self.tombol_lupa)
+
         self.tombol_atur_komputer = tombol("Atur komputer ini")
         self.tombol_atur_komputer.setToolTip(
             "Atur komputer ini sebagai server, klien, atau satu komputer."
@@ -151,6 +158,24 @@ class LoginWindow(QDialog):
             self.tombol_masuk.setEnabled(True)
 
         self.accept()
+
+    def lupa_kata_sandi(self) -> None:
+        """Pemulihan akun admin lewat kunci dari pengembang."""
+        from PySide6.QtWidgets import QDialog
+
+        from app.ui.common import tampilkan_info
+        from app.ui.login.pemulihan_admin_dialog import PemulihanAdminDialog
+
+        dialog = PemulihanAdminDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.input_username.setText(dialog.username_dipulihkan or "")
+        tampilkan_info(
+            self,
+            "Kata sandi telah dipulihkan. Masuk dengan kata sandi baru; Anda "
+            "akan diminta menggantinya.",
+            "Pemulihan admin",
+        )
 
     def atur_komputer(self) -> None:
         """Buka pengaturan mesin tanpa harus berhasil masuk lebih dahulu."""

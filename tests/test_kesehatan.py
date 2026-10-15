@@ -346,3 +346,30 @@ def test_nilai_token_bersama():
     sudah = ks.nilai_token_bersama(True, 2)
     assert sudah.tingkat == PERINGATAN
     assert "dicabut" in sudah.ringkasan
+
+
+def test_nilai_hash_kata_sandi_normal_dan_peringatan():
+    from app.services import kesehatan_service as ks
+
+    assert ks.nilai_hash_kata_sandi(0, 5).tingkat == ks.NORMAL
+    hasil = ks.nilai_hash_kata_sandi(2, 5)
+    assert hasil.tingkat == ks.PERINGATAN
+    assert "2 dari 5" in hasil.ringkasan
+
+
+def test_periksa_kata_sandi_mendeteksi_nilai_tanpa_hash(auth, users):
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import User
+    from app.services import kesehatan_service as ks
+
+    assert ks._periksa_kata_sandi().tingkat == ks.NORMAL
+
+    with session_scope() as s:
+        s.execute(
+            sa.update(User).where(User.username == "cro").values(password_hash="teks-biasa")
+        )
+
+    hasil = ks._periksa_kata_sandi()
+    assert hasil.tingkat == ks.PERINGATAN

@@ -10,18 +10,32 @@ USER_MANAGE yang hanya dimiliki ADMIN.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
+import sqlalchemy as sa
+
+from app.core import clock
 from app.core.database import session_scope
 from app.core.errors import BusinessRuleError, NotFoundError, ValidationError
 from app.core.logger import get_logger
 from app.core.security import hash_password, validate_password_strength
-from app.models import AuditAction, RecordStatus, User, UserRole
+from app.models import (
+    AuditAction,
+    Counter,
+    Queue,
+    QueueCall,
+    QueueNote,
+    RecordStatus,
+    SatisfactionSurvey,
+    User,
+    UserRole,
+)
 from app.repositories.master_repository import CounterRepository
 from app.repositories.user_repository import UserRepository, normalize_username
 from app.services import audit_service
 from app.services.auth_service import AuthService
 from app.services.permissions import Permission
+from app.services.queue_service import BATAS_HADIR_PETUGAS_DETIK
 
 logger = get_logger("user")
 
@@ -306,6 +320,133 @@ class UserService:
                 user.username,
                 "diaktifkan" if active else "dinonaktifkan",
             )
+            return _as_info(user)
+
+    # -----------------------------------------------------------------
+    # Hapus dan arsip
+    # -----------------------------------------------------------------
+
+    #: Peran yang boleh dihapus atau diarsipkan lewat jalur ini.
+    _PERAN_BOLEH_HAPUS = (UserRole.CRO, UserRole.REGISTRATION, UserRole.SUPERVISOR)
+
+    @staticmethod
+    def _hitung_jejak(session, user_id: int) -> int:
+        """Baris riwayat yang menunjuk akun ini (antrian, panggilan, catatan, survey)."""
+        total = 0
+        for model, kolom in (
+            (Queue, Queue.served_by_user_id),
+            (QueueCall, QueueCall.user_id),
+            (QueueNote, QueueNote.officer_id),
+            (SatisfactionSurvey, SatisfactionSurvey.officer_id),
+        ):
+            total += session.scalar(
+                sa.select(sa.func.count()).select_from(model).where(kolom == user_id)
+            ) or 0
+        return total
+
+    def jejak_user(self, user_id: int) -> int:
+        """Jumlah riwayat milik akun; nol berarti aman dihapus permanen."""
+        self.auth.require_permission(Permission.USER_MANAGE)
+        with session_scope() as session:
+            if UserRepository(session).get_by_id(user_id) is None:
+                raise NotFoundError("Akun tidak ditemukan.")
+            return self._hitung_jejak(session, user_id)
+
+    def _periksa_boleh_dilepas(self, session, user: User, sesi) -> None:
+        if user.id == sesi.user_id:
+            raise BusinessRuleError("Anda tidak dapat menghapus akun Anda sendiri.")
+        if user.role not in self._PERAN_BOLEH_HAPUS:
+            raise BusinessRuleError(
+                "Hanya akun petugas, pendaftaran, dan supervisor yang dapat "
+                "dihapus atau diarsipkan dari sini."
+            )
+        batas = clock.now() - timedelta(seconds=BATAS_HADIR_PETUGAS_DETIK)
+        sedang_hadir = session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Counter)
+            .where(
+                Counter.petugas_user_id == user.id,
+                Counter.petugas_terlihat_pada.is_not(None),
+                Counter.petugas_terlihat_pada >= batas,
+            )
+        )
+        if sedang_hadir:
+            raise BusinessRuleError(
+                "Petugas ini sedang masuk di sebuah loket. Minta ia keluar dari "
+                "aplikasi terlebih dahulu."
+            )
+
+    @staticmethod
+    def _lepas_dari_loket(session, user_id: int) -> None:
+        session.execute(
+            sa.update(Counter)
+            .where(Counter.petugas_user_id == user_id)
+            .values(petugas_user_id=None, petugas_terlihat_pada=None)
+        )
+
+    def hapus_user(self, user_id: int) -> None:
+        """
+        Hapus permanen akun yang BELUM punya riwayat apa pun.
+
+        Akun yang pernah memanggil, melayani, mencatat, atau dinilai
+        ditolak: hapus memutus riwayatnya. Pakai `arsipkan_user`.
+        """
+        sesi = self.auth.require_permission(Permission.USER_MANAGE)
+        with session_scope() as session:
+            user = UserRepository(session).get_by_id(user_id)
+            if user is None:
+                raise NotFoundError("Akun tidak ditemukan.")
+            self._periksa_boleh_dilepas(session, user, sesi)
+            if self._hitung_jejak(session, user.id):
+                raise BusinessRuleError(
+                    "Akun ini sudah punya riwayat pelayanan, jadi tidak dapat "
+                    "dihapus. Gunakan Arsipkan agar riwayatnya tetap terbaca."
+                )
+            self._lepas_dari_loket(session, user.id)
+            nama = user.username
+            audit_service.record(
+                session,
+                AuditAction.DELETE_USER,
+                user_id=sesi.user_id,
+                entity_type="app_user",
+                entity_id=user.id,
+                username=nama,
+                peran=user.role.value,
+            )
+            session.delete(user)
+            logger.warning("Akun %s dihapus oleh %s", nama, sesi.username)
+
+    def arsipkan_user(self, user_id: int, *, samarkan_nama: bool = False) -> UserInfo:
+        """
+        Nonaktifkan akun secara permanen untuk pemakaian dan lepaskan dari loket.
+
+        Riwayatnya tetap utuh dan namanya tetap muncul di laporan lama.
+        `samarkan_nama` mengganti nama pengguna dan nama lengkap dengan
+        sebutan netral, bagi kantor yang perlu menghapus identitas orangnya.
+        """
+        sesi = self.auth.require_permission(Permission.USER_MANAGE)
+        with session_scope() as session:
+            user = UserRepository(session).get_by_id(user_id)
+            if user is None:
+                raise NotFoundError("Akun tidak ditemukan.")
+            self._periksa_boleh_dilepas(session, user, sesi)
+            nama_lama = user.username
+            user.status = RecordStatus.INACTIVE
+            user.default_counter_id = None
+            self._lepas_dari_loket(session, user.id)
+            if samarkan_nama:
+                user.username = f"arsip-{user.id}"
+                user.full_name = f"Petugas diarsipkan #{user.id}"
+            audit_service.record(
+                session,
+                AuditAction.ARCHIVE_USER,
+                user_id=sesi.user_id,
+                entity_type="app_user",
+                entity_id=user.id,
+                username=nama_lama,
+                samarkan=samarkan_nama,
+            )
+            logger.warning("Akun %s diarsipkan oleh %s", nama_lama, sesi.username)
             return _as_info(user)
 
     def reset_password(self, user_id: int, new_password: str) -> None:

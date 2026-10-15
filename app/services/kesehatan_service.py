@@ -322,6 +322,49 @@ def nilai_token_bersama(aktif: bool, terpasang: int) -> Pemeriksaan:
     )
 
 
+def nilai_hash_kata_sandi(tidak_sah: int, total: int) -> Pemeriksaan:
+    """
+    Kata sandi harus tersimpan sebagai hash scrypt, tidak pernah teks biasa.
+
+    Akun dengan nilai yang bukan format `scrypt$...` (data impor lama atau
+    isian manual di database) tidak dapat dipakai masuk dan menandakan ada
+    jalur penulisan yang melewati aplikasi.
+    """
+    nama = "Penyimpanan kata sandi"
+    if tidak_sah:
+        return Pemeriksaan(
+            nama,
+            PERINGATAN,
+            f"{tidak_sah} dari {total} akun tidak memakai hash kata sandi yang sah.",
+            (
+                "Setel ulang kata sandi akun itu lewat Data Master › Setel Ulang "
+                "Kata Sandi.",
+            ),
+        )
+    return Pemeriksaan(
+        nama, NORMAL, f"Seluruh {total} akun memakai hash scrypt bergaram."
+    )
+
+
+def _periksa_kata_sandi() -> Pemeriksaan:
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import User
+
+    with session_scope() as session:
+        total = session.scalar(sa.select(sa.func.count()).select_from(User)) or 0
+        tidak_sah = (
+            session.scalar(
+                sa.select(sa.func.count())
+                .select_from(User)
+                .where(~User.password_hash.like("scrypt$%"))
+            )
+            or 0
+        )
+    return nilai_hash_kata_sandi(tidak_sah, total)
+
+
 def ringkas_galat(baris: list[str], sekarang: datetime | None = None) -> Pemeriksaan:
     """Hitung galat penting pada `JENDELA_GALAT` dari baris-baris app.log."""
     sekarang = sekarang or clock.now()
@@ -599,6 +642,7 @@ class KesehatanService:
 
         jalankan("Database", _periksa_database)
         jalankan("Revisi migrasi", _periksa_migrasi)
+        jalankan("Penyimpanan kata sandi", _periksa_kata_sandi)
         jalankan("API anjungan", _periksa_api)
         jalankan("Perangkat Android", lambda: _periksa_perangkat(self.auth))
         jalankan("Printer tiket (komputer ini)", lambda: _periksa_printer(self.backup.settings))

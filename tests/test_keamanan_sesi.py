@@ -241,3 +241,39 @@ def test_kunci_dimatikan_dengan_nol_menit(qtbot, auth, users):
     jendela = _jendela(qtbot, auth, "cro")
 
     assert jendela._pengamat_aktivitas is None
+
+
+# ---------------------------------------------------------------------
+# Notifikasi penundaan
+# ---------------------------------------------------------------------
+
+
+def test_percobaan_kelima_memberi_tahu_akun_ditunda(auth, users):
+    for _ in range(BATAS_LOGIN_GAGAL - 1):
+        with pytest.raises(AuthenticationError):
+            auth.login("cro", "salah-sekali")
+
+    with pytest.raises(AuthenticationError, match="ditunda"):
+        auth.login("cro", "salah-sekali")
+
+
+def test_pesan_penundaan_menyebut_sisa_waktu(auth, users):
+    _gagal_login(auth, "cro", BATAS_LOGIN_GAGAL)
+
+    with pytest.raises(AuthenticationError, match=r"menit|detik"):
+        auth.login("cro", TEST_PASSWORD)
+
+
+def test_penundaan_dicatat_sekali_di_audit(auth, users):
+    _gagal_login(auth, "cro", BATAS_LOGIN_GAGAL)
+    for _ in range(3):
+        with pytest.raises(AuthenticationError):
+            auth.login("cro", "lagi")
+
+    with session_scope() as s:
+        jumlah = s.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLog)
+            .where(AuditLog.action == AuditAction.LOGIN_LOCKED.value)
+        )
+    assert jumlah == 1
