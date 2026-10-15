@@ -197,8 +197,8 @@ class ServicePage(QWidget):
 
     def _bangun_tampilan(self) -> None:
         susunan = QVBoxLayout(self)
-        susunan.setContentsMargins(20, 16, 20, 16)
-        susunan.setSpacing(14)
+        susunan.setContentsMargins(20, 12, 20, 12)
+        susunan.setSpacing(10)
 
         self.label_sinkron = QLabel("● Menyiapkan data…")
         self.label_sinkron.setObjectName("statusSinkron")
@@ -286,7 +286,7 @@ class ServicePage(QWidget):
 
     def _bangun_kolom_kerja(self) -> QVBoxLayout:
         kolom = QVBoxLayout()
-        kolom.setSpacing(12)
+        kolom.setSpacing(8)
         kolom.addWidget(self._bangun_panel_antrian())
         kolom.addWidget(self._bangun_tombol_aksi())
 
@@ -301,7 +301,9 @@ class ServicePage(QWidget):
             kolom.addWidget(self.pelapor)
 
         kolom.addStretch()
-        kolom.addWidget(self._bangun_baris_survey())
+        # Baris survey tidak lagi di sini: ia pindah ke bawah panel kanan,
+        # yang punya sisa tinggi, supaya kolom kerja muat tanpa gulir.
+        self._baris_survey = self._bangun_baris_survey()
         return kolom
 
     def _bangun_panel_antrian(self) -> QWidget:
@@ -317,12 +319,42 @@ class ServicePage(QWidget):
         # objectName wajib: QLabel turunan QFrame, dan selector "QFrame"
         # polos akan membingkai setiap label di dalam panel.
         panel.setObjectName("panelAntrian")
-        panel.setMinimumHeight(150)
+        panel.setMinimumHeight(120)
         self.panel_antrian = panel
 
-        susunan = QVBoxLayout(panel)
-        susunan.setContentsMargins(22, 14, 22, 14)
+        # Kiri: keadaan dan nomor. Kanan: tombol memanggil, tepat di tempat
+        # kalimat "Loket siap melayani" dibaca, dan tidak menambah tinggi.
+        utama = QHBoxLayout(panel)
+        utama.setContentsMargins(22, 14, 22, 14)
+        utama.setSpacing(18)
+        susunan = QVBoxLayout()
         susunan.setSpacing(4)
+        utama.addLayout(susunan, stretch=1)
+
+        # Dibuat di sini, bukan di panel tindakan: kamus `aksi` dimulai di
+        # kartu ini dan dilengkapi `_bangun_tombol_aksi`.
+        self.aksi: dict[str, object] = {}
+        kolom_tombol = QVBoxLayout()
+        kolom_tombol.setSpacing(8)
+        self.tombol_panggil = tombol("Panggil Berikutnya  ·  F2", variant="primary")
+        self.tombol_panggil.setObjectName("tombolUtamaPelayanan")
+        self.tombol_panggil.setMinimumHeight(52)
+        self.tombol_panggil.setStyleSheet(
+            f"font-size: {FONT_SIZE_LARGE}px; letter-spacing: 0.4px;"
+        )
+        self.tombol_panggil.clicked.connect(self.panggil_berikutnya)
+        kolom_tombol.addWidget(self.tombol_panggil)
+        panggil_ulang = tombol("Panggil Ulang  ·  F3", variant="secondary")
+        panggil_ulang.setMinimumHeight(38)
+        panggil_ulang.clicked.connect(self.panggil_ulang)
+        self.aksi["panggil_ulang"] = panggil_ulang
+        kolom_tombol.addWidget(panggil_ulang)
+        # Lebar tetap: tombol tidak boleh bergeser ketika status berganti.
+        pembungkus_tombol = QWidget()
+        pembungkus_tombol.setFixedWidth(250)
+        pembungkus_tombol.setLayout(kolom_tombol)
+        kolom_tombol.setContentsMargins(0, 0, 0, 0)
+        utama.addWidget(pembungkus_tombol, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         baris_atas = QHBoxLayout()
         self.label_status = QLabel("")
@@ -406,46 +438,29 @@ class ServicePage(QWidget):
         kepala.addWidget(self.label_petunjuk_aksi)
         kotak.addLayout(kepala)
 
-        self.tombol_panggil = tombol("Panggil Berikutnya  ·  F2", variant="primary")
-        self.tombol_panggil.setObjectName("tombolUtamaPelayanan")
-        self.tombol_panggil.setMinimumHeight(52)
-        self.tombol_panggil.setStyleSheet(
-            f"font-size: {FONT_SIZE_LARGE}px; letter-spacing: 0.4px;"
-        )
-        self.tombol_panggil.clicked.connect(self.panggil_berikutnya)
-        kotak.addWidget(self.tombol_panggil)
-
-        self.aksi: dict[str, object] = {}
-
         def buat_aksi(kunci: str, teks: str, handler) -> object:
             btn = tombol(teks, variant="secondary")
-            btn.setMinimumHeight(42)
+            btn.setMinimumHeight(38)
             btn.clicked.connect(handler)
             self.aksi[kunci] = btn
             return btn
 
+        # Panggil Berikutnya dan Panggil Ulang ada di kartu loket di atas.
         baris_utama = QHBoxLayout()
         baris_utama.setSpacing(8)
         for kunci, teks, handler in (
-            ("panggil_ulang", "Panggil Ulang  ·  F3", self.panggil_ulang),
             ("mulai_layani", "Mulai Melayani  ·  F4", self.mulai_melayani),
             ("selesai", "Selesai  ·  F8", self.selesaikan),
+            ("tunda", "Tunda", self.tunda),
+            ("lanjutkan", "Lanjutkan", self.lanjutkan),
         ):
             baris_utama.addWidget(buat_aksi(kunci, teks, handler), stretch=1)
         kotak.addLayout(baris_utama)
 
-        baris_lanjutan = QHBoxLayout()
-        baris_lanjutan.setSpacing(8)
-        for kunci, teks, handler in (
-            ("tunda", "Tunda Pelayanan", self.tunda),
-            ("lanjutkan", "Lanjutkan Pelayanan", self.lanjutkan),
-            ("lewati", "Lewati Sementara", self.lewati_sementara),
-        ):
-            baris_lanjutan.addWidget(buat_aksi(kunci, teks, handler), stretch=1)
-        kotak.addLayout(baris_lanjutan)
-
         baris_tutup = QHBoxLayout()
         baris_tutup.setSpacing(8)
+        lewati = buat_aksi("lewati", "Lewati Sementara", self.lewati_sementara)
+        baris_tutup.addWidget(lewati, stretch=1)
         for kunci, teks, handler in (
             ("tidak_hadir", "Tidak Hadir", self.tidak_hadir),
             ("batal", "Batalkan Antrian", self.batalkan),
@@ -453,9 +468,8 @@ class ServicePage(QWidget):
             btn = tombol(teks, variant="danger")
             btn.setMinimumHeight(38)
             btn.clicked.connect(handler)
-            baris_tutup.addWidget(btn)
+            baris_tutup.addWidget(btn, stretch=1)
             self.aksi[kunci] = btn
-        baris_tutup.addStretch()
         kotak.addLayout(baris_tutup)
 
         _beri_bayangan(panel)
@@ -535,7 +549,13 @@ class ServicePage(QWidget):
         self.tab_kanan.addTab(self._bangun_panel_dilewati(), "Dilewati (0)")
 
         _beri_bayangan(self.tab_kanan)
-        return self.tab_kanan
+        kanan = QWidget()
+        susunan = QVBoxLayout(kanan)
+        susunan.setContentsMargins(0, 0, 0, 0)
+        susunan.setSpacing(10)
+        susunan.addWidget(self.tab_kanan, stretch=1)
+        susunan.addWidget(self._baris_survey)
+        return kanan
 
     def _bangun_panel_menunggu(self) -> QWidget:
         panel = QFrame()

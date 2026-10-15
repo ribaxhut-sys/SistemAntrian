@@ -98,7 +98,7 @@ class DashboardPetugasPage(QWidget):
 
     #: Paling sedikit sekian baris tabel selalu tampil, sehingga tata letak
     #: yang belum sempat diukur tidak menampilkan tabel kosong.
-    BARIS_MINIMUM = 3
+    BARIS_MINIMUM = 2
 
     def __init__(
         self,
@@ -127,8 +127,8 @@ class DashboardPetugasPage(QWidget):
 
     def _bangun_tampilan(self) -> None:
         susunan = QVBoxLayout(self)
-        susunan.setContentsMargins(20, 14, 20, 14)
-        susunan.setSpacing(10)
+        susunan.setContentsMargins(20, 8, 20, 8)
+        susunan.setSpacing(8)
 
         atas = QHBoxLayout()
         atas.setSpacing(12)
@@ -141,7 +141,7 @@ class DashboardPetugasPage(QWidget):
         atas.addWidget(self.label_status)
         atas.addStretch()
         self.tombol_pelayanan = tombol("Buka Pelayanan", variant="primary")
-        self.tombol_pelayanan.setMinimumHeight(40)
+        self.tombol_pelayanan.setMinimumHeight(34)
         self.tombol_pelayanan.setToolTip(
             "Panggil, panggil ulang, selesai, lewati, dan batalkan ada di menu Pelayanan."
         )

@@ -174,8 +174,17 @@ def test_isian_pelapor_tidak_saling_menimpa(halaman_kerja, terbitkan, qtbot):
     qtbot.waitExposed(halaman_kerja)
 
     pelapor = halaman_kerja.pelapor
-    kotak = (pelapor.isian_nama, pelapor.isian_telepon, pelapor.isian_alamat)
-    for atas, bawah in zip(kotak, kotak[1:]):
+    # Tata letak dua baris: nama, no. pelanggan, telepon di atas; email dan
+    # alamat di bawah. Yang dijaga: baris atas tidak menimpa baris bawah.
+    kotak = (
+        pelapor.isian_nama,
+        pelapor.isian_nomor_pelanggan,
+        pelapor.isian_telepon,
+        pelapor.isian_email,
+        pelapor.isian_alamat,
+    )
+    pasangan = [(a, b) for a in kotak[:3] for b in kotak[3:]]
+    for atas, bawah in pasangan:
         sisi_atas = atas.mapTo(pelapor, atas.rect().bottomLeft()).y()
         sisi_bawah = bawah.mapTo(pelapor, bawah.rect().topLeft()).y()
         assert sisi_atas <= sisi_bawah, "isian pelapor menimpa isian di bawahnya"

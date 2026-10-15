@@ -298,3 +298,54 @@ def test_dashboard_petugas_muat_tanpa_scrollbar_di_1366x768(
         assert tabel.verticalScrollBar().maximum() == 0
     assert halaman.label_lainnya_berikut.isVisibleTo(halaman)
     assert "lainnya" in halaman.label_lainnya_berikut.text()
+
+
+def test_menu_petugas_tanpa_scrollbar_di_1366x768(qtbot, auth, antrian_siap, terbitkan):
+    """Pelayanan dan Ringkasan Saya harus muat utuh pada laptop 1366x768."""
+    from app.ui.main_window import MainWindow
+
+    terbitkan("A", 8)
+    _masuk(auth, "cro")
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+    jendela.show()
+    jendela.resize(1366, 768)
+    qtbot.wait(50)
+
+    bermasalah = []
+    for indeks, menu in enumerate(jendela.menu_aktif):
+        if menu.judul not in {"Pelayanan", "Ringkasan Saya"}:
+            continue
+        jendela.navigasi.setCurrentRow(indeks)
+        qtbot.wait(80)
+        pembungkus = jendela.halaman.widget(indeks)
+        bermasalah.append(
+            (
+                menu.judul,
+                pembungkus.horizontalScrollBar().maximum(),
+                pembungkus.verticalScrollBar().maximum(),
+            )
+        )
+
+    assert bermasalah == [("Pelayanan", 0, 0), ("Ringkasan Saya", 0, 0)]
+
+
+def test_pelayanan_muat_di_1280x720(qtbot, auth, antrian_siap, terbitkan):
+    """Tombol memanggil ada di kartu loket, sehingga kolom kiri lebih pendek."""
+    from app.ui.main_window import MainWindow
+
+    terbitkan("A", 3)
+    _masuk(auth, "cro")
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+    jendela.show()
+    jendela.resize(1280, 720)
+    qtbot.wait(50)
+
+    pembungkus = jendela.halaman.widget(0)
+    assert jendela.menu_aktif[0].judul == "Pelayanan"
+    assert pembungkus.verticalScrollBar().maximum() == 0
+    halaman = pembungkus.widget()
+    # Tombol memanggil berada di dalam kartu loket.
+    assert halaman.panel_antrian.isAncestorOf(halaman.tombol_panggil)
+    assert halaman.panel_antrian.isAncestorOf(halaman.aksi["panggil_ulang"])
