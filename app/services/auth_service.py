@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
+import json
+
 import sqlalchemy as sa
 
 from app.core import clock
@@ -151,8 +153,11 @@ class AuthService:
             repo = UserRepository(session)
             user = repo.get_by_username(nama)
 
-            sisa_tunda = (
-                self._sisa_penundaan(session, user.id) if user is not None else None
+            # Dihitung per NAMA yang diketik, bukan per akun yang ada: nama
+            # yang tidak terdaftar ditunda dengan cara dan pesan yang sama,
+            # sehingga penundaan tidak membocorkan akun mana yang ada.
+            sisa_tunda = self._sisa_penundaan(
+                session, nama, user.id if user is not None else None
             )
             if sisa_tunda is not None:
                 # Ditolak sebelum kata sandi diperiksa dan TIDAK dicatat
@@ -210,8 +215,7 @@ class AuthService:
         if gagal is not None:
             user_id, alasan, pesan = gagal
             self._catat_login_gagal(user_id=user_id, username=nama, alasan=alasan)
-            if user_id is not None:
-                pesan = self._beri_tahu_bila_terkunci(user_id, nama, pesan)
+            pesan = self._beri_tahu_bila_terkunci(user_id, nama, pesan)
             logger.warning("Login gagal untuk %r: %s", nama, alasan)
             raise AuthenticationError(pesan)
 
@@ -219,36 +223,42 @@ class AuthService:
         return self._session
 
     @staticmethod
-    def _sisa_penundaan(session, user_id: int) -> timedelta | None:
+    def _sisa_penundaan(
+        session, username: str, user_id: int | None = None
+    ) -> timedelta | None:
         """
-        Sisa waktu penundaan akun ini, atau None bila tidak sedang ditunda.
+        Sisa waktu penundaan untuk nama ini, atau None bila tidak ditunda.
 
-        Ditunda bila ada BATAS_LOGIN_GAGAL percobaan gagal dalam
-        BATAS_LOGIN_GAGAL_MENIT menit terakhir; penundaan berakhir ketika
-        percobaan tertua dari lima itu keluar dari jendela. Percobaan
-        sebelum pemulihan admin terakhir (`RESET_ADMIN_KEY`) tidak dihitung.
+        Ditunda bila ada BATAS_LOGIN_GAGAL percobaan gagal dengan nama itu
+        dalam BATAS_LOGIN_GAGAL_MENIT menit terakhir; penundaan berakhir
+        ketika percobaan tertua dari lima itu keluar dari jendela.
+        Percobaan sebelum pemulihan admin terakhir (`RESET_ADMIN_KEY`) tidak
+        dihitung.
 
         Dihitung dari audit log, bukan memori: percobaan dari komputer
         loket mana pun ikut terhitung, dan tidak hilang saat aplikasi
-        dibuka ulang.
+        dibuka ulang. Pencocokan memakai nama yang tercatat di `meta`
+        sehingga nama yang tidak terdaftar diperlakukan sama.
         """
         jendela = timedelta(minutes=BATAS_LOGIN_GAGAL_MENIT)
         sekarang = clock.now()
         sejak = sekarang - jendela
-        reset = session.scalar(
-            sa.select(sa.func.max(AuditLog.created_at)).where(
-                AuditLog.action == AuditAction.RESET_ADMIN_KEY.value,
-                AuditLog.user_id == user_id,
+        if user_id is not None:
+            reset = session.scalar(
+                sa.select(sa.func.max(AuditLog.created_at)).where(
+                    AuditLog.action == AuditAction.RESET_ADMIN_KEY.value,
+                    AuditLog.user_id == user_id,
+                )
             )
-        )
-        if reset is not None and reset > sejak:
-            sejak = reset
+            if reset is not None and reset > sejak:
+                sejak = reset
+        penanda = f'"username": {json.dumps(username, ensure_ascii=False)}'
         waktu = list(
             session.scalars(
                 sa.select(AuditLog.created_at)
                 .where(
                     AuditLog.action == AuditAction.LOGIN_FAILED.value,
-                    AuditLog.user_id == user_id,
+                    AuditLog.meta.contains(penanda, autoescape=True),
                     AuditLog.created_at > sejak,
                 )
                 .order_by(AuditLog.created_at.desc())
@@ -260,18 +270,16 @@ class AuthService:
         sisa = (waktu[BATAS_LOGIN_GAGAL - 1] + jendela) - sekarang
         return sisa if sisa > timedelta(0) else None
 
-    @classmethod
-    def _terlalu_banyak_gagal(cls, session, user_id: int) -> bool:
-        return cls._sisa_penundaan(session, user_id) is not None
-
-    def _beri_tahu_bila_terkunci(self, user_id: int, username: str, pesan: str) -> str:
+    def _beri_tahu_bila_terkunci(
+        self, user_id: int | None, username: str, pesan: str
+    ) -> str:
         """
         Percobaan gagal yang baru saja mencapai batas: catat `LOGIN_LOCKED`
         (sekali, karena percobaan berikutnya ditolak tanpa dicatat) dan
         beri tahu pengguna bahwa akunnya ditunda.
         """
         with session_scope() as session:
-            sisa = self._sisa_penundaan(session, user_id)
+            sisa = self._sisa_penundaan(session, username, user_id)
             if sisa is None:
                 return pesan
             audit_service.record(
@@ -304,7 +312,7 @@ class AuthService:
             user = UserRepository(session).get_by_id(sesi.user_id)
             if user is None:
                 return False
-            sisa = self._sisa_penundaan(session, user.id)
+            sisa = self._sisa_penundaan(session, sesi.username, user.id)
             if sisa is not None:
                 raise AuthenticationError(
                     "Terlalu banyak percobaan yang gagal. Coba lagi dalam "

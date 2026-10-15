@@ -277,3 +277,28 @@ def test_penundaan_dicatat_sekali_di_audit(auth, users):
             .where(AuditLog.action == AuditAction.LOGIN_LOCKED.value)
         )
     assert jumlah == 1
+
+
+def test_penundaan_tidak_membocorkan_akun_yang_ada(auth, users):
+    """Nama terdaftar dan nama tak terdaftar mendapat urutan pesan yang sama."""
+
+    def urutan(nama: str) -> list[str]:
+        hasil = []
+        for _ in range(BATAS_LOGIN_GAGAL + 2):
+            with pytest.raises(AuthenticationError) as info:
+                auth.login(nama, "salah-terus")
+            hasil.append(info.value.user_message)
+        return hasil
+
+    ada = urutan("cro")
+    tidak_ada = urutan("tidak-terdaftar")
+
+    def kelas(pesan: str) -> str:
+        if "ditunda" in pesan:
+            return "ditunda"
+        if "Terlalu banyak" in pesan:
+            return "tunda"
+        return "salah"
+
+    assert [kelas(p) for p in ada] == [kelas(p) for p in tidak_ada]
+    assert [kelas(p) for p in ada][-1] == "tunda"

@@ -21,6 +21,7 @@ from app.core.logger import get_logger
 from app.core.security import hash_password, validate_password_strength
 from app.models import (
     AuditAction,
+    AuditLog,
     Counter,
     Queue,
     QueueCall,
@@ -327,12 +328,28 @@ class UserService:
     # -----------------------------------------------------------------
 
     #: Peran yang boleh dihapus atau diarsipkan lewat jalur ini.
-    _PERAN_BOLEH_HAPUS = (UserRole.CRO, UserRole.REGISTRATION, UserRole.SUPERVISOR)
+    _PERAN_BOLEH_HAPUS = (
+        UserRole.CRO,
+        UserRole.REGISTRATION,
+        UserRole.SUPERVISOR,
+        UserRole.DISPLAY,
+    )
 
     @staticmethod
     def _hitung_jejak(session, user_id: int) -> int:
-        """Baris riwayat yang menunjuk akun ini (antrian, panggilan, catatan, survey)."""
-        total = 0
+        """
+        Baris riwayat yang menunjuk akun ini: antrian, panggilan, catatan,
+        survey, dan audit log (akun yang pernah masuk).
+
+        Audit ikut dihitung karena menghapus akun mengosongkan pelaku pada
+        barisnya (ON DELETE SET NULL), dan jejak "siapa melakukan apa"
+        tidak boleh hilang.
+        """
+        total = session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLog)
+            .where(AuditLog.user_id == user_id)
+        ) or 0
         for model, kolom in (
             (Queue, Queue.served_by_user_id),
             (QueueCall, QueueCall.user_id),
@@ -357,8 +374,8 @@ class UserService:
             raise BusinessRuleError("Anda tidak dapat menghapus akun Anda sendiri.")
         if user.role not in self._PERAN_BOLEH_HAPUS:
             raise BusinessRuleError(
-                "Hanya akun petugas, pendaftaran, dan supervisor yang dapat "
-                "dihapus atau diarsipkan dari sini."
+                "Hanya akun petugas, pendaftaran, supervisor, dan layar antrian "
+                "yang dapat dihapus atau diarsipkan dari sini."
             )
         batas = clock.now() - timedelta(seconds=BATAS_HADIR_PETUGAS_DETIK)
         sedang_hadir = session.scalar(

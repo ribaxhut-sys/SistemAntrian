@@ -145,9 +145,20 @@ def test_tantangan_pemasangan_lain_ditolak(auth, users, pengembang):
         pa.pulihkan(asing, _tanda(kunci, asing), SANDI_BARU, kunci_publik_b64=publik)
 
 
-def test_hanya_akun_admin_dapat_dipulihkan(auth, users):
+def test_tantangan_tidak_membocorkan_akun_admin(auth, users):
+    """Nama admin, nama bukan admin, dan nama tak terdaftar dijawab sama."""
+    for nama in ("admin", "cro", "tidak-ada"):
+        assert pa.buat_tantangan(nama).startswith("ANTR-")
+
+
+def test_hanya_akun_admin_dapat_dipulihkan(auth, users, pengembang):
+    kunci, publik = pengembang
+    tantangan = pa.buat_tantangan("cro")
+
     with pytest.raises(ValidationError, match="Akun admin"):
-        pa.buat_tantangan("cro")
+        pa.pulihkan(
+            tantangan, _tanda(kunci, tantangan), SANDI_BARU, kunci_publik_b64=publik
+        )
 
 
 def test_tanpa_kunci_terpasang_dinyatakan_terus_terang(auth, users):

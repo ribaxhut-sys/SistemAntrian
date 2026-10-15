@@ -11,7 +11,10 @@ Ringkasan aturan sesi dan kata sandi, serta perilaku layar kerja yang terkait.
   mana pun ikut terhitung dan tidak hilang saat aplikasi dibuka ulang.
 - Percobaan yang **ditolak karena penundaan tidak dicatat** sebagai kegagalan
   baru. Tanpa itu penyerang dapat mengunci pemilik akun tanpa batas.
-- Akun lain tidak terpengaruh. Kode: `AuthService._terlalu_banyak_gagal`,
+- Dihitung per **nama yang diketik**, bukan per akun yang ada: nama yang
+  tidak terdaftar ditunda dengan pesan dan urutan yang sama, sehingga
+  penundaan tidak membocorkan akun mana yang ada.
+- Akun lain tidak terpengaruh. Kode: `AuthService._sisa_penundaan`,
   konstanta `BATAS_LOGIN_GAGAL` dan `BATAS_LOGIN_GAGAL_MENIT`.
 
 ## Kata sandi
@@ -75,7 +78,11 @@ Sifat keamanannya:
   yang tidak dapat dipakai membuat tanda tangan.
 - Respons berlaku untuk **satu pemasangan, satu akun, satu kali pakai**;
   nomor acak yang sudah dipakai diingat.
-- Percobaan respons yang salah dibatasi 5 kali dalam 5 menit.
+- Percobaan respons yang salah dibatasi 5 kali dalam 5 menit (hitungan
+  bersama untuk seluruh pemasangan).
+- Kode tantangan dibuat tanpa memeriksa apakah akunnya ada atau berperan
+  admin, supaya layar masuk tidak membuka daftar akun admin. Pemeriksaan
+  dilakukan saat pemulihan, setelah tanda tangan terbukti sah.
 - Kunci publik kosong berarti fitur belum aktif dan layar menyatakannya.
 - **Batas:** orang yang memegang akun `postgres` atau administrator Windows
   di server tetap dapat mengubah database langsung.
@@ -113,14 +120,28 @@ hash yang sah.
 ## Menghapus dan mengarsipkan petugas
 
 - **Hapus permanen** hanya untuk akun yang belum punya riwayat apa pun
-  (antrian, panggilan, catatan pengaduan, survey).
+  (antrian, panggilan, catatan pengaduan, survey, dan audit log). Akun yang
+  pernah masuk punya jejak audit; menghapusnya mengosongkan pelaku pada
+  barisnya, sehingga ia diarsipkan, bukan dihapus.
 - Akun yang pernah bekerja **diarsipkan**: dinonaktifkan, dilepas dari loket,
   riwayatnya utuh dan namanya tetap tampil di laporan lama. Nama dapat
   disamarkan menjadi `Petugas diarsipkan #n`.
-- Hanya `ADMIN`; tidak untuk diri sendiri, tidak untuk akun ADMIN lain, dan
+- Hanya `ADMIN`; tidak untuk diri sendiri, tidak untuk akun ADMIN lain
+  (akun petugas, pendaftaran, supervisor, dan layar antrian yang diizinkan), dan
   ditolak bila petugas masih masuk di loket. Dicatat sebagai `DELETE_USER`
   atau `ARCHIVE_USER`.
 - Tombol **Hapus / Arsipkan** ada di Data Master › Pengguna.
+
+## Catatan keterbatasan
+
+- Penundaan login dapat dipakai orang lain untuk menunda akun tertentu
+  selama 5 menit (kompromi yang diterima; akun lain dan admin lain tidak
+  terpengaruh).
+- Nama pengguna lama tetap ada di meta audit setelah penyamaran nama; yang
+  disamarkan hanya akunnya.
+- Kunci layar membaca `sesi.idle_menit` saat jendela dibuka; perubahan
+  berlaku pada sesi berikutnya. Layar pemantauan yang sengaja dibiarkan
+  menyala dapat diatur ke `0`.
 
 ## Yang sengaja belum dikerjakan
 

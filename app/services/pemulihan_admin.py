@@ -224,10 +224,11 @@ def id_instalasi() -> str:
 def buat_tantangan(username: str) -> str:
     """Kode tantangan untuk akun admin `username`; berlaku 24 jam."""
     nama = username.strip().lower()
-    with session_scope() as session:
-        user = session.scalar(sa.select(User).where(User.username == nama))
-        if user is None or user.role is not UserRole.ADMIN:
-            raise ValidationError("Akun admin dengan nama itu tidak ditemukan.")
+    if not nama:
+        raise ValidationError("Nama akun belum diisi.")
+    # Tidak memeriksa apakah akunnya ada atau berperan admin: jawaban yang
+    # berbeda akan membuka daftar akun admin kepada siapa pun di layar masuk.
+    # Pemeriksaan dilakukan saat `pulihkan`, setelah tanda tangan terbukti sah.
     mentah = kemas_tantangan(
         id_instalasi(), nama, secrets.token_bytes(8), clock.now() + MASA_BERLAKU
     )

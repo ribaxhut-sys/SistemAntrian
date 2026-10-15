@@ -202,3 +202,23 @@ def test_hapus_lewat_tab_menghapus_akun_tanpa_riwayat(
     tab.hapus_atau_arsipkan()
 
     assert not _ada(baru)
+
+
+def test_akun_yang_pernah_masuk_tidak_dapat_dihapus(auth, users):
+    """Menghapusnya mengosongkan pelaku pada audit login/logout."""
+    baru = _buat(users, "pernah-masuk")
+    auth.login("pernah-masuk", TEST_PASSWORD)
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    layanan = UserService(auth)
+
+    assert layanan.jejak_user(baru) > 0
+    with pytest.raises(BusinessRuleError, match="Arsipkan"):
+        layanan.hapus_user(baru)
+    assert _ada(baru)
+
+
+def test_akun_layar_antrian_dapat_diarsipkan(admin_auth, users):
+    info = UserService(admin_auth).arsipkan_user(users["DISPLAY"])
+
+    assert info.is_active is False
