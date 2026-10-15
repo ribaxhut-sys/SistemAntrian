@@ -583,10 +583,13 @@ def test_layar_petugas_dibuka_di_tengah(qtbot, admin_auth, monkeypatch):
     assert panggilan == [(main_window._area_layar_utama(), ukuran)]
 
 
-def test_layar_petugas_menghapus_status_maksimal_dan_tetap_di_tengah(
+def test_layar_petugas_dibuka_maksimal_dengan_ukuran_biasa_tercatat(
     qtbot, admin_auth, monkeypatch
 ):
-    """Konfigurasi shortcut ``Run: Maximized`` tidak boleh mengalahkan posisi awal."""
+    """
+    Jendela kerja langsung memenuhi area kerja (taskbar tetap terlihat),
+    sementara ukuran biasa yang dipusatkan tetap dicatat untuk restore.
+    """
     from app.ui import main_window
 
     jendela = MainWindow(admin_auth)
@@ -597,12 +600,36 @@ def test_layar_petugas_menghapus_status_maksimal_dan_tetap_di_tengah(
         jendela, "_pusatkan", lambda area, ukuran: panggilan.append((area, ukuran))
     )
 
-    jendela.showMaximized()
-    qtbot.waitExposed(jendela)
+    jendela.tampilkan()
+
+    assert jendela.isMaximized()
+    assert not jendela.isFullScreen()
+    assert panggilan == [(main_window._area_layar_utama(), ukuran_normal)]
+
+
+def test_argumen_jendela_mempertahankan_jendela_biasa(qtbot, admin_auth):
+    jendela = MainWindow(admin_auth, berjendela=True)
+    qtbot.addWidget(jendela)
+
     jendela.tampilkan()
 
     assert not jendela.isMaximized()
-    assert panggilan == [(main_window._area_layar_utama(), ukuran_normal)]
+    assert not jendela.isFullScreen()
+
+
+def test_esc_dari_layar_penuh_kembali_ke_maksimal(qtbot, admin_auth):
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    jendela.tampilkan()
+    qtbot.waitExposed(jendela)
+    assert jendela.isMaximized()
+
+    jendela.ganti_layar_penuh()
+    assert jendela.isFullScreen()
+    jendela.keluar_layar_penuh()
+
+    assert not jendela.isFullScreen()
+    assert jendela.isMaximized()
 
 
 def test_ukuran_awal_mengikuti_area_kerja_monitor(admin_auth, monkeypatch):
@@ -665,7 +692,8 @@ def test_jendela_admin_benar_benar_muat_pada_800_x_600(
     monkeypatch.setattr(
         main_window, "_area_layar_utama", lambda: QRect(0, 0, 870, 652)
     )
-    jendela = MainWindow(admin_auth)
+    # Jendela biasa: yang diuji adalah batas ukuran, bukan mode maksimal.
+    jendela = MainWindow(admin_auth, berjendela=True)
     qtbot.addWidget(jendela)
     jendela.tampilkan()
     qtbot.wait(10)
@@ -1493,7 +1521,8 @@ def test_lewati_sementara_masuk_daftar_dan_dapat_dipanggil_kembali(
 
     assert halaman_layanan.label_nomor.text() == "—"
     assert halaman_layanan.tombol_panggil.isEnabled()
-    assert halaman_layanan.tab_kanan.tabText(2) == "Dilewati (1)"
+    tab = halaman_layanan.tab_kanan
+    assert tab.tabText(tab.indexOf(halaman_layanan.panel_dilewati)) == "Dilewati (1)"
     assert halaman_layanan.tabel_dilewati.item(0, 0).text() == "A-001"
     assert halaman_layanan.tabel_dilewati.item(0, 2).text() == "1x"
 
@@ -1528,7 +1557,8 @@ def test_nomor_dilewati_dapat_ditandai_tidak_hadir_dari_tabnya(
     halaman_layanan.tidak_hadir_dilewati()
 
     assert halaman_layanan.tabel_dilewati.rowCount() == 0
-    assert halaman_layanan.tab_kanan.tabText(2) == "Dilewati (0)"
+    tab = halaman_layanan.tab_kanan
+    assert tab.tabText(tab.indexOf(halaman_layanan.panel_dilewati)) == "Dilewati (0)"
     assert halaman_layanan.label_nomor.text() == "A-002", "loket tidak terganggu"
 
 

@@ -472,6 +472,7 @@ class MainWindow(QMainWindow):
 
         self._bangun_tampilan()
         self._pasang_pintasan()
+        self._pasang_kunci_layar()
 
     # -----------------------------------------------------------------
 
@@ -881,7 +882,11 @@ class MainWindow(QMainWindow):
             # sesudah event show diproses agar batas yang sudah mengecil
             # benar-benar diterapkan oleh window manager.
             def ulangi_geometri() -> None:
-                if not self.isVisible() or self.isFullScreen():
+                if (
+                    not self.isVisible()
+                    or self.isFullScreen()
+                    or self.isMaximized()
+                ):
                     return
                 self.setMinimumSize(0, 0)
                 self.updateGeometry()
@@ -891,12 +896,26 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, ulangi_geometri)
         self._geometri_normal = QRect(self.geometry())
         self._posisi_normal_diketahui = True
+        # Jendela kerja langsung memenuhi area kerja layar; taskbar Windows
+        # tetap terlihat. Geometri di atas tetap dicatat sebagai ukuran
+        # "biasa" yang dipulihkan bila jendela di-restore. `--jendela`
+        # mempertahankan jendela biasa untuk pengembangan di laptop.
+        if not self.berjendela:
+            self.showMaximized()
 
     def ganti_layar_penuh(self) -> None:
         if self.isFullScreen():
             self._turunkan_layar_penuh()
         else:
-            self._geometri_normal = QRect(self.geometry())
+            # Dari keadaan maksimal, Esc/F11 kembali ke maksimal, bukan ke
+            # jendela biasa.
+            self._maksimal_sebelum_penuh = self.isMaximized()
+            if self.isMaximized():
+                biasa = self.normalGeometry()
+                if biasa.isValid():
+                    self._geometri_normal = QRect(biasa)
+            else:
+                self._geometri_normal = QRect(self.geometry())
             self._posisi_normal_diketahui = self.isVisible()
             self.showFullScreen()
 
@@ -916,6 +935,10 @@ class MainWindow(QMainWindow):
         menaruh jendela di pojok kiri atas dengan bilah judul lewat tepi atas
         layar — dan jendela tanpa bilah judul tidak dapat digeser dengan mouse.
         """
+        if getattr(self, "_maksimal_sebelum_penuh", False):
+            self._maksimal_sebelum_penuh = False
+            self.showMaximized()
+            return
         # Dibaca sebelum showNormal: layar TV sering monitor kedua, dan
         # jendela harus turun di layar yang sedang ditatap, bukan melompat
         # ke monitor utama.
@@ -1049,6 +1072,74 @@ class MainWindow(QMainWindow):
         if not self.mode_kios and sesi is not None and sesi.user_id is not None:
             self._pewaktu_hadir.start()
             self._kirim_tanda_hadir()
+
+    # -----------------------------------------------------------------
+    # Kunci layar setelah menganggur
+    # -----------------------------------------------------------------
+
+    def _pasang_kunci_layar(self) -> None:
+        """
+        Kunci layar petugas yang menganggur lebih lama dari `sesi.idle_menit`.
+
+        Hanya untuk sesi akun. Layar antrian dan anjungan tidak punya
+        siapa-siapa yang perlu dikunci, dan menutup papan yang menghadap
+        pengunjung justru merusaknya.
+        """
+        self._pengamat_aktivitas = None
+        self._pewaktu_kunci = None
+        self._kunci_terbuka = False
+        sesi = self.auth.current_session
+        if self.mode_kios or sesi is None or sesi.user_id is None:
+            return
+        try:
+            self._batas_menganggur = (
+                self.settings_service.get_int("sesi.idle_menit", 15) * 60
+            )
+        except Exception:  # noqa: BLE001 - pengaturan rusak tidak boleh menjatuhkan jendela
+            self._batas_menganggur = 0
+        if self._batas_menganggur <= 0:
+            return
+
+        from app.ui.login.kunci_layar import PengamatAktivitas
+
+        self._pengamat_aktivitas = PengamatAktivitas(self)
+        QApplication.instance().installEventFilter(self._pengamat_aktivitas)
+        self._pewaktu_kunci = QTimer(self)
+        self._pewaktu_kunci.setInterval(5_000)
+        self._pewaktu_kunci.timeout.connect(self._periksa_menganggur)
+        self._pewaktu_kunci.start()
+
+    def _periksa_menganggur(self) -> None:
+        pengamat = self._pengamat_aktivitas
+        if (
+            pengamat is None
+            or self._kunci_terbuka
+            or self._ditutup
+            or not self.auth.is_authenticated
+        ):
+            return
+        if pengamat.menganggur_detik() >= self._batas_menganggur:
+            self.kunci_layar()
+
+    def kunci_layar(self) -> None:
+        """Tutup jendela dengan layar kunci sampai kata sandi dimasukkan."""
+        from app.ui.login.kunci_layar import KunciLayarDialog
+
+        if self._kunci_terbuka or not self.auth.is_authenticated:
+            return
+        self._kunci_terbuka = True
+        try:
+            dialog = KunciLayarDialog(self.auth, self)
+            dialog.exec()
+            keluar = dialog.keluar
+        finally:
+            self._kunci_terbuka = False
+        if self._pengamat_aktivitas is not None:
+            self._pengamat_aktivitas.catat()
+        if keluar:
+            self._hentikan_tanda_hadir()
+            self.auth.logout()
+            self.close()
 
     def _hentikan_tanda_hadir(self) -> None:
         """
@@ -1231,6 +1322,14 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802 - nama dari Qt
         """Pastikan sesi berakhir walau jendela ditutup lewat tombol silang."""
         self._ditutup = True
+        pewaktu_kunci = getattr(self, "_pewaktu_kunci", None)
+        if pewaktu_kunci is not None:
+            pewaktu_kunci.stop()
+        pengamat = getattr(self, "_pengamat_aktivitas", None)
+        if pengamat is not None:
+            instans = QApplication.instance()
+            if instans is not None:
+                instans.removeEventFilter(pengamat)
         for indeks in range(self.halaman.count()):
             halaman = self.halaman.widget(indeks)
             hentikan = getattr(halaman, "hentikan", None)

@@ -13,7 +13,7 @@ menyembunyikan tombol, tetapi tidak boleh menjadi satu-satunya penjaga.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import sqlalchemy as sa
 
@@ -28,7 +28,7 @@ from app.core.errors import (
 )
 from app.core.logger import get_logger
 from app.core.security import hash_password, needs_rehash, validate_password_strength, verify_password
-from app.models import AuditAction, Counter, RecordStatus, UserRole
+from app.models import AuditAction, AuditLog, Counter, RecordStatus, UserRole
 from app.repositories.master_repository import CounterRepository
 from app.repositories.queue_repository import QueueRepository
 from app.repositories.user_repository import UserRepository, normalize_username
@@ -36,6 +36,11 @@ from app.services import audit_service
 from app.services.permissions import Permission, permissions_for
 
 logger = get_logger("auth")
+
+#: Percobaan masuk yang gagal pada satu akun sebelum ditunda, dan lamanya
+#: penundaan (jendela waktu yang sama dipakai menghitungnya).
+BATAS_LOGIN_GAGAL = 5
+BATAS_LOGIN_GAGAL_MENIT = 5
 
 
 @dataclass(frozen=True)
@@ -129,12 +134,19 @@ class AuthService:
         """
         nama = normalize_username(username)
         gagal: tuple[int | None, str, str] | None = None
+        ditunda = False
 
         with session_scope() as session:
             repo = UserRepository(session)
             user = repo.get_by_username(nama)
 
-            if user is None or not verify_password(password, user.password_hash):
+            if user is not None and self._terlalu_banyak_gagal(session, user.id):
+                # Ditolak sebelum kata sandi diperiksa dan TIDAK dicatat
+                # sebagai percobaan gagal baru: jendela penundaan yang
+                # diperpanjang oleh penolakannya sendiri akan mengunci
+                # pemilik akun selama penyerang terus mencoba.
+                ditunda = True
+            elif user is None or not verify_password(password, user.password_hash):
                 gagal = (
                     user.id if user else None,
                     "kredensial salah",
@@ -174,6 +186,13 @@ class AuthService:
                     default_counter_id=user.default_counter_id,
                 )
 
+        if ditunda:
+            logger.warning("Login %r ditunda: terlalu banyak percobaan gagal", nama)
+            raise AuthenticationError(
+                "Terlalu banyak percobaan masuk yang gagal. Coba lagi dalam "
+                f"{BATAS_LOGIN_GAGAL_MENIT} menit."
+            )
+
         if gagal is not None:
             user_id, alasan, pesan = gagal
             self._catat_login_gagal(user_id=user_id, username=nama, alasan=alasan)
@@ -182,6 +201,55 @@ class AuthService:
 
         logger.info("Login berhasil: %s (%s)", nama, self._session.role.value)
         return self._session
+
+    @staticmethod
+    def _terlalu_banyak_gagal(session, user_id: int) -> bool:
+        """
+        Benar bila akun ini sudah gagal masuk BATAS_LOGIN_GAGAL kali dalam
+        BATAS_LOGIN_GAGAL_MENIT menit terakhir.
+
+        Dihitung dari audit log, bukan memori: percobaan dari komputer
+        loket mana pun ikut terhitung, dan tidak hilang saat aplikasi
+        dibuka ulang.
+        """
+        sejak = clock.now() - timedelta(minutes=BATAS_LOGIN_GAGAL_MENIT)
+        jumlah = session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLog)
+            .where(
+                AuditLog.action == AuditAction.LOGIN_FAILED.value,
+                AuditLog.user_id == user_id,
+                AuditLog.created_at >= sejak,
+            )
+        )
+        return (jumlah or 0) >= BATAS_LOGIN_GAGAL
+
+    def verifikasi_kata_sandi(self, password: str) -> bool:
+        """
+        Benar bila `password` milik akun yang sedang masuk.
+
+        Untuk membuka kunci layar. Tidak mengubah sesi. Jawaban salah
+        dicatat sebagai percobaan gagal dan ikut dihitung batas percobaan
+        login, sehingga kunci layar tidak dapat ditebak tanpa batas.
+        """
+        sesi = self.require_session()
+        if sesi.user_id is None:
+            return False
+        with session_scope() as session:
+            user = UserRepository(session).get_by_id(sesi.user_id)
+            if user is None:
+                return False
+            if self._terlalu_banyak_gagal(session, user.id):
+                raise AuthenticationError(
+                    "Terlalu banyak percobaan yang gagal. Coba lagi dalam "
+                    f"{BATAS_LOGIN_GAGAL_MENIT} menit."
+                )
+            sah = verify_password(password, user.password_hash)
+        if not sah:
+            self._catat_login_gagal(
+                user_id=sesi.user_id, username=sesi.username, alasan="kunci layar"
+            )
+        return sah
 
     def logout(self) -> None:
         """Keluar dari aplikasi. Aman dipanggil walau belum login."""

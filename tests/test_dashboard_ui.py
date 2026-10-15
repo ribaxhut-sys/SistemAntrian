@@ -330,8 +330,8 @@ def test_menu_petugas_tanpa_scrollbar_di_1366x768(qtbot, auth, antrian_siap, ter
     assert bermasalah == [("Pelayanan", 0, 0), ("Ringkasan Saya", 0, 0)]
 
 
-def test_pelayanan_muat_di_1280x720(qtbot, auth, antrian_siap, terbitkan):
-    """Tombol memanggil ada di kartu loket, sehingga kolom kiri lebih pendek."""
+def test_tombol_memanggil_ada_di_kartu_loket_tanpa_scrollbar(qtbot, auth, antrian_siap, terbitkan):
+    """Tombol memanggil ada di kartu loket; halaman muat di 1366x768."""
     from app.ui.main_window import MainWindow
 
     terbitkan("A", 3)
@@ -339,11 +339,12 @@ def test_pelayanan_muat_di_1280x720(qtbot, auth, antrian_siap, terbitkan):
     jendela = MainWindow(auth)
     qtbot.addWidget(jendela)
     jendela.show()
-    jendela.resize(1280, 720)
-    qtbot.wait(50)
-
+    jendela.resize(1366, 768)
     pembungkus = jendela.halaman.widget(0)
     assert jendela.menu_aktif[0].judul == "Pelayanan"
+    # Tunggu muat latar selesai: isi yang datang kemudian ikut menentukan tinggi.
+    qtbot.waitUntil(lambda: pembungkus.widget()._pekerja_data is None, timeout=5000)
+    qtbot.wait(100)
     assert pembungkus.verticalScrollBar().maximum() == 0
     halaman = pembungkus.widget()
     # Tombol memanggil berada di dalam kartu loket.

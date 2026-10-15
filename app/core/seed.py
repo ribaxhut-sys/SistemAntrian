@@ -80,6 +80,8 @@ _SETTINGS: list[tuple[str, str, str]] = [
      "Folder salinan kedua backup (disk lain/flashdisk); kosongkan bila tidak dipakai"),
     ("dashboard.refresh_seconds", "30",
      "Jeda penyegaran layar ringkasan harian, dalam detik"),
+    ("sesi.idle_menit", "15",
+     "Kunci layar petugas setelah menganggur, dalam menit; 0 untuk mematikan"),
     (
         "display.screen_shape",
         "auto",

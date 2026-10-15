@@ -119,6 +119,7 @@ KETERANGAN_KELOMPOK: dict[str, str] = {
     "Pengaduan": "Berapa lama identitas pelapor pengaduan disimpan.",
     "Ringkasan Harian": "Layar rekap yang dibaca penyelia sepanjang hari.",
     "Backup": "Salinan database dan berapa lama salinan itu disimpan.",
+    "Keamanan": "Kunci layar petugas ketika komputer ditinggalkan.",
 }
 
 #: Kelompok tambahan yang isinya bukan pengaturan database, melainkan

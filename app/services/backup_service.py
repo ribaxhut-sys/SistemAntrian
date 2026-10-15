@@ -20,7 +20,7 @@ import json
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.core import clock
@@ -552,6 +552,16 @@ class BackupService:
                 "Berkas yang dipilih bukan database antrian yang sah."
             )
 
+        masih_aktif = self._loket_masih_aktif(sesi.user_id)
+        if masih_aktif:
+            raise BusinessRuleError(
+                "Masih ada loket yang aktif: "
+                + ", ".join(masih_aktif)
+                + ". Minta petugasnya keluar dari aplikasi (Keluar), tunggu "
+                "sebentar, lalu ulangi pemulihan. Memulihkan database selagi "
+                "loket bekerja dapat merusak nomor yang sedang dilayani."
+            )
+
         pengaman = self._salin(alasan="sebelum-restore")
 
         # Koneksi wajib ditutup lebih dahulu. Pada SQLite karena Windows
@@ -576,6 +586,34 @@ class BackupService:
         logger.warning(
             "Database dipulihkan dari %s (pengaman: %s)", sumber.name, pengaman.nama
         )
+
+    @staticmethod
+    def _loket_masih_aktif(user_id: int | None) -> list[str]:
+        """
+        Nama loket yang petugasnya masih memberi tanda hadir segar.
+
+        Tanda hadir dikirim setiap 30 detik oleh jendela petugas dan hilang
+        saat logout; yang lebih tua dari BATAS_HADIR_PETUGAS_DETIK dianggap
+        sudah tidak ada orangnya. Milik sesi yang sedang memulihkan sendiri
+        tidak dihitung.
+        """
+        import sqlalchemy as sa
+
+        from app.models import Counter
+        from app.services.queue_service import BATAS_HADIR_PETUGAS_DETIK
+
+        batas = clock.now() - timedelta(seconds=BATAS_HADIR_PETUGAS_DETIK)
+        with session_scope() as session:
+            kondisi = [
+                Counter.petugas_user_id.is_not(None),
+                Counter.petugas_terlihat_pada.is_not(None),
+                Counter.petugas_terlihat_pada >= batas,
+            ]
+            if user_id is not None:
+                kondisi.append(Counter.petugas_user_id != user_id)
+            return list(
+                session.scalars(sa.select(Counter.name).where(*kondisi).order_by(Counter.code))
+            )
 
     def _sumber(self, berkas: Path | str) -> Path:
         sumber = Path(berkas)

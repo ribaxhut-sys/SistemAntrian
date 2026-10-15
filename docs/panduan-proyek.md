@@ -416,6 +416,7 @@ API anjungan mempunyai dua endpoint tanpa token:
 - [PostgreSQL dan banyak komputer](../README.md#pemasangan-beberapa-loket-postgresql)
 - [Anjungan Android dan printer USB](android-kiosk.md)
 - [Dashboard admin, supervisor, dan petugas](dashboard.md)
+- [Keamanan sesi petugas](keamanan-sesi.md)
 - [Uji terima sebelum operasional](acceptance-test.md)
 - [Peran komputer](peran-komputer.md)
 - [Catatan lanjutan pengembangan](lanjutan.md)

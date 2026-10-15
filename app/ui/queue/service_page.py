@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core import clock
 from app.models import QueueStatus
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
@@ -39,6 +40,7 @@ from app.ui.common import (
 )
 from app.ui.efek import pasang_efek
 from app.ui.queue.note_panel import NotePanel
+from app.ui.queue.papan_tunggu import PapanTunggu
 from app.ui.queue.pelapor_form import PelaporForm
 from app.ui.style import (
     BORDER,
@@ -300,7 +302,10 @@ class ServicePage(QWidget):
             self.pelapor = PelaporForm()
             kolom.addWidget(self.pelapor)
 
-        kolom.addStretch()
+        # Papan tunggu mengisi sisa tinggi kolom kiri: apa yang dilihat
+        # pengunjung di layar antrian, tanpa berpindah tab.
+        self.papan_tunggu = PapanTunggu(TUNGGU_LAMA_MENIT)
+        kolom.addWidget(self.papan_tunggu, stretch=1)
         # Baris survey tidak lagi di sini: ia pindah ke bawah panel kanan,
         # yang punya sisa tinggi, supaya kolom kerja muat tanpa gulir.
         self._baris_survey = self._bangun_baris_survey()
@@ -1051,6 +1056,7 @@ class ServicePage(QWidget):
         self.antrian = antrian
         self._tampilkan_antrian()
         self._isi_tabel(menunggu)
+        self.papan_tunggu.setel(menunggu, self.loket_kategori, clock.now())
         self._isi_tabel_dilewati(dilewati)
 
     def _tandai_gagal_sinkron(self) -> None:
@@ -1301,6 +1307,10 @@ class ServicePage(QWidget):
         if self.auth is None or self.antrian is None:
             return False
         sesi = self.auth.current_session
+        if sesi is None:
+            # Sesi sudah berakhir (logout/jendela ditutup) selagi muat latar
+            # masih berjalan; tidak ada lagi yang dapat "dialihkan".
+            return False
         return (
             self.antrian.served_by_id is not None
             and self.antrian.served_by_id != sesi.user_id
