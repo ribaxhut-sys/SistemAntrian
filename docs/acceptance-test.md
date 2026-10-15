@@ -143,16 +143,21 @@ Lewati bagian ini bila hanya satu komputer yang dipakai.
 | G6 | Beri nilai 1 pada satu pelayanan | Status antrian TETAP Selesai, tidak berubah | |
 | G7 | Setel `survey.enabled` = `false` | Layar survey menyatakan dinonaktifkan; tombol padam | |
 
-## H. Ringkasan harian
+## H. Dashboard
 
 | # | Langkah | Hasil yang diharapkan | Hasil |
 |---|---|---|---|
-| H1 | Masuk sebagai SUPERVISOR | Menu Pengaduan, Ringkasan Harian, dan Hasil Survey; tidak ada tombol mengubah antrian | |
+| H1 | Masuk sebagai SUPERVISOR | Menu Pengaduan, Dashboard, Laporan, dan Hasil Survey; tidak ada tombol mengubah antrian | |
 | H2 | Cocokkan angka per status dengan kenyataan di loket | Sama persis | |
 | H3 | Periksa rata-rata menunggu dan pelayanan | Terisi wajar; `—` bila memang belum ada datanya | |
 | H4 | Periksa ringkasan kepuasan | Rata-rata dan sebaran nilai sesuai survey yang masuk | |
 | H5 | Terbitkan nomor baru dari komputer lain, tunggu 30 detik | Angka menyegar sendiri tanpa ditekan `F5` | |
 | H6 | Coba memanggil atau menyelesaikan antrian | Tidak ada tombolnya — supervisor memantau, tidak mengubah | |
+| H7 | Ubah saringan tanggal, jenis layanan, loket, dan petugas | Angka mengikuti saringan; tanggal tanpa data menampilkan pemberitahuan kosong | |
+| H8 | Masuk sebagai ADMIN, buka Dashboard | Papan loket, grafik per jam, akses cepat (Laporan, Data Master, Pengaturan, Backup, Kesehatan), dan aktivitas terakhir tampil | |
+| H9 | Masuk sebagai SUPERVISOR, buka Dashboard | Hanya akses cepat Laporan; tidak ada aktivitas terakhir | |
+| H10 | Masuk sebagai CRO, buka Ringkasan Saya | Hanya nomor, antrean, hitungan, dan riwayat milik sendiri; tidak ada menu Dashboard | |
+| H11 | Tanpa loket bawaan / loket istirahat | Peringatan jelas tampil di Ringkasan Saya | |
 
 ## I. Backup dan pemulihan
 

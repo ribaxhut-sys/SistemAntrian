@@ -100,6 +100,10 @@ def _beri_bayangan(widget: QWidget) -> None:
     pasang_efek(widget, efek)
 
 
+#: Judul tab ruang kerja pengaduan di panel kanan (tab pertama).
+JUDUL_TAB_PENGADUAN = "Pengaduan & Catatan"
+
+
 class ServicePage(QWidget):
     """
     Panel kerja petugas CRO.
@@ -141,6 +145,10 @@ class ServicePage(QWidget):
         #: transisi loket kosong <-> sedang melayani, satu-satunya saat
         #: panel kanan berpindah tab sendiri — lihat `_perbarui_panel_kanan`.
         self._kanan_aktif_sebelumnya: bool | None = None
+        #: (id, status) nomor yang dipegang pada penyegaran sebelumnya.
+        #: Tab Pengaduan dibuka pada PERISTIWA — nomor dipanggil atau mulai
+        #: dilayani — bukan pada setiap penyegaran.
+        self._kunci_antrian_sebelumnya: tuple | None = None
         #: Dipakai untuk memilih loket petugas ini sendiri saat halaman
         #: dibuka, dan mengingat kepindahannya bila ia berganti meja.
         self.auth = auth
@@ -501,13 +509,30 @@ class ServicePage(QWidget):
         """
         self.tab_kanan = QTabWidget()
         self.tab_kanan.setMinimumWidth(320)
-        self.tab_kanan.addTab(self._bangun_panel_menunggu(), "Menunggu Dilayani")
-        self.tab_kanan.addTab(self._bangun_panel_dilewati(), "Dilewati (0)")
 
+        # Pengaduan & Catatan selalu tab pertama: itu tempat petugas
+        # bekerja begitu seseorang dipanggil, jadi letaknya tetap di awal.
         self.panel_pengaduan: NotePanel | None = None
         if self.note is not None and self.pelapor is not None:
             self.panel_pengaduan = NotePanel(self.note, self.pelapor)
-            self.tab_kanan.addTab(self.panel_pengaduan, "Pengaduan & Catatan")
+            self.tab_kanan.addTab(self.panel_pengaduan, JUDUL_TAB_PENGADUAN)
+            # Penanda isian yang belum disimpan, supaya tidak terlewat
+            # ketika petugas berpindah ke tab lain.
+            self.panel_pengaduan.isian_deskripsi.textChanged.connect(
+                self._perbarui_judul_pengaduan
+            )
+            self.panel_pengaduan.isian_catatan.textChanged.connect(
+                self._perbarui_judul_pengaduan
+            )
+            self._pewaktu_judul_pengaduan = QTimer(self)
+            self._pewaktu_judul_pengaduan.setInterval(1000)
+            self._pewaktu_judul_pengaduan.timeout.connect(
+                self._perbarui_judul_pengaduan
+            )
+            self._pewaktu_judul_pengaduan.start()
+
+        self.tab_kanan.addTab(self._bangun_panel_menunggu(), "Menunggu Dilayani")
+        self.tab_kanan.addTab(self._bangun_panel_dilewati(), "Dilewati (0)")
 
         _beri_bayangan(self.tab_kanan)
         return self.tab_kanan
@@ -1290,12 +1315,34 @@ class ServicePage(QWidget):
                     self.pelapor.set_aktif(False)
 
         aktif = self.antrian is not None
-        if aktif != self._kanan_aktif_sebelumnya:
-            self._kanan_aktif_sebelumnya = aktif
-            if self.panel_pengaduan is not None:
-                self.tab_kanan.setCurrentWidget(
-                    self.panel_pengaduan if aktif else self.panel_menunggu
-                )
+        kunci = (
+            (self.antrian.id, self.antrian.status) if self.antrian is not None else None
+        )
+        # Nomor dipanggil, mulai dilayani, atau berganti: buka Pengaduan.
+        # Selain itu pilihan tab petugas dibiarkan. Muatan pertama dengan
+        # nomor yang sudah dipegang juga termasuk peristiwa (kunci awal None).
+        peristiwa = kunci != self._kunci_antrian_sebelumnya
+        self._kunci_antrian_sebelumnya = kunci
+        berubah_aktif = aktif != self._kanan_aktif_sebelumnya
+        self._kanan_aktif_sebelumnya = aktif
+        if self.panel_pengaduan is not None:
+            if aktif and peristiwa:
+                self.tab_kanan.setCurrentWidget(self.panel_pengaduan)
+            elif not aktif and berubah_aktif:
+                self.tab_kanan.setCurrentWidget(self.panel_menunggu)
+            self._perbarui_judul_pengaduan()
+
+    def _perbarui_judul_pengaduan(self) -> None:
+        """Beri tanda ● pada judul tab bila ada isian yang belum disimpan."""
+        panel = self.panel_pengaduan
+        if panel is None:
+            return
+        judul = JUDUL_TAB_PENGADUAN
+        if self.antrian is not None and panel.berubah:
+            judul += " ●"
+        indeks = self.tab_kanan.indexOf(panel)
+        if indeks >= 0 and self.tab_kanan.tabText(indeks) != judul:
+            self.tab_kanan.setTabText(indeks, judul)
 
     def _perbarui_tombol_survey(self) -> None:
         aktif = self.settings.get_bool("survey.enabled", True)
@@ -1403,7 +1450,9 @@ class ServicePage(QWidget):
         ada = bool(dilewati)
         self.tabel_dilewati.setVisible(ada)
         self.label_dilewati_kosong.setVisible(not ada)
-        self.tab_kanan.setTabText(1, f"Dilewati ({len(dilewati)})")
+        self.tab_kanan.setTabText(
+            self.tab_kanan.indexOf(self.panel_dilewati), f"Dilewati ({len(dilewati)})"
+        )
         self._perbarui_tombol_panggil_kembali()
 
     def _id_dilewati_terpilih(self) -> int | None:
@@ -1453,7 +1502,7 @@ class ServicePage(QWidget):
         terlambat = sum(1 for m in lama_menit if m >= TUNGGU_LAMA_MENIT)
         if terlambat:
             judul += f" · {terlambat} lama"
-        self.tab_kanan.setTabText(0, judul)
+        self.tab_kanan.setTabText(self.tab_kanan.indexOf(self.panel_menunggu), judul)
 
     def _gayai_sel(
         self, sel: QTableWidgetItem, *, baris: int, kolom: int, menit: int

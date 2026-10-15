@@ -116,12 +116,12 @@ def test_judul_tab_menunggu_menyebut_jumlah_dan_yang_lama(halaman_kerja):
 
     halaman_kerja._perbarui_judul_tab_menunggu(5, [3, TUNGGU_LAMA_MENIT, 25])
 
-    assert halaman_kerja.tab_kanan.tabText(0) == "Menunggu Dilayani (5) · 2 lama"
+    assert halaman_kerja.tab_kanan.tabText(1) == "Menunggu Dilayani (5) · 2 lama"
 
 
 def test_judul_tab_tanpa_keterangan_lama_bila_tidak_ada(halaman_kerja):
     halaman_kerja._perbarui_judul_tab_menunggu(3, [1, 2, 5])
-    assert halaman_kerja.tab_kanan.tabText(0) == "Menunggu Dilayani (3)"
+    assert halaman_kerja.tab_kanan.tabText(1) == "Menunggu Dilayani (3)"
 
 
 # ---------------------------------------------------------------------
@@ -648,3 +648,36 @@ def test_f5_tetap_memakai_ketikan_saat_ini(qtbot, auth, lembar_terisi):
 
     assert halaman.tabel.rowCount() == 1
     assert halaman.terpilih.nama == "Budi Santoso"
+
+
+# ---------------------------------------------------------------------
+# Urutan tab, pemicu mulai-layani, dan penanda isian belum disimpan
+# ---------------------------------------------------------------------
+
+def test_tab_pengaduan_selalu_di_awal(halaman_kerja):
+    tab = halaman_kerja.tab_kanan
+    assert tab.widget(0) is halaman_kerja.panel_pengaduan
+    assert tab.tabText(0).startswith("Pengaduan & Catatan")
+
+
+def test_mulai_melayani_membuka_pengaduan_walau_tab_lain_dibuka(
+    halaman_kerja, terbitkan
+):
+    _panggil(halaman_kerja, terbitkan)
+    halaman_kerja.tab_kanan.setCurrentWidget(halaman_kerja.panel_menunggu)
+
+    halaman_kerja.mulai_melayani()
+
+    assert halaman_kerja.tab_kanan.currentWidget() is halaman_kerja.panel_pengaduan
+
+
+def test_judul_pengaduan_bertanda_bila_ada_isian_belum_disimpan(
+    halaman_kerja, terbitkan
+):
+    _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    assert halaman_kerja.tab_kanan.tabText(0) == "Pengaduan & Catatan"
+
+    panel.isian_catatan.setPlainText("ditulis tetapi belum disimpan")
+
+    assert halaman_kerja.tab_kanan.tabText(0).endswith("●")

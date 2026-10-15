@@ -184,11 +184,19 @@ def test_ringkasan_survey_kosong_saat_belum_ada_penilaian(
 # Hak akses
 # ---------------------------------------------------------------------
 
-@pytest.mark.parametrize("peran", ["cro", "registration", "display", "admin"])
-def test_hanya_supervisor_yang_boleh_melihat_ringkasan(auth, antrian_siap, peran):
-    """Ringkasan operasional bukan urusan petugas loket maupun administrator."""
+@pytest.mark.parametrize("peran", ["cro", "registration", "display"])
+def test_petugas_dan_layar_tidak_boleh_melihat_ringkasan(auth, antrian_siap, peran):
+    """Ringkasan operasional bukan urusan petugas loket, pendaftaran, atau layar."""
     auth.logout()
     auth.login(peran, TEST_PASSWORD)
 
     with pytest.raises(AuthorizationError):
         DashboardService(auth).ringkasan_hari_ini()
+
+
+def test_admin_boleh_melihat_ringkasan(auth, antrian_siap):
+    """Admin memantau seluruh cabang; hanya membaca, tidak mengubah antrian."""
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+
+    assert DashboardService(auth).ringkasan_hari_ini().total == 0

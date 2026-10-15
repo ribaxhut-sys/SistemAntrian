@@ -43,6 +43,10 @@ from app.services.ticket_service import TicketService, buat_printer, mode_pencet
 from app.services.user_service import UserService
 from app.ui.common import judul, keterangan, konfirmasi, tombol
 from app.ui.dashboard.dashboard_page import DashboardPage
+from app.ui.dashboard.petugas_page import (
+    DashboardPendaftaranPage,
+    DashboardPetugasPage,
+)
 from app.ui.dashboard.survey_result_page import SurveyResultPage
 from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.settings.dialogs import LABEL_PERAN
@@ -99,6 +103,8 @@ TUNDA_PERIKSA_ANJUNGAN_AWAL_MS = 1_500
 #: Judul menu halaman Layanan Anjungan; juga dipakai pita peringatan untuk
 #: membuka halaman itu.
 MENU_LAYANAN_ANJUNGAN = "Layanan Anjungan"
+MENU_PELAYANAN = "Pelayanan"
+MENU_RINGKASAN_SAYA = "Ringkasan Saya"
 
 #: Utas pemeriksa yang masih berjalan saat jendelanya ditutup. Dilepas dari
 #: jendela dan disimpan di sini sampai selesai: QThread yang ikut dihapus
@@ -163,6 +169,8 @@ class _Menu:
     kecuali: tuple[Permission, ...] = ()
     #: Hanya di komputer yang berperan server database.
     hanya_server: bool = False
+    #: Hanya untuk sesi yang mewakili akun (bukan sesi kios tanpa login).
+    hanya_akun: bool = False
 
 
 def _komputer_server() -> bool:
@@ -600,7 +608,7 @@ class MainWindow(QMainWindow):
                 ),
             ),
             _Menu(
-                "Pelayanan",
+                MENU_PELAYANAN,
                 Permission.QUEUE_CALL,
                 lambda: ServicePage(
                     self.queue_service,
@@ -610,6 +618,29 @@ class MainWindow(QMainWindow):
                     self.auth,
                     note=self.note_service,
                 ),
+            ),
+            # Keadaan meja sendiri: nomor, antrean, dan riwayat hari ini.
+            # Tindakannya tetap di "Pelayanan"; lihat petugas_page.
+            _Menu(
+                MENU_RINGKASAN_SAYA,
+                Permission.QUEUE_CALL,
+                lambda: DashboardPetugasPage(
+                    self.dashboard_service,
+                    self.settings_service,
+                    buka_menu=self.buka_menu,
+                    menu_pelayanan=MENU_PELAYANAN,
+                ),
+            ),
+            # Petugas pendaftaran: nomor yang ia terbitkan. Akun yang juga
+            # memanggil sudah mendapat Ringkasan Saya di atas.
+            _Menu(
+                MENU_RINGKASAN_SAYA,
+                Permission.QUEUE_CREATE,
+                lambda: DashboardPendaftaranPage(
+                    self.dashboard_service, self.settings_service
+                ),
+                kecuali=(Permission.QUEUE_CALL,),
+                hanya_akun=True,
             ),
             _Menu(
                 "Survey Kepuasan",
@@ -679,9 +710,13 @@ class MainWindow(QMainWindow):
             # menjadi "Antrian" dan "Laporan" hanya membuat supervisor
             # berpindah-pindah untuk membaca satu keadaan yang sama.
             _Menu(
-                "Ringkasan Harian",
+                "Dashboard",
                 Permission.DASHBOARD_VIEW,
-                lambda: DashboardPage(self.dashboard_service, self.settings_service),
+                lambda: DashboardPage(
+                    self.dashboard_service,
+                    self.settings_service,
+                    buka_menu=self.buka_menu,
+                ),
             ),
             # Rentang tanggal, per loket dan per petugas: pertanyaan sesudah
             # "bagaimana hari ini", dan sebab hak REPORT_VIEW sudah ada.
@@ -710,6 +745,8 @@ class MainWindow(QMainWindow):
             if any(self.auth.has_permission(p) for p in butir.kecuali):
                 continue
             if butir.hanya_server and not _komputer_server():
+                continue
+            if butir.hanya_akun and self.auth.require_session().user_id is None:
                 continue
             if butir.permission is None or self.auth.has_permission(butir.permission):
                 self.menu_aktif.append(butir)
@@ -1120,8 +1157,18 @@ class MainWindow(QMainWindow):
             pita.tampilkan(status)
 
     def _buka_layanan_anjungan(self) -> None:
+        self.buka_menu(MENU_LAYANAN_ANJUNGAN)
+
+    def buka_menu(self, judul_menu: str) -> None:
+        """
+        Pindah ke menu berjudul `judul_menu`, bila sesi ini memilikinya.
+
+        Dipakai tombol akses cepat di dashboard. Menu yang tidak ada pada
+        sesi (hak akses tidak cukup) diabaikan: tombolnya pun tidak dibuat
+        di sana, dan service tetap menolak bila ada yang memaksa.
+        """
         for baris, butir in enumerate(self.menu_aktif):
-            if butir.judul == MENU_LAYANAN_ANJUNGAN:
+            if butir.judul == judul_menu:
                 self.navigasi.setCurrentRow(baris)
                 return
 

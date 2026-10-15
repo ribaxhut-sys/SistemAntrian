@@ -783,7 +783,10 @@ def test_form_admin_penuh_tanpa_scrollbar_form(qtbot, admin_auth, monkeypatch, s
             else halaman.findChildren(SettingsPage)
         )
         if not pengaturan:
-            periksa(halaman, judul_halaman)
+            # Dashboard adalah halaman pemantauan yang panjang dan sengaja
+            # bergulir vertikal; yang dijaga di sini hanyalah form.
+            if judul_halaman != "Dashboard":
+                periksa(halaman, judul_halaman)
             continue
         rail = pengaturan[0].rail
         for baris in range(rail.count()):
@@ -851,7 +854,7 @@ def test_supervisor_melihat_ringkasan(qtbot, auth):
     qtbot.addWidget(jendela)
 
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-    assert "Ringkasan Harian" in menu
+    assert "Dashboard" in menu
 
 
 def test_menu_pertama_langsung_terpilih(qtbot, admin_auth):
@@ -1490,7 +1493,7 @@ def test_lewati_sementara_masuk_daftar_dan_dapat_dipanggil_kembali(
 
     assert halaman_layanan.label_nomor.text() == "—"
     assert halaman_layanan.tombol_panggil.isEnabled()
-    assert halaman_layanan.tab_kanan.tabText(1) == "Dilewati (1)"
+    assert halaman_layanan.tab_kanan.tabText(2) == "Dilewati (1)"
     assert halaman_layanan.tabel_dilewati.item(0, 0).text() == "A-001"
     assert halaman_layanan.tabel_dilewati.item(0, 2).text() == "1x"
 
@@ -1525,7 +1528,7 @@ def test_nomor_dilewati_dapat_ditandai_tidak_hadir_dari_tabnya(
     halaman_layanan.tidak_hadir_dilewati()
 
     assert halaman_layanan.tabel_dilewati.rowCount() == 0
-    assert halaman_layanan.tab_kanan.tabText(1) == "Dilewati (0)"
+    assert halaman_layanan.tab_kanan.tabText(2) == "Dilewati (0)"
     assert halaman_layanan.label_nomor.text() == "A-002", "loket tidak terganggu"
 
 
@@ -1619,14 +1622,14 @@ def test_menu_petugas_cro_dan_pendaftaran_tidak_tumpang_tindih(qtbot, auth, antr
     # "Pengaduan" BUKAN pekerjaan yang sama dengan "Pelayanan":
     # panel pelayanan menulis lembar untuk nomor yang sedang di depan meja,
     # layar ini mencari lembar milik hari-hari sebelumnya.
-    assert menu == ["Pelayanan", "Survey Kepuasan", "Pengaduan"]
+    assert menu == ["Pelayanan", "Ringkasan Saya", "Survey Kepuasan", "Pengaduan"]
 
     auth.logout()
     auth.login("registration", TEST_PASSWORD)
     jendela2 = MainWindow(auth)
     qtbot.addWidget(jendela2)
     menu2 = [jendela2.navigasi.item(i).text() for i in range(jendela2.navigasi.count())]
-    assert menu2 == ["Terbitkan Nomor"]
+    assert menu2 == ["Terbitkan Nomor", "Ringkasan Saya"]
 
 
 # ---------------------------------------------------------------------
@@ -2516,7 +2519,7 @@ def test_menu_hasil_survey_hanya_untuk_supervisor(qtbot, auth, antrian_siap):
     jendela = MainWindow(auth)
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-    assert menu == ["Pengaduan", "Ringkasan Harian", "Laporan", "Hasil Survey"]
+    assert menu == ["Pengaduan", "Dashboard", "Laporan", "Hasil Survey"]
 
     for peran in ("cro", "admin", "registration"):
         auth.logout()
@@ -2540,7 +2543,7 @@ def test_supervisor_hanya_memantau(qtbot, auth, antrian_siap):
     # "Pengaduan" ikut ada, dan itu tetap memantau: supervisor
     # boleh MEMBACA lembar pengaduan, tidak boleh menulis maupun
     # menghapusnya — menulis milik CRO, menghapus milik ADMIN.
-    assert menu == ["Pengaduan", "Ringkasan Harian", "Laporan", "Hasil Survey"]
+    assert menu == ["Pengaduan", "Dashboard", "Laporan", "Hasil Survey"]
 
 
 def test_timer_hanya_berjalan_pada_halaman_yang_terlihat(qtbot, auth, antrian_siap):

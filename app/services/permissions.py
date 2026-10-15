@@ -106,6 +106,10 @@ ROLE_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
             # dapat mengunduh rekap tanpa akun supervisor terpisah.
             # Murni membaca: tidak membuka kewenangan mengubah antrian.
             Permission.REPORT_VIEW,
+            # Dashboard operasional seluruh cabang. Murni membaca, sama
+            # seperti laporan di atas; audit log di dalamnya tetap
+            # ditegakkan lewat CONFIG_MANAGE di DashboardService.
+            Permission.DASHBOARD_VIEW,
             # Menghapus pengaduan adalah tindakan administratif, dan
             # sengaja TIDAK diberikan kepada petugas yang menulisnya:
             # penulis yang sekaligus dapat menghilangkan tulisannya
