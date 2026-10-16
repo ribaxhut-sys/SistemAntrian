@@ -226,6 +226,10 @@ class KartuPerangkat(QFrame):
         self.peringatan_suara.hide()
         isi.addWidget(self.peringatan_suara)
 
+        self._pewaktu_lebar = QTimer(self)
+        self._pewaktu_lebar.setSingleShot(True)
+        self._pewaktu_lebar.setInterval(0)
+        self._pewaktu_lebar.timeout.connect(self._atur_lebar_aksi)
         self._pewaktu = QTimer(self)
         self._pewaktu.setInterval(SELANG_SEGARKAN_MS)
         self._pewaktu.timeout.connect(self.muat_ulang)
@@ -351,15 +355,9 @@ class KartuPerangkat(QFrame):
         # Tombol aplikasi bertinggi minimum sendiri; baris dan kolom aksi
         # mengikuti ukuran tombol, bukan sebaliknya, supaya tidak terpotong.
         tinggi = TINGGI_BARIS
-        lebar_aksi = 0
-        for baris in range(self.tabel.rowCount()):
-            wadah = self.tabel.cellWidget(baris, K_AKSI)
-            if wadah is not None:
-                lebar_aksi = max(lebar_aksi, wadah.sizeHint().width())
         for baris in range(self.tabel.rowCount()):
             self.tabel.setRowHeight(baris, tinggi)
-        if lebar_aksi:
-            self.tabel.setColumnWidth(K_AKSI, lebar_aksi + 8)
+        self._atur_lebar_aksi()
         # Halaman sudah digulir; tabel tidak perlu gulungan sendiri.
         self.tabel.setFixedHeight(
             self.tabel.horizontalHeader().height()
@@ -367,6 +365,34 @@ class KartuPerangkat(QFrame):
             + 2 * self.tabel.frameWidth()
             + 2
         )
+
+    def _atur_lebar_aksi(self) -> None:
+        """
+        Lebarkan kolom aksi sesuai tombol terlebar.
+
+        Dipanggil lagi saat kartu tampil: sebelum itu tombol baris belum
+        dipolish dengan huruf dan stylesheet aplikasi, sehingga sizeHint-nya
+        ±4 px terlalu kecil dan "Segarkan media" terpotong.
+        """
+        lebar_aksi = 0
+        for baris in range(self.tabel.rowCount()):
+            wadah = self.tabel.cellWidget(baris, K_AKSI)
+            if wadah is None:
+                continue
+            for btn in wadah.findChildren(QPushButton):
+                btn.ensurePolished()
+            wadah.ensurePolished()
+            wadah.layout().invalidate()
+            lebar_aksi = max(lebar_aksi, wadah.sizeHint().width())
+        if lebar_aksi:
+            # Widget sel menerima ±12 px lebih sempit daripada kolomnya
+            # (diukur: kolom 331 px, widget 319 px); +16 memberi sisa.
+            self.tabel.setColumnWidth(K_AKSI, lebar_aksi + 16)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - nama Qt
+        super().showEvent(event)
+        # Ditunda satu putaran: anak-anak baru dipolish setelah event ini.
+        self._pewaktu_lebar.start()
 
     def _tombol_baris(self, p: PerangkatInfo) -> QWidget:
         wadah = QWidget()

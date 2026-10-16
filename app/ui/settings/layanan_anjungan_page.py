@@ -384,11 +384,13 @@ class LayananAnjunganPage(QWidget):
         )
         self.api_otomatis.setChecked(muat_api_otomatis())
         self.api_otomatis.toggled.connect(self._ubah_api_otomatis)
-        # Sebaris dengan tombol tindakan: keduanya tentang cara API menyala.
-        tindakan.addSpacing(8)
-        tindakan.addWidget(self.api_otomatis)
+        # Tepat di bawah tombol tindakan (sama-sama tentang cara API menyala),
+        # bukan sebaris: label "Pasang ulang && nyalakan ulang" terpotong di
+        # 800 px dan pada Windows 125%/150% ketika kotak centang yang panjang
+        # berbagi baris dan menekan ketiga tombol.
         tindakan.addStretch()
         kanan.addLayout(tindakan)
+        kanan.addWidget(self.api_otomatis)
         kanan.addStretch()
 
         self.kartu_perangkat = None

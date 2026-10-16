@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -383,9 +384,18 @@ class ServicePage(QWidget):
         panggil_ulang.clicked.connect(self.panggil_ulang)
         self.aksi["panggil_ulang"] = panggil_ulang
         kolom_tombol.addWidget(panggil_ulang)
-        # Lebar tetap: tombol tidak boleh bergeser ketika status berganti.
+        # Lebar mengikuti tombol terlebar, bukan angka tetap: label
+        # "Panggil Berikutnya  ·  F2" butuh 254 px dengan Segoe UI dan
+        # terpotong ketika pembungkus dikunci 250 px. Kebijakan Minimum
+        # menjadikan sizeHint (bukan angka buatan) sebagai lebar terkecil;
+        # `setMinimumWidth` sengaja tidak dipakai karena nilai eksplisit
+        # menggantikan sizeHint itu dan layout boleh memerasnya di bawah
+        # kebutuhan teks. Teks kedua tombol tetap, jadi lebarnya tidak
+        # bergeser ketika status berganti.
         pembungkus_tombol = QWidget()
-        pembungkus_tombol.setFixedWidth(250)
+        pembungkus_tombol.setSizePolicy(
+            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred
+        )
         pembungkus_tombol.setLayout(kolom_tombol)
         kolom_tombol.setContentsMargins(0, 0, 0, 0)
         utama.addWidget(pembungkus_tombol, alignment=Qt.AlignmentFlag.AlignVCenter)
