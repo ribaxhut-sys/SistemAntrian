@@ -298,6 +298,17 @@ untuk nomor baru) dipakai.
 ruang kosong ada di bawah (sebelumnya blok nomor di tengah vertikal dan ikut
 bergeser tiap ada nomor dipanggil). Titik halaman tetap di bagian bawah.
 
+### Dialog Media di tablet ini (setelah 2.4.34.1, belum dirilis)
+
+Pengaturan > Kelola media tablet (`showMediaTablet`). Isi: ringkasan (jumlah,
+total ukuran, sumber aktif, sisa ruang), penanda "N berkas di server belum ada
+di tablet" (ketuk untuk Salin dari server; hilang diam-diam bila server tidak
+terjangkau), daftar dikelompokkan **Video** dan **Gambar** dengan gambar mini
+(video: ikon putar + durasi; dibuat di latar belakang, di-cache), lencana tempat
+tampil, menu **Aksi** per berkas (panel atas / layar penuh / keduanya / Hapus),
+menu **Lainnya** > Hapus semua berkas. Keadaan kosong menampilkan tombol besar
+Salin dari server dan Tambah berkas. Dialog dibuka ulang sesudah tiap aksi.
+
 ### Panggilan mengalahkan iklan (setelah 2.4.34.1, belum dirilis)
 
 Prioritas tampilan: **panggilan > transaksi pengunjung > iklan layar penuh >

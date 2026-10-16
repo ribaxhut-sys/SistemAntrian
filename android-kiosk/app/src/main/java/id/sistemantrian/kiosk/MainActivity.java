@@ -662,6 +662,11 @@ public final class MainActivity extends Activity {
     // Unduhan media terpisah dari `worker`, supaya video besar tidak
     // menahan permintaan API (tiket, display) di belakangnya.
     private final ExecutorService pengunduh = Executors.newSingleThreadExecutor();
+    /** Gambar mini dan durasi di dialog Media di tablet; dibuat di latar belakang. */
+    private final ExecutorService pembuatThumbnail = Executors.newSingleThreadExecutor();
+    private final android.util.LruCache<String, Bitmap> cacheThumbnail =
+            new android.util.LruCache<>(48);
+    private final Map<String, Long> cacheDurasi = new java.util.concurrent.ConcurrentHashMap<>();
     private String serverKind = "teks";
     private List<String> serverMedia = new ArrayList<>();
     /**
@@ -5767,59 +5772,301 @@ public final class MainActivity extends Activity {
                         : "; diputar tanpa jaringan.");
     }
 
-    /** Daftar berkas di folder media tablet: tambah dari tablet, atau hapus. */
+    /**
+     * Kelola media tablet: ringkasan (jumlah, ukuran, sumber aktif, sisa ruang),
+     * daftar dikelompokkan Video dan Gambar dengan gambar mini, lencana tempat
+     * tampil, dan menu Aksi per berkas. Dialog dibuka ulang sesudah tiap aksi.
+     */
     private void showMediaTablet() {
+        List<File> berkas = daftarMediaTablet();
+        List<File> daftarVideo = new ArrayList<>();
+        List<File> daftarGambar = new ArrayList<>();
+        long total = 0L;
+        for (File item : berkas) {
+            total += item.length();
+            (isVideo(item.getName()) ? daftarVideo : daftarGambar).add(item);
+        }
+        AlertDialog[] dialog = new AlertDialog[1];
         LinearLayout isi = new LinearLayout(this);
         isi.setOrientation(LinearLayout.VERTICAL);
         isi.setPadding(dp(20), dp(4), dp(20), 0);
-        List<File> berkas = daftarMediaTablet();
-        if (berkas.isEmpty()) {
-            TextView kosong = text("Folder masih kosong.", 14, INK, true);
-            kosong.setPadding(0, dp(10), 0, dp(4));
-            isi.addView(kosong);
+
+        LinearLayout kepala = new LinearLayout(this);
+        kepala.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout teksKepala = new LinearLayout(this);
+        teksKepala.setOrientation(LinearLayout.VERTICAL);
+        teksKepala.addView(text(berkas.isEmpty() ? "Belum ada berkas"
+                : berkas.size() + " berkas · " + formatUkuran(total), 14, INK, true));
+        TextView sumber = text("Sumber aktif: "
+                + (sumberTablet() ? "folder tablet, diputar tanpa jaringan"
+                : "server (berkas di sini dipakai bila sumber diganti ke folder tablet)")
+                + " · sisa ruang " + formatUkuran(sisaRuangTablet()), 12, MUTED, false);
+        teksKepala.addView(sumber);
+        TextView belumSalin = text("", 12, UTAMA, true);
+        belumSalin.setVisibility(View.GONE);
+        belumSalin.setOnClickListener(v -> {
+            if (dialog[0] != null) dialog[0].dismiss();
+            tampilkanPustakaServer();
+        });
+        teksKepala.addView(belumSalin);
+        kepala.addView(teksKepala, new LinearLayout.LayoutParams(0, -2, 1));
+        if (!berkas.isEmpty()) {
+            Button lainnya = smallButton("Lainnya");
+            lainnya.setOnClickListener(v -> {
+                android.widget.PopupMenu menu = new android.widget.PopupMenu(this, v);
+                menu.getMenu().add(0, 1, 0, "Hapus semua berkas");
+                menu.setOnMenuItemClickListener(item -> {
+                    konfirmasiHapusSemuaMedia(berkas.size(), dialog);
+                    return true;
+                });
+                menu.show();
+            });
+            kepala.addView(lainnya);
         }
-        AlertDialog[] dialog = new AlertDialog[1];
-        for (File item : berkas) {
-            LinearLayout baris = new LinearLayout(this);
-            baris.setGravity(Gravity.CENTER_VERTICAL);
-            baris.setPadding(0, dp(6), 0, 0);
-            String ukuran = String.format(Locale.ROOT, "%.1f MB", item.length() / 1048576.0);
-            TextView nama = text(item.getName() + "\n" + (isVideo(item.getName())
-                    ? "video" : "gambar") + " · " + ukuran, 13, INK, false);
-            baris.addView(nama, new LinearLayout.LayoutParams(0, -2, 1));
-            Button tempat = smallButton(labelTempatLokal(tampilLokal(item.getName())));
-            tempat.setOnClickListener(v -> {
-                aturTampilLokal(item.getName(), tempatBerikutnya(tampilLokal(item.getName())));
+        isi.addView(kepala);
+
+        if (berkas.isEmpty()) {
+            TextView kosong = text("Belum ada media di tablet ini. Salin dari server atau "
+                    + "tambah dari tablet; sampai ada berkas, panel menampilkan teks sambutan.",
+                    14, INK, false);
+            kosong.setPadding(0, dp(14), 0, dp(4));
+            isi.addView(kosong);
+            Button salin = actionButton("Salin dari server", true);
+            salin.setOnClickListener(v -> {
+                if (dialog[0] != null) dialog[0].dismiss();
+                tampilkanPustakaServer();
+            });
+            isi.addView(salin, tombolPengaturan());
+            Button tambah = actionButton("Tambah berkas", false);
+            tambah.setOnClickListener(v -> {
+                if (dialog[0] != null) dialog[0].dismiss();
+                pilihMediaTablet();
+            });
+            isi.addView(tambah, tombolPengaturan());
+        } else {
+            tambahBagianMedia(isi, "Video", daftarVideo, dialog);
+            tambahBagianMedia(isi, "Gambar", daftarGambar, dialog);
+        }
+
+        dialog[0] = pembuatDialog()
+                .setTitle("Media di tablet ini")
+                .setView(gulungan(isi))
+                .setPositiveButton("Salin dari server", (d, w) -> tampilkanPustakaServer())
+                .setNeutralButton("Tambah berkas", (d, w) -> pilihMediaTablet())
+                .setNegativeButton("Tutup", null)
+                .show();
+        rapikanTombolDialog(dialog[0]);
+        tandaiBelumDisalin(belumSalin, dialog[0]);
+    }
+
+    private void tambahBagianMedia(
+            LinearLayout isi, String judul, List<File> daftar, AlertDialog[] dialog) {
+        if (daftar.isEmpty()) return;
+        TextView kepala = text(judul + " (" + daftar.size() + ")", 13, MUTED, true);
+        kepala.setPadding(0, dp(14), 0, dp(2));
+        isi.addView(kepala);
+        for (File item : daftar) tambahBarisMedia(isi, item, dialog);
+    }
+
+    private void tambahBarisMedia(LinearLayout isi, File item, AlertDialog[] dialog) {
+        boolean video = isVideo(item.getName());
+        LinearLayout baris = new LinearLayout(this);
+        baris.setGravity(Gravity.CENTER_VERTICAL);
+        baris.setPadding(0, dp(6), 0, dp(6));
+
+        FrameLayout bingkai = new FrameLayout(this);
+        ImageView gambar = new ImageView(this);
+        gambar.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        gambar.setBackground(rounded(LEMBUT, dp(8)));
+        gambar.setClipToOutline(true);
+        bingkai.addView(gambar, new FrameLayout.LayoutParams(dp(72), dp(48)));
+        if (video) {
+            TextView putar = text("▶", 16, Color.WHITE, true);
+            putar.setGravity(Gravity.CENTER);
+            putar.setShadowLayer(dp(3), 0f, 0f, Color.BLACK);
+            bingkai.addView(putar, new FrameLayout.LayoutParams(dp(72), dp(48)));
+        }
+        baris.addView(bingkai, new LinearLayout.LayoutParams(dp(72), dp(48)));
+
+        LinearLayout kolom = new LinearLayout(this);
+        kolom.setOrientation(LinearLayout.VERTICAL);
+        kolom.setPadding(dp(10), 0, dp(8), 0);
+        TextView nama = text(item.getName(), 13, INK, true);
+        nama.setSingleLine(true);
+        nama.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+        kolom.addView(nama);
+        String dasarInfo = (video ? "video" : "gambar") + " · " + formatUkuran(item.length());
+        TextView info = text(dasarInfo, 12, MUTED, false);
+        kolom.addView(info);
+        String tempat = tampilLokal(item.getName());
+        TextView lencana = text(labelTempatLokal(tempat), 11, UTAMA, true);
+        lencana.setBackground(rounded((UTAMA & 0x00FFFFFF) | 0x26000000, dp(10)));
+        lencana.setPadding(dp(8), dp(2), dp(8), dp(2));
+        LinearLayout.LayoutParams paramLencana = new LinearLayout.LayoutParams(-2, -2);
+        paramLencana.topMargin = dp(3);
+        kolom.addView(lencana, paramLencana);
+        baris.addView(kolom, new LinearLayout.LayoutParams(0, -2, 1));
+
+        Button aksi = smallButton("Aksi");
+        aksi.setOnClickListener(v -> {
+            android.widget.PopupMenu menu = new android.widget.PopupMenu(this, v);
+            menu.getMenu().add(0, 1, 0, (tempat.equals("panel") ? "✓ " : "") + "Tampil di panel atas");
+            menu.getMenu().add(0, 2, 1, (tempat.equals("penuh") ? "✓ " : "") + "Tampil di layar penuh");
+            menu.getMenu().add(0, 3, 2, (tempat.equals("keduanya") ? "✓ " : "") + "Tampil di keduanya");
+            menu.getMenu().add(0, 4, 3, "Hapus");
+            menu.setOnMenuItemClickListener(pilihan -> {
+                int id = pilihan.getItemId();
+                if (id == 4) {
+                    konfirmasiHapusMedia(item, dialog);
+                    return true;
+                }
+                aturTampilLokal(item.getName(),
+                        id == 1 ? "panel" : id == 2 ? "penuh" : "keduanya");
                 terapkanMediaSambutan();
                 terapkanBarisLoket();
                 if (dialog[0] != null) dialog[0].dismiss();
                 showMediaTablet();
+                return true;
             });
-            baris.addView(tempat);
-            Button hapus = smallButton("Hapus");
-            hapus.setOnClickListener(v -> pembuatDialog()
-                    .setTitle("Hapus " + item.getName() + "?")
-                    .setMessage("Berkas dihapus dari tablet ini.")
-                    .setNegativeButton("Batal", null)
-                    .setPositiveButton("Hapus", (d, w) -> {
+            menu.show();
+        });
+        baris.addView(aksi);
+        isi.addView(baris);
+        muatThumbnail(item, video, gambar, info, dasarInfo);
+    }
+
+    private void konfirmasiHapusMedia(File item, AlertDialog[] dialog) {
+        pembuatDialog()
+                .setTitle("Hapus " + item.getName() + "?")
+                .setMessage("Berkas dihapus dari tablet ini.")
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Hapus", (d, w) -> {
+                    //noinspection ResultOfMethodCallIgnored
+                    item.delete();
+                    terapkanMediaSambutan();
+                    terapkanBarisLoket();
+                    if (dialog[0] != null) dialog[0].dismiss();
+                    showMediaTablet();
+                }).show();
+    }
+
+    private void konfirmasiHapusSemuaMedia(int jumlah, AlertDialog[] dialog) {
+        pembuatDialog()
+                .setTitle("Hapus semua berkas?")
+                .setMessage("Seluruh " + jumlah + " berkas dihapus dari tablet ini. "
+                        + "Berkas di server tidak terpengaruh.")
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Hapus semua", (d, w) -> {
+                    for (File item : daftarMediaTablet()) {
                         //noinspection ResultOfMethodCallIgnored
                         item.delete();
-                        terapkanMediaSambutan();
-                        terapkanBarisLoket();
-                        if (dialog[0] != null) dialog[0].dismiss();
-                        showMediaTablet();
-                    }).show());
-            baris.addView(hapus);
-            isi.addView(baris);
+                    }
+                    terapkanMediaSambutan();
+                    terapkanBarisLoket();
+                    if (dialog[0] != null) dialog[0].dismiss();
+                    showMediaTablet();
+                }).show();
+    }
+
+    /** Gambar mini (dan durasi video) dibuat di latar belakang lalu disimpan di cache. */
+    private void muatThumbnail(
+            File item, boolean video, ImageView gambar, TextView info, String dasarInfo) {
+        String kunci = item.getName() + "|" + item.lastModified() + "|" + item.length();
+        Bitmap ada = cacheThumbnail.get(kunci);
+        Long durasiAda = cacheDurasi.get(kunci);
+        if (ada != null) gambar.setImageBitmap(ada);
+        if (durasiAda != null) info.setText(dasarInfo + " · " + formatDurasi(durasiAda));
+        if (ada != null && (!video || durasiAda != null)) return;
+        pembuatThumbnail.execute(() -> {
+            Bitmap hasil = null;
+            long durasi = -1L;
+            try {
+                if (video) {
+                    android.media.MediaMetadataRetriever pembaca =
+                            new android.media.MediaMetadataRetriever();
+                    try {
+                        pembaca.setDataSource(item.getPath());
+                        String teks = pembaca.extractMetadata(
+                                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION);
+                        if (teks != null) durasi = Long.parseLong(teks);
+                        Bitmap bingkaiPertama = pembaca.getFrameAtTime(0L,
+                                android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+                        if (bingkaiPertama != null) hasil = perkecilThumbnail(bingkaiPertama);
+                    } finally {
+                        pembaca.release();
+                    }
+                } else {
+                    BitmapFactory.Options batas = new BitmapFactory.Options();
+                    batas.inJustDecodeBounds = true;
+                    BitmapFactory.decodeFile(item.getPath(), batas);
+                    int sampel = 1;
+                    while (batas.outWidth / (sampel * 2) >= 288) sampel *= 2;
+                    BitmapFactory.Options opsi = new BitmapFactory.Options();
+                    opsi.inSampleSize = sampel;
+                    Bitmap besar = BitmapFactory.decodeFile(item.getPath(), opsi);
+                    if (besar != null) hasil = perkecilThumbnail(besar);
+                }
+            } catch (Exception | OutOfMemoryError ignored) {
+                // Berkas rusak atau tidak terbaca: baris tetap tampil tanpa gambar mini.
+            }
+            final Bitmap akhir = hasil;
+            final long lama = durasi;
+            if (akhir != null) cacheThumbnail.put(kunci, akhir);
+            if (lama > 0L) cacheDurasi.put(kunci, lama);
+            handler.post(() -> {
+                if (akhir != null) gambar.setImageBitmap(akhir);
+                if (lama > 0L) info.setText(dasarInfo + " · " + formatDurasi(lama));
+            });
+        });
+    }
+
+    private static Bitmap perkecilThumbnail(Bitmap asli) {
+        if (asli.getWidth() <= 0) return asli;
+        int lebar = 144;
+        int tinggi = Math.max(1, Math.round(asli.getHeight() * (lebar / (float) asli.getWidth())));
+        Bitmap kecil = Bitmap.createScaledBitmap(asli, lebar, tinggi, true);
+        if (kecil != asli) asli.recycle();
+        return kecil;
+    }
+
+    /** Beri tahu bila ada berkas di server yang belum ada di folder tablet. */
+    private void tandaiBelumDisalin(TextView penanda, AlertDialog dialog) {
+        if (!hasServerConfig()) return;
+        request("GET", "/v1/kiosk/media-library", null, json -> {
+            JSONArray baris = json.getJSONArray("data");
+            java.util.Set<String> ada = new java.util.HashSet<>();
+            for (File item : daftarMediaTablet()) ada.add(item.getName());
+            int belum = 0;
+            for (int i = 0; i < baris.length(); i++) {
+                if (!ada.contains(namaAman(baris.getJSONObject(i).getString("name")))) belum++;
+            }
+            if (belum > 0 && dialog.isShowing()) {
+                penanda.setText(belum + " berkas di server belum ada di tablet. Ketuk untuk menyalin.");
+                penanda.setVisibility(View.VISIBLE);
+            }
+        }, pesan -> {
+            // Server lama atau tidak terjangkau: penanda ini tidak penting, diam saja.
+        });
+    }
+
+    private long sisaRuangTablet() {
+        try {
+            return new android.os.StatFs(folderMediaTablet().getPath()).getAvailableBytes();
+        } catch (Exception e) {
+            return 0L;
         }
-        dialog[0] = pembuatDialog()
-                .setTitle("Media di tablet")
-                .setView(gulungan(isi))
-                .setPositiveButton("Tambah berkas", (d, w) -> pilihMediaTablet())
-                .setNeutralButton("Salin dari server", (d, w) -> tampilkanPustakaServer())
-                .setNegativeButton("Tutup", null)
-                .show();
-        rapikanTombolDialog(dialog[0]);
+    }
+
+    private static String formatUkuran(long byteJumlah) {
+        if (byteJumlah >= 1073741824L) {
+            return String.format(Locale.ROOT, "%.1f GB", byteJumlah / 1073741824.0);
+        }
+        return String.format(Locale.ROOT, "%.1f MB", byteJumlah / 1048576.0);
+    }
+
+    private static String formatDurasi(long milidetik) {
+        long detik = Math.max(0L, Math.round(milidetik / 1000.0));
+        return String.format(Locale.ROOT, "%d:%02d", detik / 60, detik % 60);
     }
 
     /**

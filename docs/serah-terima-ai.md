@@ -246,6 +246,10 @@ commit berikut di atas `main`:
   `call_count`). Dibangun sebagai APK debug, **belum diverifikasi di perangkat**
   dan belum dirilis.
 
+- **Dialog Media di tablet ini** dirombak (ringkasan, kelompok Video/Gambar,
+  gambar mini, menu Aksi, Hapus semua); lihat android-kiosk.md. APK debug saja,
+  belum diverifikasi di perangkat.
+
 ### 4.4b PIN pengaturan anjungan dan mode putar saja
 
 Rinci di [android-kiosk.md](android-kiosk.md) (bagian "PIN pengaturan dan
