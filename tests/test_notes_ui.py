@@ -666,7 +666,7 @@ def test_f5_tetap_memakai_ketikan_saat_ini(qtbot, auth, lembar_terisi):
 def test_tab_pengaduan_selalu_di_awal(halaman_kerja):
     tab = halaman_kerja.tab_kanan
     assert tab.widget(0) is halaman_kerja.panel_pengaduan
-    assert tab.tabText(0).startswith("Pengaduan & Catatan")
+    assert tab.tabText(0).startswith("Pengaduan && Catatan")
 
 
 def test_mulai_melayani_membuka_pengaduan_walau_tab_lain_dibuka(
@@ -685,7 +685,7 @@ def test_judul_pengaduan_bertanda_bila_ada_isian_belum_disimpan(
 ):
     _panggil(halaman_kerja, terbitkan)
     panel = halaman_kerja.panel_pengaduan
-    assert halaman_kerja.tab_kanan.tabText(0) == "Pengaduan & Catatan"
+    assert halaman_kerja.tab_kanan.tabText(0) == "Pengaduan && Catatan"
 
     panel.isian_catatan.setPlainText("ditulis tetapi belum disimpan")
 

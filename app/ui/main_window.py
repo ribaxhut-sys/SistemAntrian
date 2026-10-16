@@ -283,6 +283,10 @@ class BilahNavigasi(QFrame):
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
         self._gulir.setMinimumSize(0, 0)
+        # Tombol menu di tengah tinggi pita, bukan menempel di atas.
+        self._gulir.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         self._gulir.viewport().setAutoFillBackground(False)
 
         self._wadah = QWidget()

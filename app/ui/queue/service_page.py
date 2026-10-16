@@ -103,7 +103,8 @@ def _beri_bayangan(widget: QWidget) -> None:
 
 
 #: Judul tab ruang kerja pengaduan di panel kanan (tab pertama).
-JUDUL_TAB_PENGADUAN = "Pengaduan & Catatan"
+# "&&": satu "&" dibaca Qt sebagai tanda mnemonik dan hilang dari label.
+JUDUL_TAB_PENGADUAN = "Pengaduan && Catatan"
 
 
 class ServicePage(QWidget):
@@ -304,8 +305,9 @@ class ServicePage(QWidget):
 
         # Papan tunggu mengisi sisa tinggi kolom kiri: apa yang dilihat
         # pengunjung di layar antrian, tanpa berpindah tab.
-        self.papan_tunggu = PapanTunggu(TUNGGU_LAMA_MENIT)
-        kolom.addWidget(self.papan_tunggu, stretch=1)
+        # (Papan tunggu pindah ke tab Menunggu Dilayani di panel kanan:
+        # di sana ada sisa tinggi, di kolom ini tidak.)
+        kolom.addStretch(1)
         # Baris survey tidak lagi di sini: ia pindah ke bawah panel kanan,
         # yang punya sisa tinggi, supaya kolom kerja muat tanpa gulir.
         self._baris_survey = self._bangun_baris_survey()
@@ -583,6 +585,13 @@ class ServicePage(QWidget):
         self.label_jumlah.setStyleSheet(_pil(PRIMARY_DARK, PRIMARY_SOFT))
         baris_judul.addWidget(self.label_jumlah)
         susunan.addLayout(baris_judul)
+
+        # Ringkasan per layanan yang sedang ada antriannya, di atas daftar
+        # nomor: mengisi sisa tinggi panel dan memberi gambaran sekilas.
+        self.papan_tunggu = PapanTunggu(
+            TUNGGU_LAMA_MENIT, tinggi_menurut_isi=True
+        )
+        susunan.addWidget(self.papan_tunggu)
 
         self.tabel = QTableWidget(0, 4)
         # Judul kolom sengaja sesingkat mungkin. Panel ini hanya sepertiga
