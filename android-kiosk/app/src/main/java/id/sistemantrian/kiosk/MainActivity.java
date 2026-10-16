@@ -3178,11 +3178,19 @@ public final class MainActivity extends Activity {
 
     private View kartuLoket(Loket loket, boolean besar) {
         FrameLayout kartu = new FrameLayout(this);
-        kartu.setPadding(dp(4), dp(3), dp(4), dp(3));
         boolean melayani = !loket.nomor.isEmpty();
         // Nomor yang baru dipanggil menunggu pemiliknya berjalan ke loket:
         // itu yang paling perlu dilihat pengunjung, jadi kartunya dibedakan.
         boolean dipanggil = melayani && "Dipanggil".equalsIgnoreCase(loket.status);
+        // Kartu besar diberi ruang agar nama loket dan keterangan tidak
+        // mepet tepi; garis tepi 2 dp pada kartu "dipanggil" ditambahkan agar
+        // jaraknya sama dengan kartu tanpa garis. Kartu ringkas tetap rapat.
+        int garis = dipanggil ? dp(2) : 0;
+        if (besar) {
+            kartu.setPadding(dp(8) + garis, dp(10) + garis, dp(8) + garis, dp(10) + garis);
+        } else {
+            kartu.setPadding(dp(4), dp(3), dp(4), dp(3));
+        }
         kartu.setBackground(dipanggil
                 ? roundedOutline(HIJAU_PANGGIL_LATAR, HIJAU_PANGGIL, dp(16), dp(2))
                 : rounded(melayani ? LEMBUT : ABU_LEMBUT, dp(16)));
@@ -3226,6 +3234,7 @@ public final class MainActivity extends Activity {
             int warna = dipanggil ? HIJAU_PANGGIL : ditunda ? MUTED : UTAMA;
             TextView keterangan = text(bawah, ukuran, warna, dipanggil);
             keterangan.setGravity(Gravity.CENTER);
+            if (besar) keterangan.setPadding(0, 0, 0, dp(2));
             pasangSatuBaris(keterangan, 8, ukuran);
             kartu.addView(keterangan, new FrameLayout.LayoutParams(-1, -2,
                     Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
