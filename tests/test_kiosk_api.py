@@ -296,6 +296,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "return_animation": True,
         "return_animation_lead_seconds": 2,
         "waiting_animation": True,
+        "ad_entry_animation": True,
         "call_interrupts_ad": True,
         "registration_open": True,
         "priority_enabled": True,

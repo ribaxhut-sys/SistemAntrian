@@ -298,6 +298,19 @@ untuk nomor baru) dipakai.
 ruang kosong ada di bawah (sebelumnya blok nomor di tengah vertikal dan ikut
 bergeser tiap ada nomor dipanggil). Titik halaman tetap di bagian bawah.
 
+### Panel keluar saat iklan akan muncul; kotak prioritas di atas (setelah 2.4.34.1, belum dirilis)
+
+- Kotak prioritas kini di **atas** tombol layanan (`showCategories`), di semua
+  tingkat menu.
+- Kebalikan animasi kembali: ±1,5 detik sebelum waktu menganggur habis, tiga panel
+  keluar ke arah acak (`mulaiKeluarPanel`, arah dari `arahPanelBaru`, dipakai
+  bersama animasi masuk), lalu iklan memudar masuk tanpa transisi lain
+  (`panelSudahKeluar`). Disentuh atau ada panggilan di tengah animasi → panel
+  kembali dan iklan batal (`batalkanKeluarPanel`).
+- Setelan server **Animasi saat iklan akan muncul** (`kiosk.animasi_iklan_muncul`,
+  API `ad_entry_animation`, bawaan aktif). Dilewati bila animasi Android mati,
+  mode putar saja, atau waktu menganggur < 5 detik.
+
 ### Bintang prioritas pada nomor menunggu (setelah 2.4.34.1, belum dirilis)
 
 Nomor prioritas diberi " ★" di daftar nomor menunggu, **tanpa menyebut alasan**

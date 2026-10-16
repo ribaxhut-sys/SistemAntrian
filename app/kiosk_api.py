@@ -912,6 +912,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "return_animation": services.settings.get_bool(
                 "kiosk.animasi_kembali", True
             ),
+            # Tiga panel keluar sebelum iklan layar penuh muncul.
+            "ad_entry_animation": services.settings.get_bool(
+                "kiosk.animasi_iklan_muncul", True
+            ),
             # Panggilan petugas mengalahkan iklan layar penuh.
             "call_interrupts_ad": services.settings.get_bool(
                 "kiosk.panggilan_hentikan_iklan", True

@@ -256,6 +256,9 @@ commit berikut di atas `main`:
 - **Bintang prioritas** pada nomor menunggu (anjungan, layar Android, layar
   Windows), tanpa alasan; lihat android-kiosk.md. APK debug saja.
 
+- **Panel keluar sebelum iklan muncul** dan **kotak prioritas di atas tombol
+  layanan**; lihat android-kiosk.md. APK debug saja, belum diuji di perangkat.
+
 ### 4.4b PIN pengaturan anjungan dan mode putar saja
 
 Rinci di [android-kiosk.md](android-kiosk.md) (bagian "PIN pengaturan dan
