@@ -162,7 +162,9 @@ Layanan Anjungan menampilkan peringatan di baris Paket suara.
   iklan memenuhi layar.
 - **Iklan layar penuh.** Setelah **Iklan layar penuh saat menganggur**
   (bawaan 60 detik, 0 = mati) tanpa sentuhan, iklan memenuhi layar dengan
-  ajakan "Sentuh layar untuk mengambil nomor antrian". Sentuhan pertama hanya
+  ajakan "Sentuh layar untuk mengambil nomor antrian" (strip gradasi gelap
+  di dasar layar, muncul 4 detik lalu hilang 9 detik, berulang, agar tidak
+  menutupi iklan). Sentuhan pertama hanya
   mengembalikan layar biasa, tidak diteruskan ke tombol layanan. Tidak aktif
   selama dialog terbuka, pembaruan APK, atau bila media gagal diputar.
   Mulai APK 2.4.34.1 iklan memenuhi **seluruh layar** tanpa margin, padding,

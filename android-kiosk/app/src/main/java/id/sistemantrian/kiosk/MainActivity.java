@@ -798,7 +798,7 @@ public final class MainActivity extends Activity {
     private FrameLayout bingkaiMedia;
     private View tiraiMedia;
     private TextView ajakanIklanPenuh;
-    private android.animation.ObjectAnimator denyutAjakanIklan;
+    private Runnable denyutAjakanIklan;
 
     // Laporan tayang ke server: jumlah tayang dan gagal sejak laporan
     // terakhir, dikirim tiap menit. Hanya untuk media dari server; berkas di
@@ -1133,14 +1133,17 @@ public final class MainActivity extends Activity {
         bingkaiMedia.addView(tiraiMedia, new FrameLayout.LayoutParams(-1, -1));
         ajakanIklanPenuh = text("Sentuh layar untuk mengambil nomor antrian",
                 20, Color.WHITE, true);
+        ajakanIklanPenuh.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
+        ajakanIklanPenuh.setShadowLayer(dp(3), 0, dp(1), Color.argb(200, 0, 0, 0));
         ajakanIklanPenuh.setGravity(Gravity.CENTER);
-        ajakanIklanPenuh.setPadding(dp(22), dp(12), dp(22), dp(12));
-        ajakanIklanPenuh.setBackground(rounded(Color.argb(185, 15, 23, 42), dp(28)));
+        ajakanIklanPenuh.setPadding(dp(16), dp(30), dp(16), dp(12));
+        // Strip di dasar: gelap di bawah, memudar ke transparan di atas.
+        ajakanIklanPenuh.setBackground(new GradientDrawable(
+                GradientDrawable.Orientation.BOTTOM_TOP,
+                new int[]{Color.argb(170, 15, 23, 42), Color.TRANSPARENT}));
         ajakanIklanPenuh.setVisibility(View.GONE);
-        FrameLayout.LayoutParams ajakanParams = new FrameLayout.LayoutParams(-2, -2,
-                Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        ajakanParams.topMargin = dp(24);
-        bingkaiMedia.addView(ajakanIklanPenuh, ajakanParams);
+        bingkaiMedia.addView(ajakanIklanPenuh, new FrameLayout.LayoutParams(-1, -2,
+                Gravity.BOTTOM));
         infoPanel.addView(bingkaiMedia, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(infoPanel, new LinearLayout.LayoutParams(-1, 0, 1));
 
@@ -2088,12 +2091,19 @@ public final class MainActivity extends Activity {
         }
         ajakanIklanPenuh.setVisibility(View.VISIBLE);
         hentikanDenyutAjakanIklan();
-        denyutAjakanIklan = android.animation.ObjectAnimator.ofFloat(
-                ajakanIklanPenuh, View.ALPHA, 1f, 0.55f);
-        denyutAjakanIklan.setDuration(1400);
-        denyutAjakanIklan.setRepeatCount(android.animation.ValueAnimator.INFINITE);
-        denyutAjakanIklan.setRepeatMode(android.animation.ValueAnimator.REVERSE);
-        denyutAjakanIklan.start();
+        ajakanIklanPenuh.setAlpha(0f);
+        tampilkanAjakanIklan();
+    }
+
+    /** Ajakan tampil 4 detik, memudar, hilang 9 detik, lalu berulang. */
+    private void tampilkanAjakanIklan() {
+        ajakanIklanPenuh.animate().alpha(1f).setDuration(500).start();
+        denyutAjakanIklan = () -> {
+            ajakanIklanPenuh.animate().alpha(0f).setDuration(600).start();
+            denyutAjakanIklan = this::tampilkanAjakanIklan;
+            handler.postDelayed(denyutAjakanIklan, 9000);
+        };
+        handler.postDelayed(denyutAjakanIklan, 4000);
     }
 
     /**
@@ -2400,10 +2410,13 @@ public final class MainActivity extends Activity {
 
     private void hentikanDenyutAjakanIklan() {
         if (denyutAjakanIklan != null) {
-            denyutAjakanIklan.cancel();
+            handler.removeCallbacks(denyutAjakanIklan);
             denyutAjakanIklan = null;
         }
-        if (ajakanIklanPenuh != null) ajakanIklanPenuh.setAlpha(1f);
+        if (ajakanIklanPenuh != null) {
+            ajakanIklanPenuh.animate().cancel();
+            ajakanIklanPenuh.setAlpha(1f);
+        }
     }
 
     // -----------------------------------------------------------------

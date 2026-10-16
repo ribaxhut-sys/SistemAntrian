@@ -222,7 +222,7 @@ commit berikut di atas `main`:
   masuk iklan layar penuh. Kartu layanan dikurangi tingginya (`dp(66)`).
 - **Iklan layar penuh tanpa bingkai**: margin, padding, sudut, garis tepi
   dihapus di atas latar hitam (`bukaBingkaiIklanPenuh`). Rasio video dijaga
-  (pas). Label **"Sentuh layar…" di paling atas**.
+  (pas). Label **"Sentuh layar…"** kini strip gradasi di dasar layar yang muncul 4 detik / hilang 9 detik (sebelumnya pil di atas); belum diuji di perangkat, hanya dikompilasi.
 - **Pemutar video `VideoTekstur`** (TextureView + MediaPlayer) menggantikan
   `VideoView`. Alasan: di BlueStacks `VideoView` (SurfaceView) tampil hitam
   padahal pemutar berjalan (decoder perangkat lunak mengeluarkan buffer
