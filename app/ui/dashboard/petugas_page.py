@@ -127,8 +127,8 @@ class DashboardPetugasPage(QWidget):
 
     def _bangun_tampilan(self) -> None:
         susunan = QVBoxLayout(self)
-        susunan.setContentsMargins(20, 8, 20, 8)
-        susunan.setSpacing(8)
+        susunan.setContentsMargins(20, 4, 20, 4)
+        susunan.setSpacing(6)
 
         atas = QHBoxLayout()
         atas.setSpacing(12)
