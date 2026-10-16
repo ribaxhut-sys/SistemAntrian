@@ -133,8 +133,8 @@ commit berikut di atas `main`:
 
 | | Dikodekan | Dibangun | Dibagikan/terpasang |
 |---|---|---|---|
-| Aplikasi Windows | 1.0.10 | `dist\AntrianCRO-Setup-1.0.10.exe` | belum dipasang di PC mana pun |
-| APK anjungan | 2.4.34.1 (kode 51) | `dist\antrianCRO-2.4.34.1.apk` | disalin ke `apk/` (server membagikannya); belum ada panel asli |
+| Aplikasi Windows | 1.0.11 | belum dibangun (terakhir `dist\AntrianCRO-Setup-1.0.10.exe`) | belum dipasang di PC mana pun |
+| APK anjungan | 2.4.34.2 (kode 52) | belum dibangun rilis (hanya debug) | `apk/` masih 2.4.34.1; belum ada panel asli |
 | APK layar antrian | 1.5 (kode 6) | `dist\AntrianLayar-1.5.apk` | tidak berubah |
 | `VERSI_MINIMAL` APK (server) | 49 | | tablet 2.4.33 tetap diterima |
 
