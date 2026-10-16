@@ -16,7 +16,7 @@ from datetime import datetime
 from html import escape
 from math import ceil
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from app.services.queue_service import QueueInfo
 from app.ui.style import (
     BORDER,
+    PRIMARY,
     PRIMARY_SOFT,
     SURFACE,
     TEXT,
@@ -49,13 +50,46 @@ JARAK = 8
 MAKS_BARIS_MENURUT_ISI = 4
 
 
+class _Kartu(QLabel):
+    """Satu kartu: dapat diklik dengan mouse maupun keyboard."""
+
+    diklik = Signal()
+
+    def __init__(self, html: str, parent: QWidget | None = None) -> None:
+        super().__init__(html, parent)
+        self.setTextFormat(Qt.TextFormat.RichText)
+        self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - nama Qt
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(
+            event.position().toPoint()
+        ):
+            self.diklik.emit()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - nama Qt
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.diklik.emit()
+            return
+        super().keyPressEvent(event)
+
+
 def _label_menit(detik: float) -> str:
     menit = int(detik // 60)
     return "<1 mnt" if menit < 1 else f"{menit} mnt"
 
 
 class PapanTunggu(QFrame):
-    """Kartu antrian per jenis layanan, hanya untuk dibaca."""
+    """
+    Kartu antrian per jenis layanan. Mengklik kartu memilih layanan itu
+    (`layananDipilih`); kartu "Semua" mencabut pilihan.
+    """
+
+    #: id kategori yang dipilih, atau None untuk "Semua".
+    layananDipilih = Signal(object)
 
     def __init__(
         self,
@@ -83,6 +117,7 @@ class PapanTunggu(QFrame):
         self._batas_lama = batas_lama_menit
         self._data: tuple | None = None
         self._tanda: tuple | None = None
+        self._pilihan: int | None = None
 
         susunan = QVBoxLayout(self)
         susunan.setContentsMargins(14, 10, 14, 10)
@@ -112,6 +147,19 @@ class PapanTunggu(QFrame):
         self.teks_kartu: list[str] = []
 
     # -----------------------------------------------------------------
+
+    @property
+    def pilihan(self) -> int | None:
+        """Id layanan yang dipilih, atau None bila "Semua"."""
+        return self._pilihan
+
+    def pilih(self, kategori_id: int | None) -> None:
+        if kategori_id == self._pilihan:
+            return
+        self._pilihan = kategori_id
+        if self._data is not None:
+            self._gambar()
+        self.layananDipilih.emit(kategori_id)
 
     def setel(
         self,
@@ -192,12 +240,20 @@ class PapanTunggu(QFrame):
             ),
         )
 
+        # Pilihan yang layanannya sudah tidak punya antrian kembali ke
+        # "Semua"; kartu "Semua" sendiri menempati satu tempat di grid.
+        if self._pilihan is not None and self._pilihan not in per_layanan:
+            self._pilihan = None
+            self.layananDipilih.emit(None)
+
+        n_kartu = len(urutan) + 1 if urutan else 0
         if self._menurut_isi:
-            baris, kolom, isi = self._susunan_menurut_isi(len(urutan))
+            baris, kolom, isi = self._susunan_menurut_isi(n_kartu)
         else:
-            baris, kolom = self._susunan(len(urutan)) if urutan else (1, 1)
+            baris, kolom = self._susunan(n_kartu) if urutan else (1, 1)
             isi = self._baris_isi(baris)
-        tampil, tersisa = urutan[: baris * kolom], urutan[baris * kolom :]
+        kapasitas = max(0, baris * kolom - 1) if urutan else 0
+        tampil, tersisa = urutan[:kapasitas], urutan[kapasitas:]
 
         kartu = [
             self._kartu(sorted(d, key=lambda a: a.created_at), dilayani, sekarang, isi)
@@ -209,7 +265,14 @@ class PapanTunggu(QFrame):
                 f"{len(menunggu)} menunggu · +{len(tersisa)} layanan lain ({jumlah})"
             )
 
-        tanda = (baris, kolom, tuple(k[:3] for k in kartu))
+        semua = self._kartu_semua(menunggu, sekarang, isi) if urutan else None
+        tanda = (
+            baris,
+            kolom,
+            self._pilihan,
+            semua[1] if semua else None,
+            tuple(k[:3] for k in kartu),
+        )
         if tanda == self._tanda:
             return  # tidak ada yang berubah: jangan berkedip
         self._tanda = tanda
@@ -225,18 +288,52 @@ class PapanTunggu(QFrame):
         self.judul_kolom = [k[0] for k in kartu]
         self.teks_kartu = [k[1] for k in kartu]
 
-        for indeks, (_judul, html, gaya, tip) in enumerate(kartu):
-            label = QLabel(html)
-            label.setTextFormat(Qt.TextFormat.RichText)
-            label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-            label.setStyleSheet(gaya)
-            label.setToolTip(tip)
-            label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        self.kartu_semua: _Kartu | None = None
+        self.kartu_layanan: dict[int, _Kartu] = {}
+        entri: list[tuple[int | None, tuple[str, str, str, str]]] = []
+        if semua is not None:
+            entri.append((None, semua))
+        entri.extend((d[0].category_id, k) for d, k in zip(tampil, kartu))
+        for indeks, (kid, (_judul, html, gaya, tip)) in enumerate(entri):
+            label = _Kartu(html)
+            terpilih = kid == self._pilihan
+            label.setStyleSheet(
+                gaya
+                if not terpilih
+                else gaya + f" border: 2px solid {PRIMARY}; font-weight: 600;"
+            )
+            label.setToolTip(tip + " — klik untuk menyaring daftar")
+            label.setProperty("terpilih", terpilih)
+            label.diklik.connect(lambda k=kid: self.pilih(k))
+            if kid is None:
+                self.kartu_semua = label
+            else:
+                self.kartu_layanan[kid] = label
             self.grid.addWidget(label, indeks // kolom, indeks % kolom)
         for i in range(baris):
             self.grid.setRowStretch(i, 1)
         for j in range(kolom):
             self.grid.setColumnStretch(j, 1)
+
+    def _kartu_semua(
+        self, menunggu: Sequence[QueueInfo], sekarang: datetime, baris_isi: int
+    ) -> tuple[str, str, str, str]:
+        """Kartu "Semua": jumlah seluruh antrian dan nomor terlamanya."""
+        terlama = min(menunggu, key=lambda a: a.created_at)
+        detik = max(0.0, (sekarang - terlama.created_at).total_seconds())
+        html = (
+            f"<b style='color:{TEXT}'>Semua</b> "
+            f"<span style='color:{TEXT}'>({len(menunggu)})</span>"
+            + ("" if baris_isi <= 1 else "<br>")
+            + f"<span style='color:{TEXT}'>{'· ' if baris_isi <= 1 else ''}"
+            f"{escape(terlama.queue_number)} · {escape(_label_menit(detik))}</span>"
+        )
+        gaya = (
+            f"background: {SURFACE}; border: 1px dashed {PRIMARY};"
+            " border-radius: 8px; padding: 5px 8px;"
+        )
+        tip = f"Semua layanan: {len(menunggu)} menunggu"
+        return "Semua", html, gaya, tip
 
     def _kartu(
         self,

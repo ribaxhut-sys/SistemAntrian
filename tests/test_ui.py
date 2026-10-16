@@ -1640,6 +1640,31 @@ def test_daftar_menunggu_tampil_di_tabel(halaman_layanan, terbitkan, auth):
     assert "menit" in tabel.item(0, 3).text()
 
 
+def test_klik_kartu_papan_menyaring_daftar_menunggu(
+    halaman_layanan, terbitkan, auth, antrian_siap
+):
+    terbitkan("A", 2)
+    terbitkan("B", 1)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+    papan = halaman_layanan.papan_tunggu
+    assert halaman_layanan.tabel.rowCount() == 3
+
+    papan.pilih(antrian_siap["kategori"]["B"])
+
+    tabel = halaman_layanan.tabel
+    assert tabel.rowCount() == 1
+    assert tabel.item(0, 0).text() == "B-001"
+    # Judul tab tetap menghitung seluruh antrian.
+    assert "(3)" in halaman_layanan.tab_kanan.tabText(
+        halaman_layanan.tab_kanan.indexOf(halaman_layanan.panel_menunggu)
+    )
+
+    papan.pilih(None)
+    assert halaman_layanan.tabel.rowCount() == 3
+
+
 def test_tabel_menyusut_setelah_dipanggil(halaman_layanan, terbitkan, auth):
     terbitkan("A", 3)
     auth.logout()

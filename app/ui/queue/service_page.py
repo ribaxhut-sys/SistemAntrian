@@ -591,6 +591,9 @@ class ServicePage(QWidget):
         self.papan_tunggu = PapanTunggu(
             TUNGGU_LAMA_MENIT, tinggi_menurut_isi=True
         )
+        # Klik kartu layanan menyaring daftar nomor di bawahnya.
+        self.papan_tunggu.layananDipilih.connect(self._saring_menunggu)
+        self._menunggu_penuh: list[QueueInfo] = []
         susunan.addWidget(self.papan_tunggu)
 
         self.tabel = QTableWidget(0, 4)
@@ -1064,8 +1067,10 @@ class ServicePage(QWidget):
 
         self.antrian = antrian
         self._tampilkan_antrian()
-        self._isi_tabel(menunggu)
+        # Papan lebih dulu: ia mengembalikan pilihan ke "Semua" bila
+        # layanan yang dipilih sudah tidak punya antrian.
         self.papan_tunggu.setel(menunggu, self.loket_kategori, clock.now())
+        self._isi_tabel(menunggu)
         self._isi_tabel_dilewati(dilewati)
 
     def _tandai_gagal_sinkron(self) -> None:
@@ -1433,15 +1438,28 @@ class ServicePage(QWidget):
         from app.core import clock
 
         sekarang = clock.now()
-        self.label_jumlah.setText(str(len(menunggu)))
+        self._menunggu_penuh = list(menunggu)
+        pilihan = self.papan_tunggu.pilihan
+        tampil = (
+            [q for q in menunggu if q.category_id == pilihan]
+            if pilihan is not None
+            else list(menunggu)
+        )
+        if pilihan is not None and tampil:
+            self.label_jumlah.setText(f"{tampil[0].category_name} · {len(tampil)}")
+        else:
+            self.label_jumlah.setText(str(len(menunggu)))
         self.tabel.setVisible(bool(menunggu))
         self.panel_kosong.setVisible(not menunggu)
 
-        self.tabel.setRowCount(len(menunggu))
-        lama_menit: list[int] = []
-        for baris, q in enumerate(menunggu):
+        self.tabel.setRowCount(len(tampil))
+        # Judul tab dan warnanya selalu menghitung SELURUH antrian, bukan
+        # hanya yang sedang disaring.
+        lama_menit = [
+            int((sekarang - q.created_at).total_seconds() // 60) for q in menunggu
+        ]
+        for baris, q in enumerate(tampil):
             lama = int((sekarang - q.created_at).total_seconds() // 60)
-            lama_menit.append(lama)
             nilai = [
                 q.queue_number,
                 q.category_name,
@@ -1454,6 +1472,10 @@ class ServicePage(QWidget):
                 self.tabel.setItem(baris, kolom, sel)
 
         self._perbarui_judul_tab_menunggu(len(menunggu), lama_menit)
+
+    def _saring_menunggu(self, _kategori_id=None) -> None:
+        """Pilihan kartu berubah: gambar ulang daftar dari data terakhir."""
+        self._isi_tabel(self._menunggu_penuh)
 
     def _isi_tabel_dilewati(self, dilewati: list[QueueInfo]) -> None:
         """Perbarui tab dilewati sambil mempertahankan pilihan petugas."""

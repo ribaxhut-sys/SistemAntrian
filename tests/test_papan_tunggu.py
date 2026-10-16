@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from PySide6.QtCore import Qt
+
 from app.core import clock
 from app.ui.queue.papan_tunggu import PapanTunggu
 
@@ -97,12 +99,12 @@ def test_semua_layanan_ada_antrian_tampil_bukan_empat_saja(qtbot):
 def test_isi_kartu_meringkas_saat_ruang_sempit(qtbot):
     papan = _papan(qtbot, lebar=720, tinggi=130)
     antrian = [
-        _Antrian(f"L{i}-001", i, f"Layanan {i}", i) for i in range(1, 9)
+        _Antrian(f"L{i}-001", i, f"Layanan {i}", i) for i in range(1, 8)
     ]
 
     papan.setel(antrian, (), clock.now())
 
-    assert len(papan.judul_kolom) == 8
+    assert len(papan.judul_kolom) == 7
     assert all("<br>" not in teks for teks in papan.teks_kartu)
 
 
@@ -127,3 +129,67 @@ def test_nomor_berikutnya_tampil_saat_kartu_tinggi(qtbot):
     )
 
     assert "A-002" in papan.teks_kartu[0]
+
+
+def test_kartu_semua_selalu_ada_dan_terpilih_bawaan(qtbot):
+    papan = _papan(qtbot)
+    papan.setel(
+        [_Antrian("A-001", 1, "Konsultasi", 4), _Antrian("B-001", 2, "Pengaduan", 9)],
+        (),
+        clock.now(),
+    )
+
+    assert papan.kartu_semua is not None
+    assert papan.pilihan is None
+    assert "Semua" in papan.kartu_semua.text()
+    assert "(2)" in papan.kartu_semua.text()
+    assert "B-001" in papan.kartu_semua.text()  # terlama dari semua layanan
+    # Kartu "Semua" bukan layanan: tidak ikut daftar judul layanan.
+    assert papan.judul_kolom == ["Pengaduan (1)", "Konsultasi (1)"]
+
+
+def test_klik_kartu_memilih_layanan_dan_klik_semua_mencabutnya(qtbot):
+    papan = _papan(qtbot)
+    papan.setel(
+        [_Antrian("A-001", 1, "Konsultasi", 4), _Antrian("B-001", 2, "Pengaduan", 9)],
+        (),
+        clock.now(),
+    )
+    qtbot.wait(30)
+
+    dengan_sinyal = []
+    papan.layananDipilih.connect(dengan_sinyal.append)
+
+    qtbot.mouseClick(papan.kartu_layanan[2], Qt.MouseButton.LeftButton)
+    assert papan.pilihan == 2
+    assert dengan_sinyal == [2]
+
+    qtbot.mouseClick(papan.kartu_semua, Qt.MouseButton.LeftButton)
+    assert papan.pilihan is None
+    assert dengan_sinyal == [2, None]
+
+
+def test_pilihan_kembali_ke_semua_bila_layanan_sudah_kosong(qtbot):
+    papan = _papan(qtbot)
+    papan.setel(
+        [_Antrian("A-001", 1, "Konsultasi", 4), _Antrian("B-001", 2, "Pengaduan", 9)],
+        (),
+        clock.now(),
+    )
+    papan.pilih(2)
+
+    papan.setel([_Antrian("A-001", 1, "Konsultasi", 5)], (), clock.now())
+
+    assert papan.pilihan is None
+
+
+def test_pilihan_bertahan_saat_data_disegarkan(qtbot):
+    papan = _papan(qtbot)
+    data = [_Antrian("A-001", 1, "Konsultasi", 4), _Antrian("B-001", 2, "Pengaduan", 9)]
+    papan.setel(data, (), clock.now())
+    papan.pilih(1)
+
+    papan.setel(data, (), clock.now())
+
+    assert papan.pilihan == 1
+    assert papan.kartu_layanan[1].property("terpilih") is True
