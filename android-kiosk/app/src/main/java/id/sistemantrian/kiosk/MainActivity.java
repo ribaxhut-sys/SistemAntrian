@@ -732,6 +732,13 @@ public final class MainActivity extends Activity {
     private int putaranIklanSelesai;
     /** Server menyalakan animasi tiga panel saat kembali ke antrian. */
     private boolean animasiKembali = true;
+    /** Panggilan petugas mengalahkan iklan (server: call_interrupts_ad). */
+    private boolean panggilanHentikanIklan = true;
+    /** Penanda panggilan terakhir tiap loket: nomor#jumlah panggilan; null = belum dimuat. */
+    private Map<String, String> penandaPanggilanLoket;
+    private android.widget.PopupWindow bannerPanggilan;
+    private static final long LAMA_BANNER_PANGGILAN_MS = 6_000L;
+    private static final long DURASI_PANEL_PANGGILAN_MS = 900L;
     /** Nomor menunggu muncul berurutan, gaya acak (server: waiting_animation). */
     private boolean animasiNomorAktif = true;
     /** Bangun ulang nomor menunggu dengan animasi masuk (sesudah kembali dari iklan). */
@@ -785,12 +792,15 @@ public final class MainActivity extends Activity {
         final String nomor;
         final String layanan;
         final String status;
+        /** Bertambah tiap panggilan dan panggilan ulang. */
+        final int panggilan;
 
         Loket(JSONObject json) {
             nama = json.optString("name", "");
             nomor = json.isNull("queue_number") ? "" : json.optString("queue_number", "");
             layanan = json.isNull("category") ? "" : json.optString("category", "");
             status = json.optString("status", "KOSONG");
+            panggilan = json.optInt("call_count", 0);
         }
 
         String tanda() {
@@ -920,7 +930,8 @@ public final class MainActivity extends Activity {
                 terapkanMediaSambutan();
                 terapkanBarisLoket();
             }
-            handler.postDelayed(this, 5000);
+            // Selama iklan memenuhi layar, panggilan baru harus terlihat segera.
+            handler.postDelayed(this, iklanPenuh && panggilanHentikanIklan ? 1000 : 5000);
         }
     };
 
@@ -1286,6 +1297,7 @@ public final class MainActivity extends Activity {
             iklanPenuhDetik = Math.max(0, display.optInt("fullscreen_ad_idle_seconds", 60));
             iklanPutaran = Math.max(0, display.optInt("fullscreen_ad_loops", 2));
             animasiKembali = display.optBoolean("return_animation", true);
+            panggilanHentikanIklan = display.optBoolean("call_interrupts_ad", true);
             animasiNomorAktif = display.optBoolean("waiting_animation", true);
             animasiMulaiMs = Math.max(0, Math.min(5,
                     display.optInt("return_animation_lead_seconds", 2))) * 1000L;
@@ -1347,6 +1359,7 @@ public final class MainActivity extends Activity {
                     if (row != null) loketList.add(new Loket(row));
                 }
             }
+            deteksiPanggilanBaru();
             terapkanBarisLoket();
             if (!showingResult && !showingConfirmation) tampilkanNomorMenunggu();
             minVersionCode = display.optInt("app_min_version_code", 0);
@@ -2107,6 +2120,101 @@ public final class MainActivity extends Activity {
                 }).start();
     };
 
+    // --- panggilan petugas mengalahkan iklan --------------------------------
+
+    /** Bandingkan loket dengan pengecekan sebelumnya; panggilan baru memicu sorotan. */
+    private void deteksiPanggilanBaru() {
+        Map<String, String> sekarang = new HashMap<>();
+        Loket terbaru = null;
+        boolean ada = false;
+        for (Loket loket : loketList) {
+            if (loket.nomor.isEmpty() || !"Dipanggil".equalsIgnoreCase(loket.status)) continue;
+            String tanda = loket.nomor + "#" + loket.panggilan;
+            sekarang.put(loket.nama, tanda);
+            if (penandaPanggilanLoket != null && !tanda.equals(penandaPanggilanLoket.get(loket.nama))) {
+                terbaru = loket;
+                ada = true;
+            }
+        }
+        boolean pertama = penandaPanggilanLoket == null;
+        penandaPanggilanLoket = sekarang;
+        if (pertama || !ada || terbaru == null) return;
+        panggilanBaru(terbaru);
+    }
+
+    /**
+     * Panggilan baru (atau ulang): iklan layar penuh berhenti, tampilan antrian
+     * muncul dengan animasi sedang, nomornya ditampilkan besar sebentar, dan
+     * hitungan menganggur dimulai dari nol supaya iklan tidak langsung kembali.
+     */
+    private void panggilanBaru(Loket loket) {
+        if (!panggilanHentikanIklan || putarSaja) return;
+        sentuhTerakhirMillis = System.currentTimeMillis();
+        if (iklanPenuh) {
+            handler.removeCallbacks(akhirIklanAwal);
+            keluarDenganAnimasiPenuh = false;
+            keluarIklanPenuh();
+        }
+        if (!showingConfirmation && !showingResult) {
+            tampilkanBannerPanggilan(loket.nomor, loket.nama);
+        }
+    }
+
+    /** Nomor besar di tengah layar selama beberapa detik; sentuhan tetap tembus. */
+    private void tampilkanBannerPanggilan(String nomor, String loket) {
+        if (bannerPanggilan != null) {
+            bannerPanggilan.dismiss();
+            bannerPanggilan = null;
+        }
+        LinearLayout isi = new LinearLayout(this);
+        isi.setOrientation(LinearLayout.VERTICAL);
+        isi.setGravity(Gravity.CENTER);
+        isi.setPadding(dp(36), dp(24), dp(36), dp(24));
+        isi.setBackground(rounded(Color.argb(235, 4, 120, 87), dp(28)));
+        TextView judul = text("Nomor dipanggil", 16, Color.WHITE, true);
+        judul.setGravity(Gravity.CENTER);
+        isi.addView(judul);
+        TextView angka = text(nomor, 64, Color.WHITE, true);
+        angka.setTypeface(huruf(800));
+        angka.setGravity(Gravity.CENTER);
+        pasangSatuBaris(angka, 28, 64);
+        isi.addView(angka, new LinearLayout.LayoutParams(dp(280), -2));
+        TextView tujuan = text("→ " + loket, 24, Color.WHITE, true);
+        tujuan.setGravity(Gravity.CENTER);
+        pasangSatuBaris(tujuan, 12, 24);
+        isi.addView(tujuan, new LinearLayout.LayoutParams(dp(280), -2));
+        android.widget.PopupWindow jendela = new android.widget.PopupWindow(
+                isi, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        jendela.setTouchable(false);
+        jendela.setFocusable(false);
+        bannerPanggilan = jendela;
+        View decor = getWindow().getDecorView();
+        decor.post(() -> {
+            if (bannerPanggilan != jendela || isFinishing()) return;
+            try {
+                jendela.showAtLocation(decor, Gravity.CENTER, 0, 0);
+            } catch (RuntimeException ignored) {
+                // Jendela belum siap; sorotan kartu loket tetap tampil.
+                return;
+            }
+            isi.setAlpha(0f);
+            isi.setScaleX(0.85f);
+            isi.setScaleY(0.85f);
+            isi.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(350).start();
+            handler.postDelayed(() -> {
+                if (bannerPanggilan != jendela) return;
+                isi.animate().alpha(0f).setDuration(350).withEndAction(() -> {
+                    if (bannerPanggilan == jendela) bannerPanggilan = null;
+                    try {
+                        jendela.dismiss();
+                    } catch (RuntimeException ignored) {
+                        // Sudah tertutup.
+                    }
+                }).start();
+            }, LAMA_BANNER_PANGGILAN_MS);
+        });
+    }
+
     /** Animasi dipakai bila server menyalakannya dan Android tidak mematikan animasi. */
     private boolean animasiPanelDipakai() {
         if (!animasiKembali || rootLayout == null) return false;
@@ -2140,7 +2248,7 @@ public final class MainActivity extends Activity {
             kombinasi = arah.get(0) * 16 + arah.get(1) * 4 + arah.get(2);
         }
         arahAnimasiTerakhir = kombinasi;
-        long durasi = penuh ? DURASI_PANEL_PENUH_MS : DURASI_PANEL_SENTUH_MS;
+        long durasi = penuh ? DURASI_PANEL_PENUH_MS : DURASI_PANEL_PANGGILAN_MS;
         long jeda = penuh ? JEDA_PANEL_PENUH_MS : 0L;
         int lebar = rootLayout.getWidth();
         int tinggi = rootLayout.getHeight();

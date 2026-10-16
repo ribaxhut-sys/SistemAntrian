@@ -385,6 +385,11 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 "name": loket.counter_name,
                 "queue_number": loket.antrian.queue_number if loket.antrian else None,
                 "category": loket.antrian.category_name if loket.antrian else None,
+                # Bertambah tiap panggilan DAN panggilan ulang: anjungan
+                # mengenali panggilan baru dari perubahan angka ini.
+                "call_count": (
+                    loket.antrian.jumlah_panggilan if loket.antrian else 0
+                ),
                 "status": (
                     loket.antrian.label_status
                     if loket.antrian is not None
@@ -902,6 +907,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             # Animasi tiga panel masuk dari arah acak saat kembali ke antrian.
             "return_animation": services.settings.get_bool(
                 "kiosk.animasi_kembali", True
+            ),
+            # Panggilan petugas mengalahkan iklan layar penuh.
+            "call_interrupts_ad": services.settings.get_bool(
+                "kiosk.panggilan_hentikan_iklan", True
             ),
             # Nomor menunggu muncul berurutan dengan gaya acak.
             "waiting_animation": services.settings.get_bool(

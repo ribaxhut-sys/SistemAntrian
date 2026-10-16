@@ -238,6 +238,14 @@ commit berikut di atas `main`:
   tombol **Segarkan media** (`media_refresh`), dan **Salin dari server**
   (`/v1/kiosk/media-library`) di Kelola media tablet.
 
+- **Panggilan mengalahkan iklan** ([android-kiosk.md](android-kiosk.md),
+  bagian "Panggilan mengalahkan iklan"): panggilan/panggilan ulang petugas
+  menghentikan iklan layar penuh, banner nomor ±6 detik, hitungan menganggur
+  diulang. Setelan **Panggilan menghentikan iklan** (grup Iklan Anjungan,
+  `kiosk.panggilan_hentikan_iklan`, API `call_interrupts_ad`; per loket
+  `call_count`). Dibangun sebagai APK debug, **belum diverifikasi di perangkat**
+  dan belum dirilis.
+
 ### 4.4b PIN pengaturan anjungan dan mode putar saja
 
 Rinci di [android-kiosk.md](android-kiosk.md) (bagian "PIN pengaturan dan
@@ -395,6 +403,7 @@ menyeret APK ke jendela BlueStacks. Tangkapan layar:
 | Tanggal | Oleh | Perubahan |
 |---|---|---|
 | 2026-10-16 | Claude | Dokumen dibuat; mencakup seluruh pekerjaan Oktober 2026 di atas |
+| 2026-10-16 | Claude | Ditambah: panggilan mengalahkan iklan (setelan, `call_count`, banner, polling 1 detik) |
 
 Saat menutup sesi: perbarui bagian 3 (keadaan, commit, versi), 6 (belum
 selesai), dan tabel di atas.

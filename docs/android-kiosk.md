@@ -298,6 +298,23 @@ untuk nomor baru) dipakai.
 ruang kosong ada di bawah (sebelumnya blok nomor di tengah vertikal dan ikut
 bergeser tiap ada nomor dipanggil). Titik halaman tetap di bagian bawah.
 
+### Panggilan mengalahkan iklan (setelah 2.4.34.1, belum dirilis)
+
+Prioritas tampilan: **panggilan > transaksi pengunjung > iklan layar penuh >
+iklan panel**. Saat petugas memanggil atau memanggil ulang nomor, iklan layar
+penuh langsung berhenti (animasi panel masuk 900 ms), nomor dan loket tampil
+besar sebagai banner ±6 detik, dan hitungan menganggur dimulai dari nol.
+
+- Server: `/v1/kiosk/display` mengirim `call_interrupts_ad` (setelan
+  **Panggilan menghentikan iklan**, grup *Iklan Anjungan*, bawaan aktif) dan
+  `call_count` per loket (jumlah panggilan + panggilan ulang).
+- Tablet mengenali panggilan baru dari perubahan `nomor#call_count` loket
+  berstatus Dipanggil (`deteksiPanggilanBaru`). Muatan pertama tidak dihitung.
+  Selama iklan layar penuh aktif, display diambil tiap 1 detik (biasanya 5).
+- Tidak berlaku pada mode putar saja; tidak mengganggu layar konfirmasi atau
+  hasil (iklan tetap dihentikan, banner ditahan).
+- Pembatalan: peredupan/animasi awal menjelang akhir iklan dibatalkan.
+
 ### Teks loket tanpa panggilan (setelah 2.4.34.1, belum dirilis)
 
 Loket yang aktif tetapi tidak sedang memanggil menampilkan **"Siap melayani"**
