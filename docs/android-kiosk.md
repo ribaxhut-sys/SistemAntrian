@@ -323,7 +323,7 @@ Nomor prioritas diberi " ★" di daftar nomor menunggu, **tanpa menyebut alasan*
 
 ### Warna kilau bebas (setelah 2.4.34.1, belum dirilis)
 
-Pengaturan > warna kilau: selain 7 warna tetap ada bulatan pelangi "+" yang
+Pengaturan > warna kilau: bulatan pelangi "+" di barisan paling depan, sebelum 7 warna tetap,
 membuka pemilih (pita jenis warna, bidang kejenuhan x kecerahan, isian hex).
 Disimpan per tablet di `warna_kilau` sebagai `#RRGGBB`; pilihan lama (`emas`,
 `biru`, dst.) tetap berlaku. Kecerahan dibatasi minimal 0,5

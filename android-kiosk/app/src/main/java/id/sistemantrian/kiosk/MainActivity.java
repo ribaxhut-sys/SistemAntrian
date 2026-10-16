@@ -5787,6 +5787,10 @@ public final class MainActivity extends Activity {
             }
         };
         segarkanRef[0] = segarkan;
+        lain.setOnClickListener(v -> bukaPemilihWarnaKilau(segarkanRef[0]));
+        LinearLayout.LayoutParams paramLain = new LinearLayout.LayoutParams(dp(36), dp(36));
+        paramLain.rightMargin = dp(8);
+        baris.addView(lain, paramLain);
         for (String[] pilihan : PILIHAN_KILAU) {
             TextView b = text("mati".equals(pilihan[0]) ? "✕"
                     : KILAU_TEMA.equals(pilihan[0]) ? "T" : "", 13, MUTED, true);
@@ -5802,10 +5806,6 @@ public final class MainActivity extends Activity {
             baris.addView(b, params);
             bulatan.add(b);
         }
-        lain.setOnClickListener(v -> bukaPemilihWarnaKilau(segarkanRef[0]));
-        LinearLayout.LayoutParams paramLain = new LinearLayout.LayoutParams(dp(36), dp(36));
-        paramLain.rightMargin = dp(8);
-        baris.addView(lain, paramLain);
         baris.addView(keterangan);
         segarkan.run();
         return gulir;
