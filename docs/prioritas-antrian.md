@@ -6,7 +6,7 @@ Nomor yang didahulukan untuk lansia, disabilitas, dan ibu hamil.
 
 | Aksi | Siapa | Di mana |
 |---|---|---|
-| **Menandai** | Pengunjung sendiri | Kotak **"Saya lansia / disabilitas / ibu hamil"** di menu awal anjungan Android (APK 2.4.34). Petugas yang berjaga mengarahkannya. |
+| **Menandai** | Pengunjung sendiri | Kotak **"Saya lansia / disabilitas / ibu hamil"** di menu awal anjungan Android (APK 2.4.34.1). Petugas yang berjaga mengarahkannya. |
 | **Menandai** | Petugas pendaftaran (bila ada) | Pilihan "Pengunjung prioritas" pada layar Terbitkan Nomor |
 | **Mencabut** | Petugas pelayanan | Tombol **Cabut prioritas** pada daftar Menunggu dan pada pita nomor aktif |
 

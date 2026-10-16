@@ -143,7 +143,7 @@ Layanan Anjungan menampilkan peringatan di baris Paket suara.
   `{"nama", "mulai", "selesai", "detik"}`; butir tanpa aturan tetap berupa
   nama saja, jadi nilai lama terbaca apa adanya. `welcome_media_files[].seconds`
   membawa lama tampilnya ke tablet.
-- **Tempat tampil (APK 2.4.34).** Video untuk strip panel atas (mendatar,
+- **Tempat tampil (APK 2.4.34.1).** Video untuk strip panel atas (mendatar,
   kecil) dan video untuk layar penuh (seluruh layar) berbeda bentuknya, jadi
   di dialog **Atur jadwal…** tiap berkas punya **Tampil di**: *Panel atas*,
   *Layar penuh*, atau *Keduanya* (bawaan). Disimpan sebagai `"tampil":
@@ -165,7 +165,7 @@ Layanan Anjungan menampilkan peringatan di baris Paket suara.
   ajakan "Sentuh layar untuk mengambil nomor antrian". Sentuhan pertama hanya
   mengembalikan layar biasa, tidak diteruskan ke tombol layanan. Tidak aktif
   selama dialog terbuka, pembaruan APK, atau bila media gagal diputar.
-  Mulai APK 2.4.34 iklan memenuhi **seluruh layar** tanpa margin, padding,
+  Mulai APK 2.4.34.1 iklan memenuhi **seluruh layar** tanpa margin, padding,
   sudut membulat, dan garis tepi, di atas latar hitam. Video dan gambar tetap
   utuh (rasio dijaga; pita hitam bila rasionya berbeda dengan layar), tidak
   dipotong. Siapkan video dengan rasio yang sama dengan layar tablet agar
