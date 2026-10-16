@@ -244,6 +244,38 @@ seketika tanpa tombol Simpan:
 Lama tampil gambar, suara video, dan posisi baris loket tetap mengikuti
 pengaturan server pada kedua sumber.
 
+### PIN pengaturan dan mode putar saja (setelah 2.4.34.1, belum dirilis)
+
+- **PIN pengaturan.** Satu PIN 6 angka untuk semua tablet, diatur admin di
+  Layanan Anjungan → **PIN anjungan ▾** (atur/ganti/hapus). Server menyimpan
+  hash PBKDF2-SHA1 berbumbu (`kiosk.pin_pengaturan`, tidak tampil di
+  Pengaturan), bukan PIN-nya (`app/services/pin_anjungan.py`). Tombol ⚙ di
+  anjungan meminta PIN lewat papan angka; tablet memverifikasi ke server
+  (`POST /v1/kiosk/pin/verifikasi`, penundaan 1/5/15 menit per tablet setelah
+  5/10/15 kali salah, dihitung di server) dan, bila server tidak terjangkau,
+  dengan hash terakhir yang dikirim pada `/v1/kiosk/display`
+  (`settings_pin`). Pengaturan menutup sendiri setelah 2 menit tanpa
+  sentuhan.
+  - **Tidak diminta** pada tablet yang belum pernah tersambung (belum
+    dipasang, supaya alamat server dapat diisi) dan bila server belum
+    memasang PIN.
+- **Mode putar saja.** Bila server tidak terjangkau ≥ 30 detik (dan tablet
+  pernah tersambung), semua fitur mati: tanpa menu, tiket, kotak prioritas,
+  dan ⚙. Layar memutar video dari salinan di tablet (daftar *Layar penuh*;
+  bila kosong, daftar *Panel atas*) dengan teks redup "Menghubungkan ke
+  server…". Tanpa media: "Layanan antrian sementara tidak tersedia. Silakan
+  hubungi petugas." Kembali normal otomatis begitu server terjangkau; tidak
+  menyela pengunjung yang sedang di layar konfirmasi atau hasil nomor.
+  Daftar media terakhir disimpan di tablet supaya mode ini bekerja sesudah
+  dinyalakan ulang saat server mati.
+- **Jalan pulih.** Dalam mode putar saja, sentuh-tahan pojok kiri bawah
+  5 detik (tanpa tanda di layar) membuka papan PIN yang diperiksa dengan hash
+  tersimpan; bila benar, ⚙ terbuka untuk memperbaiki alamat server.
+- **Tempat tampil untuk folder tablet.** Pada sumber media *Folder media di
+  tablet ini*, tiap berkas di **Kelola media tablet** punya tombol *Keduanya /
+  Panel atas / Layar penuh* (disimpan di tablet menurut nama berkas). Pada
+  sumber server, aturan server yang berlaku.
+
 ### Salinan media: status, segarkan, dan salin dari server
 
 - **Status per anjungan.** Tablet melaporkan berapa berkas daftar putar yang

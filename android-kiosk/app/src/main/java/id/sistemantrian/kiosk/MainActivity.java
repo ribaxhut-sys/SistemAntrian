@@ -662,6 +662,28 @@ public final class MainActivity extends Activity {
     private final Map<String, String> tampilBerkas = new HashMap<>();
     /** Daftar yang diputar sekarang: true = daftar layar penuh. */
     private boolean mediaModePenuh;
+
+    // --- PIN pengaturan, mode putar saja, dan tempat tampil lokal -----------
+    private static final String PIN_AKTIF = "pin_aktif";
+    private static final String PIN_SALT = "pin_salt";
+    private static final String PIN_HASH = "pin_hash";
+    private static final String PIN_ITER = "pin_iter";
+    private static final String PIN_GAGAL = "pin_gagal";
+    private static final String PIN_TUNDA_SAMPAI = "pin_tunda_sampai";
+    private static final String PERNAH_TERHUBUNG = "pernah_terhubung";
+    private static final String DISPLAY_TERAKHIR = "display_terakhir";
+    private static final String TAMPIL_LOKAL = "tampil_lokal";
+    /** Gagal terhubung selama ini membuat tablet masuk mode putar saja. */
+    private static final long BATAS_PUTAR_SAJA_MS = 30_000L;
+    /** Pengaturan menutup sendiri bila tidak disentuh selama ini. */
+    private static final long BATAS_DIAM_PENGATURAN_MS = 120_000L;
+    /** Sentuh-tahan di pojok kiri bawah selama ini membuka jalan pulih. */
+    private static final long TAHAN_PULIH_MS = 5_000L;
+    /** Waktu gagal terhubung yang pertama; 0 = tersambung. */
+    private long gagalSejak;
+    /** Server tidak terjangkau: hanya memutar video, tanpa fitur lain. */
+    private boolean putarSaja;
+    private String mediaTerakhirTersimpan = "";
     /** Nama berkas server -> nama salinannya (ukuran-waktu-nama). */
     private final Map<String, String> kunciSalinan = new HashMap<>();
     /** Kunci salinan yang sedang diunduh; hanya disentuh di thread UI. */
@@ -930,6 +952,7 @@ public final class MainActivity extends Activity {
         } else {
             registerReceiver(installReceiver, installFilter);
         }
+        muatMediaTerakhir();
         buildHome();
         if (sumberTablet()) {
             terapkanMediaSambutan();
@@ -984,7 +1007,7 @@ public final class MainActivity extends Activity {
         titleRow.addView(displayTitle, new LinearLayout.LayoutParams(0, -2, 1));
         Button settings = smallButton("⚙");
         settings.setContentDescription("Pengaturan server");
-        settings.setOnClickListener(v -> showSettings());
+        settings.setOnClickListener(v -> bukaPengaturan());
         titleRow.addView(settings, new LinearLayout.LayoutParams(dp(42), dp(38)));
         infoPanel.addView(titleRow);
         subtitleLabel = text(subjudulServer, 13, MUTED, true);
@@ -1180,6 +1203,10 @@ public final class MainActivity extends Activity {
         request("GET", "/v1/kiosk/display", null, json -> {
             JSONObject display = json.getJSONObject("data");
             displayFailures = 0;
+            gagalSejak = 0L;
+            preferences.edit().putBoolean(PERNAH_TERHUBUNG, true).apply();
+            simpanPinDariServer(display.optJSONObject("settings_pin"));
+            simpanMediaTerakhir(display);
             lastDisplaySuccessMillis = System.currentTimeMillis();
             tampilkanStatusKoneksi("Terhubung ke server", Color.rgb(6, 95, 70),
                     Color.rgb(209, 250, 229));
@@ -1305,6 +1332,7 @@ public final class MainActivity extends Activity {
             updateAvailability();
         }, message -> {
             displayFailures++;
+            if (gagalSejak == 0L) gagalSejak = System.currentTimeMillis();
             if (displayFailures >= 2) {
                 String terakhir = lastDisplaySuccessMillis == 0L ? ""
                         : " · terakhir " + jamLokal(lastDisplaySuccessMillis);
@@ -1395,7 +1423,7 @@ public final class MainActivity extends Activity {
             placeholder.addView(retry, retryParams);
         }
         Button settings = actionButton("PENGATURAN SERVER", true);
-        settings.setOnClickListener(v -> showSettings());
+        settings.setOnClickListener(v -> bukaPengaturan());
         LinearLayout.LayoutParams settingsParams =
                 new LinearLayout.LayoutParams(-1, dp(54));
         settingsParams.topMargin = dp(8);
@@ -1773,6 +1801,7 @@ public final class MainActivity extends Activity {
     public boolean dispatchTouchEvent(MotionEvent event) {
         int aksi = event.getActionMasked();
         sentuhTerakhirMillis = System.currentTimeMillis();
+        if (putarSaja) return tanganiSentuhanPutarSaja(event);
         if (iklanPenuh || menelanSentuhan) {
             // Sentuhan pertama hanya membangunkan layar. Diteruskan ke tombol
             // di bawahnya berarti pengunjung memilih layanan yang belum
@@ -1809,6 +1838,7 @@ public final class MainActivity extends Activity {
     private void perbaruiIklan() {
         if (bingkaiMedia == null) return;
         long sekarang = System.currentTimeMillis();
+        perbaruiModePutarSaja(sekarang);
         if (!hasWindowFocus()) sentuhTerakhirMillis = sekarang;
         if (!path.isEmpty() && !showingConfirmation && !showingResult && !requestInFlight
                 && !updating && !updateRequired
@@ -1827,8 +1857,8 @@ public final class MainActivity extends Activity {
             targetTirai = tirai;
             tiraiMedia.animate().alpha(tirai).setDuration(350).start();
         }
-        boolean bolehPenuh = iklanPenuhDetik > 0 && !mediaGagal && adaMediaLayarPenuh()
-                && !updating && !updateRequired;
+        boolean bolehPenuh = putarSaja || (iklanPenuhDetik > 0 && !mediaGagal
+                && adaMediaLayarPenuh() && !updating && !updateRequired);
         if (iklanPenuh && !bolehPenuh) {
             keluarIklanPenuh();
         } else if (!iklanPenuh && bolehPenuh && !transaksi
@@ -2164,7 +2194,12 @@ public final class MainActivity extends Activity {
 
     /** Ada media yang boleh memenuhi layar saat anjungan menganggur. */
     private boolean adaMediaLayarPenuh() {
-        if (sumberTablet()) return !daftarMediaTablet().isEmpty();
+        if (sumberTablet()) {
+            for (File item : daftarMediaTablet()) {
+                if (tampilLokalDi(item.getName(), true)) return true;
+            }
+            return false;
+        }
         if (!isMediaKind(serverKind)) return false;
         for (String nama : serverMedia) {
             if (tampilDi(nama, true)) return true;
@@ -2179,8 +2214,10 @@ public final class MainActivity extends Activity {
         String signature;
         boolean putar;
         if (tablet) {
-            StringBuilder tanda = new StringBuilder(SUMBER_TABLET);
+            StringBuilder tanda = new StringBuilder(SUMBER_TABLET)
+                    .append(mediaModePenuh ? "|penuh" : "|panel");
             for (File item : daftarMediaTablet()) {
+                if (!tampilLokalDi(item.getName(), mediaModePenuh)) continue;
                 media.add(item.getName());
                 tanda.append('|').append(item.getName()).append(':')
                         .append(item.length()).append(':').append(item.lastModified());
@@ -2190,6 +2227,12 @@ public final class MainActivity extends Activity {
         } else {
             for (String nama : serverMedia) {
                 if (tampilDi(nama, mediaModePenuh)) media.add(nama);
+            }
+            if (media.isEmpty() && putarSaja) {
+                // Putar saja: tanpa daftar layar penuh, pakai daftar panel atas.
+                for (String nama : serverMedia) {
+                    if (tampilDi(nama, false)) media.add(nama);
+                }
             }
             List<String> kunci = new ArrayList<>();
             for (String nama : media) kunci.add(String.valueOf(kunciSalinan.get(nama)));
@@ -2205,15 +2248,23 @@ public final class MainActivity extends Activity {
             handler.removeCallbacks(cobaMediaLagi);
             welcomeMedia = media;
             mediaIndex = 0;
-            applyWelcomeText(welcomeFallbackText);
+            applyWelcomeText(teksCadanganMedia());
             if (putar) {
                 showWelcomeMedia(0);
             } else {
                 handler.removeCallbacks(nextSlide);
             }
         } else if (!putar) {
-            applyWelcomeText(welcomeFallbackText);
+            applyWelcomeText(teksCadanganMedia());
         }
+    }
+
+    /** Teks di panel media bila tidak ada gambar atau video yang dapat diputar. */
+    private String teksCadanganMedia() {
+        if (putarSaja) {
+            return "Layanan antrian sementara tidak tersedia.\nSilakan hubungi petugas.";
+        }
+        return welcomeFallbackText;
     }
 
     /**
@@ -4498,6 +4549,360 @@ public final class MainActivity extends Activity {
         }
     }
 
+
+    // =====================================================================
+    // PIN pengaturan, mode putar saja, dan tempat tampil lokal
+    // =====================================================================
+
+    /**
+     * Tombol ⚙. Tablet yang belum pernah tersambung (belum dipasang) atau
+     * server yang belum memasang PIN membuka pengaturan langsung; selain itu
+     * PIN diminta.
+     */
+    private void bukaPengaturan() {
+        boolean terpasang = hasServerConfig()
+                && preferences.getBoolean(PERNAH_TERHUBUNG, false);
+        if (!terpasang || !preferences.getBoolean(PIN_AKTIF, false)) {
+            showSettings();
+            return;
+        }
+        tampilkanPapanPin(this::showSettings, false);
+    }
+
+    private void simpanPinDariServer(JSONObject pin) {
+        if (pin == null) return;
+        SharedPreferences.Editor editor = preferences.edit();
+        boolean aktif = pin.optBoolean("enabled", false);
+        editor.putBoolean(PIN_AKTIF, aktif);
+        if (aktif) {
+            editor.putString(PIN_SALT, pin.optString("salt", ""))
+                    .putString(PIN_HASH, pin.optString("hash", ""))
+                    .putInt(PIN_ITER, pin.optInt("iterations", 100000));
+        }
+        editor.apply();
+    }
+
+    /** PIN diperiksa ke server bila tersambung; tanpa jaringan, dengan hash tersimpan. */
+    private void tampilkanPapanPin(Runnable setelahBenar, boolean paksaLokal) {
+        StringBuilder isi = new StringBuilder();
+        LinearLayout kolom = new LinearLayout(this);
+        kolom.setOrientation(LinearLayout.VERTICAL);
+        kolom.setGravity(Gravity.CENTER_HORIZONTAL);
+        kolom.setPadding(dp(16), dp(8), dp(16), dp(8));
+        TextView titik = text("○ ○ ○ ○ ○ ○", 30, INK, true);
+        titik.setGravity(Gravity.CENTER);
+        kolom.addView(titik);
+        TextView pesan = text("Masukkan PIN pengaturan", 14, MUTED, false);
+        pesan.setGravity(Gravity.CENTER);
+        pesan.setPadding(0, dp(6), 0, dp(10));
+        kolom.addView(pesan);
+        AlertDialog[] dialog = new AlertDialog[1];
+        Runnable gambar = () -> {
+            StringBuilder t = new StringBuilder();
+            for (int i = 0; i < 6; i++) t.append(i < isi.length() ? "● " : "○ ");
+            titik.setText(t.toString().trim());
+        };
+        Runnable periksa = () -> {
+            long tunda = preferences.getLong(PIN_TUNDA_SAMPAI, 0L) - System.currentTimeMillis();
+            if (tunda > 0) {
+                pesan.setText("Terlalu banyak percobaan. Coba lagi dalam "
+                        + (tunda / 1000L + 1L) + " detik.");
+                isi.setLength(0);
+                gambar.run();
+                return;
+            }
+            String pin = isi.toString();
+            Runnable lokal = () -> hasilPin(cocokPinLokal(pin), 0, pesan, isi, gambar,
+                    dialog, setelahBenar);
+            if (paksaLokal || !hasServerConfig()) {
+                lokal.run();
+                return;
+            }
+            request("POST", "/v1/kiosk/pin/verifikasi",
+                    new JSONObjectBuilder().put("pin", pin).build(),
+                    json -> {
+                        JSONObject data = json.getJSONObject("data");
+                        hasilPin(data.optBoolean("ok", false),
+                                data.optInt("locked_seconds", 0), pesan, isi, gambar,
+                                dialog, setelahBenar);
+                    }, error -> lokal.run());
+        };
+        String[][] tombolAngka = {
+                {"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"Hapus", "0", "Batal"}};
+        for (String[] deret : tombolAngka) {
+            LinearLayout baris = new LinearLayout(this);
+            baris.setGravity(Gravity.CENTER);
+            for (String label : deret) {
+                Button angka = actionButton(label, false);
+                angka.setOnClickListener(v -> {
+                    v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+                    if ("Hapus".equals(label)) {
+                        if (isi.length() > 0) isi.setLength(isi.length() - 1);
+                    } else if ("Batal".equals(label)) {
+                        if (dialog[0] != null) dialog[0].dismiss();
+                        return;
+                    } else if (isi.length() < 6) {
+                        isi.append(label);
+                    }
+                    gambar.run();
+                    if (isi.length() == 6) periksa.run();
+                });
+                LinearLayout.LayoutParams ukuran = new LinearLayout.LayoutParams(dp(84), dp(58));
+                ukuran.setMargins(dp(4), dp(4), dp(4), dp(4));
+                baris.addView(angka, ukuran);
+            }
+            kolom.addView(baris);
+        }
+        dialog[0] = pembuatDialog()
+                .setTitle("PIN pengaturan")
+                .setView(kolom)
+                .show();
+        pasangAutoTutup(dialog[0]);
+    }
+
+    private void hasilPin(boolean benar, int kunciDetik, TextView pesan, StringBuilder isi,
+                          Runnable gambar, AlertDialog[] dialog, Runnable setelahBenar) {
+        isi.setLength(0);
+        gambar.run();
+        if (benar) {
+            preferences.edit().putInt(PIN_GAGAL, 0).putLong(PIN_TUNDA_SAMPAI, 0L).apply();
+            if (dialog[0] != null) dialog[0].dismiss();
+            setelahBenar.run();
+            return;
+        }
+        int gagal = preferences.getInt(PIN_GAGAL, 0) + 1;
+        long tunda = kunciDetik * 1000L;
+        if (tunda == 0L) {
+            tunda = gagal >= 15 ? 900_000L : gagal >= 10 ? 300_000L : gagal >= 5 ? 60_000L : 0L;
+        }
+        preferences.edit().putInt(PIN_GAGAL, gagal)
+                .putLong(PIN_TUNDA_SAMPAI, tunda > 0 ? System.currentTimeMillis() + tunda : 0L)
+                .apply();
+        pesan.setText(tunda > 0
+                ? "PIN salah. Coba lagi dalam " + (tunda / 1000L) + " detik."
+                : "PIN salah.");
+    }
+
+    private boolean cocokPinLokal(String pin) {
+        if (!preferences.getBoolean(PIN_AKTIF, false)) return true;
+        try {
+            byte[] salt = heks(preferences.getString(PIN_SALT, ""));
+            javax.crypto.SecretKeyFactory pabrik =
+                    javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1");
+            byte[] hitung = pabrik.generateSecret(new javax.crypto.spec.PBEKeySpec(
+                    pin.toCharArray(), salt, preferences.getInt(PIN_ITER, 100000), 160))
+                    .getEncoded();
+            return java.security.MessageDigest.isEqual(
+                    hitung, heks(preferences.getString(PIN_HASH, "")));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static byte[] heks(String teks) {
+        byte[] hasil = new byte[teks.length() / 2];
+        for (int i = 0; i < hasil.length; i++) {
+            hasil[i] = (byte) Integer.parseInt(teks.substring(2 * i, 2 * i + 2), 16);
+        }
+        return hasil;
+    }
+
+    /** Pengaturan menutup sendiri bila tidak disentuh, lalu kembali ke menu. */
+    private void pasangAutoTutup(AlertDialog dialog) {
+        Runnable[] tutup = new Runnable[1];
+        tutup[0] = () -> {
+            if (dialog.isShowing()) dialog.dismiss();
+        };
+        handler.postDelayed(tutup[0], BATAS_DIAM_PENGATURAN_MS);
+        dialog.setOnDismissListener(d -> handler.removeCallbacks(tutup[0]));
+        android.view.Window jendela = dialog.getWindow();
+        if (jendela == null) return;
+        android.view.Window.Callback asli = jendela.getCallback();
+        jendela.setCallback((android.view.Window.Callback) java.lang.reflect.Proxy
+                .newProxyInstance(android.view.Window.Callback.class.getClassLoader(),
+                        new Class<?>[]{android.view.Window.Callback.class},
+                        (proxy, metode, argumen) -> {
+                            String nama = metode.getName();
+                            if ("dispatchTouchEvent".equals(nama)
+                                    || "dispatchKeyEvent".equals(nama)) {
+                                handler.removeCallbacks(tutup[0]);
+                                handler.postDelayed(tutup[0], BATAS_DIAM_PENGATURAN_MS);
+                            }
+                            try {
+                                return metode.invoke(asli, argumen);
+                            } catch (java.lang.reflect.InvocationTargetException e) {
+                                throw e.getCause();
+                            }
+                        }));
+    }
+
+    // --- mode putar saja ----------------------------------------------------
+
+    /**
+     * Server tidak terjangkau selama BATAS_PUTAR_SAJA_MS (dan tablet pernah
+     * tersambung): semua fitur dimatikan dan hanya video yang diputar.
+     * Kembali normal sendiri begitu server terjangkau. Pengunjung yang sedang
+     * di layar konfirmasi atau melihat nomor tidak diganggu.
+     */
+    private void perbaruiModePutarSaja(long sekarang) {
+        boolean pernah = hasServerConfig() && preferences.getBoolean(PERNAH_TERHUBUNG, false);
+        boolean harus = pernah && gagalSejak != 0L
+                && sekarang - gagalSejak >= BATAS_PUTAR_SAJA_MS;
+        if (harus && !putarSaja && !showingConfirmation && !showingResult
+                && !requestInFlight && !updating) {
+            masukPutarSaja();
+        } else if (!harus && putarSaja) {
+            keluarPutarSaja();
+        }
+    }
+
+    private void masukPutarSaja() {
+        if (putarSaja || rootLayout == null) return;
+        putarSaja = true;
+        welcome.setTextColor(Color.WHITE);
+        masukIklanPenuh();
+        mediaModePenuh = true;
+        terapkanMediaSambutan();
+        hentikanDenyutAjakanIklan();
+        ajakanIklanPenuh.setText("Menghubungkan ke server…");
+        ajakanIklanPenuh.setAlpha(0.55f);
+    }
+
+    private void keluarPutarSaja() {
+        if (!putarSaja) return;
+        putarSaja = false;
+        handler.removeCallbacks(bukaPulih);
+        welcome.setTextColor(INK);
+        ajakanIklanPenuh.setText("Sentuh layar untuk mengambil nomor antrian");
+        keluarIklanPenuh();
+        mediaModePenuh = false;
+        terapkanMediaSambutan();
+        loadCategories();
+        loadDisplay();
+    }
+
+    /** Layar tidak merespons sentuhan, kecuali tahan pojok kiri bawah (jalan pulih). */
+    private boolean tanganiSentuhanPutarSaja(MotionEvent event) {
+        int aksi = event.getActionMasked();
+        int lebar = rootLayout == null ? 0 : rootLayout.getWidth();
+        int tinggi = rootLayout == null ? 0 : rootLayout.getHeight();
+        boolean pojok = event.getX() < lebar * 0.2f && event.getY() > tinggi * 0.8f;
+        if (aksi == MotionEvent.ACTION_DOWN) {
+            if (pojok) handler.postDelayed(bukaPulih, TAHAN_PULIH_MS);
+        } else if (aksi == MotionEvent.ACTION_UP || aksi == MotionEvent.ACTION_CANCEL
+                || (aksi == MotionEvent.ACTION_MOVE && !pojok)) {
+            handler.removeCallbacks(bukaPulih);
+        }
+        return true;
+    }
+
+    /** Jalan pulih: PIN diperiksa dengan hash tersimpan, tanpa jaringan. */
+    private final Runnable bukaPulih = () -> {
+        if (!preferences.getBoolean(PIN_AKTIF, false)) {
+            showSettings();
+        } else {
+            tampilkanPapanPin(this::showSettings, true);
+        }
+    };
+
+    /** Daftar media terakhir dari server, agar mode putar saja bekerja sesudah dinyalakan ulang. */
+    private void simpanMediaTerakhir(JSONObject display) {
+        try {
+            JSONObject ringkas = new JSONObject();
+            for (String kunci : new String[]{"welcome_kind", "welcome_media",
+                    "welcome_media_files", "fullscreen_ad_idle_seconds",
+                    "welcome_slide_seconds", "welcome_text"}) {
+                if (display.has(kunci)) ringkas.put(kunci, display.get(kunci));
+            }
+            String teks = ringkas.toString();
+            if (teks.equals(mediaTerakhirTersimpan)) return;
+            mediaTerakhirTersimpan = teks;
+            preferences.edit().putString(DISPLAY_TERAKHIR, teks).apply();
+        } catch (Exception ignored) {
+            // Gagal menyimpan hanya berarti mode putar saja memakai data yang ada.
+        }
+    }
+
+    private void muatMediaTerakhir() {
+        String teks = preferences.getString(DISPLAY_TERAKHIR, "");
+        if (teks.isEmpty()) return;
+        mediaTerakhirTersimpan = teks;
+        try {
+            JSONObject display = new JSONObject(teks);
+            serverKind = display.optString("welcome_kind", "teks");
+            welcomeFallbackText = display.optString("welcome_text", "");
+            iklanPenuhDetik = Math.max(0, display.optInt("fullscreen_ad_idle_seconds", 60));
+            welcomeSlideSeconds = Math.max(1, display.optInt("welcome_slide_seconds", 10));
+            List<String> media = new ArrayList<>();
+            JSONArray nama = display.optJSONArray("welcome_media");
+            if (nama != null) {
+                for (int i = 0; i < nama.length(); i++) media.add(nama.getString(i));
+            }
+            kunciSalinan.clear();
+            detikPerBerkas.clear();
+            tampilBerkas.clear();
+            JSONArray info = display.optJSONArray("welcome_media_files");
+            if (info != null) {
+                for (int i = 0; i < info.length(); i++) {
+                    JSONObject row = info.optJSONObject(i);
+                    if (row == null) continue;
+                    String berkas = row.optString("name", "");
+                    if (berkas.isEmpty()) continue;
+                    kunciSalinan.put(berkas, row.optLong("size", 0L) + "-"
+                            + row.optLong("modified_ms", 0L) + "-" + namaAman(berkas));
+                    tampilBerkas.put(berkas, row.optString("show", "keduanya"));
+                    int detik = row.isNull("seconds") ? 0 : row.optInt("seconds", 0);
+                    if (detik > 0) detikPerBerkas.put(berkas, detik);
+                }
+            }
+            serverMedia = media;
+        } catch (Exception ignored) {
+            // Data tersimpan rusak: abaikan, server akan mengirim yang baru.
+        }
+    }
+
+    // --- tempat tampil untuk media di folder tablet ---------------------------
+
+    private String tampilLokal(String nama) {
+        try {
+            return new JSONObject(preferences.getString(TAMPIL_LOKAL, "{}"))
+                    .optString(nama, "keduanya");
+        } catch (Exception e) {
+            return "keduanya";
+        }
+    }
+
+    private void aturTampilLokal(String nama, String tempat) {
+        try {
+            JSONObject isi = new JSONObject(preferences.getString(TAMPIL_LOKAL, "{}"));
+            if ("keduanya".equals(tempat)) {
+                isi.remove(nama);
+            } else {
+                isi.put(nama, tempat);
+            }
+            preferences.edit().putString(TAMPIL_LOKAL, isi.toString()).apply();
+        } catch (Exception ignored) {
+            // Preferensi rusak: pilihan tidak tersimpan, berkas tetap tampil di keduanya.
+        }
+    }
+
+    /** Berkas folder tablet tampil di panel atas (penuh=false) atau layar penuh. */
+    private boolean tampilLokalDi(String nama, boolean penuh) {
+        String tempat = tampilLokal(nama);
+        if ("keduanya".equals(tempat)) return true;
+        return penuh ? "penuh".equals(tempat) : "panel".equals(tempat);
+    }
+
+    private static String tempatBerikutnya(String sekarang) {
+        if ("keduanya".equals(sekarang)) return "panel";
+        return "panel".equals(sekarang) ? "penuh" : "keduanya";
+    }
+
+    private static String labelTempatLokal(String tempat) {
+        if ("panel".equals(tempat)) return "Panel atas";
+        return "penuh".equals(tempat) ? "Layar penuh" : "Keduanya";
+    }
+
     private void showSettings() {
         LinearLayout fields = new LinearLayout(this);
         fields.setPadding(dp(16), 0, dp(16), dp(8));
@@ -4740,6 +5145,7 @@ public final class MainActivity extends Activity {
             });
         });
         dialog.show();
+        pasangAutoTutup(dialog);
     }
 
     /** Kartu satu bagian di dialog pengaturan: judul, keterangan, lalu isinya. */
@@ -4977,6 +5383,15 @@ public final class MainActivity extends Activity {
             TextView nama = text(item.getName() + "\n" + (isVideo(item.getName())
                     ? "video" : "gambar") + " · " + ukuran, 13, INK, false);
             baris.addView(nama, new LinearLayout.LayoutParams(0, -2, 1));
+            Button tempat = smallButton(labelTempatLokal(tampilLokal(item.getName())));
+            tempat.setOnClickListener(v -> {
+                aturTampilLokal(item.getName(), tempatBerikutnya(tampilLokal(item.getName())));
+                terapkanMediaSambutan();
+                terapkanBarisLoket();
+                if (dialog[0] != null) dialog[0].dismiss();
+                showMediaTablet();
+            });
+            baris.addView(tempat);
             Button hapus = smallButton("Hapus");
             hapus.setOnClickListener(v -> pembuatDialog()
                     .setTitle("Hapus " + item.getName() + "?")

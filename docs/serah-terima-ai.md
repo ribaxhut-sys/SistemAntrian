@@ -125,6 +125,9 @@ commit berikut di atas `main`:
 | `178d088` | Salinan media: status per tablet, Segarkan media, Salin dari server |
 | `37fb744` | Tempat tampil per berkas: panel atas / layar penuh / keduanya |
 | `543d5f3` | Anjungan 2.4.34.1 |
+| `eea7ab2` | Dokumentasi serah terima untuk Codex dan Claude |
+| `338783c` | PIN pengaturan anjungan di server (hash, verifikasi, dialog admin) |
+| (berikutnya) | Android: papan PIN, mode putar saja, tempat tampil folder tablet |
 
 **Versi.**
 
@@ -235,6 +238,19 @@ commit berikut di atas `main`:
   tombol **Segarkan media** (`media_refresh`), dan **Salin dari server**
   (`/v1/kiosk/media-library`) di Kelola media tablet.
 
+### 4.4b PIN pengaturan anjungan dan mode putar saja
+
+Rinci di [android-kiosk.md](android-kiosk.md) (bagian "PIN pengaturan dan
+mode putar saja"). Ringkas: PIN 6 angka satu untuk semua tablet, diatur admin
+di Layanan Anjungan (server menyimpan hash PBKDF2-SHA1; kode
+`app/services/pin_anjungan.py`, API `POST /v1/kiosk/pin/verifikasi`,
+`settings_pin` pada `/v1/kiosk/display`). Server tidak terjangkau ≥ 30 detik →
+anjungan hanya memutar video (jalan pulih: tahan pojok kiri bawah 5 detik +
+PIN). Media dari server mengikuti aturan server; media dari folder tablet
+mengikuti aturan tablet (tombol tempat tampil di Kelola media tablet).
+Keputusan pemilik: PIN diatur sekali di server; tanpa server semua fitur
+mati kecuali video. **Belum dirilis** (APK `apk/` masih 2.4.34.1 tanpa ini).
+
 ### 4.5 Keamanan login
 
 - Penundaan login **bertingkat** per nama pengguna, dihitung dari audit
@@ -273,6 +289,8 @@ commit berikut di atas `main`:
 dengan `error: closed`):
 
 - Pemutar `VideoTekstur` apakah benar menampilkan video di BlueStacks.
+- Papan PIN, mode putar saja (mematikan server lalu menunggu 30 detik), dan
+  jalan pulih sentuh-tahan pojok kiri bawah.
 - Kotak prioritas di menu awal, tombol Salin dari server, pemisahan panel
   atas/layar penuh, dan layar penuh tanpa bingkai.
 - Semua belum pernah dijalankan di panel Maxtor asli.
