@@ -43,7 +43,6 @@ from app.repositories.user_repository import UserRepository
 from app.models.enums import (
     ASAL_MANDIRI,
     ASAL_PENDAFTARAN,
-    ASAL_PETUGAS,
     LABEL_PRIORITAS,
     AlasanPrioritas,
 )
@@ -1269,17 +1268,16 @@ class QueueService:
                 antrian, repo.jumlah_pemanggilan(antrian.id), self.batas_panggilan()
             )
 
-    def ubah_prioritas(self, queue_id: int, alasan: str | None) -> QueueInfo:
+    def cabut_prioritas(self, queue_id: int) -> QueueInfo:
         """
-        Tandai atau cabut prioritas pada nomor yang belum selesai.
+        Cabut prioritas dari nomor yang belum selesai.
 
-        Dipakai petugas pelayanan: menandai pengunjung lansia yang menunggu
-        dengan nomor biasa, memperinci prioritas mandiri dari anjungan, atau
-        mencabutnya bila tidak sesuai. `alasan` None mencabut.
+        Penandaan hanya terjadi di anjungan (pilihan pengunjung) atau saat
+        petugas pendaftaran menerbitkan nomor. Petugas pelayanan hanya boleh
+        MENCABUT: pengunjung yang mencentang tetapi ternyata tidak berhak
+        kembali ke antrian biasa, dengan urutan datangnya tetap.
         """
         sesi = self.auth.require_permission(Permission.QUEUE_CALL)
-        if alasan is not None and alasan not in {a.value for a in AlasanPrioritas}:
-            raise ValidationError("Alasan prioritas tidak dikenal.")
 
         with session_scope() as session:
             repo = QueueRepository(session)
@@ -1291,22 +1289,23 @@ class QueueService:
                     f"{antrian.queue_number} sudah selesai; prioritasnya tidak "
                     "dapat diubah."
                 )
+            if antrian.prioritas is None:
+                return _as_info(antrian, repo.jumlah_pemanggilan(antrian.id))
             lama = antrian.prioritas
-            antrian.prioritas = alasan
-            antrian.prioritas_asal = ASAL_PETUGAS if alasan else None
+            asal = antrian.prioritas_asal
+            antrian.prioritas = None
+            antrian.prioritas_asal = None
             audit_service.record(
                 session,
-                AuditAction.SET_PRIORITY,
+                AuditAction.CLEAR_PRIORITY,
                 user_id=sesi.user_id,
                 entity_type="queue",
                 entity_id=antrian.id,
                 nomor=antrian.queue_number,
-                dari=lama,
-                ke=alasan,
+                alasan=lama,
+                asal=asal,
             )
-            logger.info(
-                "Prioritas %s: %s -> %s", antrian.queue_number, lama, alasan
-            )
+            logger.info("Prioritas %s dicabut (%s)", antrian.queue_number, lama)
             return _as_info(antrian, repo.jumlah_pemanggilan(antrian.id))
 
     def recall(self, queue_id: int) -> QueueInfo:

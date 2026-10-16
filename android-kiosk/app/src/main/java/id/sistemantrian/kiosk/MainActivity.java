@@ -1661,6 +1661,8 @@ public final class MainActivity extends Activity {
 
     private void masukIklanPenuh() {
         if (rootLayout == null || iklanPenuh) return;
+        // Pengunjung berikutnya tidak boleh mewarisi centang prioritas.
+        prioritasDipilih = false;
         // Yang bangun dari layar iklan selalu mendapati menu awal.
         if (!path.isEmpty()) {
             path.clear();
@@ -2254,6 +2256,13 @@ public final class MainActivity extends Activity {
                         : new LinearLayout.LayoutParams(-1, 0, 1f);
                 content.addView(deret, ukuranDeret);
             }
+            // Kotak prioritas: terlihat sejak menu awal, supaya petugas yang
+            // berjaga dapat mengarahkan pengunjung lansia untuk mencentangnya.
+            if (prioritasAktifServer) {
+                LinearLayout.LayoutParams kotak = new LinearLayout.LayoutParams(-1, dp(58));
+                kotak.setMargins(dp(4), dp(8), dp(4), 0);
+                content.addView(buatKotakPrioritas(), kotak);
+            }
         }
         contentSlot.addView(content, new FrameLayout.LayoutParams(-1, -1));
         // Kartu masuk satu per satu: memudar dan naik sedikit.
@@ -2280,7 +2289,8 @@ public final class MainActivity extends Activity {
     private int[] susunanKartu(int jumlah, List<Category> visible) {
         float satuan = getResources().getDisplayMetrics().density * uiScale;
         int lebarPanel = contentSlot.getWidth();
-        int tinggiPanel = contentSlot.getHeight() - dp(4);
+        int tinggiPanel = contentSlot.getHeight() - dp(4)
+                - (prioritasAktifServer ? dp(66) : 0);
         int kolomLayar = Math.max(1, Math.min(3,
                 Math.round(getResources().getDisplayMetrics().widthPixels
                         / getResources().getDisplayMetrics().density / 118f)));
@@ -2779,8 +2789,6 @@ public final class MainActivity extends Activity {
                         showCategories();
                     } else {
                         pendingCategory = item;
-                        // Kotak prioritas selalu kosong untuk pengunjung baru.
-                        prioritasDipilih = false;
                         showConfirmation();
                     }
                 }, tinggiKartu);
@@ -2997,38 +3005,16 @@ public final class MainActivity extends Activity {
         identity.addView(namaLayanan, new LinearLayout.LayoutParams(0, -2, 1));
         page.addView(identity, new LinearLayout.LayoutParams(-1, -2));
 
-        // Kotak prioritas besar, agar mudah disentuh pengunjung lansia.
-        // Hanya tampil bila server mengizinkannya.
-        if (prioritasAktifServer) {
-            Button prioritas = new Button(this);
-            prioritas.setAllCaps(false);
-            prioritas.setTypeface(huruf(800));
-            prioritas.setStateListAnimator(null);
-            prioritas.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-            prioritas.setMinHeight(0);
-            prioritas.setMinimumHeight(0);
-            prioritas.setPadding(dp(16), dp(4), dp(16), dp(4));
-            pasangSatuBaris(prioritas, 10, 18);
-            Runnable gambar = () -> {
-                prioritas.setText((prioritasDipilih ? "☑  " : "☐  ")
-                        + "Saya lansia / disabilitas / ibu hamil");
-                prioritas.setTextColor(prioritasDipilih ? TEKS_TOMBOL : INK);
-                prioritas.setBackground(prioritasDipilih
-                        ? rounded(UTAMA, dp(18))
-                        : roundedOutline(KARTU, GARIS, dp(18), dp(2)));
-            };
-            gambar.run();
-            prioritas.setOnClickListener(v -> {
-                if (requestInFlight) return;
-                v.performHapticFeedback(
-                        android.view.HapticFeedbackConstants.VIRTUAL_KEY);
-                prioritasDipilih = !prioritasDipilih;
-                gambar.run();
-            });
-            LinearLayout.LayoutParams prioritasParams =
-                    new LinearLayout.LayoutParams(-1, dp(58));
-            prioritasParams.topMargin = dp(12);
-            page.addView(prioritas, prioritasParams);
+        // Penanda saja: kotaknya dicentang di menu awal.
+        if (prioritasAktifServer && prioritasDipilih) {
+            TextView tandaPrioritas = text(
+                    "★ Prioritas: lansia / disabilitas / ibu hamil", 16, TEKS_TOMBOL, true);
+            tandaPrioritas.setGravity(Gravity.CENTER);
+            tandaPrioritas.setPadding(dp(14), dp(8), dp(14), dp(8));
+            tandaPrioritas.setBackground(rounded(UTAMA, dp(18)));
+            LinearLayout.LayoutParams tandaParams = new LinearLayout.LayoutParams(-1, -2);
+            tandaParams.topMargin = dp(10);
+            page.addView(tandaPrioritas, tandaParams);
         }
 
         LinearLayout actions = new LinearLayout(this);
@@ -3122,6 +3108,7 @@ public final class MainActivity extends Activity {
             showingConfirmation = false;
             pendingCategory = null;
             pendingRequestId = null;
+            prioritasDipilih = false;
             // Pengunjung yang diam selama ini kemungkinan sudah pergi; orang
             // berikutnya harus mendapati menu awal, bukan sub-menu pilihan
             // orang lain. Tombol Kembali tetap mundur satu tingkat.
@@ -3181,6 +3168,39 @@ public final class MainActivity extends Activity {
     }
 
     /**
+     * Kotak "Saya lansia / disabilitas / ibu hamil", besar agar mudah
+     * disentuh. Keadaannya (`prioritasDipilih`) dibawa ke tiket yang diambil
+     * sesudahnya dan dikosongkan setiap tiket terbit atau pengunjung pergi.
+     */
+    private Button buatKotakPrioritas() {
+        Button prioritas = new Button(this);
+        prioritas.setAllCaps(false);
+        prioritas.setTypeface(huruf(800));
+        prioritas.setStateListAnimator(null);
+        prioritas.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        prioritas.setMinHeight(0);
+        prioritas.setMinimumHeight(0);
+        prioritas.setPadding(dp(16), dp(4), dp(16), dp(4));
+        pasangSatuBaris(prioritas, 10, 18);
+        Runnable gambar = () -> {
+            prioritas.setText((prioritasDipilih ? "☑  " : "☐  ")
+                    + "Saya lansia / disabilitas / ibu hamil");
+            prioritas.setTextColor(prioritasDipilih ? TEKS_TOMBOL : INK);
+            prioritas.setBackground(prioritasDipilih
+                    ? rounded(UTAMA, dp(18))
+                    : roundedOutline(KARTU, GARIS, dp(18), dp(2)));
+        };
+        gambar.run();
+        prioritas.setOnClickListener(v -> {
+            if (requestInFlight) return;
+            v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+            prioritasDipilih = !prioritasDipilih;
+            gambar.run();
+        });
+        return prioritas;
+    }
+
+    /**
      * Isi permintaan tiket. `priority` hanya dikirim bila dicentang, jadi
      * server lama maupun yang menonaktifkan pilihan ini tidak melihat bidang
      * baru pada permintaan biasa.
@@ -3222,6 +3242,7 @@ public final class MainActivity extends Activity {
                     Category issued = pendingCategory;
                     pendingCategory = null;
                     pendingRequestId = null;
+                    prioritasDipilih = false;
                     readyAtMillis = System.currentTimeMillis() + cooldownSeconds * 1000L;
                     nomorSaya = number;
                     batasSorotMillis = System.currentTimeMillis() + LAMA_HASIL_MS + 10_000L;
@@ -3268,6 +3289,7 @@ public final class MainActivity extends Activity {
                     showingConfirmation = false;
                     pendingCategory = null;
                     pendingRequestId = null;
+                    prioritasDipilih = false;
                     showIdleResult();
                     keluarDariKonfirmasi(null);
                     tampilkanPesanSementara(detail, "salah");
@@ -3283,6 +3305,7 @@ public final class MainActivity extends Activity {
         showingConfirmation = false;
         pendingCategory = null;
         pendingRequestId = null;
+        prioritasDipilih = false;
         // Pengunjung kemungkinan sudah pergi; orang berikutnya mendapati
         // menu awal, bukan sub-menu pilihan orang lain.
         path.clear();

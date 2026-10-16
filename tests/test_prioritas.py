@@ -267,23 +267,13 @@ def test_prioritas_mandiri_ditolak_di_luar_anjungan(auth, antrian_siap):
         )
 
 
-def test_petugas_pelayanan_menandai_dan_mencabut(auth, antrian_siap):
+def test_petugas_pelayanan_tidak_dapat_menandai_hanya_mencabut():
+    assert not hasattr(QueueService, "ubah_prioritas")
+    assert hasattr(QueueService, "cabut_prioritas")
+
+
+def test_petugas_mencabut_prioritas_mandiri(auth, antrian_siap):
     biasa, = _terbit(auth, antrian_siap, [("A", None)])
-    auth.logout()
-    auth.login("cro", TEST_PASSWORD)
-    layanan = QueueService(auth)
-
-    ditandai = layanan.ubah_prioritas(biasa.id, "LANSIA")
-    assert ditandai.prioritas == "LANSIA"
-    assert ditandai.prioritas_asal == "PETUGAS"
-    assert [q.prioritas for q in layanan.list_waiting()] == ["LANSIA"]
-
-    dicabut = layanan.ubah_prioritas(biasa.id, None)
-    assert dicabut.prioritas is None
-    assert dicabut.prioritas_asal is None
-
-
-def test_petugas_dapat_mencabut_prioritas_mandiri(auth, antrian_siap):
     layanan = _anjungan(auth)
     mandiri = layanan.create_queue(
         antrian_siap["kategori"]["A"], perangkat="tab-3", prioritas_mandiri=True
@@ -291,16 +281,34 @@ def test_petugas_dapat_mencabut_prioritas_mandiri(auth, antrian_siap):
     auth.logout()
     auth.login("cro", TEST_PASSWORD)
     layanan = QueueService(auth)
+    assert [q.queue_number for q in layanan.list_waiting()] == [
+        mandiri.queue_number,
+        biasa.queue_number,
+    ]
 
-    perinci = layanan.ubah_prioritas(mandiri.id, "IBU_HAMIL")
-    assert perinci.prioritas == "IBU_HAMIL"
-    assert perinci.prioritas_mandiri is False
+    dicabut = layanan.cabut_prioritas(mandiri.id)
 
-    assert layanan.ubah_prioritas(mandiri.id, None).prioritas is None
+    assert dicabut.prioritas is None
+    assert dicabut.prioritas_asal is None
+    # Kembali ke urutan datang: yang lebih dulu datang tetap lebih dulu.
+    assert [q.queue_number for q in layanan.list_waiting()] == [
+        biasa.queue_number,
+        mandiri.queue_number,
+    ]
 
 
-def test_prioritas_nomor_selesai_tidak_dapat_diubah(auth, antrian_siap):
-    _terbit(auth, antrian_siap, [("A", None)])
+def test_cabut_pada_nomor_biasa_tidak_mengubah_apa_pun(auth, antrian_siap):
+    biasa, = _terbit(auth, antrian_siap, [("A", None)])
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+    hasil = QueueService(auth).cabut_prioritas(biasa.id)
+
+    assert hasil.prioritas is None
+
+
+def test_prioritas_nomor_selesai_tidak_dapat_dicabut(auth, antrian_siap):
+    _terbit(auth, antrian_siap, [("A", "LANSIA")])
     _panggil_semua(auth, antrian_siap, 1)
     auth.logout()
     auth.login("cro", TEST_PASSWORD)
@@ -308,34 +316,28 @@ def test_prioritas_nomor_selesai_tidak_dapat_diubah(auth, antrian_siap):
     selesai = layanan.list_today()[0]
 
     with pytest.raises(BusinessRuleError, match="sudah selesai"):
-        layanan.ubah_prioritas(selesai.id, "LANSIA")
+        layanan.cabut_prioritas(selesai.id)
 
 
-def test_perubahan_prioritas_dicatat_di_audit(auth, antrian_siap):
+def test_pencabutan_prioritas_dicatat_di_audit(auth, antrian_siap):
     import sqlalchemy as sa
 
     from app.core.database import session_scope
     from app.models import AuditAction
     from app.models.audit_log import AuditLog
 
-    biasa, = _terbit(auth, antrian_siap, [("A", None)])
+    layanan = _anjungan(auth)
+    mandiri = layanan.create_queue(
+        antrian_siap["kategori"]["A"], perangkat="tab-4", prioritas_mandiri=True
+    )
     auth.logout()
     auth.login("cro", TEST_PASSWORD)
-    QueueService(auth).ubah_prioritas(biasa.id, "DISABILITAS")
+    QueueService(auth).cabut_prioritas(mandiri.id)
 
     with session_scope() as s:
         jumlah = s.scalar(
             sa.select(sa.func.count())
             .select_from(AuditLog)
-            .where(AuditLog.action == AuditAction.SET_PRIORITY.value)
+            .where(AuditLog.action == AuditAction.CLEAR_PRIORITY.value)
         )
     assert jumlah == 1
-
-
-def test_alasan_tidak_dikenal_ditolak_saat_diubah(auth, antrian_siap):
-    biasa, = _terbit(auth, antrian_siap, [("A", None)])
-    auth.logout()
-    auth.login("cro", TEST_PASSWORD)
-
-    with pytest.raises(ValidationError):
-        QueueService(auth).ubah_prioritas(biasa.id, "VIP")
