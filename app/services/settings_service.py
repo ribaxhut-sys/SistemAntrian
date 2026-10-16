@@ -538,7 +538,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         "Setelah iklan layar penuh, tiga panel anjungan masuk dari arah acak. "
         "Dilewati otomatis bila animasi dimatikan di pengaturan Android tablet.",
         BOOLEAN,
-        kelompok="Iklan Anjungan",
+        kelompok="Perilaku Iklan",
     ),
     Pengaturan(
         "kiosk.animasi_iklan_muncul",
@@ -549,7 +549,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         "dibatalkan. Dilewati bila animasi dimatikan di Android tablet atau "
         "waktu menganggur kurang dari 5 detik.",
         BOOLEAN,
-        kelompok="Iklan Anjungan",
+        kelompok="Perilaku Iklan",
     ),
     Pengaturan(
         "kiosk.panggilan_hentikan_iklan",
@@ -559,7 +559,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         "ditampilkan besar selama beberapa detik. Waktu menganggur dihitung "
         "ulang dari nol sesudahnya.",
         BOOLEAN,
-        kelompok="Iklan Anjungan",
+        kelompok="Perilaku Iklan",
     ),
     Pengaturan(
         "kiosk.animasi_nomor_menunggu",
@@ -569,7 +569,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         "panel muncul, saat halaman berganti, dan saat kembali dari iklan. "
         "Dilewati otomatis bila animasi dimatikan di pengaturan Android tablet.",
         BOOLEAN,
-        kelompok="Iklan Anjungan",
+        kelompok="Perilaku Iklan",
     ),
     Pengaturan(
         "kiosk.animasi_mulai_detik",
@@ -583,7 +583,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         maksimum=5,
         satuan="detik",
         nilai_khusus="Setelah iklan selesai",
-        kelompok="Iklan Anjungan",
+        kelompok="Perilaku Iklan",
     ),
     Pengaturan(
         "kiosk.iklan_putaran",
@@ -597,7 +597,7 @@ SKEMA: tuple[Pengaturan, ...] = (
         maksimum=10,
         satuan="putaran",
         nilai_khusus="Berputar terus",
-        kelompok="Iklan Anjungan",
+        kelompok="Perilaku Iklan",
     ),
     Pengaturan(
         "kiosk.iklan_layar_penuh_detik",

@@ -423,13 +423,7 @@ tiga):
   bila dijalankan sendiri** (ketergantungan urutan lama yang sudah tercatat;
   belum dipastikan apakah tes baru memperparahnya). `ruff check app tests
   alembic` lulus. Suite penuh tidak dijalankan.
-- **Suite penuh sebelum push** (16 Oktober 2026, 30 menit): 1808 lulus, 41
-  dilewati, 3 gagal yang bukan dari perubahan ini: `test_ui.py::test_form_admin_penuh_tanpa_scrollbar_form`
-  (loket dan server; Iklan Anjungan 287 px, temuan lama) dan
-  `test_seed.py::test_seluruh_bawaan_ikut_di_seed` (pengaturan `kiosk.iklan_putaran`,
-  `kiosk.animasi_*`, `kiosk.panggilan_hentikan_iklan` ada di bawaan tetapi
-  belum ikut seed; **belum diperbaiki**). Dua error `caplog` hanya karena
-  bendera `-p no:logging` saya; tanpa bendera itu 65 tes lulus.
+- **Suite penuh sebelum push** (16 Oktober 2026, 30 menit): 1808 lulus, 3 gagal yang kemudian diperbaiki: enam pengaturan `kiosk.*` (iklan_putaran, animasi_*, panggilan_hentikan_iklan) belum ada di seed (`app/core/seed.py`), dan grup "Iklan Anjungan" bergulir 287 px di 1366×768 sehingga dipecah: grup baru "Perilaku Iklan" memuat putaran iklan, empat animasi, dan panggilan menghentikan iklan. Dua error `caplog` hanya karena bendera `-p no:logging` saya.
 - **Belum teruji:** DPI Windows sungguhan (Qt offscreen tidak menskalakan
   piksel; 125%/150% hanya didekati lewat ukuran jendela logis dan font-size
   stylesheet), font Segoe UI pada mesin lain, `SurveyDialog`, dialog

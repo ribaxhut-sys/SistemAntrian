@@ -389,7 +389,7 @@ penuh langsung berhenti (animasi panel masuk 900 ms), nomor dan loket tampil
 besar sebagai banner ±6 detik, dan hitungan menganggur dimulai dari nol.
 
 - Server: `/v1/kiosk/display` mengirim `call_interrupts_ad` (setelan
-  **Panggilan menghentikan iklan**, grup *Iklan Anjungan*, bawaan aktif) dan
+  **Panggilan menghentikan iklan**, grup *Perilaku Iklan*, bawaan aktif) dan
   `call_count` per loket (jumlah panggilan + panggilan ulang).
 - Tablet mengenali panggilan baru dari perubahan `nomor#call_count` loket
   berstatus Dipanggil (`deteksiPanggilanBaru`). Muatan pertama tidak dihitung.

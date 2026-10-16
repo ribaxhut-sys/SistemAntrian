@@ -115,6 +115,10 @@ KETERANGAN_KELOMPOK: dict[str, str] = {
     "Anjungan": "Judul, tema, dan letak baris loket di tablet ambil nomor.",
     "Panel Anjungan": "Isi panel besar di atas tombol layanan: teks atau media.",
     "Iklan Anjungan": "Urutan, jadwal, dan cara iklan diputar di tablet.",
+    "Perilaku Iklan": (
+        "Berapa putaran iklan layar penuh, gerak panel anjungan, dan apa yang "
+        "terjadi pada iklan saat petugas memanggil."
+    ),
     "Survey": "Penilaian kepuasan yang diminta setelah pelayanan selesai.",
     "Pengaduan": "Berapa lama identitas pelapor pengaduan disimpan.",
     "Ringkasan Harian": "Layar rekap yang dibaca penyelia sepanjang hari.",
