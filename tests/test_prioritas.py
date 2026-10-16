@@ -217,3 +217,125 @@ def test_layar_dan_anjungan_memakai_urutan_panggil(auth, antrian_siap):
 
     assert [q.queue_number for q in keadaan.berikutnya] == ["A-002", "A-001"]
     assert layanan.nomor_menunggu_untuk_layar() == ["A-002", "A-001"]
+
+
+# ---------------------------------------------------------------------
+# Prioritas mandiri (anjungan) dan penandaan oleh petugas pelayanan
+# ---------------------------------------------------------------------
+
+
+def _anjungan(auth):
+    auth.logout()
+    auth.mulai_sesi_kios()
+    return QueueService(auth)
+
+
+def test_anjungan_menandai_prioritas_mandiri(auth, antrian_siap):
+    layanan = _anjungan(auth)
+
+    info = layanan.create_queue(
+        antrian_siap["kategori"]["A"], perangkat="tab-1", prioritas_mandiri=True
+    )
+
+    assert info.prioritas == "PRIORITAS"
+    assert info.prioritas_asal == "MANDIRI"
+    assert info.prioritas_mandiri is True
+
+
+def test_saklar_prioritas_dimatikan_nomor_tetap_terbit_biasa(auth, antrian_siap):
+    from app.services.settings_service import SettingsService
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    SettingsService(auth).set("kiosk.prioritas_aktif", "false")
+    layanan = _anjungan(auth)
+
+    info = layanan.create_queue(
+        antrian_siap["kategori"]["A"], perangkat="tab-2", prioritas_mandiri=True
+    )
+
+    assert info.prioritas is None
+
+
+def test_prioritas_mandiri_ditolak_di_luar_anjungan(auth, antrian_siap):
+    auth.logout()
+    auth.login("registration", TEST_PASSWORD)
+
+    with pytest.raises(BusinessRuleError, match="anjungan"):
+        QueueService(auth).create_queue(
+            antrian_siap["kategori"]["A"], prioritas_mandiri=True
+        )
+
+
+def test_petugas_pelayanan_menandai_dan_mencabut(auth, antrian_siap):
+    biasa, = _terbit(auth, antrian_siap, [("A", None)])
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    layanan = QueueService(auth)
+
+    ditandai = layanan.ubah_prioritas(biasa.id, "LANSIA")
+    assert ditandai.prioritas == "LANSIA"
+    assert ditandai.prioritas_asal == "PETUGAS"
+    assert [q.prioritas for q in layanan.list_waiting()] == ["LANSIA"]
+
+    dicabut = layanan.ubah_prioritas(biasa.id, None)
+    assert dicabut.prioritas is None
+    assert dicabut.prioritas_asal is None
+
+
+def test_petugas_dapat_mencabut_prioritas_mandiri(auth, antrian_siap):
+    layanan = _anjungan(auth)
+    mandiri = layanan.create_queue(
+        antrian_siap["kategori"]["A"], perangkat="tab-3", prioritas_mandiri=True
+    )
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    layanan = QueueService(auth)
+
+    perinci = layanan.ubah_prioritas(mandiri.id, "IBU_HAMIL")
+    assert perinci.prioritas == "IBU_HAMIL"
+    assert perinci.prioritas_mandiri is False
+
+    assert layanan.ubah_prioritas(mandiri.id, None).prioritas is None
+
+
+def test_prioritas_nomor_selesai_tidak_dapat_diubah(auth, antrian_siap):
+    _terbit(auth, antrian_siap, [("A", None)])
+    _panggil_semua(auth, antrian_siap, 1)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    layanan = QueueService(auth)
+    selesai = layanan.list_today()[0]
+
+    with pytest.raises(BusinessRuleError, match="sudah selesai"):
+        layanan.ubah_prioritas(selesai.id, "LANSIA")
+
+
+def test_perubahan_prioritas_dicatat_di_audit(auth, antrian_siap):
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import AuditAction
+    from app.models.audit_log import AuditLog
+
+    biasa, = _terbit(auth, antrian_siap, [("A", None)])
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    QueueService(auth).ubah_prioritas(biasa.id, "DISABILITAS")
+
+    with session_scope() as s:
+        jumlah = s.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLog)
+            .where(AuditLog.action == AuditAction.SET_PRIORITY.value)
+        )
+    assert jumlah == 1
+
+
+def test_alasan_tidak_dikenal_ditolak_saat_diubah(auth, antrian_siap):
+    biasa, = _terbit(auth, antrian_siap, [("A", None)])
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+
+    with pytest.raises(ValidationError):
+        QueueService(auth).ubah_prioritas(biasa.id, "VIP")

@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMenu,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -21,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from app.core import clock
 from app.models import QueueStatus
+from app.models.enums import LABEL_PRIORITAS, AlasanPrioritas
 from app.services.auth_service import AuthService
 from app.services.dashboard_service import DashboardService
 from app.services.master_data_service import MasterDataService
@@ -393,6 +396,23 @@ class ServicePage(QWidget):
         self.label_status = QLabel("")
         self.label_status.setAlignment(Qt.AlignmentFlag.AlignLeft)
         baris_atas.addWidget(self.label_status)
+
+        # Nomor prioritas ditandai di sini, di baris yang sudah ada, supaya
+        # kartu ini tidak bertambah tinggi. Menu "Ubah" memperinci alasannya
+        # atau mencabut prioritas yang dipilih pengunjung di anjungan.
+        self.pil_prioritas = QLabel("")
+        self.pil_prioritas.setStyleSheet(
+            f"background: {WARNING_SOFT}; color: {WARNING}; font-weight: 700;"
+            " border-radius: 10px; padding: 3px 10px;"
+        )
+        self.pil_prioritas.setVisible(False)
+        baris_atas.addWidget(self.pil_prioritas)
+        self.tombol_ubah_prioritas = QPushButton("Ubah ▾")
+        self.tombol_ubah_prioritas.setFlat(True)
+        self.tombol_ubah_prioritas.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tombol_ubah_prioritas.setMenu(self._menu_prioritas(cabut=True))
+        self.tombol_ubah_prioritas.setVisible(False)
+        baris_atas.addWidget(self.tombol_ubah_prioritas)
         baris_atas.addStretch()
 
         self.label_durasi = QLabel("")
@@ -653,6 +673,27 @@ class ServicePage(QWidget):
         ):
             kepala.setSectionResizeMode(kolom, mode)
         susunan.addWidget(self.tabel, stretch=1)
+
+        # Menandai pengunjung yang menunggu (mis. lansia yang terlanjur
+        # mengambil nomor biasa). Bekerja pada baris yang dipilih.
+        baris_prioritas = QHBoxLayout()
+        baris_prioritas.setSpacing(8)
+        self.tombol_tandai_prioritas = QPushButton("★ Tandai prioritas ▾")
+        self.tombol_tandai_prioritas.setMenu(self._menu_prioritas(cabut=False))
+        baris_prioritas.addWidget(self.tombol_tandai_prioritas)
+        self.tombol_cabut_prioritas = QPushButton("Cabut prioritas")
+        self.tombol_cabut_prioritas.clicked.connect(
+            lambda: self._ubah_prioritas_terpilih(None)
+        )
+        baris_prioritas.addWidget(self.tombol_cabut_prioritas)
+        baris_prioritas.addStretch()
+        self.baris_prioritas = QWidget()
+        self.baris_prioritas.setLayout(baris_prioritas)
+        baris_prioritas.setContentsMargins(0, 0, 0, 0)
+        susunan.addWidget(self.baris_prioritas)
+        self._tampil_menunggu: list[QueueInfo] = []
+        self.tabel.itemSelectionChanged.connect(self._perbarui_tombol_prioritas)
+        self._perbarui_tombol_prioritas()
 
         self.panel_kosong = QFrame()
         self.panel_kosong.setObjectName("panelKosongMenunggu")
@@ -1187,6 +1228,7 @@ class ServicePage(QWidget):
                 )
             )
 
+        self._tampilkan_prioritas_aktif()
         self._perbarui_panel_kanan()
         self._warnai_panel_antrian()
         self._perbarui_durasi()
@@ -1502,6 +1544,7 @@ class ServicePage(QWidget):
         self.panel_kosong.setVisible(not menunggu)
 
         self.tabel.setRowCount(len(tampil))
+        self._tampil_menunggu = list(tampil)
         # Judul tab dan warnanya selalu menghitung SELURUH antrian, bukan
         # hanya yang sedang disaring.
         lama_menit = [
@@ -1521,6 +1564,71 @@ class ServicePage(QWidget):
                 self.tabel.setItem(baris, kolom, sel)
 
         self._perbarui_judul_tab_menunggu(len(menunggu), lama_menit)
+
+    # -----------------------------------------------------------------
+    # Prioritas
+    # -----------------------------------------------------------------
+
+    def _menu_prioritas(self, *, cabut: bool) -> QMenu:
+        """Menu pilihan alasan prioritas; `cabut` menambah "Cabut prioritas"."""
+        menu = QMenu(self)
+        for alasan in (
+            AlasanPrioritas.LANSIA,
+            AlasanPrioritas.DISABILITAS,
+            AlasanPrioritas.IBU_HAMIL,
+        ):
+            aksi = menu.addAction(LABEL_PRIORITAS[alasan.value])
+            aksi.triggered.connect(
+                lambda _=False, a=alasan.value: self._ubah_prioritas_terpilih(
+                    a, nomor_aktif=cabut
+                )
+            )
+        if cabut:
+            menu.addSeparator()
+            aksi = menu.addAction("Cabut prioritas")
+            aksi.triggered.connect(
+                lambda _=False: self._ubah_prioritas_terpilih(None, nomor_aktif=True)
+            )
+        return menu
+
+    def _tampilkan_prioritas_aktif(self) -> None:
+        """Pita prioritas pada nomor yang sedang ditangani loket ini."""
+        antrian = self.antrian
+        ada = antrian is not None and antrian.prioritas is not None
+        self.pil_prioritas.setVisible(ada)
+        self.tombol_ubah_prioritas.setVisible(ada)
+        if not ada:
+            return
+        teks = f"★ PRIORITAS · {antrian.label_prioritas}"
+        if antrian.prioritas_mandiri:
+            teks += " · dipilih pengunjung, mohon periksa"
+        self.pil_prioritas.setText(teks)
+
+    def _perbarui_tombol_prioritas(self) -> None:
+        dipilih = self._nomor_menunggu_terpilih()
+        self.tombol_tandai_prioritas.setEnabled(dipilih is not None)
+        self.tombol_cabut_prioritas.setEnabled(
+            dipilih is not None and dipilih.prioritas is not None
+        )
+
+    def _nomor_menunggu_terpilih(self) -> QueueInfo | None:
+        baris = self.tabel.currentRow()
+        if 0 <= baris < len(self._tampil_menunggu):
+            return self._tampil_menunggu[baris]
+        return None
+
+    def _ubah_prioritas_terpilih(
+        self, alasan: str | None, *, nomor_aktif: bool = False
+    ) -> None:
+        """Tandai atau cabut prioritas pada nomor aktif atau baris terpilih."""
+        target = self.antrian if nomor_aktif else self._nomor_menunggu_terpilih()
+        if target is None:
+            return
+        antrian_id = target.id
+        self._jalankan(
+            lambda: self.queue.ubah_prioritas(antrian_id, alasan),
+            "Gagal mengubah prioritas",
+        )
 
     def _saring_menunggu(self, _kategori_id=None) -> None:
         """Pilihan kartu berubah: gambar ulang daftar dari data terakhir."""

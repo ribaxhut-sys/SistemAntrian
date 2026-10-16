@@ -523,6 +523,10 @@ public final class MainActivity extends Activity {
     private float uiScale = 1f;
     private long readyAtMillis;
     private boolean registrationOpen = true;
+    /** Server menampilkan kotak prioritas (setelan priority_enabled). */
+    private boolean prioritasAktifServer = false;
+    /** Pengunjung mencentang "Saya lansia / disabilitas / ibu hamil". */
+    private boolean prioritasDipilih = false;
     private boolean requestInFlight;
     private boolean showingConfirmation;
     private boolean showingResult;
@@ -1198,6 +1202,7 @@ public final class MainActivity extends Activity {
             terapkanMediaSambutan();
             if (!sumberTablet()) sinkronkanSalinan();
             registrationOpen = display.optBoolean("registration_open", true);
+            prioritasAktifServer = display.optBoolean("priority_enabled", false);
             String versi = display.optString("categories_version", "");
             if (!versi.isEmpty() && !versi.equals(versiLayanan)) {
                 // Daftar yang dimuat saat menyala sudah sesuai versi pertama.
@@ -2718,6 +2723,8 @@ public final class MainActivity extends Activity {
                         showCategories();
                     } else {
                         pendingCategory = item;
+                        // Kotak prioritas selalu kosong untuk pengunjung baru.
+                        prioritasDipilih = false;
                         showConfirmation();
                     }
                 }, tinggiKartu);
@@ -2934,6 +2941,40 @@ public final class MainActivity extends Activity {
         identity.addView(namaLayanan, new LinearLayout.LayoutParams(0, -2, 1));
         page.addView(identity, new LinearLayout.LayoutParams(-1, -2));
 
+        // Kotak prioritas besar, agar mudah disentuh pengunjung lansia.
+        // Hanya tampil bila server mengizinkannya.
+        if (prioritasAktifServer) {
+            Button prioritas = new Button(this);
+            prioritas.setAllCaps(false);
+            prioritas.setTypeface(huruf(800));
+            prioritas.setStateListAnimator(null);
+            prioritas.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+            prioritas.setMinHeight(0);
+            prioritas.setMinimumHeight(0);
+            prioritas.setPadding(dp(16), dp(4), dp(16), dp(4));
+            pasangSatuBaris(prioritas, 10, 18);
+            Runnable gambar = () -> {
+                prioritas.setText((prioritasDipilih ? "☑  " : "☐  ")
+                        + "Saya lansia / disabilitas / ibu hamil");
+                prioritas.setTextColor(prioritasDipilih ? TEKS_TOMBOL : INK);
+                prioritas.setBackground(prioritasDipilih
+                        ? rounded(UTAMA, dp(18))
+                        : roundedOutline(KARTU, GARIS, dp(18), dp(2)));
+            };
+            gambar.run();
+            prioritas.setOnClickListener(v -> {
+                if (requestInFlight) return;
+                v.performHapticFeedback(
+                        android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+                prioritasDipilih = !prioritasDipilih;
+                gambar.run();
+            });
+            LinearLayout.LayoutParams prioritasParams =
+                    new LinearLayout.LayoutParams(-1, dp(58));
+            prioritasParams.topMargin = dp(12);
+            page.addView(prioritas, prioritasParams);
+        }
+
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER);
         actions.setPadding(0, dp(12), 0, 0);
@@ -3083,6 +3124,19 @@ public final class MainActivity extends Activity {
         kirimPermintaanTiket();
     }
 
+    /**
+     * Isi permintaan tiket. `priority` hanya dikirim bila dicentang, jadi
+     * server lama maupun yang menonaktifkan pilihan ini tidak melihat bidang
+     * baru pada permintaan biasa.
+     */
+    private org.json.JSONObject bodiTiket() {
+        JSONObjectBuilder isi = new JSONObjectBuilder()
+                .put("category_id", pendingCategory.id)
+                .put("request_id", pendingRequestId);
+        if (prioritasAktifServer && prioritasDipilih) isi.put("priority", true);
+        return isi.build();
+    }
+
     private void kirimPermintaanTiket() {
         if (pendingCategory == null || requestInFlight) return;
         handler.removeCallbacks(confirmTimeout);
@@ -3092,10 +3146,7 @@ public final class MainActivity extends Activity {
         if (pendingRequestId == null) pendingRequestId = UUID.randomUUID().toString();
         setHint("Mengambil nomor…", "tunggu");
         request(penerbit, "POST", "/v1/kiosk/tickets",
-                new JSONObjectBuilder()
-                        .put("category_id", pendingCategory.id)
-                        .put("request_id", pendingRequestId)
-                        .build(),
+                bodiTiket(),
                 json -> {
                     // Seluruh jawaban dibaca dulu. Bila ada yang tidak
                     // terbaca, pilihan dan request_id masih utuh sehingga

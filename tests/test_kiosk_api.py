@@ -45,8 +45,15 @@ class _Queue:
         self.terbit: dict[tuple[str, str | None], QueueInfo] = {}
 
     def create_queue(
-        self, category_id: int, *, perangkat="", request_id=None, kunci_jeda=None
+        self,
+        category_id: int,
+        *,
+        perangkat="",
+        request_id=None,
+        kunci_jeda=None,
+        prioritas_mandiri=False,
     ):
+        self.prioritas_mandiri_terakhir = prioritas_mandiri
         if category_id != 10:
             raise BusinessRuleError("Layanan tidak tersedia.")
         if (perangkat, request_id) in self.terbit:
@@ -274,6 +281,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "welcome_media_files": [],
         "fullscreen_ad_idle_seconds": 60,
         "registration_open": True,
+        "priority_enabled": True,
         "cooldown_remaining_seconds": 0,
         "waiting_queue_numbers": ["A-002", "A-003"],
         "counters": [
@@ -685,3 +693,27 @@ def test_versi_layanan_berubah_bila_daftar_layanan_berubah(tmp_path, monkeypatch
         lambda *, only_active: [replace(k, name="PKB") for k in asli(only_active=only_active)],
     )
     assert versi() != awal
+
+
+def test_centang_prioritas_diteruskan_ke_service():
+    from app.kiosk_api import create_app
+
+    services = _Services()
+    client = TestClient(create_app(TOKEN, services))
+    headers = {"Authorization": f"Bearer {TOKEN}", **VERSI_APK}
+
+    biasa = client.post(
+        "/v1/kiosk/tickets",
+        headers=headers,
+        json={"category_id": 10, "request_id": str(uuid4())},
+    )
+    assert biasa.status_code == 200
+    assert services.queue.prioritas_mandiri_terakhir is False
+
+    prioritas = client.post(
+        "/v1/kiosk/tickets",
+        headers=headers,
+        json={"category_id": 10, "request_id": str(uuid4()), "priority": True},
+    )
+    assert prioritas.status_code == 200
+    assert services.queue.prioritas_mandiri_terakhir is True

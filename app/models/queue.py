@@ -78,6 +78,8 @@ class Queue(TimestampMixin, Base):
     # Alasan prioritas (lihat AlasanPrioritas); kosong berarti nomor biasa.
     # Hanya petugas pendaftaran yang dapat mengisinya, saat nomor terbit.
     prioritas: Mapped[str | None] = mapped_column(sa.String(16), nullable=True)
+    # PENDAFTARAN, MANDIRI (pengunjung di anjungan), atau PETUGAS.
+    prioritas_asal: Mapped[str | None] = mapped_column(sa.String(12), nullable=True)
 
     status: Mapped[QueueStatus] = mapped_column(
         sa.Enum(QueueStatus, native_enum=False, length=12),

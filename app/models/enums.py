@@ -27,12 +27,26 @@ class AlasanPrioritas(str, Enum):
     LANSIA = "LANSIA"
     DISABILITAS = "DISABILITAS"
     IBU_HAMIL = "IBU_HAMIL"
+    #: Ditandai pengunjung di anjungan tanpa menyebut alasannya; petugas
+    #: pelayanan boleh memperincinya atau mencabutnya.
+    PRIORITAS = "PRIORITAS"
 
 
 LABEL_PRIORITAS: dict[str, str] = {
     AlasanPrioritas.LANSIA.value: "Lansia",
     AlasanPrioritas.DISABILITAS.value: "Disabilitas",
     AlasanPrioritas.IBU_HAMIL.value: "Ibu hamil",
+    AlasanPrioritas.PRIORITAS.value: "Prioritas",
+}
+
+#: Siapa yang menandai sebuah nomor sebagai prioritas.
+ASAL_PENDAFTARAN = "PENDAFTARAN"
+ASAL_MANDIRI = "MANDIRI"
+ASAL_PETUGAS = "PETUGAS"
+LABEL_ASAL_PRIORITAS: dict[str, str] = {
+    ASAL_PENDAFTARAN: "ditandai petugas pendaftaran",
+    ASAL_MANDIRI: "dipilih pengunjung di anjungan",
+    ASAL_PETUGAS: "ditandai petugas pelayanan",
 }
 
 
@@ -121,3 +135,4 @@ class AuditAction(str, Enum):
     RESET_ADMIN_KEY = "RESET_ADMIN_KEY"
     DELETE_USER = "DELETE_USER"
     ARCHIVE_USER = "ARCHIVE_USER"
+    SET_PRIORITY = "SET_PRIORITY"

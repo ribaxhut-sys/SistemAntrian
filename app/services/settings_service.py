@@ -81,6 +81,7 @@ BAWAAN: dict[str, str] = {
     "display.loket_tampil": "petugas",
     "queue.max_call_attempts": "3",
     "queue.rasio_prioritas": "3",
+    "kiosk.prioritas_aktif": "true",
     "queue.registration_open": "true",
     "queue.registration_closed_date": "",
     "survey.enabled": "true",
@@ -415,6 +416,15 @@ SKEMA: tuple[Pengaturan, ...] = (
         maksimum=20,
         satuan="nomor",
         nilai_khusus="Prioritas selalu lebih dulu",
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.prioritas_aktif",
+        "Pilihan prioritas di anjungan",
+        "Menampilkan kotak \"Saya lansia / disabilitas / ibu hamil\" di anjungan. "
+        "Nomor yang ditandai pengunjung diperiksa petugas di loket dan dapat "
+        "dicabut.",
+        BOOLEAN,
         kelompok="Antrian",
     ),
     Pengaturan(

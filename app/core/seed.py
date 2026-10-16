@@ -99,6 +99,7 @@ _SETTINGS: list[tuple[str, str, str]] = [
     ("display.loket_tampil", "petugas",
      "Loket di layar: petugas = hanya yang ada petugasnya, semua = semua loket aktif"),
     ("queue.max_call_attempts", "3", "Batas pemanggilan sebelum dianggap tidak hadir"),
+    ("kiosk.prioritas_aktif", "true", "Tampilkan pilihan prioritas di anjungan"),
     (
         "queue.rasio_prioritas",
         "3",

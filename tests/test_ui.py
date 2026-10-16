@@ -1703,6 +1703,44 @@ def test_kartu_berikutnya_menampilkan_nomor_dan_ringkasan(
     assert "A-002" in " ".join(kartu.baris_tampil)
 
 
+def test_petugas_menandai_dan_mencabut_prioritas_dari_daftar(
+    halaman_layanan, terbitkan, auth
+):
+    terbitkan("A", 2)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+    tabel = halaman_layanan.tabel
+    assert not halaman_layanan.tombol_cabut_prioritas.isEnabled()
+
+    tabel.setCurrentCell(1, 0)
+    assert halaman_layanan.tombol_tandai_prioritas.isEnabled()
+    halaman_layanan._ubah_prioritas_terpilih("LANSIA")
+
+    # Yang ditandai maju ke depan dan diberi bintang.
+    assert tabel.item(0, 0).text() == "★ A-002"
+    assert tabel.item(1, 0).text() == "A-001"
+
+    tabel.setCurrentCell(0, 0)
+    assert halaman_layanan.tombol_cabut_prioritas.isEnabled()
+    halaman_layanan._ubah_prioritas_terpilih(None)
+    assert tabel.item(0, 0).text() == "A-001"
+
+
+def test_pita_prioritas_tampil_pada_nomor_aktif(halaman_layanan, terbitkan, auth):
+    terbitkan("A", 1)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+    halaman_layanan.tabel.setCurrentCell(0, 0)
+    halaman_layanan._ubah_prioritas_terpilih("IBU_HAMIL")
+
+    halaman_layanan.panggil_berikutnya()
+
+    assert halaman_layanan.pil_prioritas.isVisibleTo(halaman_layanan)
+    assert "Ibu hamil" in halaman_layanan.pil_prioritas.text()
+
+
 def test_tabel_menyusut_setelah_dipanggil(halaman_layanan, terbitkan, auth):
     terbitkan("A", 3)
     auth.logout()

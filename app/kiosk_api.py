@@ -115,6 +115,9 @@ def _serve_discovery(
 class TicketRequest(BaseModel):
     category_id: int = Field(gt=0)
     request_id: UUID
+    #: Pengunjung mencentang "Saya lansia / disabilitas / ibu hamil".
+    #: Opsional: APK lama tidak mengirimnya dan tetap mendapat nomor biasa.
+    priority: bool = False
 
 
 class PairRequest(BaseModel):
@@ -786,6 +789,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 "kiosk.iklan_layar_penuh_detik", 60
             ),
             "registration_open": services.queue.pendaftaran_dibuka(),
+            # Tablet menampilkan kotak prioritas hanya bila true.
+            "priority_enabled": services.settings.get_bool(
+                "kiosk.prioritas_aktif", True
+            ),
             # Tablet hanya memuat /categories saat menyala. Tanpa sidik ini
             # layanan yang ditambah, diganti nama, atau dinonaktifkan di
             # Data Master baru terlihat sesudah tablet dibuka ulang.
@@ -960,6 +967,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 perangkat=device_id,
                 kunci_jeda=kunci_jeda,
                 request_id=str(request.request_id),
+                prioritas_mandiri=request.priority,
             )
             ticket_warning = None
             ticket_layout = None

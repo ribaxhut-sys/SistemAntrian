@@ -40,7 +40,13 @@ from app.repositories.queue_repository import (
     terbitkan_nomor,
 )
 from app.repositories.user_repository import UserRepository
-from app.models.enums import LABEL_PRIORITAS, AlasanPrioritas
+from app.models.enums import (
+    ASAL_MANDIRI,
+    ASAL_PENDAFTARAN,
+    ASAL_PETUGAS,
+    LABEL_PRIORITAS,
+    AlasanPrioritas,
+)
 from app.services import audit_service
 from app.services.urutan_prioritas import MODE_OTOMATIS, MODE_SAH, susun
 from app.services.auth_service import AuthService
@@ -123,6 +129,13 @@ class QueueInfo:
     batas_panggilan: int = 0
     #: Alasan prioritas (AlasanPrioritas.value); None untuk nomor biasa.
     prioritas: str | None = None
+    #: PENDAFTARAN, MANDIRI, atau PETUGAS; None bila nomor biasa.
+    prioritas_asal: str | None = None
+
+    @property
+    def prioritas_mandiri(self) -> bool:
+        """Ditandai pengunjung sendiri di anjungan: perlu diperiksa petugas."""
+        return self.prioritas is not None and self.prioritas_asal == ASAL_MANDIRI
 
     @property
     def label_prioritas(self) -> str:
@@ -223,6 +236,7 @@ def _as_info(
         jumlah_panggilan=jumlah_panggilan,
         batas_panggilan=batas_panggilan,
         prioritas=row.prioritas,
+        prioritas_asal=row.prioritas_asal,
     )
 
 
@@ -409,6 +423,7 @@ class QueueService:
         request_id: str | None = None,
         kunci_jeda: str | None = None,
         prioritas: str | None = None,
+        prioritas_mandiri: bool = False,
     ) -> QueueInfo:
         """
         Terbitkan nomor antrian baru untuk sebuah jenis layanan.
@@ -436,6 +451,20 @@ class QueueService:
                 )
             if prioritas not in {a.value for a in AlasanPrioritas}:
                 raise ValidationError("Alasan prioritas tidak dikenal.")
+        asal = None
+        if prioritas is not None:
+            asal = ASAL_PENDAFTARAN
+        elif prioritas_mandiri:
+            # Pilihan pengunjung di anjungan. Bila saklarnya dimatikan admin,
+            # tablet yang masih menampilkannya tetap mendapat nomor biasa:
+            # menolak penerbitan lebih merugikan daripada mengabaikannya.
+            if not sesi.kios:
+                raise BusinessRuleError(
+                    "Pilihan prioritas mandiri hanya tersedia di anjungan."
+                )
+            if self.settings.get_bool("kiosk.prioritas_aktif", True):
+                prioritas = AlasanPrioritas.PRIORITAS.value
+                asal = ASAL_MANDIRI
         kunci = None if request_id is None else KunciTiket(perangkat, request_id)
         if kunci_jeda is None:
             kunci_jeda = perangkat
@@ -512,10 +541,12 @@ class QueueService:
                 entity_id=terbit.queue_id,
                 nomor=terbit.queue_number,
                 prioritas=prioritas,
+                asal=asal,
             )
             baris = QueueRepository(session).get_by_id(terbit.queue_id)
             if prioritas is not None:
                 baris.prioritas = prioritas
+                baris.prioritas_asal = asal
             info = _as_info(baris)
 
         if sesi.kios:
@@ -1237,6 +1268,46 @@ class QueueService:
             return _as_info(
                 antrian, repo.jumlah_pemanggilan(antrian.id), self.batas_panggilan()
             )
+
+    def ubah_prioritas(self, queue_id: int, alasan: str | None) -> QueueInfo:
+        """
+        Tandai atau cabut prioritas pada nomor yang belum selesai.
+
+        Dipakai petugas pelayanan: menandai pengunjung lansia yang menunggu
+        dengan nomor biasa, memperinci prioritas mandiri dari anjungan, atau
+        mencabutnya bila tidak sesuai. `alasan` None mencabut.
+        """
+        sesi = self.auth.require_permission(Permission.QUEUE_CALL)
+        if alasan is not None and alasan not in {a.value for a in AlasanPrioritas}:
+            raise ValidationError("Alasan prioritas tidak dikenal.")
+
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            antrian = self._ambil(repo, queue_id, for_update=True)
+            if antrian.branch_id != sesi.branch_id:
+                raise NotFoundError("Antrian tidak ditemukan.")
+            if antrian.status.is_final:
+                raise BusinessRuleError(
+                    f"{antrian.queue_number} sudah selesai; prioritasnya tidak "
+                    "dapat diubah."
+                )
+            lama = antrian.prioritas
+            antrian.prioritas = alasan
+            antrian.prioritas_asal = ASAL_PETUGAS if alasan else None
+            audit_service.record(
+                session,
+                AuditAction.SET_PRIORITY,
+                user_id=sesi.user_id,
+                entity_type="queue",
+                entity_id=antrian.id,
+                nomor=antrian.queue_number,
+                dari=lama,
+                ke=alasan,
+            )
+            logger.info(
+                "Prioritas %s: %s -> %s", antrian.queue_number, lama, alasan
+            )
+            return _as_info(antrian, repo.jumlah_pemanggilan(antrian.id))
 
     def recall(self, queue_id: int) -> QueueInfo:
         """
