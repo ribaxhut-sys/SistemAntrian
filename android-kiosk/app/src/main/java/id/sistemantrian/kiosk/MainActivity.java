@@ -43,13 +43,15 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.ImageView;
+import android.view.TextureView;
+import android.view.Surface;
+import android.graphics.SurfaceTexture;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.VideoView;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -1027,8 +1029,8 @@ public final class MainActivity extends Activity {
         ajakanIklanPenuh.setBackground(rounded(Color.argb(185, 15, 23, 42), dp(28)));
         ajakanIklanPenuh.setVisibility(View.GONE);
         FrameLayout.LayoutParams ajakanParams = new FrameLayout.LayoutParams(-2, -2,
-                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        ajakanParams.bottomMargin = dp(20);
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        ajakanParams.topMargin = dp(24);
         bingkaiMedia.addView(ajakanIklanPenuh, ajakanParams);
         infoPanel.addView(bingkaiMedia, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(infoPanel, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -1410,6 +1412,155 @@ public final class MainActivity extends Activity {
         mediaSlot.addView(welcome, new FrameLayout.LayoutParams(-1, -1));
     }
 
+
+    /**
+     * Pemutar video di atas TextureView. VideoView memakai SurfaceView yang
+     * digambar di lapisan terpisah dan tampil hitam pada emulator dan
+     * sebagian panel (keluaran decoder tidak dikomposisi). TextureView
+     * digambar lewat GL di dalam hierarki tampilan, sehingga terlihat di
+     * mana pun, ikut peredupan dan animasi, dan rasio video dijaga (pas):
+     * utuh, dengan pita hitam bila rasionya berbeda.
+     */
+    private final class VideoTekstur extends FrameLayout
+            implements TextureView.SurfaceTextureListener {
+        private final TextureView tekstur;
+        private SurfaceTexture permukaan;
+        private android.media.MediaPlayer pemain;
+        private Uri sumber;
+        private Map<String, String> header;
+        private android.media.MediaPlayer.OnCompletionListener selesai;
+        private android.media.MediaPlayer.OnErrorListener galat;
+        private android.media.MediaPlayer.OnPreparedListener siap;
+        private int lebarVideo;
+        private int tinggiVideo;
+        private boolean dihentikan;
+
+        VideoTekstur(Context konteks) {
+            super(konteks);
+            setBackgroundColor(Color.BLACK);
+            tekstur = new TextureView(konteks);
+            tekstur.setSurfaceTextureListener(this);
+            addView(tekstur, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
+        }
+
+        void setOnCompletionListener(android.media.MediaPlayer.OnCompletionListener l) {
+            selesai = l;
+        }
+
+        void setOnErrorListener(android.media.MediaPlayer.OnErrorListener l) {
+            galat = l;
+        }
+
+        void setOnPreparedListener(android.media.MediaPlayer.OnPreparedListener l) {
+            siap = l;
+        }
+
+        void setVideoURI(Uri uri) {
+            setVideoURI(uri, null);
+        }
+
+        void setVideoURI(Uri uri, Map<String, String> headers) {
+            sumber = uri;
+            header = headers;
+            mulaiBilaSiap();
+        }
+
+        void stopPlayback() {
+            dihentikan = true;
+            lepaskan();
+        }
+
+        private void mulaiBilaSiap() {
+            if (pemain != null || sumber == null || permukaan == null || dihentikan) return;
+            try {
+                pemain = new android.media.MediaPlayer();
+                pemain.setSurface(new Surface(permukaan));
+                pemain.setOnVideoSizeChangedListener((p, w, h) -> {
+                    lebarVideo = w;
+                    tinggiVideo = h;
+                    pasKanKeBingkai();
+                });
+                pemain.setOnCompletionListener(p -> {
+                    if (selesai != null) selesai.onCompletion(p);
+                });
+                pemain.setOnErrorListener((p, what, extra) ->
+                        galat != null && galat.onError(p, what, extra));
+                pemain.setOnPreparedListener(p -> {
+                    if (siap != null) siap.onPrepared(p);
+                });
+                if (header == null) {
+                    pemain.setDataSource(getContext(), sumber);
+                } else {
+                    pemain.setDataSource(getContext(), sumber, header);
+                }
+                pemain.prepareAsync();
+            } catch (Exception e) {
+                lepaskan();
+                if (galat != null) {
+                    galat.onError(null, android.media.MediaPlayer.MEDIA_ERROR_UNKNOWN, 0);
+                }
+            }
+        }
+
+        private void lepaskan() {
+            android.media.MediaPlayer lama = pemain;
+            pemain = null;
+            if (lama == null) return;
+            try {
+                lama.setOnCompletionListener(null);
+                lama.setOnErrorListener(null);
+                lama.setOnPreparedListener(null);
+                lama.setOnVideoSizeChangedListener(null);
+                lama.release();
+            } catch (Exception ignored) {
+                // Pemutar yang sudah rusak tidak perlu dilaporkan lagi.
+            }
+        }
+
+        /** Rasio dijaga: video utuh di tengah, sisanya hitam. */
+        private void pasKanKeBingkai() {
+            int lebar = getWidth();
+            int tinggi = getHeight();
+            if (lebarVideo <= 0 || tinggiVideo <= 0 || lebar <= 0 || tinggi <= 0) return;
+            float skala = Math.min(lebar / (float) lebarVideo, tinggi / (float) tinggiVideo);
+            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                    Math.round(lebarVideo * skala), Math.round(tinggiVideo * skala),
+                    Gravity.CENTER);
+            tekstur.setLayoutParams(params);
+        }
+
+        @Override
+        protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            pasKanKeBingkai();
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            super.onDetachedFromWindow();
+            lepaskan();
+        }
+
+        @Override
+        public void onSurfaceTextureAvailable(SurfaceTexture st, int w, int h) {
+            permukaan = st;
+            mulaiBilaSiap();
+        }
+
+        @Override
+        public void onSurfaceTextureSizeChanged(SurfaceTexture st, int w, int h) { }
+
+        @Override
+        public boolean onSurfaceTextureDestroyed(SurfaceTexture st) {
+            lepaskan();
+            permukaan = null;
+            return true;
+        }
+
+        @Override
+        public void onSurfaceTextureUpdated(SurfaceTexture st) { }
+    }
+
     private void showWelcomeMedia(int index) {
         if (welcomeMedia.isEmpty() || mediaSlot == null) return;
         mediaIndex = index;
@@ -1428,8 +1579,7 @@ public final class MainActivity extends Activity {
             // Video digambar di permukaan tersendiri yang tidak dapat
             // dipudarkan; yang lama langsung diganti.
             mediaSlot.removeAllViews();
-            VideoView video = new VideoView(this);
-            video.setBackgroundColor(Color.BLACK);
+            VideoTekstur video = new VideoTekstur(this);
             mediaSlot.addView(video, new FrameLayout.LayoutParams(-1, -1));
             video.setOnCompletionListener(player -> advanceSlide());
             video.setOnErrorListener((player, what, extra) -> {
@@ -1460,7 +1610,7 @@ public final class MainActivity extends Activity {
             // tidak ada kilatan kosong saat gambar berikutnya dimuat.
             for (int i = 0; i < mediaSlot.getChildCount(); i++) {
                 View lama = mediaSlot.getChildAt(i);
-                if (lama instanceof VideoView) ((VideoView) lama).stopPlayback();
+                if (lama instanceof VideoTekstur) ((VideoTekstur) lama).stopPlayback();
             }
             ImageView image = new ImageView(this);
             image.setScaleType(ImageView.ScaleType.FIT_CENTER);
