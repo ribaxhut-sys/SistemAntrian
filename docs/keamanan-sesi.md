@@ -4,9 +4,18 @@ Ringkasan aturan sesi dan kata sandi, serta perilaku layar kerja yang terkait.
 
 ## Batas percobaan login
 
-- Satu akun yang **gagal masuk 5 kali dalam 5 menit** ditunda: percobaan
-  berikutnya (termasuk dengan kata sandi benar) ditolak sampai jendela
-  5 menit itu lewat.
+- Satu akun yang **gagal masuk berulang dalam 15 menit** ditunda bertingkat,
+  dihitung dari percobaan gagal terakhir; percobaan berikutnya (termasuk
+  dengan kata sandi benar) ditolak sampai penundaan lewat:
+
+  | Gagal beruntun | Penundaan |
+  |---|---|
+  | 3 | tombol "Lupa kata sandi admin?" muncul di layar masuk |
+  | 5–7 | 1 menit |
+  | 8–9 | 5 menit |
+  | 10 atau lebih | 15 menit |
+
+- Hitungan dikosongkan oleh masuk yang berhasil dan oleh pemulihan admin.
 - Dihitung dari audit log (`LOGIN_FAILED`), jadi percobaan dari komputer loket
   mana pun ikut terhitung dan tidak hilang saat aplikasi dibuka ulang.
 - Percobaan yang **ditolak karena penundaan tidak dicatat** sebagai kegagalan
@@ -15,7 +24,7 @@ Ringkasan aturan sesi dan kata sandi, serta perilaku layar kerja yang terkait.
   tidak terdaftar ditunda dengan pesan dan urutan yang sama, sehingga
   penundaan tidak membocorkan akun mana yang ada.
 - Akun lain tidak terpengaruh. Kode: `AuthService._sisa_penundaan`,
-  konstanta `BATAS_LOGIN_GAGAL` dan `BATAS_LOGIN_GAGAL_MENIT`.
+  konstanta `TINGKAT_PENUNDAAN` dan `JENDELA_LOGIN_GAGAL_MENIT`.
 
 ## Kata sandi
 
@@ -135,7 +144,7 @@ hash yang sah.
 ## Catatan keterbatasan
 
 - Penundaan login dapat dipakai orang lain untuk menunda akun tertentu
-  selama 5 menit (kompromi yang diterima; akun lain dan admin lain tidak
+  sampai 15 menit (kompromi yang diterima; akun lain dan admin lain tidak
   terpengaruh).
 - Nama pengguna lama tetap ada di meta audit setelah penyamaran nama; yang
   disamarkan hanya akunnya.

@@ -88,6 +88,39 @@ def test_gagal_di_bawah_batas_tidak_menunda(auth, users):
     assert auth.login("cro", TEST_PASSWORD).username == "cro"
 
 
+def _catat_gagal(auth, nama: str, jumlah: int) -> None:
+    for _ in range(jumlah):
+        auth._catat_login_gagal(
+            user_id=None, username=nama, alasan="kredensial salah"
+        )
+
+
+@pytest.mark.parametrize(
+    ("jumlah", "pola"),
+    [(5, r"dalam (1 menit|\d+ detik)\."), (8, r"[45] menit"), (10, r"1[45] menit")],
+)
+def test_penundaan_bertingkat_mengikuti_jumlah_gagal(auth, users, jumlah, pola):
+    _catat_gagal(auth, "cro", jumlah)
+
+    with pytest.raises(AuthenticationError, match=pola):
+        auth.login("cro", TEST_PASSWORD)
+
+
+def test_gagal_ketujuh_masih_satu_menit(auth, users):
+    _catat_gagal(auth, "cro", 7)
+
+    with pytest.raises(AuthenticationError, match=r"dalam (1 menit|\d+ detik)\."):
+        auth.login("cro", TEST_PASSWORD)
+
+
+def test_masuk_berhasil_mengosongkan_hitungan(auth, users):
+    _gagal_login(auth, "cro", BATAS_LOGIN_GAGAL - 1)
+    assert auth.login("cro", TEST_PASSWORD).username == "cro"
+
+    _gagal_login(auth, "cro", BATAS_LOGIN_GAGAL - 1)
+    assert auth.login("cro", TEST_PASSWORD).username == "cro"
+
+
 # ---------------------------------------------------------------------
 # Kata sandi dan kunci layar
 # ---------------------------------------------------------------------

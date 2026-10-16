@@ -21,6 +21,10 @@ from app.ui.common import keterangan, label_error, tombol
 
 logger = get_logger("ui.login")
 
+# Tombol pemulihan admin baru muncul setelah sekian kali gagal masuk
+# berturut-turut dengan nama pengguna yang sama.
+GAGAL_SEBELUM_PEMULIHAN = 3
+
 
 class LoginWindow(QDialog):
     """
@@ -39,6 +43,8 @@ class LoginWindow(QDialog):
         super().__init__(parent)
         self.auth = auth
         self.session: AuthSession | None = None
+        self._gagal_berturut = 0
+        self._username_gagal = ""
 
         self.setWindowTitle(f"{APP_NAME} — Masuk")
         self.setMinimumWidth(400)
@@ -92,6 +98,7 @@ class LoginWindow(QDialog):
             "Pulihkan akun admin dengan kunci dari pengembang."
         )
         self.tombol_lupa.clicked.connect(self.lupa_kata_sandi)
+        self.tombol_lupa.setVisible(False)
         susunan.addWidget(self.tombol_lupa)
 
         self.tombol_atur_komputer = tombol("Atur komputer ini")
@@ -146,6 +153,7 @@ class LoginWindow(QDialog):
         try:
             self.session = self.auth.login(username, password)
         except AppError as exc:
+            self._catat_gagal(username)
             self._tampilkan_kesalahan(exc.user_message)
             return
         except Exception:  # noqa: BLE001 - batas UI
@@ -158,6 +166,15 @@ class LoginWindow(QDialog):
             self.tombol_masuk.setEnabled(True)
 
         self.accept()
+
+    def _catat_gagal(self, username: str) -> None:
+        """Hitung gagal berturut-turut; tombol pemulihan muncul di ambang."""
+        if username != self._username_gagal:
+            self._username_gagal = username
+            self._gagal_berturut = 0
+        self._gagal_berturut += 1
+        if self._gagal_berturut >= GAGAL_SEBELUM_PEMULIHAN:
+            self.tombol_lupa.setVisible(True)
 
     def lupa_kata_sandi(self) -> None:
         """Pemulihan akun admin lewat kunci dari pengembang."""

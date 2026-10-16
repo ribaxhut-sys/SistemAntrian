@@ -79,6 +79,33 @@ def test_login_berhasil_menutup_jendela(qtbot, auth):
     assert jendela.session.role is UserRole.CRO
 
 
+def test_lupa_kata_sandi_admin_tersembunyi_sampai_gagal_berulang(qtbot, auth):
+    jendela = LoginWindow(auth)
+    qtbot.addWidget(jendela)
+    assert not jendela.tombol_lupa.isVisibleTo(jendela)
+
+    jendela.input_username.setText("admin")
+    for _ in range(2):
+        jendela.input_password.setText("salah-salah")
+        jendela.coba_masuk()
+    assert not jendela.tombol_lupa.isVisibleTo(jendela)
+
+    jendela.input_password.setText("salah-salah")
+    jendela.coba_masuk()
+    assert jendela.tombol_lupa.isVisibleTo(jendela)
+
+
+def test_lupa_kata_sandi_tidak_muncul_bila_nama_berganti(qtbot, auth):
+    jendela = LoginWindow(auth)
+    qtbot.addWidget(jendela)
+
+    for nama in ("admin", "cro", "admin", "cro"):
+        jendela.input_username.setText(nama)
+        jendela.input_password.setText("salah-salah")
+        jendela.coba_masuk()
+    assert not jendela.tombol_lupa.isVisibleTo(jendela)
+
+
 def test_layar_masuk_menawarkan_atur_komputer_tanpa_pemilih_mode(qtbot, auth):
     """Windows langsung login; pengaturan mesin tersedia sebagai aksi sekunder."""
     jendela = LoginWindow(auth)

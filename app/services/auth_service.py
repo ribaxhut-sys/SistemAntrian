@@ -39,10 +39,24 @@ from app.services.permissions import Permission, permissions_for
 
 logger = get_logger("auth")
 
-#: Percobaan masuk yang gagal pada satu akun sebelum ditunda, dan lamanya
-#: penundaan (jendela waktu yang sama dipakai menghitungnya).
-BATAS_LOGIN_GAGAL = 5
-BATAS_LOGIN_GAGAL_MENIT = 5
+#: Jendela waktu penghitung percobaan masuk yang gagal, per nama pengguna.
+JENDELA_LOGIN_GAGAL_MENIT = 15
+
+#: Penundaan bertingkat: (gagal dalam jendela, menit ditunda), dari yang
+#: terberat. Penundaan dihitung dari percobaan gagal terakhir, sehingga
+#: setiap kegagalan sesudah ambang memulai penundaan baru. Pemulihan
+#: admin dan masuk yang berhasil mengosongkan hitungan.
+TINGKAT_PENUNDAAN: tuple[tuple[int, int], ...] = ((10, 15), (8, 5), (5, 1))
+
+#: Percobaan gagal pertama yang memicu penundaan.
+BATAS_LOGIN_GAGAL = TINGKAT_PENUNDAAN[-1][0]
+
+
+def _menit_penundaan(jumlah_gagal: int) -> int:
+    for ambang, menit in TINGKAT_PENUNDAAN:
+        if jumlah_gagal >= ambang:
+            return menit
+    return 0
 
 
 def _label_sisa(sisa: timedelta) -> str:
@@ -230,28 +244,35 @@ class AuthService:
         Sisa waktu penundaan untuk nama ini, atau None bila tidak ditunda.
 
         Ditunda bila ada BATAS_LOGIN_GAGAL percobaan gagal dengan nama itu
-        dalam BATAS_LOGIN_GAGAL_MENIT menit terakhir; penundaan berakhir
-        ketika percobaan tertua dari lima itu keluar dari jendela.
-        Percobaan sebelum pemulihan admin terakhir (`RESET_ADMIN_KEY`) tidak
-        dihitung.
+        dalam JENDELA_LOGIN_GAGAL_MENIT menit terakhir; lamanya mengikuti
+        TINGKAT_PENUNDAAN dan dihitung dari percobaan gagal terakhir.
+        Percobaan sebelum pemulihan admin (`RESET_ADMIN_KEY`) atau masuk
+        berhasil terakhir tidak dihitung.
 
         Dihitung dari audit log, bukan memori: percobaan dari komputer
         loket mana pun ikut terhitung, dan tidak hilang saat aplikasi
         dibuka ulang. Pencocokan memakai nama yang tercatat di `meta`
         sehingga nama yang tidak terdaftar diperlakukan sama.
         """
-        jendela = timedelta(minutes=BATAS_LOGIN_GAGAL_MENIT)
+        jendela = timedelta(minutes=JENDELA_LOGIN_GAGAL_MENIT)
         sekarang = clock.now()
         sejak = sekarang - jendela
         if user_id is not None:
-            reset = session.scalar(
+            # Hitungan dimulai ulang oleh pemulihan admin dan oleh masuk
+            # yang berhasil terakhir.
+            titik_awal = session.scalar(
                 sa.select(sa.func.max(AuditLog.created_at)).where(
-                    AuditLog.action == AuditAction.RESET_ADMIN_KEY.value,
+                    AuditLog.action.in_(
+                        (
+                            AuditAction.RESET_ADMIN_KEY.value,
+                            AuditAction.LOGIN.value,
+                        )
+                    ),
                     AuditLog.user_id == user_id,
                 )
             )
-            if reset is not None and reset > sejak:
-                sejak = reset
+            if titik_awal is not None and titik_awal > sejak:
+                sejak = titik_awal
         penanda = f'"username": {json.dumps(username, ensure_ascii=False)}'
         waktu = list(
             session.scalars(
@@ -262,12 +283,13 @@ class AuthService:
                     AuditLog.created_at > sejak,
                 )
                 .order_by(AuditLog.created_at.desc())
-                .limit(BATAS_LOGIN_GAGAL)
+                .limit(TINGKAT_PENUNDAAN[0][0])
             )
         )
-        if len(waktu) < BATAS_LOGIN_GAGAL:
+        menit = _menit_penundaan(len(waktu))
+        if not menit:
             return None
-        sisa = (waktu[BATAS_LOGIN_GAGAL - 1] + jendela) - sekarang
+        sisa = (waktu[0] + timedelta(minutes=menit)) - sekarang
         return sisa if sisa > timedelta(0) else None
 
     def _beri_tahu_bila_terkunci(
@@ -289,9 +311,9 @@ class AuthService:
                 entity_type="app_user",
                 entity_id=user_id,
                 username=username,
-                menit=BATAS_LOGIN_GAGAL_MENIT,
+                menit=round(sisa.total_seconds() / 60, 1),
             )
-        logger.warning("Akun %r ditunda %d menit", username, BATAS_LOGIN_GAGAL_MENIT)
+        logger.warning("Akun %r ditunda %s", username, _label_sisa(sisa))
         return (
             "Kata sandi salah. Karena terlalu banyak percobaan, akun ditunda "
             f"{_label_sisa(sisa)}."
