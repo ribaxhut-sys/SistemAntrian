@@ -143,6 +143,18 @@ Layanan Anjungan menampilkan peringatan di baris Paket suara.
   `{"nama", "mulai", "selesai", "detik"}`; butir tanpa aturan tetap berupa
   nama saja, jadi nilai lama terbaca apa adanya. `welcome_media_files[].seconds`
   membawa lama tampilnya ke tablet.
+- **Tempat tampil (APK 2.4.34).** Video untuk strip panel atas (mendatar,
+  kecil) dan video untuk layar penuh (seluruh layar) berbeda bentuknya, jadi
+  di dialog **Atur jadwal…** tiap berkas punya **Tampil di**: *Panel atas*,
+  *Layar penuh*, atau *Keduanya* (bawaan). Disimpan sebagai `"tampil":
+  "panel" | "penuh"` pada butir (tidak ditulis bila keduanya) dan dikirim ke
+  tablet sebagai `welcome_media_files[].show`.
+  - Normal: panel atas memutar berkas *Panel atas* dan *Keduanya*.
+  - Menganggur melewati **Iklan layar penuh saat menganggur**: layar penuh
+    memutar berkas *Layar penuh* dan *Keduanya*. Bila tidak ada satu pun,
+    layar penuh tidak diaktifkan dan layar tetap menampilkan menu — video
+    strip tidak dipaksa memenuhi layar, dan sebaliknya.
+  - APK lama mengabaikan `show` dan memutar semuanya seperti dulu.
 - **Saat pengunjung bertransaksi** (memilih layanan, konfirmasi, menunggu
   tiket, layar "Nomor Anda", atau 15 detik sejak sentuhan terakhir) video
   selalu dibisukan dan panel iklan diredupkan. Sub-menu layanan yang

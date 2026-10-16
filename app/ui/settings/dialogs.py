@@ -636,6 +636,19 @@ class JadwalIklanDialog(_DialogIsian):
             centang.setChecked(nilai is not None)
             kotak.setEnabled(nilai is not None)
 
+        # Video untuk strip panel atas dan video untuk layar penuh berbeda
+        # bentuknya (mendatar kecil vs seluruh layar): satu berkas dapat
+        # dibatasi pada salah satunya.
+        self.tampil = QComboBox()
+        for kunci in daftar_putar.TAMPIL_SAH:
+            self.tampil.addItem(daftar_putar.LABEL_TAMPIL[kunci], kunci)
+        self.tampil.setCurrentIndex(self.tampil.findData(butir.tampil))
+        self.tampil.setToolTip(
+            "Panel atas: strip di atas kartu layanan. Layar penuh: saat anjungan "
+            "menganggur dan iklan memenuhi layar."
+        )
+        self.form.addRow("Tampil di", self.tampil)
+
         self.detik = QSpinBox()
         # Satu di bawah batas bawah berarti "ikut pengaturan umum".
         self.detik.setRange(daftar_putar.DETIK_MIN - 1, daftar_putar.DETIK_MAKS)
@@ -670,6 +683,7 @@ class JadwalIklanDialog(_DialogIsian):
             mulai,
             selesai,
             None if detik < daftar_putar.DETIK_MIN else detik,
+            self.tampil.currentData() or daftar_putar.TAMPIL_KEDUANYA,
         )
 
     def simpan(self) -> None:

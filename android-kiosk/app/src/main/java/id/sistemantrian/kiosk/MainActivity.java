@@ -654,6 +654,14 @@ public final class MainActivity extends Activity {
     private final ExecutorService pengunduh = Executors.newSingleThreadExecutor();
     private String serverKind = "teks";
     private List<String> serverMedia = new ArrayList<>();
+    /**
+     * Di mana tiap berkas daftar putar server tampil: "panel" (strip atas),
+     * "penuh" (iklan layar penuh saat menganggur), atau "keduanya".
+     * Server lama tidak menyebutnya: semuanya keduanya.
+     */
+    private final Map<String, String> tampilBerkas = new HashMap<>();
+    /** Daftar yang diputar sekarang: true = daftar layar penuh. */
+    private boolean mediaModePenuh;
     /** Nama berkas server -> nama salinannya (ukuran-waktu-nama). */
     private final Map<String, String> kunciSalinan = new HashMap<>();
     /** Kunci salinan yang sedang diunduh; hanya disentuh di thread UI. */
@@ -1193,6 +1201,7 @@ public final class MainActivity extends Activity {
             // jaringan seperti sebelumnya.
             kunciSalinan.clear();
             detikPerBerkas.clear();
+            tampilBerkas.clear();
             JSONArray infoRows = display.optJSONArray("welcome_media_files");
             if (infoRows != null) {
                 for (int i = 0; i < infoRows.length(); i++) {
@@ -1202,6 +1211,7 @@ public final class MainActivity extends Activity {
                     if (nama.isEmpty()) continue;
                     kunciSalinan.put(nama, row.optLong("size", 0L) + "-"
                             + row.optLong("modified_ms", 0L) + "-" + namaAman(nama));
+                    tampilBerkas.put(nama, row.optString("show", "keduanya"));
                     int detik = row.isNull("seconds") ? 0 : row.optInt("seconds", 0);
                     if (detik > 0) detikPerBerkas.put(nama, detik);
                 }
@@ -1817,7 +1827,8 @@ public final class MainActivity extends Activity {
             targetTirai = tirai;
             tiraiMedia.animate().alpha(tirai).setDuration(350).start();
         }
-        boolean bolehPenuh = iklanPenuhDetik > 0 && mediaJalan && !updating && !updateRequired;
+        boolean bolehPenuh = iklanPenuhDetik > 0 && !mediaGagal && adaMediaLayarPenuh()
+                && !updating && !updateRequired;
         if (iklanPenuh && !bolehPenuh) {
             keluarIklanPenuh();
         } else if (!iklanPenuh && bolehPenuh && !transaksi
@@ -1842,6 +1853,8 @@ public final class MainActivity extends Activity {
         TransitionManager.beginDelayedTransition(rootLayout, transisi);
         sembunyikanUntukIklanPenuh();
         bukaBingkaiIklanPenuh();
+        mediaModePenuh = true;
+        terapkanMediaSambutan();
         ajakanIklanPenuh.setVisibility(View.VISIBLE);
         hentikanDenyutAjakanIklan();
         denyutAjakanIklan = android.animation.ObjectAnimator.ofFloat(
@@ -1939,6 +1952,8 @@ public final class MainActivity extends Activity {
         }
         visibilitasSebelumIklanPenuh.clear();
         pulihkanBingkaiIklanPenuh();
+        mediaModePenuh = false;
+        terapkanMediaSambutan();
         hentikanDenyutAjakanIklan();
         ajakanIklanPenuh.setVisibility(View.GONE);
         perbaruiJudul();
@@ -2140,6 +2155,23 @@ public final class MainActivity extends Activity {
      * Pilih daftar putar menurut sumber media, lalu mulai ulang putaran bila
      * isinya berubah. Pemanggil yang lalu memanggil terapkanBarisLoket().
      */
+    /** Apakah berkas tampil di panel atas (penuh=false) atau layar penuh. */
+    private boolean tampilDi(String nama, boolean penuh) {
+        String tempat = tampilBerkas.get(nama);
+        if (tempat == null || "keduanya".equals(tempat)) return true;
+        return penuh ? "penuh".equals(tempat) : "panel".equals(tempat);
+    }
+
+    /** Ada media yang boleh memenuhi layar saat anjungan menganggur. */
+    private boolean adaMediaLayarPenuh() {
+        if (sumberTablet()) return !daftarMediaTablet().isEmpty();
+        if (!isMediaKind(serverKind)) return false;
+        for (String nama : serverMedia) {
+            if (tampilDi(nama, true)) return true;
+        }
+        return false;
+    }
+
     private void terapkanMediaSambutan() {
         if (mediaSlot == null) return;
         boolean tablet = sumberTablet();
@@ -2156,11 +2188,13 @@ public final class MainActivity extends Activity {
             signature = tanda.toString();
             putar = !media.isEmpty();
         } else {
-            media.addAll(serverMedia);
+            for (String nama : serverMedia) {
+                if (tampilDi(nama, mediaModePenuh)) media.add(nama);
+            }
             List<String> kunci = new ArrayList<>();
             for (String nama : media) kunci.add(String.valueOf(kunciSalinan.get(nama)));
-            signature = serverKind + "|" + TextUtils.join("|", media)
-                    + "|" + TextUtils.join("|", kunci);
+            signature = serverKind + (mediaModePenuh ? "|penuh|" : "|panel|")
+                    + TextUtils.join("|", media) + "|" + TextUtils.join("|", kunci);
             putar = isMediaKind(serverKind) && !media.isEmpty();
         }
         adaMediaSambutan = putar;

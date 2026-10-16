@@ -768,3 +768,42 @@ def test_pustaka_media_memuat_semua_berkas_bukan_hanya_daftar_putar(
         307,
     }
     assert client.get("/v1/kiosk/media-library").status_code == 401
+
+
+def test_display_menyebut_tempat_tampil_tiap_berkas(tmp_path, monkeypatch):
+    """APK baru membedakan panel atas dan layar penuh; APK lama mengabaikannya."""
+    from app.kiosk_api import create_app
+    from app.services import daftar_putar
+
+    monkeypatch.setattr("app.kiosk_api.base_dir", lambda: tmp_path)
+    folder = tmp_path / "media" / "kiosk"
+    folder.mkdir(parents=True)
+    for nama in ("a.mp4", "b.mp4", "c.jpg"):
+        (folder / nama).write_bytes(b"x")
+    services = _Services()
+    daftar = daftar_putar.tulis(
+        [
+            daftar_putar.Butir("a.mp4", tampil=daftar_putar.TAMPIL_PANEL),
+            daftar_putar.Butir("b.mp4", tampil=daftar_putar.TAMPIL_PENUH),
+            "c.jpg",
+        ]
+    )
+    nilai_asli = services.settings.get
+
+    def get(kunci, bawaan=None):
+        if kunci == daftar_putar.KUNCI:
+            return daftar
+        if kunci == "kiosk.welcome_kind":
+            return "media"
+        return nilai_asli(kunci, bawaan)
+
+    services.settings.get = get
+    client = TestClient(create_app(TOKEN, services))
+
+    isi = client.get(
+        "/v1/kiosk/display", headers={"Authorization": f"Bearer {TOKEN}"}
+    ).json()
+
+    tampil = {item["name"]: item["show"] for item in isi["welcome_media_files"]}
+    assert tampil == {"a.mp4": "panel", "b.mp4": "penuh", "c.jpg": "keduanya"}
+    assert isi["welcome_media"] == ["a.mp4", "b.mp4", "c.jpg"]

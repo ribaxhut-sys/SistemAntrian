@@ -32,6 +32,20 @@ from app.core.errors import ValidationError
 
 KUNCI = "kiosk.daftar_putar"
 
+#: Di mana sebuah berkas tampil. Video untuk strip panel atas dan video untuk
+#: layar penuh (saat menganggur) berbeda bentuknya, jadi tiap berkas dapat
+#: dibatasi pada salah satunya. Tanpa keterangan: keduanya, seperti sebelum
+#: pilihan ini ada.
+TAMPIL_PANEL = "panel"
+TAMPIL_PENUH = "penuh"
+TAMPIL_KEDUANYA = "keduanya"
+TAMPIL_SAH = (TAMPIL_PANEL, TAMPIL_PENUH, TAMPIL_KEDUANYA)
+LABEL_TAMPIL = {
+    TAMPIL_PANEL: "Panel atas",
+    TAMPIL_PENUH: "Layar penuh",
+    TAMPIL_KEDUANYA: "Keduanya",
+}
+
 #: Batas lama tampil per gambar, sama dengan pengaturan umumnya.
 DETIK_MIN = 3
 DETIK_MAKS = 60
@@ -46,6 +60,12 @@ class Butir:
     selesai: date | None = None
     #: Lama tampil gambar ini; None = ikut pengaturan umum.
     detik: int | None = None
+    #: TAMPIL_PANEL, TAMPIL_PENUH, atau TAMPIL_KEDUANYA (bawaan).
+    tampil: str = TAMPIL_KEDUANYA
+
+    def tampil_di(self, tempat: str) -> bool:
+        """Apakah berkas ini tampil di `tempat` (TAMPIL_PANEL atau TAMPIL_PENUH)."""
+        return self.tampil in (tempat, TAMPIL_KEDUANYA)
 
     @property
     def berjadwal(self) -> bool:
@@ -57,7 +77,11 @@ class Butir:
         return not (self.selesai is not None and hari > self.selesai)
 
     def ke_json(self) -> str | dict:
-        if not self.berjadwal and self.detik is None:
+        if (
+            not self.berjadwal
+            and self.detik is None
+            and self.tampil == TAMPIL_KEDUANYA
+        ):
             return self.nama
         isi: dict = {"nama": self.nama}
         if self.mulai is not None:
@@ -66,6 +90,8 @@ class Butir:
             isi["selesai"] = self.selesai.isoformat()
         if self.detik is not None:
             isi["detik"] = self.detik
+        if self.tampil != TAMPIL_KEDUANYA:
+            isi["tampil"] = self.tampil
         return isi
 
 
@@ -98,6 +124,16 @@ def _detik(nilai, ketat: bool) -> int | None:
     return angka
 
 
+def _tampil(nilai, ketat: bool) -> str:
+    if nilai in (None, ""):
+        return TAMPIL_KEDUANYA
+    if nilai in TAMPIL_SAH:
+        return nilai
+    if ketat:
+        raise ValidationError(f"Tempat tampil tidak sah: {nilai!r}.")
+    return TAMPIL_KEDUANYA
+
+
 def _butir(isi, ketat: bool) -> Butir | None:
     """Satu elemen larik JSON menjadi Butir; None bila tidak terbaca."""
     if isinstance(isi, str):
@@ -118,7 +154,13 @@ def _butir(isi, ketat: bool) -> Butir | None:
                 f"Tanggal selesai {nama} lebih awal dari tanggal mulainya."
             )
         selesai = None
-    return Butir(nama, mulai, selesai, _detik(isi.get("detik"), ketat))
+    return Butir(
+        nama,
+        mulai,
+        selesai,
+        _detik(isi.get("detik"), ketat),
+        _tampil(isi.get("tampil"), ketat),
+    )
 
 
 def baca_butir(nilai: str) -> list[Butir] | None:
@@ -196,6 +238,11 @@ def terapkan(berkas: list[Path], nilai: str, hari: date | None = None) -> list[P
         for butir in daftar
         if butir.nama in per_nama and (hari is None or butir.tayang_pada(hari))
     ]
+
+
+def tampil_per_berkas(nilai: str) -> dict[str, str]:
+    """Tempat tampil tiap berkas; yang tidak disebut berarti keduanya."""
+    return {butir.nama: butir.tampil for butir in baca_butir(nilai) or []}
 
 
 def detik_per_berkas(nilai: str) -> dict[str, int]:

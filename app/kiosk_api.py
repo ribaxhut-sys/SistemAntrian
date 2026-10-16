@@ -805,6 +805,9 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         detik_khusus = daftar_putar.detik_per_berkas(
             services.settings.get(daftar_putar.KUNCI, "")
         )
+        tampil_berkas = daftar_putar.tampil_per_berkas(
+            services.settings.get(daftar_putar.KUNCI, "")
+        )
         apk = info_apk(folder_apk(base_dir()))
         paket = info_paket(folder_paket(base_dir()))
         judul = (services.settings.get("kiosk.judul", "") or "").strip()
@@ -832,6 +835,12 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                     "modified_ms": int(item.stat().st_mtime * 1000),
                     # Lama tampil gambar ini; null = welcome_slide_seconds.
                     "seconds": detik_khusus.get(item.name),
+                    # Di mana berkas ini tampil: panel (strip atas), penuh
+                    # (layar penuh saat menganggur), atau keduanya. APK lama
+                    # mengabaikannya dan memutar semuanya seperti dulu.
+                    "show": tampil_berkas.get(
+                        item.name, daftar_putar.TAMPIL_KEDUANYA
+                    ),
                 }
                 for item in media
             ],

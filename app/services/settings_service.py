@@ -510,7 +510,8 @@ SKEMA: tuple[Pengaturan, ...] = (
         "urutannya dengan Naik/Turun. Video diputar sampai selesai; satu "
         "video saja diulang terus. Yang tidak dicentang tetap "
         "tersimpan di folder dan dapat dinyalakan lagi kapan saja. "
-        "Atur jadwal… membatasi tanggal tayang dan lama tampil tiap gambar.",
+        "Atur jadwal… membatasi tanggal tayang, lama tampil tiap gambar, dan "
+        "tempat tampilnya: panel atas, layar penuh, atau keduanya.",
         DAFTAR_PUTAR,
         boleh_kosong=True,
         kelompok="Iklan Anjungan",

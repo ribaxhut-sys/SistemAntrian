@@ -205,6 +205,13 @@ def teks_jadwal(butir: daftar_putar.Butir) -> str:
     return ""
 
 
+def teks_tempat(butir: daftar_putar.Butir) -> str:
+    """Tempat tampil bila dibatasi; kosong bila keduanya (bawaan)."""
+    if butir.tampil == daftar_putar.TAMPIL_KEDUANYA:
+        return ""
+    return daftar_putar.LABEL_TAMPIL[butir.tampil]
+
+
 class _DaftarPutar(QWidget):
     """
     Berkas di folder media/kiosk dengan centang (diputar) dan urutannya.
@@ -355,6 +362,9 @@ class _DaftarPutar(QWidget):
         bagian = [nama, "video" if video else "gambar"]
         if not video and butir.detik:
             bagian.append(f"{butir.detik} dtk")
+        tempat = teks_tempat(butir)
+        if tempat:
+            bagian.append(f"hanya {tempat.lower()}")
         jadwal = teks_jadwal(butir)
         if jadwal:
             bagian.append(jadwal)
