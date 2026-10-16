@@ -294,6 +294,10 @@ itu nomor baru. Saklar **Animasi nomor menunggu**
 mati, perilaku lama (papan balik berurutan 45 ms saat halaman berganti, pop
 untuk nomor baru) dipakai.
 
+**Perataan.** Nomor menunggu mengisi dari **atas** panel: bila tidak penuh,
+ruang kosong ada di bawah (sebelumnya blok nomor di tengah vertikal dan ikut
+bergeser tiap ada nomor dipanggil). Titik halaman tetap di bagian bawah.
+
 ### Teks loket tanpa panggilan (setelah 2.4.34.1, belum dirilis)
 
 Loket yang aktif tetapi tidak sedang memanggil menampilkan **"Siap melayani"**

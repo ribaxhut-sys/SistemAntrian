@@ -3094,8 +3094,11 @@ public final class MainActivity extends Activity {
         // ubin nomor selebar nol dan daftarnya tampak kosong.
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setGravity(Gravity.CENTER_VERTICAL);
-        page.setPadding(dp(2), dp(2), dp(2), dp(2));
+        // Nomor mengisi dari ATAS: bila tidak penuh, ruang kosong ada di bawah.
+        // Nomor pertama selalu di tempat yang sama, dan saat nomor dipanggil
+        // hanya yang di bawahnya yang bergeser naik.
+        page.setGravity(Gravity.TOP);
+        page.setPadding(dp(2), dp(4), dp(2), dp(2));
         wadah.addView(page, new LinearLayout.LayoutParams(-1, 0, 1));
 
         boolean sorot = sorotAktif();
