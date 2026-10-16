@@ -5360,14 +5360,6 @@ public final class MainActivity extends Activity {
         LinearLayout isi = new LinearLayout(this);
         isi.setOrientation(LinearLayout.VERTICAL);
         isi.setPadding(dp(20), dp(4), dp(20), 0);
-        TextView petunjuk = text(
-                "Dipakai bila sumber media sambutan = Folder media di tablet ini. "
-                        + "Salin gambar/video lewat kabel USB dari komputer ke folder:\n"
-                        + folderMediaTablet().getAbsolutePath()
-                        + "\natau tekan Tambah berkas. Urutan putar mengikuti nama berkas "
-                        + "(01_..., 02_...). Video paling aman MP4 (H.264).",
-                12, MUTED, false);
-        isi.addView(petunjuk);
         List<File> berkas = daftarMediaTablet();
         if (berkas.isEmpty()) {
             TextView kosong = text("Folder masih kosong.", 14, INK, true);
