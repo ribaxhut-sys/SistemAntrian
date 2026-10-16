@@ -1347,7 +1347,15 @@ public final class MainActivity extends Activity {
                 laporkanStatusMedia();
             }
             registrationOpen = display.optBoolean("registration_open", true);
-            prioritasAktifServer = display.optBoolean("priority_enabled", false);
+            boolean prioritasBaruAktif = display.optBoolean("priority_enabled", false);
+            boolean prioritasBerubah = prioritasBaruAktif != prioritasAktifServer;
+            prioritasAktifServer = prioritasBaruAktif;
+            // Menu pertama digambar sebelum jawaban ini tiba; gambar ulang sekali
+            // agar kotak prioritas muncul (atau hilang) tanpa menunggu pemicu lain.
+            if (prioritasBerubah && categoriesLoaded && !showingConfirmation
+                    && !showingResult && !updating && !updateRequired) {
+                showCategories();
+            }
             String versi = display.optString("categories_version", "");
             if (!versi.isEmpty() && !versi.equals(versiLayanan)) {
                 // Daftar yang dimuat saat menyala sudah sesuai versi pertama.
