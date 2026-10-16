@@ -14,6 +14,7 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
@@ -3361,13 +3362,17 @@ public final class MainActivity extends Activity {
             }
             String isi = waitingQueueNumbers.get(index);
             boolean milikSaya = sorot && isi.equals(nomorSaya);
-            TextView nomor = text(nomorPrioritasMenunggu.contains(isi) ? isi + " ★" : isi,
-                    19, milikSaya ? TEKS_TOMBOL : INK, true);
+            boolean prioritasIni = nomorPrioritasMenunggu.contains(isi);
+            TextView nomor = prioritasIni ? new NomorBerbintang(this) : new TextView(this);
+            nomor.setText(isi);
+            nomor.setTextSize(19 * uiScale);
+            nomor.setTextColor(milikSaya ? TEKS_TOMBOL : INK);
             nomor.setTypeface(huruf(800));
             nomor.setFontFeatureSettings("tnum");
             nomor.setGravity(Gravity.CENTER);
             nomor.setPadding(dp(4), dp(4), dp(4), dp(4));
-            nomor.setBackground(rounded(milikSaya ? UTAMA : LEMBUT, dp(16)));
+            nomor.setBackground(rounded(milikSaya ? UTAMA
+                    : prioritasIni ? Color.rgb(254, 243, 199) : LEMBUT, dp(16)));
             nomor.setCameraDistance(kamera);
             pasangSatuBaris(nomor, 10, 20);
             baris.addView(nomor, selNomorMenunggu());
@@ -6868,6 +6873,28 @@ public final class MainActivity extends Activity {
             }
         });
         view.post(pas);
+    }
+
+    /**
+     * Nomor prioritas pada daftar menunggu: bintang kecil di pojok kiri atas
+     * ubin, digambar terpisah supaya teks nomornya tetap polos.
+     */
+    private static final class NomorBerbintang extends TextView {
+        private final Paint bintang = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        NomorBerbintang(Context context) {
+            super(context);
+            bintang.setColor(Color.rgb(217, 119, 6));
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            super.onDraw(canvas);
+            float kepadatan = getResources().getDisplayMetrics().density;
+            float besar = Math.max(getTextSize() * 0.55f, 9 * kepadatan);
+            bintang.setTextSize(besar);
+            canvas.drawText("★", 5 * kepadatan, besar + 2 * kepadatan, bintang);
+        }
     }
 
     private TextView text(String value, int size, int color, boolean bold) {

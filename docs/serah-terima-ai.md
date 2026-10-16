@@ -254,7 +254,7 @@ commit berikut di atas `main`:
   APK debug saja, belum diverifikasi di perangkat.
 
 - **Bintang prioritas** pada nomor menunggu (anjungan, layar Android, layar
-  Windows), tanpa alasan; lihat android-kiosk.md. APK debug saja.
+  Windows), tanpa alasan; kini bintang kecil di pojok kiri atas ubin + latar amber lembut (bukan lagi " ★" di belakang nomor); lihat android-kiosk.md. APK debug saja, belum diuji di perangkat.
 
 - **Panel keluar sebelum iklan muncul** dan **kotak prioritas di atas tombol
   layanan**; lihat android-kiosk.md. APK debug saja, belum diuji di perangkat.

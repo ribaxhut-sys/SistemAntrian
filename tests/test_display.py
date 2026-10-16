@@ -3549,3 +3549,19 @@ def test_papan_lebar_tetap_meminta_daftar_menunggu(
 
     assert diminta and diminta[0] > 0
     assert halaman.daftar_menunggu_tampil
+
+
+def test_label_nomor_menunggu_prioritas_tanpa_bintang_di_teks(qtbot):
+    """Bintang prioritas digambar di pojok, teks nomornya tetap polos."""
+    from app.ui.display.display_page import LabelNomorMenunggu
+
+    biasa = LabelNomorMenunggu("A-001")
+    prioritas = LabelNomorMenunggu("A-002", True)
+    for label in (biasa, prioritas):
+        qtbot.addWidget(label)
+        label.resize(160, 60)
+
+    assert prioritas.text() == "A-002"
+    assert not biasa.prioritas and prioritas.prioritas
+    # Menggambar tidak boleh gagal pada kedua jenis.
+    assert not biasa.grab().isNull() and not prioritas.grab().isNull()
