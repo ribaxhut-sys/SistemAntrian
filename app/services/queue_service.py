@@ -722,6 +722,21 @@ class QueueService:
                 )
             ]
 
+    def nomor_prioritas_menunggu_untuk_layar(self) -> list[str]:
+        """
+        Nomor menunggu hari ini yang berstatus prioritas. HANYA nomornya: alasan
+        (lansia, disabilitas, ibu hamil) tidak boleh sampai ke perangkat publik.
+        """
+        sesi = self.auth.require_permission(Permission.DISPLAY_VIEW)
+        with session_scope() as session:
+            return [
+                q.queue_number
+                for q in QueueRepository(session).list_menunggu_berurutan(
+                    sesi.branch_id, clock.today(), rasio=self.rasio_prioritas()
+                )
+                if q.prioritas
+            ]
+
     def list_today(self, *, status: tuple[QueueStatus, ...] | None = None) -> list[QueueInfo]:
         sesi = self.auth.require_permission(Permission.QUEUE_VIEW)
         with session_scope() as session:

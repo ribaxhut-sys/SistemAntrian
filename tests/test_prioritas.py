@@ -217,6 +217,9 @@ def test_layar_dan_anjungan_memakai_urutan_panggil(auth, antrian_siap):
 
     assert [q.queue_number for q in keadaan.berikutnya] == ["A-002", "A-001"]
     assert layanan.nomor_menunggu_untuk_layar() == ["A-002", "A-001"]
+    # Hanya nomornya yang diberi bintang; alasan prioritas tidak ikut keluar.
+    assert layanan.nomor_prioritas_menunggu_untuk_layar() == ["A-002"]
+    assert all(isinstance(n, str) for n in layanan.nomor_prioritas_menunggu_untuk_layar())
 
 
 # ---------------------------------------------------------------------

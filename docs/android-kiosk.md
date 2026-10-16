@@ -298,6 +298,16 @@ untuk nomor baru) dipakai.
 ruang kosong ada di bawah (sebelumnya blok nomor di tengah vertikal dan ikut
 bergeser tiap ada nomor dipanggil). Titik halaman tetap di bagian bawah.
 
+### Bintang prioritas pada nomor menunggu (setelah 2.4.34.1, belum dirilis)
+
+Nomor prioritas diberi " ★" di daftar nomor menunggu, **tanpa menyebut alasan**
+(lansia/disabilitas/ibu hamil tidak pernah dikirim ke perangkat publik).
+- Anjungan: `/v1/kiosk/display` mengirim `waiting_priority_numbers` (subset
+  `waiting_queue_numbers`); `nomorPrioritasMenunggu` masuk tanda gambar ulang.
+- Layar antrian Android: `/v1/layar/state` mengirim `next_priority` (subset `next`).
+- Layar Windows: `DisplayPage._teks_nomor_menunggu` memakai `QueueInfo.prioritas`.
+- Server: `QueueService.nomor_prioritas_menunggu_untuk_layar()`.
+
 ### Warna kilau bebas (setelah 2.4.34.1, belum dirilis)
 
 Pengaturan > warna kilau: selain 7 warna tetap ada bulatan pelangi "+" yang

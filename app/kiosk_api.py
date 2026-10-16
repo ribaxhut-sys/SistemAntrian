@@ -592,6 +592,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "sound_enabled": services.settings.get_bool("display.sound_enabled", True),
             "counters": isi_loket(state),
             "next": [q.queue_number for q in state.berikutnya],
+            # Subset "next" yang prioritas (hanya nomor; tanpa alasan).
+            "next_priority": [
+                q.queue_number for q in state.berikutnya if q.prioritas
+            ],
             "total_waiting": state.total_menunggu,
             "server_time_ms": int(time.time() * 1000),
             "timezone": TIMEZONE,
@@ -938,6 +942,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "categories_version": versi_layanan(isi_layanan()),
             "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(device_id),
             "waiting_queue_numbers": services.queue.nomor_menunggu_untuk_layar(),
+            # Nomor yang diberi tanda bintang; tanpa alasan prioritasnya.
+            "waiting_priority_numbers": (
+                services.queue.nomor_prioritas_menunggu_untuk_layar()
+            ),
             # Baris "NOMOR DI LOKET". Posisinya (otomatis/atas/bawah) dipilih
             # di server supaya semua tablet seragam; tablet sendiri yang
             # memutuskan "otomatis", karena hanya tablet yang tahu apakah

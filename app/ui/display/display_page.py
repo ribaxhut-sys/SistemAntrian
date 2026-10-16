@@ -2761,7 +2761,7 @@ class DisplayPage(QWidget):
                 continue
 
             for indeks, antrian in enumerate(potongan):
-                label = QLabel(antrian.queue_number)
+                label = QLabel(self._teks_nomor_menunggu(antrian))
                 label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 label.setMinimumSize(1, 1)
                 label.setSizePolicy(
@@ -2782,6 +2782,13 @@ class DisplayPage(QWidget):
         for kolom in range(len(self._layanan) * self.kolom_per_layanan):
             self.baris_berikutnya.setColumnStretch(kolom, 1)
 
+    @staticmethod
+    def _teks_nomor_menunggu(antrian) -> str:
+        """Nomor menunggu; prioritas diberi bintang, tanpa menyebut alasannya."""
+        if getattr(antrian, "prioritas", None):
+            return f"{antrian.queue_number} ★"
+        return antrian.queue_number
+
     def _isi_berikutnya(self, berikutnya: list) -> None:
         """Daftar gabungan, dipakai papan kios dan saat jenis layanan terlalu banyak."""
         self._kosongkan_daftar()
@@ -2799,7 +2806,7 @@ class DisplayPage(QWidget):
         kolom = -(-len(berikutnya) // baris)
 
         for indeks, antrian in enumerate(berikutnya):
-            label = QLabel(antrian.queue_number)
+            label = QLabel(self._teks_nomor_menunggu(antrian))
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setMinimumSize(1, 1)
             label.setSizePolicy(

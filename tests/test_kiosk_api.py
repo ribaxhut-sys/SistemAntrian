@@ -113,6 +113,9 @@ class _Queue:
     def nomor_menunggu_untuk_layar(self):
         return ["A-002", "A-003"]
 
+    def nomor_prioritas_menunggu_untuk_layar(self):
+        return ["A-003"]
+
     def ringkasan_tiket(self, queue_info):
         return SimpleNamespace(sisa_antrian=2)
 
@@ -300,6 +303,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "media_refresh": 0,
         "cooldown_remaining_seconds": 0,
         "waiting_queue_numbers": ["A-002", "A-003"],
+        "waiting_priority_numbers": ["A-003"],
         "counters": [
             {
                 "name": "Loket 1",

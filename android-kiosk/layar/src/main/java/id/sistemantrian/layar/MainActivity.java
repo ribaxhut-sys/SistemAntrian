@@ -719,6 +719,11 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     private void applyNext(JSONObject state) {
         JSONArray next = state.optJSONArray("next");
+        java.util.Set<String> prioritas = new java.util.HashSet<>();
+        JSONArray prioritasRows = state.optJSONArray("next_priority");
+        for (int i = 0; prioritasRows != null && i < prioritasRows.length(); i++) {
+            prioritas.add(prioritasRows.optString(i));
+        }
         int available = next == null ? 0 : next.length();
         int per = perRow();
         int wanted = (int) Math.ceil(available / (double) per);
@@ -749,6 +754,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             LinearLayout row = (LinearLayout) nextList.getChildAt(i / per);
             TextView cell = (TextView) row.getChildAt(i % per);
             String value = i < shown ? next.optString(i) : "";
+            if (prioritas.contains(value)) value = value + " ★";
             if (!value.contentEquals(cell.getText())) {
                 cell.setText(value);
                 cell.post(() -> fitText(cell, NEXT_SP, cell.getWidth(), 0));

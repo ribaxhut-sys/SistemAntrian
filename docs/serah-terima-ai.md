@@ -253,6 +253,9 @@ commit berikut di atas `main`:
 - **Warna kilau bebas** per tablet (pemilih warna + hex); lihat android-kiosk.md.
   APK debug saja, belum diverifikasi di perangkat.
 
+- **Bintang prioritas** pada nomor menunggu (anjungan, layar Android, layar
+  Windows), tanpa alasan; lihat android-kiosk.md. APK debug saja.
+
 ### 4.4b PIN pengaturan anjungan dan mode putar saja
 
 Rinci di [android-kiosk.md](android-kiosk.md) (bagian "PIN pengaturan dan

@@ -563,6 +563,8 @@ public final class MainActivity extends Activity {
     private String welcomeFallbackText = "";
     private String displayedWelcomeText = "";
     private final List<String> waitingQueueNumbers = new ArrayList<>();
+    /** Nomor menunggu yang diberi bintang prioritas (tanpa alasan). */
+    private final java.util.Set<String> nomorPrioritasMenunggu = new java.util.HashSet<>();
     private final List<Loket> loketList = new ArrayList<>();
     private LinearLayout rootLayout;
     private LinearLayout loketAtas;
@@ -1342,6 +1344,18 @@ public final class MainActivity extends Activity {
                     String nomor = waitingRows.optString(i, "").trim();
                     if (!nomor.isEmpty()) terbaru.add(nomor);
                 }
+            }
+            JSONArray prioritasRows = display.optJSONArray("waiting_priority_numbers");
+            java.util.Set<String> prioritasBaru = new java.util.HashSet<>();
+            if (prioritasRows != null) {
+                for (int i = 0; i < prioritasRows.length(); i++) {
+                    String nomor = prioritasRows.optString(i, "").trim();
+                    if (!nomor.isEmpty()) prioritasBaru.add(nomor);
+                }
+            }
+            if (!nomorPrioritasMenunggu.equals(prioritasBaru)) {
+                nomorPrioritasMenunggu.clear();
+                nomorPrioritasMenunggu.addAll(prioritasBaru);
             }
             if (!waitingQueueNumbers.equals(terbaru)) {
                 waitingQueueNumbers.clear();
@@ -3153,7 +3167,8 @@ public final class MainActivity extends Activity {
         int halaman = jumlahHalamanMenunggu();
         waitingPage = Math.min(waitingPage, halaman - 1);
         boolean halamanBerganti = waitingPage != halamanMenungguTerakhir;
-        String tanda = TextUtils.join(",", waitingQueueNumbers) + "|" + waitingPage
+        String tanda = TextUtils.join(",", waitingQueueNumbers) + "|"
+                + TextUtils.join(",", nomorPrioritasMenunggu) + "|" + waitingPage
                 + "|" + barisMenunggu + "|" + sorotAktif() + "|" + temaAktif;
         if (tanda.equals(tandaMenunggu) && resultSlot.getChildCount() > 0) return;
 
@@ -3231,7 +3246,8 @@ public final class MainActivity extends Activity {
             }
             String isi = waitingQueueNumbers.get(index);
             boolean milikSaya = sorot && isi.equals(nomorSaya);
-            TextView nomor = text(isi, 19, milikSaya ? TEKS_TOMBOL : INK, true);
+            TextView nomor = text(nomorPrioritasMenunggu.contains(isi) ? isi + " ★" : isi,
+                    19, milikSaya ? TEKS_TOMBOL : INK, true);
             nomor.setTypeface(huruf(800));
             nomor.setFontFeatureSettings("tnum");
             nomor.setGravity(Gravity.CENTER);
