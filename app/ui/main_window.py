@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import subprocess
 import warnings
 from dataclasses import dataclass
 
@@ -41,7 +42,7 @@ from app.services.note_service import NoteService
 from app.services.survey_service import SurveyService
 from app.services.ticket_service import TicketService, buat_printer, mode_pencetak
 from app.services.user_service import UserService
-from app.ui.common import judul, keterangan, konfirmasi, tombol
+from app.ui.common import judul, keterangan, konfirmasi, tampilkan_error, tombol
 from app.ui.dashboard.dashboard_page import DashboardPage
 from app.ui.dashboard.petugas_page import (
     DashboardPendaftaranPage,
@@ -53,6 +54,7 @@ from app.ui.settings.dialogs import LABEL_PERAN
 from app.ui.dashboard.report_page import LaporanPage
 from app.ui.indikator_anjungan import PitaAnjungan
 from app.ui.pita_database import PitaDatabase
+from app.ui.pita_pembaruan import PitaPembaruan
 from app.ui.display.display_page import DisplayPage
 from app.ui.notes.note_page import NotePage
 from app.ui.queue.service_page import ServicePage
@@ -99,6 +101,11 @@ SELANG_TANDA_HADIR_MS = 30_000
 SELANG_PERIKSA_ANJUNGAN_MS = 30_000
 #: Beri jendela waktu selesai tampil sebelum pemeriksaan lengkap pertama.
 TUNDA_PERIKSA_ANJUNGAN_AWAL_MS = 1_500
+
+# Pembaruan bukan keadaan darurat. Sekali saat aplikasi mulai dan dua kali
+# per jam cukup untuk memberi tahu petugas tanpa membebani API server.
+TUNDA_PERIKSA_PEMBARUAN_AWAL_MS = 3_000
+SELANG_PERIKSA_PEMBARUAN_MS = 30 * 60 * 1_000
 
 #: Judul menu halaman Layanan Anjungan; juga dipakai pita peringatan untuk
 #: membuka halaman itu.
@@ -155,6 +162,31 @@ class _PemeriksaAnjungan(QThread):
             self.selesai.emit(periksa_status_anjungan())
         except Exception:  # noqa: BLE001 - indikator tidak boleh menjatuhkan jendela
             logger.warning("Pemeriksaan anjungan gagal", exc_info=True)
+
+
+class _PemeriksaPembaruan(QThread):
+    selesai = Signal(object)
+
+    def run(self) -> None:
+        from app.services.pembaruan_windows import periksa_pembaruan
+
+        self.selesai.emit(periksa_pembaruan())
+
+
+class _PengunduhPembaruan(QThread):
+    selesai = Signal(object, object)
+
+    def __init__(self, info, parent=None) -> None:
+        super().__init__(parent)
+        self.info = info
+
+    def run(self) -> None:
+        from app.services.pembaruan_windows import unduh_pembaruan
+
+        try:
+            self.selesai.emit(unduh_pembaruan(self.info), None)
+        except Exception as exc:  # noqa: BLE001 - diteruskan ke batas UI
+            self.selesai.emit(None, exc)
 
 
 @dataclass(frozen=True)
@@ -515,6 +547,8 @@ class MainWindow(QMainWindow):
                 self._jadwalkan_periksa_database, untuk_admin=self._info_teknis
             )
             susunan_utama.addWidget(self.pita_database)
+            self.pita_pembaruan = PitaPembaruan(self._unduh_dan_perbarui)
+            susunan_utama.addWidget(self.pita_pembaruan)
 
         self.halaman = QStackedWidget()
         susunan_utama.addWidget(self.halaman, stretch=1)
@@ -527,6 +561,7 @@ class MainWindow(QMainWindow):
         # anjungan maupun televisi.
         if not self.mode_kios:
             self._pasang_bilah_database()
+            self._pasang_pemeriksa_pembaruan()
 
     def _bangun_kepala(self) -> QWidget:
         kepala = QFrame()
@@ -970,6 +1005,85 @@ class MainWindow(QMainWindow):
         bingkai.moveTop(max(bingkai.top(), area.top()))
         self.move(bingkai.topLeft())
 
+    def _pasang_pemeriksa_pembaruan(self) -> None:
+        self._pemeriksa_pembaruan: _PemeriksaPembaruan | None = None
+        self._pengunduh_pembaruan: _PengunduhPembaruan | None = None
+        self._sedang_memeriksa_pembaruan = False
+        self._pewaktu_pembaruan_awal = QTimer(self)
+        self._pewaktu_pembaruan_awal.setSingleShot(True)
+        self._pewaktu_pembaruan_awal.setInterval(TUNDA_PERIKSA_PEMBARUAN_AWAL_MS)
+        self._pewaktu_pembaruan_awal.timeout.connect(
+            self._jadwalkan_periksa_pembaruan
+        )
+        self._pewaktu_pembaruan_awal.start()
+        self._pewaktu_pembaruan = QTimer(self)
+        self._pewaktu_pembaruan.setInterval(SELANG_PERIKSA_PEMBARUAN_MS)
+        self._pewaktu_pembaruan.timeout.connect(self._jadwalkan_periksa_pembaruan)
+        self._pewaktu_pembaruan.start()
+
+    def _jadwalkan_periksa_pembaruan(self) -> None:
+        if self._ditutup or self._sedang_memeriksa_pembaruan:
+            return
+        self._sedang_memeriksa_pembaruan = True
+        pemeriksa = _PemeriksaPembaruan(self)
+        pemeriksa.selesai.connect(self.pita_pembaruan.tampilkan)
+        pemeriksa.finished.connect(self._selesai_periksa_pembaruan)
+        self._pemeriksa_pembaruan = pemeriksa
+        pemeriksa.start()
+
+    def _selesai_periksa_pembaruan(self) -> None:
+        self._sedang_memeriksa_pembaruan = False
+        pemeriksa = self._pemeriksa_pembaruan
+        self._pemeriksa_pembaruan = None
+        if pemeriksa is not None:
+            pemeriksa.deleteLater()
+
+    def _unduh_dan_perbarui(self) -> None:
+        info = self.pita_pembaruan.info
+        if info is None or self._pengunduh_pembaruan is not None:
+            return
+        if not konfirmasi(
+            self,
+            f"Unduh pembaruan versi {info.versi} dari server dan mulai pemasangan?\n\n"
+            "Selesaikan pelayanan yang sedang berjalan terlebih dahulu. "
+            "Saat pemasangan dimulai, aplikasi akan ditutup otomatis; data "
+            "antrian dan pengaturan tidak berubah.",
+            "Perbarui Sistem Antrian CRO",
+        ):
+            return
+        self.pita_pembaruan.sedang_mengunduh()
+        pengunduh = _PengunduhPembaruan(info, self)
+        pengunduh.selesai.connect(self._pembaruan_selesai_diunduh)
+        pengunduh.finished.connect(self._selesai_mengunduh_pembaruan)
+        self._pengunduh_pembaruan = pengunduh
+        pengunduh.start()
+
+    def _pembaruan_selesai_diunduh(self, path, exc) -> None:
+        if exc is not None:
+            self.pita_pembaruan.tampilkan(self.pita_pembaruan.info)
+            tampilkan_error(self, exc, "Pembaruan Gagal")
+            return
+        try:
+            subprocess.Popen([str(path)], close_fds=True)  # noqa: S603
+        except OSError as gagal:
+            from app.services.pembaruan_windows import PembaruanError
+
+            self.pita_pembaruan.tampilkan(self.pita_pembaruan.info)
+            tampilkan_error(
+                self,
+                PembaruanError(
+                    "Installer sudah diunduh, tetapi belum dapat dibuka.",
+                    detail=type(gagal).__name__,
+                ),
+                "Pembaruan Gagal",
+            )
+
+    def _selesai_mengunduh_pembaruan(self) -> None:
+        pengunduh = self._pengunduh_pembaruan
+        self._pengunduh_pembaruan = None
+        if pengunduh is not None:
+            pengunduh.deleteLater()
+
     def _ganti_halaman(self, baris: int) -> None:
         if baris >= 0:
             self.halaman.setCurrentIndex(baris)
@@ -1335,7 +1449,12 @@ class MainWindow(QMainWindow):
             hentikan = getattr(halaman, "hentikan", None)
             if callable(hentikan):
                 hentikan()
-        for nama in ("_pewaktu_anjungan_awal", "_pewaktu_api"):
+        for nama in (
+            "_pewaktu_anjungan_awal",
+            "_pewaktu_api",
+            "_pewaktu_pembaruan_awal",
+            "_pewaktu_pembaruan",
+        ):
             pewaktu_api = getattr(self, nama, None)
             if pewaktu_api is not None:
                 pewaktu_api.stop()
@@ -1343,7 +1462,12 @@ class MainWindow(QMainWindow):
         if pewaktu is not None:
             pewaktu.stop()
         self._hentikan_tanda_hadir()
-        for nama, batas_ms in (("_pemeriksa_db", 400), ("_pemeriksa_anjungan", 3000)):
+        for nama, batas_ms in (
+            ("_pemeriksa_db", 400),
+            ("_pemeriksa_anjungan", 3000),
+            ("_pemeriksa_pembaruan", 4500),
+            ("_pengunduh_pembaruan", 500),
+        ):
             pemeriksa = getattr(self, nama, None)
             if pemeriksa is None:
                 continue

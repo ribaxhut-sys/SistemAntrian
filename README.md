@@ -916,10 +916,22 @@ Pasang Inno Setup 6, lalu dari PowerShell di folder proyek jalankan:
 ```
 
 Skrip menjalankan seluruh test, membangun dan menguji aplikasi di folder
-sementara, lalu menghasilkan `dist\AntrianCRO-Setup-1.0.8.exe`. Installer
+sementara, lalu menghasilkan `dist\AntrianCRO-Setup-1.0.9.exe`. Installer
 dipasang untuk pengguna saat ini ke `%LOCALAPPDATA%\Programs\AntrianCRO`,
 membuat pintasan Start Menu, dan menawarkan pintasan Desktop. Data aplikasi
 tidak dihapus saat aplikasi di-uninstall.
+
+Setiap pemasangan juga menyimpan salinan installer di folder `pembaruan`
+sebelah aplikasi. Pada komputer server, API membagikan installer itu kepada
+PC loket. Mulai versi 1.0.9, PC loket memeriksa versi saat aplikasi dibuka dan
+setiap 30 menit. Bila server mempunyai versi lebih baru, muncul pita
+**Unduh & Perbarui**. Unduhan diperiksa ukuran dan SHA-256 sebelum installer
+dibuka; pemasangan tidak pernah dimulai diam-diam saat petugas melayani.
+
+Versi 1.0.8 dan yang lebih lama belum mempunyai pemeriksa tersebut, sehingga
+harus dinaikkan ke 1.0.9 secara manual satu kali. Sesudah itu, pasang rilis
+baru di server terlebih dahulu; PC loket akan menemukannya sendiri selama
+API server pada port 8765 terjangkau.
 
 Sebelum diserahkan ke pengguna, kerjakan daftar periksa pada
 [docs/acceptance-test.md](docs/acceptance-test.md) di komputer tujuan.
