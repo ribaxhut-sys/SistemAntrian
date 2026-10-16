@@ -339,9 +339,19 @@ public final class MainActivity extends Activity {
 
     /** Dialog mengikuti terang/gelap tema, supaya judul dan tombolnya terbaca. */
     private AlertDialog.Builder pembuatDialog() {
+        // Setiap dialog yang tampil lewat sini ikut timer diam bersama
+        // (lihat pasangAutoTutup), jadi tidak ada yang tertinggal terbuka.
         return new AlertDialog.Builder(this, temaWarna != null && temaWarna.gelap
                 ? android.R.style.Theme_Material_Dialog_Alert
-                : android.R.style.Theme_Material_Light_Dialog_Alert);
+                : android.R.style.Theme_Material_Light_Dialog_Alert) {
+            @Override
+            public AlertDialog show() {
+                AlertDialog dialog = create();
+                dialog.show();
+                pasangAutoTutup(dialog);
+                return dialog;
+            }
+        };
     }
 
     /** Panah tebal (› atau ‹) untuk kartu kelompok dan Kembali. */
@@ -675,8 +685,10 @@ public final class MainActivity extends Activity {
     private static final String TAMPIL_LOKAL = "tampil_lokal";
     /** Gagal terhubung selama ini membuat tablet masuk mode putar saja. */
     private static final long BATAS_PUTAR_SAJA_MS = 30_000L;
-    /** Pengaturan menutup sendiri bila tidak disentuh selama ini. */
-    private static final long BATAS_DIAM_PENGATURAN_MS = 120_000L;
+    /** Seluruh dialog pengaturan menutup sendiri bila tidak disentuh selama ini. */
+    private static final long BATAS_DIAM_PENGATURAN_MS = 60_000L;
+    /** Peringatan "akan menutup" pada sekian milidetik terakhir. */
+    private static final long PERINGATAN_DIAM_PENGATURAN_MS = 10_000L;
     /** Sentuh-tahan di pojok kiri bawah selama ini membuka jalan pulih. */
     private static final long TAHAN_PULIH_MS = 5_000L;
     /** Waktu gagal terhubung yang pertama; 0 = tersambung. */
@@ -4707,14 +4719,70 @@ public final class MainActivity extends Activity {
         return hasil;
     }
 
-    /** Pengaturan menutup sendiri bila tidak disentuh, lalu kembali ke menu. */
-    private void pasangAutoTutup(AlertDialog dialog) {
-        Runnable[] tutup = new Runnable[1];
-        tutup[0] = () -> {
+    /**
+     * Seluruh dialog pengaturan berbagi SATU timer diam: sentuhan di dialog
+     * mana pun menyetelnya ulang, sepuluh detik terakhir diberi peringatan, dan
+     * saat habis SEMUA dialog ditutup sekaligus. Menutup juga saat aplikasi
+     * masuk latar. Membuka pengaturan lagi meminta PIN lagi.
+     */
+    private final List<AlertDialog> dialogPengaturan = new ArrayList<>();
+    private long sentuhPengaturanTerakhir;
+    private Toast peringatanDiam;
+
+    private final Runnable periksaDiamPengaturan = new Runnable() {
+        @Override
+        public void run() {
+            if (dialogPengaturan.isEmpty()) return;
+            long diam = System.currentTimeMillis() - sentuhPengaturanTerakhir;
+            if (diam >= BATAS_DIAM_PENGATURAN_MS) {
+                tutupSemuaPengaturan();
+                return;
+            }
+            long sisa = BATAS_DIAM_PENGATURAN_MS - diam;
+            if (sisa <= PERINGATAN_DIAM_PENGATURAN_MS) {
+                if (peringatanDiam != null) peringatanDiam.cancel();
+                peringatanDiam = Toast.makeText(MainActivity.this,
+                        "Pengaturan menutup dalam " + (sisa / 1000L + 1L)
+                                + " detik. Sentuh layar untuk melanjutkan.",
+                        Toast.LENGTH_SHORT);
+                peringatanDiam.show();
+            }
+            handler.postDelayed(this, 1000L);
+        }
+    };
+
+    private void tutupSemuaPengaturan() {
+        handler.removeCallbacks(periksaDiamPengaturan);
+        if (peringatanDiam != null) {
+            peringatanDiam.cancel();
+            peringatanDiam = null;
+        }
+        List<AlertDialog> salinan = new ArrayList<>(dialogPengaturan);
+        dialogPengaturan.clear();
+        for (AlertDialog dialog : salinan) {
             if (dialog.isShowing()) dialog.dismiss();
-        };
-        handler.postDelayed(tutup[0], BATAS_DIAM_PENGATURAN_MS);
-        dialog.setOnDismissListener(d -> handler.removeCallbacks(tutup[0]));
+        }
+    }
+
+    private void pasangAutoTutup(AlertDialog dialog) {
+        if (dialogPengaturan.contains(dialog)) return;  // sudah terpasang
+        sentuhPengaturanTerakhir = System.currentTimeMillis();
+        boolean pertama = dialogPengaturan.isEmpty();
+        dialogPengaturan.add(dialog);
+        if (pertama) {
+            handler.removeCallbacks(periksaDiamPengaturan);
+            handler.postDelayed(periksaDiamPengaturan, 1000L);
+        }
+        dialog.setOnDismissListener(d -> {
+            dialogPengaturan.remove(dialog);
+            if (dialogPengaturan.isEmpty()) {
+                handler.removeCallbacks(periksaDiamPengaturan);
+                if (peringatanDiam != null) {
+                    peringatanDiam.cancel();
+                    peringatanDiam = null;
+                }
+            }
+        });
         android.view.Window jendela = dialog.getWindow();
         if (jendela == null) return;
         android.view.Window.Callback asli = jendela.getCallback();
@@ -4725,8 +4793,7 @@ public final class MainActivity extends Activity {
                             String nama = metode.getName();
                             if ("dispatchTouchEvent".equals(nama)
                                     || "dispatchKeyEvent".equals(nama)) {
-                                handler.removeCallbacks(tutup[0]);
-                                handler.postDelayed(tutup[0], BATAS_DIAM_PENGATURAN_MS);
+                                sentuhPengaturanTerakhir = System.currentTimeMillis();
                             }
                             try {
                                 return metode.invoke(asli, argumen);
@@ -4734,6 +4801,13 @@ public final class MainActivity extends Activity {
                                 throw e.getCause();
                             }
                         }));
+    }
+
+    @Override
+    protected void onStop() {
+        // Layar mati atau tombol Home: pengaturan tidak boleh tertinggal terbuka.
+        tutupSemuaPengaturan();
+        super.onStop();
     }
 
     // --- mode putar saja ----------------------------------------------------
