@@ -75,6 +75,7 @@ def app_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ANTRIAN_DB_PATH", str(tmp_path / "queue.db"))
     monkeypatch.setenv("ANTRIAN_BACKUP_DIR", str(tmp_path / "backup"))
     monkeypatch.setenv("ANTRIAN_LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("ANTRIAN_TAMPILAN_PATH", str(tmp_path / "tampilan.json"))
 
     config_module.reset_config()
     database_module.dispose_engine()
@@ -103,6 +104,7 @@ def env_mesin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     mengharapkan "mesin tidak berpendapat" gagal hanya di komputer itu.
     """
     monkeypatch.setenv("ANTRIAN_PERAN_PATH", str(tmp_path / "peran.json"))
+    monkeypatch.setenv("ANTRIAN_TAMPILAN_PATH", str(tmp_path / "tampilan.json"))
 
     def setel(**nilai: str | None):
         for kunci, isi in nilai.items():

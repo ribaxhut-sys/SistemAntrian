@@ -79,3 +79,4 @@ config.local.*
 Thumbs.db
 desktop.ini
 Desktop.ini
+data/tampilan.json

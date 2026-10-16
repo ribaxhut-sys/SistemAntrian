@@ -254,11 +254,14 @@ def _jalankan_ui(
     from app.ui.login.mode_dialog import LAYAR_ANTRIAN
     from app.ui.main_window import MainWindow
     from app.ui.style import STYLESHEET
+    from app.ui.tema_petugas import baca_tema, terapkan_tema
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     pasang_ikon(app)
     app.setStyleSheet(STYLESHEET)
+    # Tema pilihan petugas di komputer ini (tab Tampilan).
+    terapkan_tema(app, baca_tema())
 
     # Diinduk pada `app`, bukan pada jendela: jendela dibuka dan ditutup
     # berkali-kali oleh loop di bawah — setiap logout membuat yang baru —

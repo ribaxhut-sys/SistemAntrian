@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from app.core import clock
 from app.models import QueueStatus
 from app.services.auth_service import AuthService
+from app.services.dashboard_service import DashboardService
 from app.services.master_data_service import MasterDataService
 from app.services.note_service import NoteService
 from app.services.queue_service import QueueInfo, QueueService
@@ -40,6 +41,7 @@ from app.ui.common import (
 )
 from app.ui.efek import pasang_efek
 from app.ui.queue.note_panel import NotePanel
+from app.ui.queue.kartu_berikutnya import KartuBerikutnya
 from app.ui.queue.papan_tunggu import PapanTunggu
 from app.ui.queue.pelapor_form import PelaporForm
 from app.ui.style import (
@@ -268,9 +270,16 @@ class ServicePage(QWidget):
         susunan.addLayout(self._berlabel("JENIS LAYANAN", self.pilih_kategori))
 
         self.tombol_istirahat = tombol("Mulai Istirahat")
-        self.tombol_istirahat.setMinimumHeight(40)
+        # Padding bawaan tombol (9 px) membuatnya 42 px, dua piksel lebih
+        # tinggi daripada kotak pilihan di sebelahnya.
+        self.tombol_istirahat.setStyleSheet(
+            "padding-top: 8px; padding-bottom: 8px;"
+        )
         self.tombol_istirahat.clicked.connect(self.alihkan_istirahat)
-        susunan.addLayout(self._berlabel("", self.tombol_istirahat))
+        # Keterangan kosong (spasi tak terputus) menyamakan tinggi kolom ini
+        # dengan kolom LOKET dan JENIS LAYANAN, sehingga tombol sejajar
+        # dengan kotak pilihannya, bukan dengan keterangannya.
+        susunan.addLayout(self._berlabel(" ", self.tombol_istirahat))
 
         _beri_bayangan(kepala)
         return kepala
@@ -305,9 +314,11 @@ class ServicePage(QWidget):
 
         # Papan tunggu mengisi sisa tinggi kolom kiri: apa yang dilihat
         # pengunjung di layar antrian, tanpa berpindah tab.
-        # (Papan tunggu pindah ke tab Menunggu Dilayani di panel kanan:
-        # di sana ada sisa tinggi, di kolom ini tidak.)
-        kolom.addStretch(1)
+        # (Papan tunggu pindah ke tab Menunggu Dilayani di panel kanan.)
+        # Kartu ini hanya memakai sisa tinggi kolom dan tidak tampak bila
+        # sisanya terlalu kecil, jadi tidak pernah membuat halaman bergulir.
+        self.kartu_berikutnya = KartuBerikutnya(TUNGGU_LAMA_MENIT)
+        kolom.addWidget(self.kartu_berikutnya, stretch=1)
         # Baris survey tidak lagi di sini: ia pindah ke bawah panel kanan,
         # yang punya sisa tinggi, supaya kolom kerja muat tanpa gulir.
         self._baris_survey = self._bangun_baris_survey()
@@ -594,6 +605,7 @@ class ServicePage(QWidget):
         # Klik kartu layanan menyaring daftar nomor di bawahnya.
         self.papan_tunggu.layananDipilih.connect(self._saring_menunggu)
         self._menunggu_penuh: list[QueueInfo] = []
+        self._sedang_segar = False
         susunan.addWidget(self.papan_tunggu)
 
         self.tabel = QTableWidget(0, 4)
@@ -991,7 +1003,18 @@ class ServicePage(QWidget):
         menunggu = self.queue.list_waiting()
         dilewati = self.queue.list_skipped()
         kategori = self.master.list_categories(only_active=True, only_leaf=True)
-        return diminta, loket_id, loket, antrian, menunggu, dilewati, kategori
+        # Ringkasan kerja hari ini untuk kartu "Berikutnya & hari ini".
+        # Kegagalannya tidak boleh menggagalkan penyegaran pelayanan.
+        ringkasan = None
+        if self.auth is not None:
+            try:
+                ringkasan = DashboardService(self.auth).ringkasan_petugas()
+            except Exception:  # noqa: BLE001 - hanya hiasan
+                ringkasan = None
+        return (
+            diminta, loket_id, loket, antrian, menunggu, dilewati, kategori,
+            ringkasan,
+        )
 
     def _mulai_muat_latar(self) -> None:
         if self.loket_id is None and self.auth is None:
@@ -1037,7 +1060,9 @@ class ServicePage(QWidget):
         self._set_sibuk(self._pekerja_aksi is not None)
 
     def _terapkan_snapshot(self, snapshot) -> None:
-        _, loket_id, loket, antrian, menunggu, dilewati, kategori = snapshot
+        _, loket_id, loket, antrian, menunggu, dilewati, kategori, ringkasan = (
+            snapshot
+        )
         if loket_id != self.loket_id:
             self.pilih_loket.blockSignals(True)
             indeks = self.pilih_loket.findData(loket_id)
@@ -1069,8 +1094,17 @@ class ServicePage(QWidget):
         self._tampilkan_antrian()
         # Papan lebih dulu: ia mengembalikan pilihan ke "Semua" bila
         # layanan yang dipilih sudah tidak punya antrian.
-        self.papan_tunggu.setel(menunggu, self.loket_kategori, clock.now())
+        # Tabel digambar sekali di bawah; sinyal pilihan yang dikembalikan
+        # papan selama setel() tidak perlu menggambarnya dengan data lama.
+        self._sedang_segar = True
+        try:
+            self.papan_tunggu.setel(menunggu, self.loket_kategori, clock.now())
+        finally:
+            self._sedang_segar = False
         self._isi_tabel(menunggu)
+        self.kartu_berikutnya.setel(
+            menunggu, self.loket_kategori, clock.now(), ringkasan
+        )
         self._isi_tabel_dilewati(dilewati)
 
     def _tandai_gagal_sinkron(self) -> None:
@@ -1475,6 +1509,8 @@ class ServicePage(QWidget):
 
     def _saring_menunggu(self, _kategori_id=None) -> None:
         """Pilihan kartu berubah: gambar ulang daftar dari data terakhir."""
+        if self._sedang_segar:
+            return
         self._isi_tabel(self._menunggu_penuh)
 
     def _isi_tabel_dilewati(self, dilewati: list[QueueInfo]) -> None:
