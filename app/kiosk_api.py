@@ -59,6 +59,7 @@ from app.services.ticket_service import (
     tata_letak_tiket_anjungan,
 )
 
+_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".3gp"}
 _MEDIA_EXTENSIONS = {
     ".png",
     ".jpg",
@@ -139,6 +140,14 @@ class MediaReportItem(BaseModel):
     error: str = Field(default="", max_length=500)
     #: Percobaan terakhir berkas ini di tablet gagal.
     last_failed: bool = False
+
+
+class MediaStatus(BaseModel):
+    """Status salinan media di tablet: tersalin dari total berkas."""
+
+    total: int = Field(ge=0, le=10_000)
+    copied: int = Field(ge=0, le=10_000)
+    bytes: int = Field(default=0, ge=0)
 
 
 class MediaReport(BaseModel):
@@ -380,6 +389,32 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             }
             for loket in state.loket
         ]
+
+    def permintaan_segarkan(device_id: str) -> int:
+        if perangkat is None or not device_id:
+            return 0
+        try:
+            return int(perangkat.permintaan_segarkan_media(device_id))
+        except Exception:
+            return 0
+
+    def pustaka_media() -> list[Path]:
+        """SEMUA gambar/video di folder media server, bukan hanya daftar putar."""
+        folder = (base_dir() / "media" / "kiosk").resolve()
+        if not folder.is_dir():
+            return []
+        hasil = []
+        for item in sorted(folder.iterdir(), key=lambda item: item.name.lower()):
+            if not item.is_file() or item.name.startswith("."):
+                continue
+            if item.suffix.lower() not in _MEDIA_EXTENSIONS:
+                continue
+            try:
+                item.resolve().relative_to(folder)
+            except ValueError:
+                continue
+            hasil.append(item.resolve())
+        return hasil
 
     def welcome_media_paths() -> list[Path]:
         kind = services.settings.get("kiosk.welcome_kind", "teks")
@@ -683,6 +718,23 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 logger.warning("Status printer %s gagal dicatat", device_id, exc_info=True)
         return {"status": "ok"}
 
+    @app.post("/v1/kiosk/media-status")
+    def media_status(
+        laporan: MediaStatus,
+        device_id: str = Depends(require_token),  # noqa: B008
+    ):
+        """Berapa berkas daftar putar yang sudah tersalin utuh di tablet."""
+        if perangkat is not None and device_id:
+            try:
+                perangkat.catat_media(
+                    device_id, laporan.total, laporan.copied, laporan.bytes
+                )
+            except Exception:
+                logger.warning(
+                    "Status media %s gagal dicatat", device_id, exc_info=True
+                )
+        return {"status": "ok"}
+
     @app.post("/v1/kiosk/media-report")
     def media_report(
         report: MediaReport,
@@ -789,6 +841,9 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 "kiosk.iklan_layar_penuh_detik", 60
             ),
             "registration_open": services.queue.pendaftaran_dibuka(),
+            # Berubah bila admin menekan "Segarkan media" untuk tablet ini;
+            # tablet menyegarkan salinannya segera bila nilainya baru.
+            "media_refresh": permintaan_segarkan(device_id),
             # Tablet menampilkan kotak prioritas hanya bila true.
             "priority_enabled": services.settings.get_bool(
                 "kiosk.prioritas_aktif", True
@@ -912,6 +967,44 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Media sambutan tidak ditemukan.",
+            )
+        media_type = mimetypes.guess_type(media.name)[0] or "application/octet-stream"
+        return FileResponse(media, media_type=media_type)
+
+    @app.get("/v1/kiosk/media-library", dependencies=[Depends(require_token)])
+    def media_library():
+        """
+        Semua berkas media di server beserta ukuran dan waktu ubahnya, untuk
+        "Salin dari server" di tablet. Berbeda dengan daftar putar: yang
+        tidak dicentang pun terdaftar.
+        """
+        return [
+            {
+                "name": item.name,
+                "size": item.stat().st_size,
+                "modified_ms": int(item.stat().st_mtime * 1000),
+                "video": item.suffix.lower() in _VIDEO_EXTENSIONS,
+            }
+            for item in pustaka_media()
+        ]
+
+    @app.get(
+        "/v1/kiosk/media-library/{filename}",
+        dependencies=[Depends(require_token)],
+        response_class=FileResponse,
+    )
+    def media_library_file(filename: str):
+        """Satu berkas dari pustaka media server (untuk disalin ke tablet)."""
+        if not filename or filename != Path(filename).name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Media tidak ditemukan.",
+            )
+        media = next((item for item in pustaka_media() if item.name == filename), None)
+        if media is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Media tidak ditemukan.",
             )
         media_type = mimetypes.guess_type(media.name)[0] or "application/octet-stream"
         return FileResponse(media, media_type=media_type)

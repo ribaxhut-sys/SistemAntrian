@@ -73,6 +73,28 @@ class PerangkatInfo:
     printer_ok: bool | None
     printer_pesan: str
     printer_waktu: datetime | None
+    media_total: int | None = None
+    media_tersalin: int | None = None
+    media_byte: int | None = None
+    media_waktu: datetime | None = None
+
+    @property
+    def teks_media(self) -> str:
+        """Ringkasan salinan media untuk daftar perangkat; "" bila belum ada."""
+        if self.media_total is None or self.media_tersalin is None:
+            return ""
+        ukuran = ""
+        if self.media_byte:
+            ukuran = f" · {self.media_byte / 1_048_576:.0f} MB"
+        return f"{self.media_tersalin} dari {self.media_total} tersalin{ukuran}"
+
+    @property
+    def media_lengkap(self) -> bool:
+        return (
+            self.media_total is not None
+            and self.media_tersalin is not None
+            and self.media_tersalin >= self.media_total
+        )
 
     @property
     def label_jenis(self) -> str:
@@ -103,6 +125,10 @@ def _info(baris: KioskDevice) -> PerangkatInfo:
         printer_ok=baris.printer_ok,
         printer_pesan=baris.printer_pesan,
         printer_waktu=baris.printer_waktu,
+        media_total=baris.media_total,
+        media_tersalin=baris.media_tersalin,
+        media_byte=baris.media_byte,
+        media_waktu=baris.media_waktu,
     )
 
 
@@ -234,6 +260,31 @@ def catat_printer(device_id: str, ok: bool, pesan: str = "") -> None:
         baris.printer_waktu = clock.now()
 
 
+def catat_media(device_id: str, total: int, tersalin: int, byte: int = 0) -> None:
+    """Status salinan media dari tablet (berkas tersalin dari total)."""
+    with session_scope() as session:
+        baris = session.scalar(sa.select(KioskDevice).where(KioskDevice.device_id == device_id))
+        if baris is None:
+            return
+        baris.media_total = max(0, int(total))
+        baris.media_tersalin = max(0, min(int(tersalin), baris.media_total))
+        baris.media_byte = max(0, int(byte))
+        baris.media_waktu = clock.now()
+
+
+def permintaan_segarkan_media(device_id: str) -> int:
+    """
+    Penanda permintaan "segarkan media sekarang" untuk tablet ini, dalam
+    milidetik sejak epoch; 0 bila belum pernah diminta. Tablet menyegarkan
+    salinannya bila nilainya berbeda dari yang terakhir ia tangani.
+    """
+    with session_scope() as session:
+        baris = session.scalar(sa.select(KioskDevice).where(KioskDevice.device_id == device_id))
+        if baris is None or baris.media_segarkan is None:
+            return 0
+        return int(baris.media_segarkan.timestamp() * 1000)
+
+
 def pasangkan(kode: str, device_id: str, nama: str, jenis: str) -> str:
     """
     Tukar kode pasang yang masih berlaku dengan token khusus perangkat ini.
@@ -363,6 +414,17 @@ class PerangkatService:
             hasil,
             key=lambda p: (p.dicabut, -(p.terakhir_terlihat or datetime.min).timestamp()),
         )
+
+    def segarkan_media(self, perangkat_id: int) -> None:
+        """Minta satu anjungan menyegarkan salinan medianya sekarang."""
+        self.auth.require_permission(Permission.CONFIG_MANAGE)
+        with session_scope() as session:
+            baris = session.get(KioskDevice, perangkat_id)
+            if baris is None:
+                raise NotFoundError("Perangkat tidak ditemukan.")
+            if baris.dicabut_pada is not None:
+                raise BusinessRuleError("Perangkat ini sudah dicabut.")
+            baris.media_segarkan = clock.now()
 
     def buat_kode(self) -> KodePasang:
         sesi = self.auth.require_permission(Permission.CONFIG_MANAGE)

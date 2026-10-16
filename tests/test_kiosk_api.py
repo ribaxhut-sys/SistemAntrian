@@ -282,6 +282,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "fullscreen_ad_idle_seconds": 60,
         "registration_open": True,
         "priority_enabled": True,
+        "media_refresh": 0,
         "cooldown_remaining_seconds": 0,
         "waiting_queue_numbers": ["A-002", "A-003"],
         "counters": [
@@ -717,3 +718,53 @@ def test_centang_prioritas_diteruskan_ke_service():
     )
     assert prioritas.status_code == 200
     assert services.queue.prioritas_mandiri_terakhir is True
+
+
+def test_media_status_diterima_tanpa_mengganggu_tablet():
+    from app.kiosk_api import create_app
+
+    client = TestClient(create_app(TOKEN, _Services()))
+    headers = {"Authorization": f"Bearer {TOKEN}", **VERSI_APK}
+
+    ok = client.post(
+        "/v1/kiosk/media-status",
+        headers=headers,
+        json={"total": 3, "copied": 2, "bytes": 1234},
+    )
+    salah = client.post(
+        "/v1/kiosk/media-status", headers=headers, json={"total": -1, "copied": 0}
+    )
+
+    assert ok.status_code == 200 and ok.json() == {"status": "ok"}
+    assert salah.status_code == 422
+
+
+def test_pustaka_media_memuat_semua_berkas_bukan_hanya_daftar_putar(
+    tmp_path, monkeypatch
+):
+    from app.kiosk_api import create_app
+
+    monkeypatch.setattr("app.kiosk_api.base_dir", lambda: tmp_path)
+    folder = tmp_path / "media" / "kiosk"
+    folder.mkdir(parents=True)
+    (folder / "satu.mp4").write_bytes(b"x" * 10)
+    (folder / "dua.jpg").write_bytes(b"y" * 5)
+    (folder / "catatan.txt").write_text("bukan media")
+    client = TestClient(create_app(TOKEN, _Services()))
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+
+    daftar = client.get("/v1/kiosk/media-library", headers=headers)
+
+    assert daftar.status_code == 200
+    nama = {item["name"]: item for item in daftar.json()}
+    assert set(nama) == {"satu.mp4", "dua.jpg"}
+    assert nama["satu.mp4"]["video"] is True and nama["dua.jpg"]["video"] is False
+    assert nama["satu.mp4"]["size"] == 10
+    unduh = client.get("/v1/kiosk/media-library/satu.mp4", headers=headers)
+    assert unduh.status_code == 200 and unduh.content == b"x" * 10
+    assert client.get("/v1/kiosk/media-library/catatan.txt", headers=headers).status_code == 404
+    assert client.get("/v1/kiosk/media-library/%2e%2e%2fx.mp4", headers=headers).status_code in {
+        404,
+        307,
+    }
+    assert client.get("/v1/kiosk/media-library").status_code == 401

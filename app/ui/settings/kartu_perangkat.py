@@ -37,6 +37,7 @@ from app.ui.common import (
     keterangan,
     konfirmasi,
     pesan_untuk_user,
+    tampilkan_info,
     tampilkan_peringatan,
     tombol,
 )
@@ -46,7 +47,11 @@ from app.utils.formatting import tanggal_pendek
 SELANG_SEGARKAN_MS = 10_000
 TINGGI_BARIS = 40
 TINGGI_TOMBOL_BARIS = 32
-KOLOM = ("Nama", "Jenis", "Terakhir terlihat", "Alamat", "Versi", "Printer", "")
+KOLOM = (
+    "Nama", "Jenis", "Terakhir terlihat", "Alamat", "Versi", "Printer", "Media", "",
+)
+#: Kolom tombol aksi (terakhir).
+K_AKSI = len(KOLOM) - 1
 
 
 def teks_terakhir_terlihat(perangkat: PerangkatInfo, sekarang: datetime) -> tuple[str, str]:
@@ -67,6 +72,14 @@ def teks_terakhir_terlihat(perangkat: PerangkatInfo, sekarang: datetime) -> tupl
     if waktu.date() == sekarang.date():
         return f"pukul {waktu:%H:%M}", warna
     return tanggal_pendek(waktu.date()), warna
+
+
+def teks_media(perangkat: PerangkatInfo) -> tuple[str, str]:
+    """(teks, warna) kolom Media: berapa berkas daftar putar sudah tersalin."""
+    if perangkat.jenis == JENIS_LAYAR_ANTRIAN or not perangkat.teks_media:
+        return "—", TEXT_MUTED
+    warna = SUCCESS if perangkat.media_lengkap else WARNING
+    return perangkat.teks_media, warna
 
 
 def teks_printer(perangkat: PerangkatInfo) -> tuple[str, str]:
@@ -315,21 +328,24 @@ class KartuPerangkat(QFrame):
             sel(4, p.versi_nama or "—")
             teks, warna = teks_printer(p)
             sel(5, teks, titik=None if teks == "—" else warna, tip=p.printer_pesan)
+            teks, warna = teks_media(p)
+            jam_media = f"Dilaporkan {p.media_waktu:%H:%M}" if p.media_waktu else ""
+            sel(6, teks, titik=None if teks == "—" else warna, tip=jam_media)
             if bangun_tombol:
-                self.tabel.setCellWidget(baris, 6, self._tombol_baris(p))
+                self.tabel.setCellWidget(baris, K_AKSI, self._tombol_baris(p))
 
         # Tombol aplikasi bertinggi minimum sendiri; baris dan kolom aksi
         # mengikuti ukuran tombol, bukan sebaliknya, supaya tidak terpotong.
         tinggi = TINGGI_BARIS
         lebar_aksi = 0
         for baris in range(self.tabel.rowCount()):
-            wadah = self.tabel.cellWidget(baris, 6)
+            wadah = self.tabel.cellWidget(baris, K_AKSI)
             if wadah is not None:
                 lebar_aksi = max(lebar_aksi, wadah.sizeHint().width())
         for baris in range(self.tabel.rowCount()):
             self.tabel.setRowHeight(baris, tinggi)
         if lebar_aksi:
-            self.tabel.setColumnWidth(6, lebar_aksi + 8)
+            self.tabel.setColumnWidth(K_AKSI, lebar_aksi + 8)
         # Halaman sudah digulir; tabel tidak perlu gulungan sendiri.
         self.tabel.setFixedHeight(
             self.tabel.horizontalHeader().height()
@@ -349,6 +365,16 @@ class KartuPerangkat(QFrame):
             hapus.clicked.connect(lambda _=False, pid=p.id: self._hapus(pid))
             baris.addWidget(hapus)
         else:
+            if p.jenis == JENIS_ANJUNGAN:
+                segarkan = tombol("Segarkan media")
+                segarkan.setToolTip(
+                    "Minta anjungan ini memeriksa dan menyalin ulang media "
+                    "dari server sekarang."
+                )
+                segarkan.clicked.connect(
+                    lambda _=False, info=p: self._segarkan_media(info)
+                )
+                baris.addWidget(segarkan)
             ganti = tombol("Ganti nama")
             ganti.clicked.connect(lambda _=False, info=p: self._ganti_nama(info))
             cabut = tombol("Cabut", variant="danger")
@@ -380,6 +406,17 @@ class KartuPerangkat(QFrame):
             return
         DialogKodePasang(kode.kode, kode.kedaluwarsa, self).exec()
         self.muat_ulang()
+
+    def _segarkan_media(self, p: PerangkatInfo) -> None:
+        """Anjungan menyalin ulang medianya pada kontak berikutnya (±beberapa detik)."""
+        if self._jalankan(lambda: self.layanan.segarkan_media(p.id)):
+            tampilkan_info(
+                self,
+                f"Permintaan dikirim ke {p.nama}. Anjungan memeriksa dan menyalin "
+                "ulang media dalam beberapa detik; kolom Media menunjukkan "
+                "kemajuannya.",
+                "Segarkan media",
+            )
 
     def _ganti_nama(self, p: PerangkatInfo) -> None:
         nama, ok = QInputDialog.getText(self, "Ganti nama", "Nama perangkat:", text=p.nama)

@@ -232,6 +232,25 @@ seketika tanpa tombol Simpan:
 Lama tampil gambar, suara video, dan posisi baris loket tetap mengikuti
 pengaturan server pada kedua sumber.
 
+### Salinan media: status, segarkan, dan salin dari server
+
+- **Status per anjungan.** Tablet melaporkan berapa berkas daftar putar yang
+  sudah tersalin utuh (`POST /v1/kiosk/media-status`: `total`, `copied`,
+  `bytes`). Kartu perangkat di **Layanan Anjungan** menampilkannya di kolom
+  **Media**, mis. "2 dari 3 tersalin · 58 MB" (hijau bila lengkap, kuning
+  bila belum). Dilaporkan saat angkanya berubah dan paling lama lima menit
+  sekali.
+- **Segarkan media.** Tombol **Segarkan media** pada baris anjungan meminta
+  tablet itu memeriksa dan menyalin ulang medianya sekarang, dengan
+  melewati jeda coba-ulang unduhan yang gagal. Server menyimpan penandanya
+  (`kiosk_device.media_segarkan`) dan mengirimnya sebagai `media_refresh`
+  pada `GET /v1/kiosk/display`; tablet menanganinya sekali per penanda.
+- **Salin dari server.** Di ⚙ Pengaturan tablet → **Kelola media tablet** →
+  **Salin dari server**: daftar SEMUA berkas di folder media server
+  (`GET /v1/kiosk/media-library`, bukan hanya daftar putar), dipilih lalu
+  disalin ke folder media tablet (`GET /v1/kiosk/media-library/{nama}`).
+  Dipakai bila sumber media = Folder media di tablet ini (tanpa jaringan).
+
 If the tablet loses its connection after requesting a number, use **Ulangi
 permintaan tiket**. The APK reuses the same request ID, so the server returns
 the existing ticket instead of issuing a second number.

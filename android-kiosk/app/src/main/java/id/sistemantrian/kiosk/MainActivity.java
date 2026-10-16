@@ -659,6 +659,11 @@ public final class MainActivity extends Activity {
     /** Kunci salinan yang sedang diunduh; hanya disentuh di thread UI. */
     private final Set<String> sedangDiunduh = new HashSet<>();
     private final Map<String, Long> unduhGagalPada = new HashMap<>();
+    /** Penanda permintaan "segarkan media" terakhir yang sudah ditangani. */
+    private static final String MEDIA_SEGARKAN_DITANGANI = "media_segarkan_ditangani";
+    /** Status salinan media terakhir yang dilaporkan: {total, tersalin}. */
+    private int[] statusMediaTerakhir;
+    private long statusMediaWaktu;
     /** Video yang sedang diputar langsung dari server, belum dari salinan. */
     private String videoLewatJaringan;
     /** Lama tampil khusus tiap gambar dari server (detik). */
@@ -1207,7 +1212,19 @@ public final class MainActivity extends Activity {
             welcomeFallbackText = display.optString("welcome_text", "");
             welcomeSlideSeconds = Math.max(1, display.optInt("welcome_slide_seconds", 10));
             terapkanMediaSambutan();
-            if (!sumberTablet()) sinkronkanSalinan();
+            long mintaSegarkan = display.optLong("media_refresh", 0L);
+            if (mintaSegarkan != 0L && mintaSegarkan
+                    != preferences.getLong(MEDIA_SEGARKAN_DITANGANI, 0L)) {
+                // Admin menekan "Segarkan media" untuk tablet ini: coba lagi
+                // unduhan yang tertunda tanpa menunggu jeda, dan laporkan.
+                preferences.edit().putLong(MEDIA_SEGARKAN_DITANGANI, mintaSegarkan).apply();
+                unduhGagalPada.clear();
+                statusMediaTerakhir = null;
+            }
+            if (!sumberTablet()) {
+                sinkronkanSalinan();
+                laporkanStatusMedia();
+            }
             registrationOpen = display.optBoolean("registration_open", true);
             prioritasAktifServer = display.optBoolean("priority_enabled", false);
             String versi = display.optString("categories_version", "");
@@ -2214,6 +2231,40 @@ public final class MainActivity extends Activity {
         });
     }
 
+    /**
+     * Lapor ke server berapa berkas daftar putar yang sudah tersalin utuh.
+     * Hanya bila angkanya berubah atau sudah lima menit, supaya tidak
+     * membebani jaringan; server menampilkannya di kartu perangkat.
+     */
+    private void laporkanStatusMedia() {
+        if (!hasServerConfig() || sumberTablet()) return;
+        int total = serverMedia.size();
+        int tersalin = 0;
+        long byteTotal = 0L;
+        for (String nama : serverMedia) {
+            File berkas = berkasMedia(nama);
+            if (berkas != null) {
+                tersalin++;
+                byteTotal += berkas.length();
+            }
+        }
+        long sekarang = System.currentTimeMillis();
+        if (statusMediaTerakhir != null && statusMediaTerakhir[0] == total
+                && statusMediaTerakhir[1] == tersalin
+                && sekarang - statusMediaWaktu < 300_000L) {
+            return;
+        }
+        statusMediaTerakhir = new int[]{total, tersalin};
+        statusMediaWaktu = sekarang;
+        request("POST", "/v1/kiosk/media-status",
+                new JSONObjectBuilder()
+                        .put("total", total)
+                        .put("copied", tersalin)
+                        .put("bytes", byteTotal)
+                        .build(),
+                json -> { }, error -> { });
+    }
+
     /** Berjalan di thread pengunduh. */
     private void unduhSalinan(String url, String kunci) throws Exception {
         File folder = folderSalinan();
@@ -2257,6 +2308,7 @@ public final class MainActivity extends Activity {
 
     private void salinanSelesai(String nama, String kunci, boolean berhasil) {
         sedangDiunduh.remove(kunci);
+        laporkanStatusMedia();
         if (!berhasil) {
             unduhGagalPada.put(kunci, System.currentTimeMillis());
             return;
@@ -4911,9 +4963,123 @@ public final class MainActivity extends Activity {
                 .setTitle("Media di tablet")
                 .setView(gulungan(isi))
                 .setPositiveButton("Tambah berkas", (d, w) -> pilihMediaTablet())
+                .setNeutralButton("Salin dari server", (d, w) -> tampilkanPustakaServer())
                 .setNegativeButton("Tutup", null)
                 .show();
         rapikanTombolDialog(dialog[0]);
+    }
+
+    /**
+     * "Salin dari server": daftar SEMUA berkas di folder media server (bukan
+     * hanya daftar putar), dipilih lalu disalin ke folder media tablet. Dipakai
+     * bila tablet memutar dari "Folder media di tablet ini" tanpa jaringan.
+     */
+    private void tampilkanPustakaServer() {
+        if (!hasServerConfig()) {
+            Toast.makeText(this, "Alamat server belum diatur.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Toast.makeText(this, "Mengambil daftar media dari server…", Toast.LENGTH_SHORT).show();
+        request("GET", "/v1/kiosk/media-library", null, json -> {
+            JSONArray baris = json.getJSONArray("data");
+            if (baris.length() == 0) {
+                Toast.makeText(this, "Folder media di server masih kosong.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            String[] nama = new String[baris.length()];
+            String[] label = new String[baris.length()];
+            boolean[] dipilih = new boolean[baris.length()];
+            for (int i = 0; i < baris.length(); i++) {
+                JSONObject item = baris.getJSONObject(i);
+                nama[i] = item.getString("name");
+                label[i] = nama[i] + "\n" + (item.optBoolean("video") ? "video" : "gambar")
+                        + " · " + String.format(Locale.ROOT, "%.1f MB",
+                        item.optLong("size", 0L) / 1048576.0);
+            }
+            AlertDialog dialog = pembuatDialog()
+                    .setTitle("Salin dari server")
+                    .setMultiChoiceItems(label, dipilih, (d, i, ya) -> dipilih[i] = ya)
+                    .setNegativeButton("Batal", null)
+                    .setPositiveButton("Salin ke tablet", (d, w) -> {
+                        List<String> terpilih = new ArrayList<>();
+                        for (int i = 0; i < nama.length; i++) {
+                            if (dipilih[i]) terpilih.add(nama[i]);
+                        }
+                        salinDariServer(terpilih);
+                    })
+                    .show();
+            rapikanTombolDialog(dialog);
+        }, pesan -> Toast.makeText(this, "Tidak dapat mengambil daftar media: " + pesan,
+                Toast.LENGTH_LONG).show());
+    }
+
+    private void salinDariServer(List<String> terpilih) {
+        if (terpilih.isEmpty()) return;
+        Toast.makeText(this, "Menyalin " + terpilih.size() + " berkas dari server…",
+                Toast.LENGTH_SHORT).show();
+        File folder = folderMediaTablet();
+        String basis = preferences.getString(SERVER, "").trim().replaceAll("/+$", "");
+        pengunduh.execute(() -> {
+            int berhasil = 0;
+            List<String> gagal = new ArrayList<>();
+            for (String nama : terpilih) {
+                File tujuan = new File(folder, namaAman(nama));
+                File sementara = new File(folder, "." + tujuan.getName() + ".part");
+                HttpURLConnection connection = null;
+                try {
+                    connection = (HttpURLConnection) new URL(
+                            basis + "/v1/kiosk/media-library/" + Uri.encode(nama))
+                            .openConnection();
+                    connection.setConnectTimeout(8000);
+                    connection.setReadTimeout(30000);
+                    applyHeaders(connection);
+                    if (connection.getResponseCode() >= 400) {
+                        throw new IllegalStateException("Media tidak dapat diunduh.");
+                    }
+                    long panjang = connection.getContentLengthLong();
+                    if (panjang > 0
+                            && folder.getUsableSpace() < panjang + CADANGAN_RUANG_BYTES) {
+                        throw new IllegalStateException("Ruang penyimpanan tidak cukup.");
+                    }
+                    try (InputStream input = connection.getInputStream();
+                         OutputStream output = new FileOutputStream(sementara)) {
+                        byte[] buffer = new byte[64 * 1024];
+                        int length;
+                        while ((length = input.read(buffer)) != -1) {
+                            output.write(buffer, 0, length);
+                        }
+                    }
+                    if (panjang > 0 && sementara.length() != panjang) {
+                        throw new IllegalStateException("Unduhan terputus.");
+                    }
+                    //noinspection ResultOfMethodCallIgnored
+                    tujuan.delete();  // berkas bernama sama diganti
+                    if (!sementara.renameTo(tujuan)) {
+                        throw new IllegalStateException("Tidak dapat menyimpan berkas.");
+                    }
+                    berhasil++;
+                } catch (Exception e) {
+                    gagal.add(nama);
+                } finally {
+                    if (connection != null) connection.disconnect();
+                    if (sementara.exists()) {
+                        //noinspection ResultOfMethodCallIgnored
+                        sementara.delete();
+                    }
+                }
+            }
+            int jumlah = berhasil;
+            runOnUiThread(() -> {
+                String pesan = jumlah + " berkas disalin ke folder tablet."
+                        + (gagal.isEmpty() ? ""
+                        : " Gagal: " + TextUtils.join(", ", gagal));
+                Toast.makeText(this, pesan, Toast.LENGTH_LONG).show();
+                terapkanMediaSambutan();
+                terapkanBarisLoket();
+                showMediaTablet();
+            });
+        });
     }
 
     private void pilihMediaTablet() {
