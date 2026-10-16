@@ -221,6 +221,14 @@ def test_udp_server_discovery_returns_api_port():
         thread.join(timeout=1)
 
 
+@pytest.fixture(autouse=True)
+def _tanpa_pin_di_database(monkeypatch):
+    """API diuji dengan layanan palsu; PIN tidak boleh dibaca dari database sungguhan."""
+    from app.services import pin_anjungan
+
+    monkeypatch.setattr(pin_anjungan, "baca", lambda: None)
+
+
 def test_api_returns_active_categories_and_ticket_lines():
     from app.kiosk_api import create_app
 
@@ -280,6 +288,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "welcome_media": [],
         "welcome_media_files": [],
         "fullscreen_ad_idle_seconds": 60,
+        "fullscreen_ad_loops": 2,
         "registration_open": True,
         "priority_enabled": True,
         "settings_pin": {"enabled": False},

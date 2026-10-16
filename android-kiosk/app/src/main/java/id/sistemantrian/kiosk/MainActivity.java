@@ -727,6 +727,9 @@ public final class MainActivity extends Activity {
     private float targetTirai = 0f;
     /** Pengaturan server: detik tanpa sentuhan sebelum iklan layar penuh; 0 = mati. */
     private int iklanPenuhDetik = 60;
+    /** Putaran iklan layar penuh sebelum kembali ke antrian; 0 = terus. */
+    private int iklanPutaran = 2;
+    private int putaranIklanSelesai;
     private boolean iklanPenuh;
     // Keadaan bingkai sebelum iklan memenuhi layar, untuk dipulihkan.
     private int[] paddingRootAsli;
@@ -1256,6 +1259,7 @@ public final class MainActivity extends Activity {
                 }
             }
             iklanPenuhDetik = Math.max(0, display.optInt("fullscreen_ad_idle_seconds", 60));
+            iklanPutaran = Math.max(0, display.optInt("fullscreen_ad_loops", 2));
             serverKind = display.optString("welcome_kind", "teks");
             serverMedia = media;
             welcomeFallbackText = display.optString("welcome_text", "");
@@ -1658,7 +1662,7 @@ public final class MainActivity extends Activity {
                 pemutarVideo = player;
                 aturSuaraVideo();
                 // Satu video saja: diulang oleh pemutar, tanpa layar hitam.
-                boolean ulang = welcomeMedia.size() == 1;
+                boolean ulang = welcomeMedia.size() == 1 && !putaranDibatasi();
                 player.setLooping(ulang);
                 player.start();
                 mediaBerhasilDiputar(filename);
@@ -1701,7 +1705,7 @@ public final class MainActivity extends Activity {
                                 .withEndAction(() -> buangSelain(image)).start();
                         mediaBerhasilDiputar(filename);
                         // Satu gambar saja tampil terus, tidak diunduh ulang.
-                        if (welcomeMedia.size() > 1) {
+                        if (welcomeMedia.size() > 1 || putaranDibatasi()) {
                             handler.postDelayed(nextSlide, detikTampil(filename) * 1000L);
                         } else {
                             jadwalkanUlangTayang(filename, detikTampil(filename) * 1000L);
@@ -1800,9 +1804,31 @@ public final class MainActivity extends Activity {
     }
 
     private void advanceSlide() {
-        if (!welcomeMedia.isEmpty()) {
-            showWelcomeMedia((mediaIndex + 1) % welcomeMedia.size());
+        if (welcomeMedia.isEmpty()) return;
+        int berikut = (mediaIndex + 1) % welcomeMedia.size();
+        if (berikut == 0 && putaranDibatasi()) {
+            putaranIklanSelesai++;
+            if (putaranIklanSelesai >= iklanPutaran) {
+                selesaiPutaranIklan();
+                return;
+            }
         }
+        showWelcomeMedia(berikut);
+    }
+
+    /** Iklan layar penuh dibatasi jumlah putarannya (bukan putar saja, bukan 0). */
+    private boolean putaranDibatasi() {
+        return iklanPenuh && !putarSaja && iklanPutaran > 0;
+    }
+
+    /**
+     * Putaran iklan habis: kembali ke tampilan antrian dan mulai menunggu waktu
+     * menganggur dari nol, sampai iklan muncul lagi bila masih tidak ada
+     * kegiatan.
+     */
+    private void selesaiPutaranIklan() {
+        sentuhTerakhirMillis = System.currentTimeMillis();
+        keluarIklanPenuh();
     }
 
     // -----------------------------------------------------------------
@@ -1889,6 +1915,7 @@ public final class MainActivity extends Activity {
             showCategories();
         }
         iklanPenuh = true;
+        putaranIklanSelesai = 0;
         visibilitasSebelumIklanPenuh.clear();
         AutoTransition transisi = new AutoTransition();
         transisi.setDuration(450);
@@ -4884,7 +4911,7 @@ public final class MainActivity extends Activity {
         try {
             JSONObject ringkas = new JSONObject();
             for (String kunci : new String[]{"welcome_kind", "welcome_media",
-                    "welcome_media_files", "fullscreen_ad_idle_seconds",
+                    "welcome_media_files", "fullscreen_ad_idle_seconds", "fullscreen_ad_loops",
                     "welcome_slide_seconds", "welcome_text"}) {
                 if (display.has(kunci)) ringkas.put(kunci, display.get(kunci));
             }
@@ -4906,6 +4933,7 @@ public final class MainActivity extends Activity {
             serverKind = display.optString("welcome_kind", "teks");
             welcomeFallbackText = display.optString("welcome_text", "");
             iklanPenuhDetik = Math.max(0, display.optInt("fullscreen_ad_idle_seconds", 60));
+            iklanPutaran = Math.max(0, display.optInt("fullscreen_ad_loops", 2));
             welcomeSlideSeconds = Math.max(1, display.optInt("welcome_slide_seconds", 10));
             List<String> media = new ArrayList<>();
             JSONArray nama = display.optJSONArray("welcome_media");

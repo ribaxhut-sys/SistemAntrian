@@ -244,6 +244,19 @@ seketika tanpa tombol Simpan:
 Lama tampil gambar, suara video, dan posisi baris loket tetap mengikuti
 pengaturan server pada kedua sumber.
 
+### Putaran iklan layar penuh (setelah 2.4.34.1, belum dirilis)
+
+Iklan layar penuh tidak lagi berputar tanpa henti: setelah
+**Putaran iklan layar penuh** (`kiosk.iklan_putaran`, bawaan **2**, 0 = terus)
+putaran selesai, anjungan kembali ke tampilan antrian dan menunggu
+**Iklan layar penuh saat menganggur** dari nol; bila tetap tidak ada
+kegiatan, iklan muncul lagi, dan seterusnya. Satu putaran = seluruh daftar
+layar penuh diputar sekali (satu video = diputar sekali sampai selesai; satu
+gambar = tampil sekali selama lama tampilnya). Dikirim ke tablet sebagai
+`fullscreen_ad_loops` pada `/v1/kiosk/display`. Sentuhan tetap langsung
+kembali ke menu dan menyetel ulang hitungan. Mode putar saja tetap berputar
+terus (tidak ada tampilan antrian untuk kembali).
+
 ### Teks loket tanpa panggilan (setelah 2.4.34.1, belum dirilis)
 
 Loket yang aktif tetapi tidak sedang memanggil menampilkan **"Siap melayani"**

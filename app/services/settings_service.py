@@ -66,6 +66,7 @@ BAWAAN: dict[str, str] = {
     "kiosk.daftar_putar": "",
     "kiosk.suara_video": "false",
     "kiosk.iklan_layar_penuh_detik": "60",
+    "kiosk.iklan_putaran": "2",
     "kiosk.tema": "biru",
     "kiosk.tema_agustus": "true",
     "display.screen_shape": "auto",
@@ -524,6 +525,20 @@ SKEMA: tuple[Pengaturan, ...] = (
         "tidak menutupi panggilan nomor. Selama pengunjung sedang memilih "
         "layanan sampai tiketnya keluar, video selalu dibisukan.",
         BOOLEAN,
+        kelompok="Iklan Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.iklan_putaran",
+        "Putaran iklan layar penuh",
+        "Iklan layar penuh berputar sebanyak ini (satu putaran = seluruh daftar "
+        "putar layar penuh diputar sekali), lalu kembali ke tampilan antrian dan "
+        "menunggu waktu menganggur lagi sebelum muncul kembali. Isi 0 agar "
+        "berputar terus sampai disentuh.",
+        ANGKA,
+        minimum=0,
+        maksimum=10,
+        satuan="putaran",
+        nilai_khusus="Berputar terus",
         kelompok="Iklan Anjungan",
     ),
     Pengaturan(
