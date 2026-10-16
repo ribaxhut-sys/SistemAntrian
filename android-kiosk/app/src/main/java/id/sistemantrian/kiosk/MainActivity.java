@@ -3307,7 +3307,7 @@ public final class MainActivity extends Activity {
         // Penanda saja: kotaknya dicentang di menu awal.
         if (prioritasAktifServer && prioritasDipilih) {
             TextView tandaPrioritas = text(
-                    "★ Prioritas: lansia / disabilitas / ibu hamil", 16, TEKS_TOMBOL, true);
+                    "★ Prioritas: lansia / disabilitas / ibu hamil", 14, TEKS_TOMBOL, true);
             tandaPrioritas.setGravity(Gravity.CENTER);
             tandaPrioritas.setPadding(dp(14), dp(8), dp(14), dp(8));
             tandaPrioritas.setBackground(rounded(UTAMA, dp(18)));
@@ -3480,7 +3480,7 @@ public final class MainActivity extends Activity {
         prioritas.setMinHeight(0);
         prioritas.setMinimumHeight(0);
         prioritas.setPadding(dp(16), dp(4), dp(16), dp(4));
-        pasangSatuBaris(prioritas, 10, 18);
+        pasangSatuBaris(prioritas, 9, 14);
         Runnable gambar = () -> {
             prioritas.setText((prioritasDipilih ? "☑  " : "☐  ")
                     + "Saya lansia / disabilitas / ibu hamil");
