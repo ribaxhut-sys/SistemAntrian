@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 
+from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import (
     QAbstractButton,
     QApplication,
@@ -57,6 +58,19 @@ def tombol_bertulisan(akar: QWidget) -> list[QAbstractButton]:
     return hasil
 
 
+def _siram_layout() -> None:
+    """
+    Paksa layout memproses perubahan teks sebelum diukur.
+
+    `setText` hanya memposting LayoutRequest; di mesin yang lebih lambat
+    (CI) satu putaran `processEvents` bisa terjadi sebelum layout berjalan,
+    sehingga tombol masih selebar label lama.
+    """
+    for _ in range(3):
+        QApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
+        QApplication.processEvents()
+
+
 def _nama(tombol: QAbstractButton) -> str:
     induk = tombol.window().windowTitle() or type(tombol.window()).__name__
     return f"{induk} › {type(tombol.parent()).__name__} › {tombol.text()!r}"
@@ -64,7 +78,7 @@ def _nama(tombol: QAbstractButton) -> str:
 
 def tombol_terpotong(akar: QWidget) -> list[str]:
     """Deskripsi tombol yang lebih sempit/pendek daripada kebutuhan teksnya."""
-    QApplication.processEvents()
+    _siram_layout()
     masalah: list[str] = []
     for tombol in tombol_bertulisan(akar):
         butuh = tombol.sizeHint()
