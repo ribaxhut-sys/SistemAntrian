@@ -539,6 +539,14 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
     }
 
+    /**
+     * Teks pada loket yang aktif tetapi tidak sedang memanggil. Satu baris
+     * pendek: "KOSONG" mengaburkan apakah loketnya atau antriannya yang kosong.
+     */
+    private static String teksLoketTanpaPanggilan(String status) {
+        return "ISTIRAHAT".equals(status) ? "Istirahat" : "Siap melayani";
+    }
+
     private void fitNumber(TextView number) {
         boolean status = number.getCurrentTextColor() == MUTED;
         fitText(number, status ? 30 : 72, number.getWidth(), number.getHeight());
@@ -637,7 +645,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             TextView number = card.findViewWithTag("number");
             TextView category = card.findViewWithTag("category");
             boolean ada = !counter.isNull("queue_number");
-            String value = ada ? counter.optString("queue_number") : counter.optString("status", "KOSONG");
+            String value = ada ? counter.optString("queue_number")
+                    : teksLoketTanpaPanggilan(counter.optString("status", "KOSONG"));
             boolean changed = !value.contentEquals(number.getText())
                     || number.getCurrentTextColor() != (ada ? INK : MUTED);
             number.setText(value);

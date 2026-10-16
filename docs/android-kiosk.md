@@ -244,6 +244,15 @@ seketika tanpa tombol Simpan:
 Lama tampil gambar, suara video, dan posisi baris loket tetap mengikuti
 pengaturan server pada kedua sumber.
 
+### Teks loket tanpa panggilan (setelah 2.4.34.1, belum dirilis)
+
+Loket yang aktif tetapi tidak sedang memanggil menampilkan **"Siap melayani"**
+(satu baris, huruf menyusut otomatis sampai muat); loket istirahat
+menampilkan "Istirahat". Berlaku di baris "NOMOR DI LOKET" anjungan dan di
+kartu loket layar antrian (`status` `KOSONG` dari `/v1/kiosk/display` dan
+`/v1/layar/state` tidak diubah). Sebelumnya anjungan menampilkan "—" dan layar
+antrian menampilkan "KOSONG".
+
 ### PIN pengaturan dan mode putar saja (setelah 2.4.34.1, belum dirilis)
 
 - **PIN pengaturan.** Satu PIN 6 angka untuk semua tablet, diatur admin di

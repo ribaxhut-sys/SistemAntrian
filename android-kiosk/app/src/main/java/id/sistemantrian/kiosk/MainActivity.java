@@ -2770,7 +2770,7 @@ public final class MainActivity extends Activity {
                 : rounded(melayani ? LEMBUT : ABU_LEMBUT, dp(16)));
 
         String isi = melayani ? loket.nomor
-                : "ISTIRAHAT".equals(loket.status) ? "Istirahat" : "—";
+                : "ISTIRAHAT".equals(loket.status) ? "Istirahat" : "Siap melayani";
         // Kartu ringkas setinggi 54 dp memuat nama, nomor, dan keadaannya.
         int maks = melayani ? (besar ? 40 : 16) : (besar ? 18 : 12);
         TextView nomor = text(isi, maks, melayani ? INK : MUTED, true);
