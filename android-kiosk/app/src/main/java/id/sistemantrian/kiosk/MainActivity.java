@@ -732,6 +732,14 @@ public final class MainActivity extends Activity {
     private int putaranIklanSelesai;
     /** Server menyalakan animasi tiga panel saat kembali ke antrian. */
     private boolean animasiKembali = true;
+    /** Animasi mulai sekian milidetik sebelum iklan terakhir berakhir; 0 = sesudahnya. */
+    private long animasiMulaiMs = 2000L;
+    /** Lama iklan meredup sebelum panel-panel masuk. */
+    private static final long DURASI_REDUP_IKLAN_MS = 600L;
+    /** Panel masuk: penuh (putaran habis) dan singkat (disentuh). */
+    private static final long DURASI_PANEL_PENUH_MS = 1800L;
+    private static final long JEDA_PANEL_PENUH_MS = 250L;
+    private static final long DURASI_PANEL_SENTUH_MS = 900L;
     /** Kembali karena putaran habis (bukan sentuhan): animasi penuh. */
     private boolean keluarDenganAnimasiPenuh;
     private int arahAnimasiTerakhir = -1;
@@ -1267,6 +1275,8 @@ public final class MainActivity extends Activity {
             iklanPenuhDetik = Math.max(0, display.optInt("fullscreen_ad_idle_seconds", 60));
             iklanPutaran = Math.max(0, display.optInt("fullscreen_ad_loops", 2));
             animasiKembali = display.optBoolean("return_animation", true);
+            animasiMulaiMs = Math.max(0, Math.min(5,
+                    display.optInt("return_animation_lead_seconds", 2))) * 1000L;
             serverKind = display.optString("welcome_kind", "teks");
             serverMedia = media;
             welcomeFallbackText = display.optString("welcome_text", "");
@@ -1646,6 +1656,7 @@ public final class MainActivity extends Activity {
         String signature = mediaSignature + "|" + filename;
         handler.removeCallbacks(nextSlide);
         handler.removeCallbacks(ulangTayang);
+        handler.removeCallbacks(akhirIklanAwal);
         ulangTayangBerkas = null;
         pemutarVideo = null;
         videoLewatJaringan = null;
@@ -1673,6 +1684,7 @@ public final class MainActivity extends Activity {
                 player.setLooping(ulang);
                 player.start();
                 mediaBerhasilDiputar(filename);
+                jadwalkanAkhirIklanAwal(player.getDuration());
                 if (ulang && player.getDuration() > 0) {
                     jadwalkanUlangTayang(filename, player.getDuration());
                 }
@@ -1711,6 +1723,7 @@ public final class MainActivity extends Activity {
                         image.animate().alpha(1f).setDuration(500)
                                 .withEndAction(() -> buangSelain(image)).start();
                         mediaBerhasilDiputar(filename);
+                        jadwalkanAkhirIklanAwal(detikTampil(filename) * 1000L);
                         // Satu gambar saja tampil terus, tidak diunduh ulang.
                         if (welcomeMedia.size() > 1 || putaranDibatasi()) {
                             handler.postDelayed(nextSlide, detikTampil(filename) * 1000L);
@@ -2019,6 +2032,9 @@ public final class MainActivity extends Activity {
     private void keluarIklanPenuh() {
         if (!iklanPenuh) return;
         iklanPenuh = false;
+        handler.removeCallbacks(akhirIklanAwal);
+        bingkaiMedia.animate().cancel();
+        bingkaiMedia.setAlpha(1f);
         boolean animasiPanel = animasiPanelDipakai();
         if (rootLayout != null && !animasiPanel) {
             AutoTransition transisi = new AutoTransition();
@@ -2041,6 +2057,44 @@ public final class MainActivity extends Activity {
         keluarDenganAnimasiPenuh = false;
     }
 
+    /**
+     * Pada berkas TERAKHIR di putaran terakhir, iklan meredup dan tampilan
+     * antrian mulai masuk `animasiMulaiMs` sebelum berkas itu selesai, jadi
+     * akhir iklan bertumpuk dengan animasi. Berkas yang lebih pendek dari
+     * jeda itu mulai segera.
+     */
+    private void jadwalkanAkhirIklanAwal(long durasiMs) {
+        handler.removeCallbacks(akhirIklanAwal);
+        if (durasiMs <= 0L || animasiMulaiMs <= 0L || !putaranDibatasi()
+                || !animasiPanelDipakai()
+                || putaranIklanSelesai != iklanPutaran - 1
+                || welcomeMedia.isEmpty() || mediaIndex != welcomeMedia.size() - 1) {
+            return;
+        }
+        long tunda = Math.max(0L, durasiMs - (animasiMulaiMs + DURASI_REDUP_IKLAN_MS));
+        handler.postDelayed(akhirIklanAwal, tunda);
+    }
+
+    private final Runnable akhirIklanAwal = () -> {
+        if (!putaranDibatasi()) return;
+        handler.removeCallbacks(nextSlide);
+        handler.removeCallbacks(ulangTayang);
+        if (pemutarVideo != null) {
+            try {
+                pemutarVideo.setVolume(0f, 0f);
+            } catch (IllegalStateException ignored) {
+                // Pemutar sudah dilepas; peredupan tetap berjalan.
+            }
+        }
+        bingkaiMedia.animate().alpha(0f).setDuration(DURASI_REDUP_IKLAN_MS)
+                .withEndAction(() -> {
+                    if (!putaranDibatasi()) return;
+                    sentuhTerakhirMillis = System.currentTimeMillis();
+                    keluarDenganAnimasiPenuh = true;
+                    keluarIklanPenuh();
+                }).start();
+    };
+
     /** Animasi dipakai bila server menyalakannya dan Android tidak mematikan animasi. */
     private boolean animasiPanelDipakai() {
         if (!animasiKembali || rootLayout == null) return false;
@@ -2052,8 +2106,8 @@ public final class MainActivity extends Activity {
     /**
      * Tiga panel (judul dan loket, pilihan layanan, hasil nomor) masuk dari
      * arah acak yang berbeda satu sama lain, dan berbeda dari kali
-     * sebelumnya. Penuh (putaran habis): 650 ms berurutan 100 ms; singkat
-     * (pengunjung menyentuh): 350 ms tanpa jeda agar tidak menunda pilihan.
+     * sebelumnya. Penuh (putaran habis): 1800 ms berurutan 250 ms; singkat
+     * (pengunjung menyentuh): 900 ms tanpa jeda agar tidak menunda pilihan.
      * Hanya geser dan transparansi; tata letak akhirnya tidak berubah.
      */
     private void animasiPanelMasuk(boolean penuh) {
@@ -2067,8 +2121,8 @@ public final class MainActivity extends Activity {
             kombinasi = arah.get(0) * 16 + arah.get(1) * 4 + arah.get(2);
         }
         arahAnimasiTerakhir = kombinasi;
-        long durasi = penuh ? 650L : 350L;
-        long jeda = penuh ? 100L : 0L;
+        long durasi = penuh ? DURASI_PANEL_PENUH_MS : DURASI_PANEL_SENTUH_MS;
+        long jeda = penuh ? JEDA_PANEL_PENUH_MS : 0L;
         int lebar = rootLayout.getWidth();
         int tinggi = rootLayout.getHeight();
         for (int i = 0; i < panel.length; i++) {
@@ -2090,7 +2144,7 @@ public final class MainActivity extends Activity {
                     .translationX(0f).translationY(0f).alpha(1f)
                     .setStartDelay(i * jeda)
                     .setDuration(durasi)
-                    .setInterpolator(new android.view.animation.OvershootInterpolator(0.5f))
+                    .setInterpolator(new android.view.animation.OvershootInterpolator(0.3f))
                     .start();
         }
     }

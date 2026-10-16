@@ -290,6 +290,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "fullscreen_ad_idle_seconds": 60,
         "fullscreen_ad_loops": 2,
         "return_animation": True,
+        "return_animation_lead_seconds": 2,
         "registration_open": True,
         "priority_enabled": True,
         "settings_pin": {"enabled": False},

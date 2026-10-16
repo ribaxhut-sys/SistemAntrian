@@ -262,8 +262,18 @@ terus (tidak ada tampilan antrian untuk kembali).
 Saat iklan layar penuh selesai, tiga panel (judul dan loket, pilihan layanan,
 hasil nomor) masuk dari **arah acak yang berbeda satu sama lain** (kiri,
 kanan, atas, bawah) dan berbeda dari kali sebelumnya, dengan pantulan kecil.
-Putaran habis: 650 ms, berurutan 100 ms. Pengunjung menyentuh: 350 ms tanpa
-jeda, supaya tidak menunda pilihan layanan. Hanya geser dan transparansi.
+Putaran habis: **1800 ms** per panel, berurutan 250 ms, pantulan 0,3.
+Pengunjung menyentuh: 900 ms tanpa jeda, supaya tidak menunda pilihan
+layanan. Hanya geser dan transparansi.
+
+**Mulai sebelum iklan berakhir.** Pada berkas terakhir di putaran terakhir,
+iklan meredup (600 ms, suara dibisukan) lalu tampilan antrian mulai masuk
+`kiosk.animasi_mulai_detik` (bawaan **2** detik; `return_animation_lead_seconds`)
+sebelum berkas itu selesai, jadi akhir iklan bertumpuk dengan animasi. Berkas
+yang lebih pendek dari jeda itu mulai segera; 0 = animasi baru mulai setelah
+iklan selesai. Waktu mulai dihitung dari durasi video (`getDuration`) atau lama
+tampil gambar. Sentuhan di tengah peredupan membatalkannya dan langsung ke
+menu.
 Saklar **Animasi saat kembali ke antrian** (`kiosk.animasi_kembali`, bawaan
 nyala; `return_animation` pada `/v1/kiosk/display`); dilewati otomatis bila
 animasi dimatikan di pengaturan Android tablet.

@@ -903,6 +903,11 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "return_animation": services.settings.get_bool(
                 "kiosk.animasi_kembali", True
             ),
+            # Detik sebelum iklan terakhir berakhir saat animasi mulai; 0 =
+            # sesudah iklan selesai.
+            "return_animation_lead_seconds": services.settings.get_int(
+                "kiosk.animasi_mulai_detik", 2
+            ),
             "registration_open": services.queue.pendaftaran_dibuka(),
             # PIN pengaturan anjungan. Hash (bukan PIN) ikut dikirim supaya
             # tablet yang terputus tetap dapat memeriksa PIN untuk jalan pulih.

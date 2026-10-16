@@ -68,6 +68,7 @@ BAWAAN: dict[str, str] = {
     "kiosk.iklan_layar_penuh_detik": "60",
     "kiosk.iklan_putaran": "2",
     "kiosk.animasi_kembali": "true",
+    "kiosk.animasi_mulai_detik": "2",
     "kiosk.tema": "biru",
     "kiosk.tema_agustus": "true",
     "display.screen_shape": "auto",
@@ -534,6 +535,20 @@ SKEMA: tuple[Pengaturan, ...] = (
         "Setelah iklan layar penuh, tiga panel anjungan masuk dari arah acak. "
         "Dilewati otomatis bila animasi dimatikan di pengaturan Android tablet.",
         BOOLEAN,
+        kelompok="Iklan Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.animasi_mulai_detik",
+        "Animasi mulai sebelum iklan berakhir",
+        "Pada putaran iklan yang terakhir, iklan meredup dan tiga panel mulai "
+        "masuk sekian detik sebelum berkas terakhir selesai, jadi bagian akhir "
+        "iklan bertumpuk dengan animasi. Isi 0 agar animasi baru mulai setelah "
+        "iklan selesai.",
+        ANGKA,
+        minimum=0,
+        maksimum=5,
+        satuan="detik",
+        nilai_khusus="Setelah iklan selesai",
         kelompok="Iklan Anjungan",
     ),
     Pengaturan(
