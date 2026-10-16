@@ -44,6 +44,7 @@ def test_setiap_peran_punya_definisi_hak_akses():
         (UserRole.ADMIN, Permission.USER_MANAGE),
         (UserRole.ADMIN, Permission.MASTER_MANAGE),
         (UserRole.ADMIN, Permission.CONFIG_MANAGE),
+        (UserRole.ADMIN, Permission.REPORT_VIEW),
         (UserRole.DISPLAY, Permission.DISPLAY_VIEW),
     ],
 )

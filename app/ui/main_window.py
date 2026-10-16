@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import subprocess
 import warnings
 from dataclasses import dataclass
 
@@ -41,14 +42,19 @@ from app.services.note_service import NoteService
 from app.services.survey_service import SurveyService
 from app.services.ticket_service import TicketService, buat_printer, mode_pencetak
 from app.services.user_service import UserService
-from app.ui.common import judul, keterangan, konfirmasi, tombol
+from app.ui.common import judul, keterangan, konfirmasi, tampilkan_error, tombol
 from app.ui.dashboard.dashboard_page import DashboardPage
+from app.ui.dashboard.petugas_page import (
+    DashboardPendaftaranPage,
+    DashboardPetugasPage,
+)
 from app.ui.dashboard.survey_result_page import SurveyResultPage
 from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.settings.dialogs import LABEL_PERAN
 from app.ui.dashboard.report_page import LaporanPage
 from app.ui.indikator_anjungan import PitaAnjungan
 from app.ui.pita_database import PitaDatabase
+from app.ui.pita_pembaruan import PitaPembaruan
 from app.ui.display.display_page import DisplayPage
 from app.ui.notes.note_page import NotePage
 from app.ui.queue.service_page import ServicePage
@@ -96,9 +102,16 @@ SELANG_PERIKSA_ANJUNGAN_MS = 30_000
 #: Beri jendela waktu selesai tampil sebelum pemeriksaan lengkap pertama.
 TUNDA_PERIKSA_ANJUNGAN_AWAL_MS = 1_500
 
+# Pembaruan bukan keadaan darurat. Sekali saat aplikasi mulai dan dua kali
+# per jam cukup untuk memberi tahu petugas tanpa membebani API server.
+TUNDA_PERIKSA_PEMBARUAN_AWAL_MS = 3_000
+SELANG_PERIKSA_PEMBARUAN_MS = 30 * 60 * 1_000
+
 #: Judul menu halaman Layanan Anjungan; juga dipakai pita peringatan untuk
 #: membuka halaman itu.
 MENU_LAYANAN_ANJUNGAN = "Layanan Anjungan"
+MENU_PELAYANAN = "Pelayanan"
+MENU_RINGKASAN_SAYA = "Ringkasan Saya"
 
 #: Utas pemeriksa yang masih berjalan saat jendelanya ditutup. Dilepas dari
 #: jendela dan disimpan di sini sampai selesai: QThread yang ikut dihapus
@@ -151,6 +164,31 @@ class _PemeriksaAnjungan(QThread):
             logger.warning("Pemeriksaan anjungan gagal", exc_info=True)
 
 
+class _PemeriksaPembaruan(QThread):
+    selesai = Signal(object)
+
+    def run(self) -> None:
+        from app.services.pembaruan_windows import periksa_pembaruan
+
+        self.selesai.emit(periksa_pembaruan())
+
+
+class _PengunduhPembaruan(QThread):
+    selesai = Signal(object, object)
+
+    def __init__(self, info, parent=None) -> None:
+        super().__init__(parent)
+        self.info = info
+
+    def run(self) -> None:
+        from app.services.pembaruan_windows import unduh_pembaruan
+
+        try:
+            self.selesai.emit(unduh_pembaruan(self.info), None)
+        except Exception as exc:  # noqa: BLE001 - diteruskan ke batas UI
+            self.selesai.emit(None, exc)
+
+
 @dataclass(frozen=True)
 class _Menu:
     """Satu butir navigasi beserta hak akses yang dibutuhkannya."""
@@ -163,6 +201,8 @@ class _Menu:
     kecuali: tuple[Permission, ...] = ()
     #: Hanya di komputer yang berperan server database.
     hanya_server: bool = False
+    #: Hanya untuk sesi yang mewakili akun (bukan sesi kios tanpa login).
+    hanya_akun: bool = False
 
 
 def _komputer_server() -> bool:
@@ -243,6 +283,10 @@ class BilahNavigasi(QFrame):
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
         self._gulir.setMinimumSize(0, 0)
+        # Tombol menu di tengah tinggi pita, bukan menempel di atas.
+        self._gulir.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         self._gulir.viewport().setAutoFillBackground(False)
 
         self._wadah = QWidget()
@@ -464,6 +508,7 @@ class MainWindow(QMainWindow):
 
         self._bangun_tampilan()
         self._pasang_pintasan()
+        self._pasang_kunci_layar()
 
     # -----------------------------------------------------------------
 
@@ -506,6 +551,8 @@ class MainWindow(QMainWindow):
                 self._jadwalkan_periksa_database, untuk_admin=self._info_teknis
             )
             susunan_utama.addWidget(self.pita_database)
+            self.pita_pembaruan = PitaPembaruan(self._unduh_dan_perbarui)
+            susunan_utama.addWidget(self.pita_pembaruan)
 
         self.halaman = QStackedWidget()
         susunan_utama.addWidget(self.halaman, stretch=1)
@@ -518,6 +565,7 @@ class MainWindow(QMainWindow):
         # anjungan maupun televisi.
         if not self.mode_kios:
             self._pasang_bilah_database()
+            self._pasang_pemeriksa_pembaruan()
 
     def _bangun_kepala(self) -> QWidget:
         kepala = QFrame()
@@ -600,7 +648,7 @@ class MainWindow(QMainWindow):
                 ),
             ),
             _Menu(
-                "Pelayanan",
+                MENU_PELAYANAN,
                 Permission.QUEUE_CALL,
                 lambda: ServicePage(
                     self.queue_service,
@@ -610,6 +658,29 @@ class MainWindow(QMainWindow):
                     self.auth,
                     note=self.note_service,
                 ),
+            ),
+            # Keadaan meja sendiri: nomor, antrean, dan riwayat hari ini.
+            # Tindakannya tetap di "Pelayanan"; lihat petugas_page.
+            _Menu(
+                MENU_RINGKASAN_SAYA,
+                Permission.QUEUE_CALL,
+                lambda: DashboardPetugasPage(
+                    self.dashboard_service,
+                    self.settings_service,
+                    buka_menu=self.buka_menu,
+                    menu_pelayanan=MENU_PELAYANAN,
+                ),
+            ),
+            # Petugas pendaftaran: nomor yang ia terbitkan. Akun yang juga
+            # memanggil sudah mendapat Ringkasan Saya di atas.
+            _Menu(
+                MENU_RINGKASAN_SAYA,
+                Permission.QUEUE_CREATE,
+                lambda: DashboardPendaftaranPage(
+                    self.dashboard_service, self.settings_service
+                ),
+                kecuali=(Permission.QUEUE_CALL,),
+                hanya_akun=True,
             ),
             _Menu(
                 "Survey Kepuasan",
@@ -679,9 +750,13 @@ class MainWindow(QMainWindow):
             # menjadi "Antrian" dan "Laporan" hanya membuat supervisor
             # berpindah-pindah untuk membaca satu keadaan yang sama.
             _Menu(
-                "Ringkasan Harian",
+                "Dashboard",
                 Permission.DASHBOARD_VIEW,
-                lambda: DashboardPage(self.dashboard_service, self.settings_service),
+                lambda: DashboardPage(
+                    self.dashboard_service,
+                    self.settings_service,
+                    buka_menu=self.buka_menu,
+                ),
             ),
             # Rentang tanggal, per loket dan per petugas: pertanyaan sesudah
             # "bagaimana hari ini", dan sebab hak REPORT_VIEW sudah ada.
@@ -710,6 +785,8 @@ class MainWindow(QMainWindow):
             if any(self.auth.has_permission(p) for p in butir.kecuali):
                 continue
             if butir.hanya_server and not _komputer_server():
+                continue
+            if butir.hanya_akun and self.auth.require_session().user_id is None:
                 continue
             if butir.permission is None or self.auth.has_permission(butir.permission):
                 self.menu_aktif.append(butir)
@@ -844,7 +921,11 @@ class MainWindow(QMainWindow):
             # sesudah event show diproses agar batas yang sudah mengecil
             # benar-benar diterapkan oleh window manager.
             def ulangi_geometri() -> None:
-                if not self.isVisible() or self.isFullScreen():
+                if (
+                    not self.isVisible()
+                    or self.isFullScreen()
+                    or self.isMaximized()
+                ):
                     return
                 self.setMinimumSize(0, 0)
                 self.updateGeometry()
@@ -854,12 +935,26 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, ulangi_geometri)
         self._geometri_normal = QRect(self.geometry())
         self._posisi_normal_diketahui = True
+        # Jendela kerja langsung memenuhi area kerja layar; taskbar Windows
+        # tetap terlihat. Geometri di atas tetap dicatat sebagai ukuran
+        # "biasa" yang dipulihkan bila jendela di-restore. `--jendela`
+        # mempertahankan jendela biasa untuk pengembangan di laptop.
+        if not self.berjendela:
+            self.showMaximized()
 
     def ganti_layar_penuh(self) -> None:
         if self.isFullScreen():
             self._turunkan_layar_penuh()
         else:
-            self._geometri_normal = QRect(self.geometry())
+            # Dari keadaan maksimal, Esc/F11 kembali ke maksimal, bukan ke
+            # jendela biasa.
+            self._maksimal_sebelum_penuh = self.isMaximized()
+            if self.isMaximized():
+                biasa = self.normalGeometry()
+                if biasa.isValid():
+                    self._geometri_normal = QRect(biasa)
+            else:
+                self._geometri_normal = QRect(self.geometry())
             self._posisi_normal_diketahui = self.isVisible()
             self.showFullScreen()
 
@@ -879,6 +974,10 @@ class MainWindow(QMainWindow):
         menaruh jendela di pojok kiri atas dengan bilah judul lewat tepi atas
         layar — dan jendela tanpa bilah judul tidak dapat digeser dengan mouse.
         """
+        if getattr(self, "_maksimal_sebelum_penuh", False):
+            self._maksimal_sebelum_penuh = False
+            self.showMaximized()
+            return
         # Dibaca sebelum showNormal: layar TV sering monitor kedua, dan
         # jendela harus turun di layar yang sedang ditatap, bukan melompat
         # ke monitor utama.
@@ -909,6 +1008,85 @@ class MainWindow(QMainWindow):
         # Bilah judul wajib di dalam layar, apa pun ukurannya.
         bingkai.moveTop(max(bingkai.top(), area.top()))
         self.move(bingkai.topLeft())
+
+    def _pasang_pemeriksa_pembaruan(self) -> None:
+        self._pemeriksa_pembaruan: _PemeriksaPembaruan | None = None
+        self._pengunduh_pembaruan: _PengunduhPembaruan | None = None
+        self._sedang_memeriksa_pembaruan = False
+        self._pewaktu_pembaruan_awal = QTimer(self)
+        self._pewaktu_pembaruan_awal.setSingleShot(True)
+        self._pewaktu_pembaruan_awal.setInterval(TUNDA_PERIKSA_PEMBARUAN_AWAL_MS)
+        self._pewaktu_pembaruan_awal.timeout.connect(
+            self._jadwalkan_periksa_pembaruan
+        )
+        self._pewaktu_pembaruan_awal.start()
+        self._pewaktu_pembaruan = QTimer(self)
+        self._pewaktu_pembaruan.setInterval(SELANG_PERIKSA_PEMBARUAN_MS)
+        self._pewaktu_pembaruan.timeout.connect(self._jadwalkan_periksa_pembaruan)
+        self._pewaktu_pembaruan.start()
+
+    def _jadwalkan_periksa_pembaruan(self) -> None:
+        if self._ditutup or self._sedang_memeriksa_pembaruan:
+            return
+        self._sedang_memeriksa_pembaruan = True
+        pemeriksa = _PemeriksaPembaruan(self)
+        pemeriksa.selesai.connect(self.pita_pembaruan.tampilkan)
+        pemeriksa.finished.connect(self._selesai_periksa_pembaruan)
+        self._pemeriksa_pembaruan = pemeriksa
+        pemeriksa.start()
+
+    def _selesai_periksa_pembaruan(self) -> None:
+        self._sedang_memeriksa_pembaruan = False
+        pemeriksa = self._pemeriksa_pembaruan
+        self._pemeriksa_pembaruan = None
+        if pemeriksa is not None:
+            pemeriksa.deleteLater()
+
+    def _unduh_dan_perbarui(self) -> None:
+        info = self.pita_pembaruan.info
+        if info is None or self._pengunduh_pembaruan is not None:
+            return
+        if not konfirmasi(
+            self,
+            f"Unduh pembaruan versi {info.versi} dari server dan mulai pemasangan?\n\n"
+            "Selesaikan pelayanan yang sedang berjalan terlebih dahulu. "
+            "Saat pemasangan dimulai, aplikasi akan ditutup otomatis; data "
+            "antrian dan pengaturan tidak berubah.",
+            "Perbarui Sistem Antrian CRO",
+        ):
+            return
+        self.pita_pembaruan.sedang_mengunduh()
+        pengunduh = _PengunduhPembaruan(info, self)
+        pengunduh.selesai.connect(self._pembaruan_selesai_diunduh)
+        pengunduh.finished.connect(self._selesai_mengunduh_pembaruan)
+        self._pengunduh_pembaruan = pengunduh
+        pengunduh.start()
+
+    def _pembaruan_selesai_diunduh(self, path, exc) -> None:
+        if exc is not None:
+            self.pita_pembaruan.tampilkan(self.pita_pembaruan.info)
+            tampilkan_error(self, exc, "Pembaruan Gagal")
+            return
+        try:
+            subprocess.Popen([str(path)], close_fds=True)  # noqa: S603
+        except OSError as gagal:
+            from app.services.pembaruan_windows import PembaruanError
+
+            self.pita_pembaruan.tampilkan(self.pita_pembaruan.info)
+            tampilkan_error(
+                self,
+                PembaruanError(
+                    "Installer sudah diunduh, tetapi belum dapat dibuka.",
+                    detail=type(gagal).__name__,
+                ),
+                "Pembaruan Gagal",
+            )
+
+    def _selesai_mengunduh_pembaruan(self) -> None:
+        pengunduh = self._pengunduh_pembaruan
+        self._pengunduh_pembaruan = None
+        if pengunduh is not None:
+            pengunduh.deleteLater()
 
     def _ganti_halaman(self, baris: int) -> None:
         if baris >= 0:
@@ -1012,6 +1190,74 @@ class MainWindow(QMainWindow):
         if not self.mode_kios and sesi is not None and sesi.user_id is not None:
             self._pewaktu_hadir.start()
             self._kirim_tanda_hadir()
+
+    # -----------------------------------------------------------------
+    # Kunci layar setelah menganggur
+    # -----------------------------------------------------------------
+
+    def _pasang_kunci_layar(self) -> None:
+        """
+        Kunci layar petugas yang menganggur lebih lama dari `sesi.idle_menit`.
+
+        Hanya untuk sesi akun. Layar antrian dan anjungan tidak punya
+        siapa-siapa yang perlu dikunci, dan menutup papan yang menghadap
+        pengunjung justru merusaknya.
+        """
+        self._pengamat_aktivitas = None
+        self._pewaktu_kunci = None
+        self._kunci_terbuka = False
+        sesi = self.auth.current_session
+        if self.mode_kios or sesi is None or sesi.user_id is None:
+            return
+        try:
+            self._batas_menganggur = (
+                self.settings_service.get_int("sesi.idle_menit", 15) * 60
+            )
+        except Exception:  # noqa: BLE001 - pengaturan rusak tidak boleh menjatuhkan jendela
+            self._batas_menganggur = 0
+        if self._batas_menganggur <= 0:
+            return
+
+        from app.ui.login.kunci_layar import PengamatAktivitas
+
+        self._pengamat_aktivitas = PengamatAktivitas(self)
+        QApplication.instance().installEventFilter(self._pengamat_aktivitas)
+        self._pewaktu_kunci = QTimer(self)
+        self._pewaktu_kunci.setInterval(5_000)
+        self._pewaktu_kunci.timeout.connect(self._periksa_menganggur)
+        self._pewaktu_kunci.start()
+
+    def _periksa_menganggur(self) -> None:
+        pengamat = self._pengamat_aktivitas
+        if (
+            pengamat is None
+            or self._kunci_terbuka
+            or self._ditutup
+            or not self.auth.is_authenticated
+        ):
+            return
+        if pengamat.menganggur_detik() >= self._batas_menganggur:
+            self.kunci_layar()
+
+    def kunci_layar(self) -> None:
+        """Tutup jendela dengan layar kunci sampai kata sandi dimasukkan."""
+        from app.ui.login.kunci_layar import KunciLayarDialog
+
+        if self._kunci_terbuka or not self.auth.is_authenticated:
+            return
+        self._kunci_terbuka = True
+        try:
+            dialog = KunciLayarDialog(self.auth, self)
+            dialog.exec()
+            keluar = dialog.keluar
+        finally:
+            self._kunci_terbuka = False
+        if self._pengamat_aktivitas is not None:
+            self._pengamat_aktivitas.catat()
+        if keluar:
+            self._hentikan_tanda_hadir()
+            self.auth.logout()
+            self.close()
 
     def _hentikan_tanda_hadir(self) -> None:
         """
@@ -1120,8 +1366,18 @@ class MainWindow(QMainWindow):
             pita.tampilkan(status)
 
     def _buka_layanan_anjungan(self) -> None:
+        self.buka_menu(MENU_LAYANAN_ANJUNGAN)
+
+    def buka_menu(self, judul_menu: str) -> None:
+        """
+        Pindah ke menu berjudul `judul_menu`, bila sesi ini memilikinya.
+
+        Dipakai tombol akses cepat di dashboard. Menu yang tidak ada pada
+        sesi (hak akses tidak cukup) diabaikan: tombolnya pun tidak dibuat
+        di sana, dan service tetap menolak bila ada yang memaksa.
+        """
         for baris, butir in enumerate(self.menu_aktif):
-            if butir.judul == MENU_LAYANAN_ANJUNGAN:
+            if butir.judul == judul_menu:
                 self.navigasi.setCurrentRow(baris)
                 return
 
@@ -1184,12 +1440,25 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802 - nama dari Qt
         """Pastikan sesi berakhir walau jendela ditutup lewat tombol silang."""
         self._ditutup = True
+        pewaktu_kunci = getattr(self, "_pewaktu_kunci", None)
+        if pewaktu_kunci is not None:
+            pewaktu_kunci.stop()
+        pengamat = getattr(self, "_pengamat_aktivitas", None)
+        if pengamat is not None:
+            instans = QApplication.instance()
+            if instans is not None:
+                instans.removeEventFilter(pengamat)
         for indeks in range(self.halaman.count()):
             halaman = self.halaman.widget(indeks)
             hentikan = getattr(halaman, "hentikan", None)
             if callable(hentikan):
                 hentikan()
-        for nama in ("_pewaktu_anjungan_awal", "_pewaktu_api"):
+        for nama in (
+            "_pewaktu_anjungan_awal",
+            "_pewaktu_api",
+            "_pewaktu_pembaruan_awal",
+            "_pewaktu_pembaruan",
+        ):
             pewaktu_api = getattr(self, nama, None)
             if pewaktu_api is not None:
                 pewaktu_api.stop()
@@ -1197,7 +1466,12 @@ class MainWindow(QMainWindow):
         if pewaktu is not None:
             pewaktu.stop()
         self._hentikan_tanda_hadir()
-        for nama, batas_ms in (("_pemeriksa_db", 400), ("_pemeriksa_anjungan", 3000)):
+        for nama, batas_ms in (
+            ("_pemeriksa_db", 400),
+            ("_pemeriksa_anjungan", 3000),
+            ("_pemeriksa_pembaruan", 4500),
+            ("_pengunduh_pembaruan", 500),
+        ):
             pemeriksa = getattr(self, nama, None)
             if pemeriksa is None:
                 continue

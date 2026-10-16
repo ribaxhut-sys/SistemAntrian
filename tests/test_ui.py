@@ -79,6 +79,33 @@ def test_login_berhasil_menutup_jendela(qtbot, auth):
     assert jendela.session.role is UserRole.CRO
 
 
+def test_lupa_kata_sandi_admin_tersembunyi_sampai_gagal_berulang(qtbot, auth):
+    jendela = LoginWindow(auth)
+    qtbot.addWidget(jendela)
+    assert not jendela.tombol_lupa.isVisibleTo(jendela)
+
+    jendela.input_username.setText("admin")
+    for _ in range(2):
+        jendela.input_password.setText("salah-salah")
+        jendela.coba_masuk()
+    assert not jendela.tombol_lupa.isVisibleTo(jendela)
+
+    jendela.input_password.setText("salah-salah")
+    jendela.coba_masuk()
+    assert jendela.tombol_lupa.isVisibleTo(jendela)
+
+
+def test_lupa_kata_sandi_tidak_muncul_bila_nama_berganti(qtbot, auth):
+    jendela = LoginWindow(auth)
+    qtbot.addWidget(jendela)
+
+    for nama in ("admin", "cro", "admin", "cro"):
+        jendela.input_username.setText(nama)
+        jendela.input_password.setText("salah-salah")
+        jendela.coba_masuk()
+    assert not jendela.tombol_lupa.isVisibleTo(jendela)
+
+
 def test_layar_masuk_menawarkan_atur_komputer_tanpa_pemilih_mode(qtbot, auth):
     """Windows langsung login; pengaturan mesin tersedia sebagai aksi sekunder."""
     jendela = LoginWindow(auth)
@@ -583,10 +610,13 @@ def test_layar_petugas_dibuka_di_tengah(qtbot, admin_auth, monkeypatch):
     assert panggilan == [(main_window._area_layar_utama(), ukuran)]
 
 
-def test_layar_petugas_menghapus_status_maksimal_dan_tetap_di_tengah(
+def test_layar_petugas_dibuka_maksimal_dengan_ukuran_biasa_tercatat(
     qtbot, admin_auth, monkeypatch
 ):
-    """Konfigurasi shortcut ``Run: Maximized`` tidak boleh mengalahkan posisi awal."""
+    """
+    Jendela kerja langsung memenuhi area kerja (taskbar tetap terlihat),
+    sementara ukuran biasa yang dipusatkan tetap dicatat untuk restore.
+    """
     from app.ui import main_window
 
     jendela = MainWindow(admin_auth)
@@ -597,12 +627,36 @@ def test_layar_petugas_menghapus_status_maksimal_dan_tetap_di_tengah(
         jendela, "_pusatkan", lambda area, ukuran: panggilan.append((area, ukuran))
     )
 
-    jendela.showMaximized()
-    qtbot.waitExposed(jendela)
+    jendela.tampilkan()
+
+    assert jendela.isMaximized()
+    assert not jendela.isFullScreen()
+    assert panggilan == [(main_window._area_layar_utama(), ukuran_normal)]
+
+
+def test_argumen_jendela_mempertahankan_jendela_biasa(qtbot, admin_auth):
+    jendela = MainWindow(admin_auth, berjendela=True)
+    qtbot.addWidget(jendela)
+
     jendela.tampilkan()
 
     assert not jendela.isMaximized()
-    assert panggilan == [(main_window._area_layar_utama(), ukuran_normal)]
+    assert not jendela.isFullScreen()
+
+
+def test_esc_dari_layar_penuh_kembali_ke_maksimal(qtbot, admin_auth):
+    jendela = MainWindow(admin_auth)
+    qtbot.addWidget(jendela)
+    jendela.tampilkan()
+    qtbot.waitExposed(jendela)
+    assert jendela.isMaximized()
+
+    jendela.ganti_layar_penuh()
+    assert jendela.isFullScreen()
+    jendela.keluar_layar_penuh()
+
+    assert not jendela.isFullScreen()
+    assert jendela.isMaximized()
 
 
 def test_ukuran_awal_mengikuti_area_kerja_monitor(admin_auth, monkeypatch):
@@ -665,7 +719,8 @@ def test_jendela_admin_benar_benar_muat_pada_800_x_600(
     monkeypatch.setattr(
         main_window, "_area_layar_utama", lambda: QRect(0, 0, 870, 652)
     )
-    jendela = MainWindow(admin_auth)
+    # Jendela biasa: yang diuji adalah batas ukuran, bukan mode maksimal.
+    jendela = MainWindow(admin_auth, berjendela=True)
     qtbot.addWidget(jendela)
     jendela.tampilkan()
     qtbot.wait(10)
@@ -783,7 +838,10 @@ def test_form_admin_penuh_tanpa_scrollbar_form(qtbot, admin_auth, monkeypatch, s
             else halaman.findChildren(SettingsPage)
         )
         if not pengaturan:
-            periksa(halaman, judul_halaman)
+            # Dashboard adalah halaman pemantauan yang panjang dan sengaja
+            # bergulir vertikal; yang dijaga di sini hanyalah form.
+            if judul_halaman != "Dashboard":
+                periksa(halaman, judul_halaman)
             continue
         rail = pengaturan[0].rail
         for baris in range(rail.count()):
@@ -851,7 +909,7 @@ def test_supervisor_melihat_ringkasan(qtbot, auth):
     qtbot.addWidget(jendela)
 
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-    assert "Ringkasan Harian" in menu
+    assert "Dashboard" in menu
 
 
 def test_menu_pertama_langsung_terpilih(qtbot, admin_auth):
@@ -1490,7 +1548,8 @@ def test_lewati_sementara_masuk_daftar_dan_dapat_dipanggil_kembali(
 
     assert halaman_layanan.label_nomor.text() == "—"
     assert halaman_layanan.tombol_panggil.isEnabled()
-    assert halaman_layanan.tab_kanan.tabText(1) == "Dilewati (1)"
+    tab = halaman_layanan.tab_kanan
+    assert tab.tabText(tab.indexOf(halaman_layanan.panel_dilewati)) == "Dilewati (1)"
     assert halaman_layanan.tabel_dilewati.item(0, 0).text() == "A-001"
     assert halaman_layanan.tabel_dilewati.item(0, 2).text() == "1x"
 
@@ -1525,7 +1584,8 @@ def test_nomor_dilewati_dapat_ditandai_tidak_hadir_dari_tabnya(
     halaman_layanan.tidak_hadir_dilewati()
 
     assert halaman_layanan.tabel_dilewati.rowCount() == 0
-    assert halaman_layanan.tab_kanan.tabText(1) == "Dilewati (0)"
+    tab = halaman_layanan.tab_kanan
+    assert tab.tabText(tab.indexOf(halaman_layanan.panel_dilewati)) == "Dilewati (0)"
     assert halaman_layanan.label_nomor.text() == "A-002", "loket tidak terganggu"
 
 
@@ -1580,6 +1640,31 @@ def test_daftar_menunggu_tampil_di_tabel(halaman_layanan, terbitkan, auth):
     assert "menit" in tabel.item(0, 3).text()
 
 
+def test_klik_kartu_papan_menyaring_daftar_menunggu(
+    halaman_layanan, terbitkan, auth, antrian_siap
+):
+    terbitkan("A", 2)
+    terbitkan("B", 1)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+    papan = halaman_layanan.papan_tunggu
+    assert halaman_layanan.tabel.rowCount() == 3
+
+    papan.pilih(antrian_siap["kategori"]["B"])
+
+    tabel = halaman_layanan.tabel
+    assert tabel.rowCount() == 1
+    assert tabel.item(0, 0).text() == "B-001"
+    # Judul tab tetap menghitung seluruh antrian.
+    assert "(3)" in halaman_layanan.tab_kanan.tabText(
+        halaman_layanan.tab_kanan.indexOf(halaman_layanan.panel_menunggu)
+    )
+
+    papan.pilih(None)
+    assert halaman_layanan.tabel.rowCount() == 3
+
+
 def test_tabel_menyusut_setelah_dipanggil(halaman_layanan, terbitkan, auth):
     terbitkan("A", 3)
     auth.logout()
@@ -1619,14 +1704,14 @@ def test_menu_petugas_cro_dan_pendaftaran_tidak_tumpang_tindih(qtbot, auth, antr
     # "Pengaduan" BUKAN pekerjaan yang sama dengan "Pelayanan":
     # panel pelayanan menulis lembar untuk nomor yang sedang di depan meja,
     # layar ini mencari lembar milik hari-hari sebelumnya.
-    assert menu == ["Pelayanan", "Survey Kepuasan", "Pengaduan"]
+    assert menu == ["Pelayanan", "Ringkasan Saya", "Survey Kepuasan", "Pengaduan"]
 
     auth.logout()
     auth.login("registration", TEST_PASSWORD)
     jendela2 = MainWindow(auth)
     qtbot.addWidget(jendela2)
     menu2 = [jendela2.navigasi.item(i).text() for i in range(jendela2.navigasi.count())]
-    assert menu2 == ["Terbitkan Nomor"]
+    assert menu2 == ["Terbitkan Nomor", "Ringkasan Saya"]
 
 
 # ---------------------------------------------------------------------
@@ -2516,7 +2601,7 @@ def test_menu_hasil_survey_hanya_untuk_supervisor(qtbot, auth, antrian_siap):
     jendela = MainWindow(auth)
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-    assert menu == ["Pengaduan", "Ringkasan Harian", "Laporan", "Hasil Survey"]
+    assert menu == ["Pengaduan", "Dashboard", "Laporan", "Hasil Survey"]
 
     for peran in ("cro", "admin", "registration"):
         auth.logout()
@@ -2540,7 +2625,7 @@ def test_supervisor_hanya_memantau(qtbot, auth, antrian_siap):
     # "Pengaduan" ikut ada, dan itu tetap memantau: supervisor
     # boleh MEMBACA lembar pengaduan, tidak boleh menulis maupun
     # menghapusnya — menulis milik CRO, menghapus milik ADMIN.
-    assert menu == ["Pengaduan", "Ringkasan Harian", "Laporan", "Hasil Survey"]
+    assert menu == ["Pengaduan", "Dashboard", "Laporan", "Hasil Survey"]
 
 
 def test_timer_hanya_berjalan_pada_halaman_yang_terlihat(qtbot, auth, antrian_siap):

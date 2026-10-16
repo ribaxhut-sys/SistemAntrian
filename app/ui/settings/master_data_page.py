@@ -563,10 +563,11 @@ class UserTab(_TabelTab):
         "Terakhir Masuk",
     )
     penjelasan = (
-        "Akun tidak dapat dihapus, hanya dinonaktifkan, agar riwayat "
-        "pemanggilan dan survey yang menunjuk petugas tetap dapat dibaca. "
-        "Loket bawaan langsung terpilih saat petugas masuk; petugas tetap "
-        "boleh berpindah sendiri bila pindah meja."
+        "Akun yang belum punya riwayat dapat dihapus permanen. Akun yang "
+        "pernah bekerja diarsipkan, bukan dihapus, agar riwayat pemanggilan "
+        "dan survey yang menunjuk petugas tetap dapat dibaca. Loket bawaan "
+        "langsung terpilih saat petugas masuk; petugas tetap boleh berpindah "
+        "sendiri bila pindah meja."
     )
 
     def __init__(
@@ -585,6 +586,10 @@ class UserTab(_TabelTab):
         self.tambah_aksi("Setel Ulang Kata Sandi", self.reset_sandi, perlu_pilihan=True)
         self.tombol_status = self.tambah_aksi(
             "Nonaktifkan", self.ganti_status, perlu_pilihan=True
+        )
+        self.tambah_aksi(
+            "Hapus / Arsipkan", self.hapus_atau_arsipkan,
+            variant="danger", perlu_pilihan=True,
         )
         self.selesai_menyusun_aksi()
 
@@ -689,6 +694,48 @@ class UserTab(_TabelTab):
                 f"Kata sandi {akun.username} telah disetel ulang. Petugas wajib "
                 "menggantinya saat masuk berikutnya.",
             )
+            self.muat_ulang()
+
+    def hapus_atau_arsipkan(self) -> None:
+        """Hapus akun tanpa riwayat; arsipkan akun yang pernah bekerja."""
+        baris = self.baris_terpilih()
+        if baris is None:
+            return
+        akun = self.data[baris]
+
+        berhasil, jejak = jalankan_aman(self, lambda: self.users.jejak_user(akun.id))
+        if not berhasil:
+            return
+
+        if jejak == 0:
+            if not konfirmasi(
+                self,
+                f"Hapus akun {akun.username} secara permanen?\n\nAkun ini "
+                "belum punya riwayat pelayanan. Tindakan ini tidak dapat "
+                "dibatalkan.",
+            ):
+                return
+            berhasil, _ = jalankan_aman(self, lambda: self.users.hapus_user(akun.id))
+        else:
+            if not konfirmasi(
+                self,
+                f"Arsipkan akun {akun.username}?\n\nAkun punya {jejak} "
+                "riwayat pelayanan, sehingga tidak dapat dihapus. Akun akan "
+                "dinonaktifkan dan dilepas dari loket; namanya tetap tampil "
+                "di laporan lama.",
+            ):
+                return
+            samarkan = konfirmasi(
+                self,
+                "Samarkan nama petugas di laporan lama?\n\nYa: nama diganti "
+                "menjadi sebutan netral. Tidak: nama tetap tampil.",
+                "Samarkan nama",
+            )
+            berhasil, _ = jalankan_aman(
+                self,
+                lambda: self.users.arsipkan_user(akun.id, samarkan_nama=samarkan),
+            )
+        if berhasil:
             self.muat_ulang()
 
     def ganti_status(self) -> None:

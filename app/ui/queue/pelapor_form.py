@@ -118,27 +118,36 @@ class PelaporForm(QFrame):
         kisi = QGridLayout()
         kisi.setHorizontalSpacing(14)
         kisi.setVerticalSpacing(6)
-        kisi.setColumnStretch(0, 1)
-        kisi.setColumnStretch(1, 1)
+        for kolom_kisi in range(3):
+            kisi.setColumnStretch(kolom_kisi, 1)
 
         self.label_nama = self._label("Nama")
         self.label_nomor_pelanggan = self._label("No. Pelanggan")
 
+        # Tiga isian pada baris pertama dan dua pada baris kedua: tinggi
+        # kolom kiri adalah yang paling menentukan apakah halaman muat
+        # tanpa bilah gulir pada layar 768 piksel.
         kisi.addLayout(self._kolom(self.label_nama, self.isian_nama), 0, 0)
         kisi.addLayout(
             self._kolom(self.label_nomor_pelanggan, self.isian_nomor_pelanggan), 0, 1
         )
-        kisi.addLayout(self._kolom(self._label("Telepon"), self.isian_telepon), 1, 0)
-        kisi.addLayout(self._kolom(self._label("Email"), self.isian_email), 1, 1)
+        kisi.addLayout(self._kolom(self._label("Telepon"), self.isian_telepon), 0, 2)
+        kisi.addLayout(self._kolom(self._label("Email"), self.isian_email), 1, 0)
         kisi.addLayout(
-            self._kolom(self._label("Alamat"), self.isian_alamat), 2, 0, 1, 2
+            self._kolom(self._label("Alamat"), self.isian_alamat), 1, 1, 1, 2
         )
         susunan.addLayout(kisi)
 
         self.label_petunjuk = QLabel("")
         self.label_petunjuk.setWordWrap(True)
+        # Tampil hanya bila ada pesan; label kosong tetap memakan tinggi.
+        self.label_petunjuk.setVisible(False)
         susunan.addWidget(self.label_petunjuk)
         self.tandai_wajib(False)
+
+    def _setel_petunjuk(self, pesan: str) -> None:
+        self.label_petunjuk.setText(pesan)
+        self.label_petunjuk.setVisible(bool(pesan))
 
     @staticmethod
     def _kolom(label: QLabel, isian: QWidget) -> QVBoxLayout:
@@ -318,7 +327,7 @@ class PelaporForm(QFrame):
 
     def _setel_umpan(self, pesan: str, *, gagal: bool = False) -> None:
         """Umpan balik singkat; sengaja tanpa mengulang isi yang ditempel."""
-        self.label_petunjuk.setText(pesan)
+        self._setel_petunjuk(pesan)
         warna = WARNING if gagal else SUCCESS
         self.label_petunjuk.setStyleSheet(
             f"color: {warna}; font-size: {FONT_SIZE_SMALL}px; font-weight: 600;"
@@ -349,14 +358,14 @@ class PelaporForm(QFrame):
 
         kurang = self.kurang if wajib else []
         if kurang:
-            self.label_petunjuk.setText(
+            self._setel_petunjuk(
                 "Wajib diisi untuk pengaduan: " + ", ".join(kurang) + "."
             )
             self.label_petunjuk.setStyleSheet(
                 f"color: {WARNING}; font-size: {FONT_SIZE_SMALL}px; font-weight: 600;"
             )
         else:
-            self.label_petunjuk.setText(
+            self._setel_petunjuk(
                 "Tersimpan bersama pengaduan atau catatan, bukan sendirian."
             )
             self.label_petunjuk.setStyleSheet(

@@ -1,5 +1,5 @@
 #define MyAppName "Sistem Antrian CRO"
-#define MyAppVersion "1.0.7"
+#define MyAppVersion "1.0.9"
 #define MyAppPublisher "Sistem Antrian CRO"
 #define MyAppExeName "AntrianCRO.exe"
 #define SourceDir GetEnv("ANTRIAN_SOURCE_DIR")
@@ -18,7 +18,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 OutputDir={#OutputDir}
-OutputBaseFilename=AntrianCRO-Setup-1.0.7
+OutputBaseFilename=AntrianCRO-Setup-1.0.9
 UninstallDisplayIcon={app}\{#MyAppExeName}
 SetupIconFile=assets\ikon\antrian.ico
 Compression=lzma2
@@ -263,6 +263,32 @@ begin
   SaveStringToFile(BerkasPenanda('selesai'), '', False);
 end;
 
+{ Simpan salinan installer yang baru saja berhasil dipakai. Pada komputer
+  server, API membagikan salinan ini ke seluruh PC loket. File versi ditulis
+  terpisah karena hash installer tidak mungkin ditanam di dalam dirinya. }
+procedure PublikasikanPembaruan;
+var
+  Folder, Tujuan, Sumber: String;
+  Berhasil: Boolean;
+begin
+  Folder := ExpandConstant('{app}\pembaruan');
+  Tujuan := AddBackslash(Folder) + 'Pembaruan-AntrianCRO.exe';
+  Sumber := ExpandConstant('{srcexe}');
+  ForceDirectories(Folder);
+  Berhasil := CompareText(Sumber, Tujuan) = 0;
+  if not Berhasil then
+  begin
+    DeleteFile(Tujuan);
+    Berhasil := CopyFile(Sumber, Tujuan, False);
+  end;
+  if Berhasil then
+    SaveStringToFile(
+      AddBackslash(Folder) + 'Pembaruan-AntrianCRO.version',
+      '{#MyAppVersion}' + #13#10, False)
+  else
+    DeleteFile(AddBackslash(Folder) + 'Pembaruan-AntrianCRO.version');
+end;
+
 { Tutup semua AntrianCRO.exe, termasuk API anjungan di latar belakang, supaya
   berkas lama dapat ditimpa tanpa dialog. }
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -280,7 +306,10 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+  begin
+    PublikasikanPembaruan;
     TandaiSelesai;
+  end;
 end;
 
 { Juga bila pemasangan dibatalkan atau gagal: API tidak boleh tertinggal mati. }

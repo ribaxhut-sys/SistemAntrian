@@ -45,6 +45,7 @@ from app.services.apk_anjungan import (
     folder_apk,
     info_apk,
 )
+from app.services.pembaruan_windows import folder_pembaruan, info_pembaruan
 from app.services import daftar_putar
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
@@ -456,6 +457,36 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         return JSONResponse(
             status_code=status.HTTP_200_OK if siap else status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"status": "ok" if siap else "gagal", **fakta},
+        )
+
+    @app.get("/v1/windows/update")
+    def windows_update_info():
+        """Metadata installer Windows terbaru untuk PC jaringan kantor."""
+        info = info_pembaruan(folder_pembaruan(base_dir()))
+        if info is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Pembaruan Windows belum tersedia di server.",
+            )
+        return {
+            "latest_version": info.versi,
+            "size": info.ukuran_byte,
+            "sha256": info.sha256,
+        }
+
+    @app.get("/v1/windows/update/download")
+    def windows_update_download():
+        """Installer Windows; klien wajib memeriksa checksum-nya."""
+        info = info_pembaruan(folder_pembaruan(base_dir()))
+        if info is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Pembaruan Windows belum tersedia di server.",
+            )
+        return FileResponse(
+            info.berkas,
+            media_type="application/vnd.microsoft.portable-executable",
+            filename=info.berkas.name,
         )
 
     def require_layar(

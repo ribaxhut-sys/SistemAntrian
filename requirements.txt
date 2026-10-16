@@ -45,6 +45,10 @@ openpyxl==3.1.5
 # zoneinfo.ZoneInfo("Asia/Jakarta") akan gagal tanpa paket ini.
 tzdata==2026.3
 
+# Verifikasi tanda tangan digital (Ed25519) untuk pemulihan akun admin lewat
+# kunci pengembang (app/services/pemulihan_admin.py).
+cryptography==50.0.2
+
 # Local API used by the Android ticket kiosk.
 fastapi==0.135.1
 uvicorn==0.41.0

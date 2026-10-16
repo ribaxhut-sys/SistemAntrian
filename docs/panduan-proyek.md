@@ -229,6 +229,8 @@ Android diperbarui. Rincian Android/USB ada di
 - **Anjungan Windows dan Android:** pemilihan layanan mandiri dan penerbitan
   tiket. Android meminta nomor melalui API Windows.
 - **Survey kepuasan:** rating setelah pelayanan dan ringkasan hasil.
+- **Dashboard:** pemantauan operasional admin/supervisor (saringan, status loket,
+  grafik per jam) dan ringkasan kerja pribadi petugas; lihat [dashboard.md](dashboard.md).
 - **Data master dan akun:** cabang, loket, jenis layanan bertingkat, user,
   peran, dan pengaturan aplikasi.
 - **Backup dan audit:** pencadangan database, pemulihan, serta pencatatan
@@ -413,6 +415,8 @@ API anjungan mempunyai dua endpoint tanpa token:
 - [README — panduan dan aturan aplikasi](../README.md)
 - [PostgreSQL dan banyak komputer](../README.md#pemasangan-beberapa-loket-postgresql)
 - [Anjungan Android dan printer USB](android-kiosk.md)
+- [Dashboard admin, supervisor, dan petugas](dashboard.md)
+- [Keamanan sesi petugas](keamanan-sesi.md)
 - [Uji terima sebelum operasional](acceptance-test.md)
 - [Peran komputer](peran-komputer.md)
 - [Catatan lanjutan pengembangan](lanjutan.md)

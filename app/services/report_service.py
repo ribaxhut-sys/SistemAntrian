@@ -35,6 +35,7 @@ from app.models import (
 )
 from app.services.auth_service import AuthService
 from app.services.permissions import Permission
+from app.services.queue_service import LABEL_STATUS
 from app.utils.formatting import durasi_singkat
 
 RENTANG_MAKS_HARI = 366
@@ -50,6 +51,8 @@ class BarisLaporan:
     selesai: int = 0
     tidak_hadir: int = 0
     batal: int = 0
+    #: Nama kelompok baris, misalnya petugas pada tabel petugas per layanan.
+    kelompok: str = ""
     _menunggu: list[float] = field(default_factory=list, repr=False)
     _layanan: list[float] = field(default_factory=list, repr=False)
     _rating: list[int] = field(default_factory=list, repr=False)
@@ -85,6 +88,31 @@ class BarisLaporan:
 
 
 @dataclass(frozen=True)
+class TiketRiwayat:
+    """Satu nomor antrian pada riwayat pelayanan, untuk ditelusuri per petugas."""
+
+    tanggal: date
+    nomor: str
+    layanan: str
+    loket: str
+    petugas: str
+    status: str
+    terbit: datetime | None
+    dipanggil: datetime | None
+    mulai: datetime | None
+    selesai: datetime | None
+    nilai: int | None
+
+    @property
+    def menunggu_detik(self) -> float | None:
+        return _detik(self.terbit, self.dipanggil)
+
+    @property
+    def layanan_detik(self) -> float | None:
+        return _detik(self.mulai, self.selesai)
+
+
+@dataclass(frozen=True)
 class Laporan:
     dari: date
     sampai: date
@@ -93,6 +121,11 @@ class Laporan:
     per_layanan: list[BarisLaporan]
     per_loket: list[BarisLaporan]
     per_petugas: list[BarisLaporan]
+    #: Per petugas: baris totalnya (sama dengan per_petugas) dan rincian
+    #: per jenis layanan yang ditanganinya, nama layanan di `nama`.
+    petugas_layanan: list[tuple[BarisLaporan, list[BarisLaporan]]] = field(default_factory=list)
+    #: Setiap nomor pada rentang, urut waktu terbit. Hanya untuk Excel.
+    riwayat: list[TiketRiwayat] = field(default_factory=list)
 
     @property
     def jumlah_hari(self) -> int:
@@ -125,7 +158,7 @@ def _catat(baris: BarisLaporan, status, created, called, serving, completed) -> 
 
 
 class ReportService:
-    """Laporan rentang tanggal untuk SUPERVISOR."""
+    """Laporan rentang tanggal untuk SUPERVISOR dan ADMIN."""
 
     def __init__(self, auth: AuthService) -> None:
         self.auth = auth
@@ -160,6 +193,7 @@ class ReportService:
                 sa.select(
                     Queue.id,
                     Queue.queue_date,
+                    Queue.queue_number,
                     Queue.status,
                     Queue.category_id,
                     Queue.counter_id,
@@ -168,10 +202,14 @@ class ReportService:
                     Queue.called_at,
                     Queue.serving_at,
                     Queue.completed_at,
-                ).where(*dalam_rentang)
+                )
+                .where(*dalam_rentang)
+                .order_by(Queue.created_at, Queue.id)
             ).all()
             survey = session.execute(
                 sa.select(
+                    SatisfactionSurvey.queue_id,
+                    SatisfactionSurvey.category_id,
                     SatisfactionSurvey.counter_id,
                     SatisfactionSurvey.officer_id,
                     SatisfactionSurvey.rating,
@@ -189,14 +227,25 @@ class ReportService:
         per_layanan: dict[int, BarisLaporan] = {}
         per_loket: dict[int, BarisLaporan] = {}
         per_petugas: dict[int, BarisLaporan] = {}
+        per_petugas_layanan: dict[tuple[int, int], BarisLaporan] = {}
+        nilai_tiket = {queue_id: rating for queue_id, _, _, _, rating, _ in survey}
+        riwayat: list[TiketRiwayat] = []
 
         def ambil(kamus: dict, kunci, nama: str) -> BarisLaporan:
             if kunci not in kamus:
                 kamus[kunci] = BarisLaporan(nama)
             return kamus[kunci]
 
-        for (queue_id, tanggal, status, kategori, loket, petugas, created, called, serving,
-             completed) in antrian:
+        def ambil_rincian(petugas: int, kategori: int) -> BarisLaporan:
+            kunci = (petugas, kategori)
+            if kunci not in per_petugas_layanan:
+                per_petugas_layanan[kunci] = BarisLaporan(
+                    nama_layanan.get(kategori, "—"), kelompok=nama_petugas.get(petugas, "—")
+                )
+            return per_petugas_layanan[kunci]
+
+        for (queue_id, tanggal, nomor, status, kategori, loket, petugas, created, called,
+             serving, completed) in antrian:
             petugas = petugas if petugas is not None else pemanggil.get(queue_id)
             waktu = (status, created, called, serving, completed)
             _catat(total, *waktu)
@@ -206,15 +255,44 @@ class ReportService:
                 _catat(ambil(per_loket, loket, nama_loket.get(loket, "—")), *waktu)
             if petugas is not None:
                 _catat(ambil(per_petugas, petugas, nama_petugas.get(petugas, "—")), *waktu)
+                _catat(ambil_rincian(petugas, kategori), *waktu)
+            riwayat.append(
+                TiketRiwayat(
+                    tanggal=tanggal,
+                    nomor=nomor,
+                    layanan=nama_layanan.get(kategori, "—"),
+                    loket=nama_loket.get(loket, "") if loket is not None else "",
+                    petugas=nama_petugas.get(petugas, "") if petugas is not None else "",
+                    status=LABEL_STATUS.get(status, getattr(status, "value", str(status))),
+                    terbit=created,
+                    dipanggil=called,
+                    mulai=serving,
+                    selesai=completed,
+                    nilai=nilai_tiket.get(queue_id),
+                )
+            )
 
-        for loket, petugas, rating, waktu in survey:
+        for _, kategori, loket, petugas, rating, waktu in survey:
             total._rating.append(rating)
             ambil(per_hari, waktu.date(), waktu.date().isoformat())._rating.append(rating)
             ambil(per_loket, loket, nama_loket.get(loket, "—"))._rating.append(rating)
             ambil(per_petugas, petugas, nama_petugas.get(petugas, "—"))._rating.append(rating)
+            ambil_rincian(petugas, kategori)._rating.append(rating)
 
         def urut_nama(kamus: dict) -> list[BarisLaporan]:
             return sorted(kamus.values(), key=lambda b: b.nama.lower())
+
+        rincian: dict[int, list[BarisLaporan]] = {}
+        for (petugas, _), baris in per_petugas_layanan.items():
+            rincian.setdefault(petugas, []).append(baris)
+        petugas_layanan = [
+            (
+                per_petugas[petugas],
+                sorted(daftar, key=lambda b: (-b.selesai, -b.dipanggil, b.nama.lower())),
+            )
+            for petugas, daftar in rincian.items()
+        ]
+        petugas_layanan.sort(key=lambda p: p[0].nama.lower())
 
         return Laporan(
             dari=dari,
@@ -224,6 +302,8 @@ class ReportService:
             per_layanan=sorted(per_layanan.values(), key=lambda b: -b.terbit),
             per_loket=urut_nama(per_loket),
             per_petugas=urut_nama(per_petugas),
+            petugas_layanan=petugas_layanan,
+            riwayat=riwayat,
         )
 
 
@@ -294,12 +374,51 @@ KOLOM_TABEL: dict[str, list[Kolom]] = {
     ],
 }
 
+#: Rincian petugas per jenis layanan. Tidak tampil di layar, hanya di
+#: PDF (dikelompokkan per petugas) dan Excel (satu baris per pasangan,
+#: supaya mudah difilter dan dibuat PivotTable).
+KOLOM_PETUGAS_LAYANAN: list[Kolom] = [
+    _k("Petugas", lambda b: b.kelompok, kanan=False),
+    _k("Jenis layanan", lambda b: b.nama, kanan=False),
+    _k("Dipanggil", lambda b: str(b.dipanggil), lambda b: b.dipanggil),
+    _k("Selesai", lambda b: str(b.selesai), lambda b: b.selesai),
+    _k("Tidak hadir", lambda b: str(b.tidak_hadir), lambda b: b.tidak_hadir),
+    _k("Rata-rata pelayanan", lambda b: b.label_layanan, lambda b: _menit(b.rata_layanan_detik)),
+    _k("Survey", lambda b: str(b.jumlah_survey), lambda b: b.jumlah_survey),
+    _k("Kepuasan", lambda b: b.label_kepuasan, lambda b: b.rata_kepuasan),
+]
+
+
+def _jam(waktu: datetime | None) -> str:
+    return "" if waktu is None else f"{waktu:%H:%M:%S}"
+
+
+#: Riwayat pelayanan per nomor antrian, hanya untuk Excel. Jam disimpan
+#: sebagai waktu Excel agar dapat diurutkan dan dihitung.
+KOLOM_RIWAYAT: list[Kolom] = [
+    _k("Tanggal", lambda t: t.tanggal.isoformat(), lambda t: t.tanggal, False),
+    _k("Nomor", lambda t: t.nomor, kanan=False),
+    _k("Jenis layanan", lambda t: t.layanan, kanan=False),
+    _k("Loket", lambda t: t.loket, kanan=False),
+    _k("Petugas", lambda t: t.petugas, kanan=False),
+    _k("Status", lambda t: t.status, kanan=False),
+    _k("Jam terbit", lambda t: _jam(t.terbit), lambda t: t.terbit),
+    _k("Jam dipanggil", lambda t: _jam(t.dipanggil), lambda t: t.dipanggil),
+    _k("Jam mulai dilayani", lambda t: _jam(t.mulai), lambda t: t.mulai),
+    _k("Jam selesai", lambda t: _jam(t.selesai), lambda t: t.selesai),
+    _k("Lama menunggu", lambda t: durasi_singkat(t.menunggu_detik), lambda t: _menit(t.menunggu_detik)),
+    _k("Lama pelayanan", lambda t: durasi_singkat(t.layanan_detik), lambda t: _menit(t.layanan_detik)),
+    _k("Nilai survey", lambda t: "" if t.nilai is None else str(t.nilai), lambda t: t.nilai),
+]
+
 JUDUL_TABEL = {
     "per_hari": "Per hari",
     "per_layanan": "Per layanan",
     "per_loket": "Per loket",
     "per_petugas": "Per petugas",
 }
+JUDUL_TABEL_PETUGAS_LAYANAN = "Petugas per layanan"
+JUDUL_TABEL_RIWAYAT = "Riwayat pelayanan"
 
 
 def angka_ringkasan(laporan: Laporan) -> list[tuple[str, str]]:

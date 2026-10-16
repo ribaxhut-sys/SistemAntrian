@@ -54,6 +54,7 @@ BAWAAN: dict[str, str] = {
     "backup.retention_days": "30",
     "backup.salinan_folder": "",
     "dashboard.refresh_seconds": "30",
+    "sesi.idle_menit": "15",
     "kiosk.cooldown_seconds": "10",
     "kiosk.welcome_kind": "teks",
     "kiosk.welcome_text": "",
@@ -585,6 +586,17 @@ SKEMA: tuple[Pengaturan, ...] = (
         maksimum=3600,
         satuan="detik",
         kelompok="Ringkasan Harian",
+    ),
+    Pengaturan(
+        "sesi.idle_menit",
+        "Kunci layar setelah menganggur",
+        "Layar petugas dikunci dan meminta kata sandi bila tidak ada aktivitas "
+        "selama ini. Isi 0 untuk mematikan.",
+        ANGKA,
+        minimum=0,
+        maksimum=480,
+        satuan="menit",
+        kelompok="Keamanan",
     ),
     Pengaturan(
         "backup.auto_enabled",

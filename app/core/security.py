@@ -32,7 +32,7 @@ _P = 1
 _DKLEN = 32
 _SALT_BYTES = 16
 
-MIN_PASSWORD_LENGTH = 6
+MIN_PASSWORD_LENGTH = 8
 
 
 def _b64(raw: bytes) -> str:

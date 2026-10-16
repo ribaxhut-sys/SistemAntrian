@@ -339,10 +339,10 @@ setiap kali status berubah — itulah yang menentukan bentuk kisi tombolnya.
 
 | Peran | Menu |
 |---|---|
-| `REGISTRATION` | Terbitkan Nomor |
-| `CRO` | Pelayanan · Survey Kepuasan · Pengaduan |
-| `SUPERVISOR` | Pengaduan · Ringkasan Harian · Laporan · Hasil Survey |
-| `ADMIN` | Pengaduan · Data Master · Pengaturan · Backup · Tutup Hari |
+| `REGISTRATION` | Terbitkan Nomor · Ringkasan Saya |
+| `CRO` | Pelayanan · Ringkasan Saya · Survey Kepuasan · Pengaduan |
+| `SUPERVISOR` | Pengaduan · Dashboard · Laporan · Hasil Survey |
+| `ADMIN` | Pengaduan · Data Master · Pengaturan · Backup · Tutup Hari · Dashboard · Laporan |
 | `DISPLAY` | Layar Antrian |
 | `KIOSK` | Tidak ada layar Windows; sesi API untuk anjungan Android |
 
@@ -380,10 +380,19 @@ tahu apakah pengunjung masih di depan meja; dialog yang menyembul sendiri
 justru menahan antrian berikutnya. Seluruh survey dapat dimatikan lewat
 pengaturan `survey.enabled`.
 
-**Ringkasan harian** tersedia untuk `SUPERVISOR`: jumlah antrian per status
-dan per jenis layanan, rata-rata waktu tunggu dan waktu layanan, porsi
-antrian yang tuntas dilayani, serta rata-rata dan sebaran nilai kepuasan
-hari itu. Layar menyegar sendiri setiap `dashboard.refresh_seconds` detik.
+**Dashboard** tersedia untuk `ADMIN` dan `SUPERVISOR` (permission
+`DASHBOARD_VIEW`): jumlah antrian per status dan per jenis layanan, nomor
+terbit per jam, status setiap loket dan petugas, rata-rata waktu tunggu dan
+waktu layanan, serta kepuasan, dengan saringan tanggal, jenis layanan,
+loket, dan petugas. Layar menyegar sendiri setiap `dashboard.refresh_seconds`
+detik atau lewat tombol **Segarkan**. `ADMIN` juga mendapat akses cepat ke
+laporan, data master, pengaturan, backup, dan audit log terakhir.
+
+Petugas `CRO` memiliki menu **Ringkasan Saya** (permission `QUEUE_CALL`):
+nomor yang sedang dipegang, antrean berikutnya, hitungan dan riwayat hari ini
+— hanya miliknya sendiri. Tindakan memanggil dan menyelesaikan tetap di menu
+**Pelayanan**. Definisi metrik, hak akses, dan cara menambah metrik:
+[docs/dashboard.md](docs/dashboard.md).
 
 Angka yang belum ada datanya ditampilkan `—`, bukan `0` — keduanya berbeda
 arti bagi yang membacanya.
@@ -613,7 +622,7 @@ padahal tombolnya masih mati.
 | 4 | Queue + Service Flow | ✅ Selesai |
 | 5 | Ticket + Display + Sound | ✅ Selesai |
 | 6 | Satisfaction Survey | ✅ Selesai |
-| 7 | Dashboard Harian | ✅ Selesai |
+| 7 | Dashboard (admin, supervisor, petugas) | ✅ Selesai |
 | 8 | Backup + Audit + Hardening | ✅ Selesai |
 | 9 | Packaging + Acceptance Test | ✅ Selesai |
 
@@ -639,10 +648,10 @@ Menghapusnya setelah membuat akun sendiri tidak akan memunculkannya lagi.
 
 | Peran | Kewenangan |
 |---|---|
-| `ADMIN` | user, cabang, loket, jenis layanan, konfigurasi, backup, **menghapus lembar pengaduan** |
+| `ADMIN` | user, cabang, loket, jenis layanan, konfigurasi, backup, dashboard dan laporan (membaca), **menghapus lembar pengaduan** |
 | `SUPERVISOR` | dashboard, laporan, hasil survey, membaca pengaduan (tanpa mengubah apa pun) |
 | `REGISTRATION` | menerbitkan nomor antrian, mencetak tiket |
-| `CRO` | memanggil, melayani, menunda, menyelesaikan, no-show, batal, menulis dan membaca pengaduan |
+| `CRO` | memanggil, melayani, menunda, menyelesaikan, no-show, batal, menulis dan membaca pengaduan, ringkasan kerja pribadi |
 | `DISPLAY` | hanya layar antrian |
 | `KIOSK` | papan nomor dan pengambilan nomor sendiri, **tanpa akun** |
 
@@ -907,10 +916,22 @@ Pasang Inno Setup 6, lalu dari PowerShell di folder proyek jalankan:
 ```
 
 Skrip menjalankan seluruh test, membangun dan menguji aplikasi di folder
-sementara, lalu menghasilkan `dist\AntrianCRO-Setup-1.0.7.exe`. Installer
+sementara, lalu menghasilkan `dist\AntrianCRO-Setup-1.0.9.exe`. Installer
 dipasang untuk pengguna saat ini ke `%LOCALAPPDATA%\Programs\AntrianCRO`,
 membuat pintasan Start Menu, dan menawarkan pintasan Desktop. Data aplikasi
 tidak dihapus saat aplikasi di-uninstall.
+
+Setiap pemasangan juga menyimpan salinan installer di folder `pembaruan`
+sebelah aplikasi. Pada komputer server, API membagikan installer itu kepada
+PC loket. Mulai versi 1.0.9, PC loket memeriksa versi saat aplikasi dibuka dan
+setiap 30 menit. Bila server mempunyai versi lebih baru, muncul pita
+**Unduh & Perbarui**. Unduhan diperiksa ukuran dan SHA-256 sebelum installer
+dibuka; pemasangan tidak pernah dimulai diam-diam saat petugas melayani.
+
+Versi 1.0.8 dan yang lebih lama belum mempunyai pemeriksa tersebut, sehingga
+harus dinaikkan ke 1.0.9 secara manual satu kali. Sesudah itu, pasang rilis
+baru di server terlebih dahulu; PC loket akan menemukannya sendiri selama
+API server pada port 8765 terjangkau.
 
 Sebelum diserahkan ke pengguna, kerjakan daftar periksa pada
 [docs/acceptance-test.md](docs/acceptance-test.md) di komputer tujuan.
@@ -1047,7 +1068,7 @@ konfirmasi dulu.
 | `queue.max_call_attempts` | `3` | Batas pemanggilan sebelum dianggap tidak hadir |
 | `kiosk.cooldown_seconds` | `10` | Jeda antar-pengambilan nomor di mesin kios (detik) |
 | `survey.enabled` | `true` | Aktifkan survey kepuasan |
-| `dashboard.refresh_seconds` | `30` | Jeda penyegaran ringkasan harian |
+| `dashboard.refresh_seconds` | `30` | Jeda penyegaran Dashboard (Ringkasan Saya dipotong paling lama 15 detik) |
 | `backup.auto_enabled` | `true` | Backup otomatis harian saat aplikasi dibuka |
 | `backup.retention_days` | `30` | Lama backup disimpan sebelum dihapus |
 | `backup.pg_dump_path` | — | Folder perkakas PostgreSQL bila tidak ada di PATH |

@@ -96,11 +96,50 @@ def test_ekspor_pdf_dan_excel(laporan_hari_ini, tmp_path):
 
     xlsx = ekspor_excel(laporan_hari_ini, tmp_path / "lap.xlsx")
     buku = load_workbook(xlsx)
-    assert buku.sheetnames == ["Ringkasan", "Per hari", "Per layanan", "Per loket", "Per petugas"]
+    assert buku.sheetnames == [
+        "Ringkasan",
+        "Per hari",
+        "Per layanan",
+        "Per loket",
+        "Per petugas",
+        "Petugas per layanan",
+        "Riwayat pelayanan",
+    ]
     loket = buku["Per loket"]
     assert loket["A1"].value == "Loket"
     assert loket["C2"].value == 2  # angka, bukan teks
     assert loket["G2"].value == 5
+
+    rincian = buku["Petugas per layanan"]
+    assert [sel.value for sel in rincian[1]][:4] == ["Petugas", "Jenis layanan", "Dipanggil", "Selesai"]
+    assert rincian["D2"].value == 2
+    assert rincian.auto_filter.ref
+
+    riwayat = buku["Riwayat pelayanan"]
+    assert riwayat.max_row == 1 + 4  # judul + satu baris per nomor
+    assert riwayat["G2"].is_date  # jam terbit tersimpan sebagai waktu
+    assert sorted(riwayat.cell(row=r, column=13).value or 0 for r in range(2, 6)) == [0, 0, 0, 5]
+
+
+def test_petugas_per_layanan_dan_riwayat(laporan_hari_ini):
+    (pasangan,) = laporan_hari_ini.petugas_layanan
+    total, rincian = pasangan
+    assert total is laporan_hari_ini.per_petugas[0]
+    (layanan,) = rincian
+    assert layanan.kelompok == total.nama
+    assert (layanan.dipanggil, layanan.selesai, layanan.tidak_hadir) == (3, 2, 1)
+    assert layanan.jumlah_survey == 1
+
+    riwayat = laporan_hari_ini.riwayat
+    assert len(riwayat) == 4
+    assert [t.terbit for t in riwayat] == sorted(t.terbit for t in riwayat)
+    assert sorted(t.status for t in riwayat) == ["Menunggu", "Selesai", "Selesai", "Tidak Hadir"]
+    selesai = [t for t in riwayat if t.status == "Selesai"]
+    assert all(t.layanan_detik is not None for t in selesai)
+    assert all(t.petugas == total.nama for t in selesai)
+    assert sorted(t.nilai or 0 for t in selesai) == [0, 5]
+    menunggu = [t for t in riwayat if t.dipanggil is None]
+    assert len(menunggu) == 1 and menunggu[0].petugas == ""
 
 
 def test_rentang_cepat():
@@ -128,11 +167,12 @@ def test_halaman_laporan_tampil(qtbot, laporan_hari_ini, auth):
     assert halaman.ekspor_pdf.isEnabled()
 
 
-def test_menu_laporan_untuk_supervisor(qtbot, auth, antrian_siap):
+@pytest.mark.parametrize("peran", ["supervisor", "admin"])
+def test_menu_laporan_untuk_supervisor_dan_admin(qtbot, auth, antrian_siap, peran):
     from app.ui.main_window import MainWindow
 
     auth.logout()
-    auth.login("supervisor", TEST_PASSWORD)
+    auth.login(peran, TEST_PASSWORD)
     jendela = MainWindow(auth)
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]

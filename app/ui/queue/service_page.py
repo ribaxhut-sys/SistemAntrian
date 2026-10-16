@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core import clock
 from app.models import QueueStatus
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
@@ -39,6 +40,7 @@ from app.ui.common import (
 )
 from app.ui.efek import pasang_efek
 from app.ui.queue.note_panel import NotePanel
+from app.ui.queue.papan_tunggu import PapanTunggu
 from app.ui.queue.pelapor_form import PelaporForm
 from app.ui.style import (
     BORDER,
@@ -100,6 +102,11 @@ def _beri_bayangan(widget: QWidget) -> None:
     pasang_efek(widget, efek)
 
 
+#: Judul tab ruang kerja pengaduan di panel kanan (tab pertama).
+# "&&": satu "&" dibaca Qt sebagai tanda mnemonik dan hilang dari label.
+JUDUL_TAB_PENGADUAN = "Pengaduan && Catatan"
+
+
 class ServicePage(QWidget):
     """
     Panel kerja petugas CRO.
@@ -141,6 +148,10 @@ class ServicePage(QWidget):
         #: transisi loket kosong <-> sedang melayani, satu-satunya saat
         #: panel kanan berpindah tab sendiri — lihat `_perbarui_panel_kanan`.
         self._kanan_aktif_sebelumnya: bool | None = None
+        #: (id, status) nomor yang dipegang pada penyegaran sebelumnya.
+        #: Tab Pengaduan dibuka pada PERISTIWA — nomor dipanggil atau mulai
+        #: dilayani — bukan pada setiap penyegaran.
+        self._kunci_antrian_sebelumnya: tuple | None = None
         #: Dipakai untuk memilih loket petugas ini sendiri saat halaman
         #: dibuka, dan mengingat kepindahannya bila ia berganti meja.
         self.auth = auth
@@ -189,8 +200,8 @@ class ServicePage(QWidget):
 
     def _bangun_tampilan(self) -> None:
         susunan = QVBoxLayout(self)
-        susunan.setContentsMargins(20, 16, 20, 16)
-        susunan.setSpacing(14)
+        susunan.setContentsMargins(20, 12, 20, 12)
+        susunan.setSpacing(10)
 
         self.label_sinkron = QLabel("● Menyiapkan data…")
         self.label_sinkron.setObjectName("statusSinkron")
@@ -278,7 +289,7 @@ class ServicePage(QWidget):
 
     def _bangun_kolom_kerja(self) -> QVBoxLayout:
         kolom = QVBoxLayout()
-        kolom.setSpacing(12)
+        kolom.setSpacing(8)
         kolom.addWidget(self._bangun_panel_antrian())
         kolom.addWidget(self._bangun_tombol_aksi())
 
@@ -292,8 +303,14 @@ class ServicePage(QWidget):
             self.pelapor = PelaporForm()
             kolom.addWidget(self.pelapor)
 
-        kolom.addStretch()
-        kolom.addWidget(self._bangun_baris_survey())
+        # Papan tunggu mengisi sisa tinggi kolom kiri: apa yang dilihat
+        # pengunjung di layar antrian, tanpa berpindah tab.
+        # (Papan tunggu pindah ke tab Menunggu Dilayani di panel kanan:
+        # di sana ada sisa tinggi, di kolom ini tidak.)
+        kolom.addStretch(1)
+        # Baris survey tidak lagi di sini: ia pindah ke bawah panel kanan,
+        # yang punya sisa tinggi, supaya kolom kerja muat tanpa gulir.
+        self._baris_survey = self._bangun_baris_survey()
         return kolom
 
     def _bangun_panel_antrian(self) -> QWidget:
@@ -309,12 +326,42 @@ class ServicePage(QWidget):
         # objectName wajib: QLabel turunan QFrame, dan selector "QFrame"
         # polos akan membingkai setiap label di dalam panel.
         panel.setObjectName("panelAntrian")
-        panel.setMinimumHeight(150)
+        panel.setMinimumHeight(120)
         self.panel_antrian = panel
 
-        susunan = QVBoxLayout(panel)
-        susunan.setContentsMargins(22, 14, 22, 14)
+        # Kiri: keadaan dan nomor. Kanan: tombol memanggil, tepat di tempat
+        # kalimat "Loket siap melayani" dibaca, dan tidak menambah tinggi.
+        utama = QHBoxLayout(panel)
+        utama.setContentsMargins(22, 14, 22, 14)
+        utama.setSpacing(18)
+        susunan = QVBoxLayout()
         susunan.setSpacing(4)
+        utama.addLayout(susunan, stretch=1)
+
+        # Dibuat di sini, bukan di panel tindakan: kamus `aksi` dimulai di
+        # kartu ini dan dilengkapi `_bangun_tombol_aksi`.
+        self.aksi: dict[str, object] = {}
+        kolom_tombol = QVBoxLayout()
+        kolom_tombol.setSpacing(8)
+        self.tombol_panggil = tombol("Panggil Berikutnya  ·  F2", variant="primary")
+        self.tombol_panggil.setObjectName("tombolUtamaPelayanan")
+        self.tombol_panggil.setMinimumHeight(52)
+        self.tombol_panggil.setStyleSheet(
+            f"font-size: {FONT_SIZE_LARGE}px; letter-spacing: 0.4px;"
+        )
+        self.tombol_panggil.clicked.connect(self.panggil_berikutnya)
+        kolom_tombol.addWidget(self.tombol_panggil)
+        panggil_ulang = tombol("Panggil Ulang  ·  F3", variant="secondary")
+        panggil_ulang.setMinimumHeight(38)
+        panggil_ulang.clicked.connect(self.panggil_ulang)
+        self.aksi["panggil_ulang"] = panggil_ulang
+        kolom_tombol.addWidget(panggil_ulang)
+        # Lebar tetap: tombol tidak boleh bergeser ketika status berganti.
+        pembungkus_tombol = QWidget()
+        pembungkus_tombol.setFixedWidth(250)
+        pembungkus_tombol.setLayout(kolom_tombol)
+        kolom_tombol.setContentsMargins(0, 0, 0, 0)
+        utama.addWidget(pembungkus_tombol, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         baris_atas = QHBoxLayout()
         self.label_status = QLabel("")
@@ -398,46 +445,29 @@ class ServicePage(QWidget):
         kepala.addWidget(self.label_petunjuk_aksi)
         kotak.addLayout(kepala)
 
-        self.tombol_panggil = tombol("Panggil Berikutnya  ·  F2", variant="primary")
-        self.tombol_panggil.setObjectName("tombolUtamaPelayanan")
-        self.tombol_panggil.setMinimumHeight(52)
-        self.tombol_panggil.setStyleSheet(
-            f"font-size: {FONT_SIZE_LARGE}px; letter-spacing: 0.4px;"
-        )
-        self.tombol_panggil.clicked.connect(self.panggil_berikutnya)
-        kotak.addWidget(self.tombol_panggil)
-
-        self.aksi: dict[str, object] = {}
-
         def buat_aksi(kunci: str, teks: str, handler) -> object:
             btn = tombol(teks, variant="secondary")
-            btn.setMinimumHeight(42)
+            btn.setMinimumHeight(38)
             btn.clicked.connect(handler)
             self.aksi[kunci] = btn
             return btn
 
+        # Panggil Berikutnya dan Panggil Ulang ada di kartu loket di atas.
         baris_utama = QHBoxLayout()
         baris_utama.setSpacing(8)
         for kunci, teks, handler in (
-            ("panggil_ulang", "Panggil Ulang  ·  F3", self.panggil_ulang),
             ("mulai_layani", "Mulai Melayani  ·  F4", self.mulai_melayani),
             ("selesai", "Selesai  ·  F8", self.selesaikan),
+            ("tunda", "Tunda", self.tunda),
+            ("lanjutkan", "Lanjutkan", self.lanjutkan),
         ):
             baris_utama.addWidget(buat_aksi(kunci, teks, handler), stretch=1)
         kotak.addLayout(baris_utama)
 
-        baris_lanjutan = QHBoxLayout()
-        baris_lanjutan.setSpacing(8)
-        for kunci, teks, handler in (
-            ("tunda", "Tunda Pelayanan", self.tunda),
-            ("lanjutkan", "Lanjutkan Pelayanan", self.lanjutkan),
-            ("lewati", "Lewati Sementara", self.lewati_sementara),
-        ):
-            baris_lanjutan.addWidget(buat_aksi(kunci, teks, handler), stretch=1)
-        kotak.addLayout(baris_lanjutan)
-
         baris_tutup = QHBoxLayout()
         baris_tutup.setSpacing(8)
+        lewati = buat_aksi("lewati", "Lewati Sementara", self.lewati_sementara)
+        baris_tutup.addWidget(lewati, stretch=1)
         for kunci, teks, handler in (
             ("tidak_hadir", "Tidak Hadir", self.tidak_hadir),
             ("batal", "Batalkan Antrian", self.batalkan),
@@ -445,9 +475,8 @@ class ServicePage(QWidget):
             btn = tombol(teks, variant="danger")
             btn.setMinimumHeight(38)
             btn.clicked.connect(handler)
-            baris_tutup.addWidget(btn)
+            baris_tutup.addWidget(btn, stretch=1)
             self.aksi[kunci] = btn
-        baris_tutup.addStretch()
         kotak.addLayout(baris_tutup)
 
         _beri_bayangan(panel)
@@ -501,16 +530,39 @@ class ServicePage(QWidget):
         """
         self.tab_kanan = QTabWidget()
         self.tab_kanan.setMinimumWidth(320)
-        self.tab_kanan.addTab(self._bangun_panel_menunggu(), "Menunggu Dilayani")
-        self.tab_kanan.addTab(self._bangun_panel_dilewati(), "Dilewati (0)")
 
+        # Pengaduan & Catatan selalu tab pertama: itu tempat petugas
+        # bekerja begitu seseorang dipanggil, jadi letaknya tetap di awal.
         self.panel_pengaduan: NotePanel | None = None
         if self.note is not None and self.pelapor is not None:
             self.panel_pengaduan = NotePanel(self.note, self.pelapor)
-            self.tab_kanan.addTab(self.panel_pengaduan, "Pengaduan & Catatan")
+            self.tab_kanan.addTab(self.panel_pengaduan, JUDUL_TAB_PENGADUAN)
+            # Penanda isian yang belum disimpan, supaya tidak terlewat
+            # ketika petugas berpindah ke tab lain.
+            self.panel_pengaduan.isian_deskripsi.textChanged.connect(
+                self._perbarui_judul_pengaduan
+            )
+            self.panel_pengaduan.isian_catatan.textChanged.connect(
+                self._perbarui_judul_pengaduan
+            )
+            self._pewaktu_judul_pengaduan = QTimer(self)
+            self._pewaktu_judul_pengaduan.setInterval(1000)
+            self._pewaktu_judul_pengaduan.timeout.connect(
+                self._perbarui_judul_pengaduan
+            )
+            self._pewaktu_judul_pengaduan.start()
+
+        self.tab_kanan.addTab(self._bangun_panel_menunggu(), "Menunggu Dilayani")
+        self.tab_kanan.addTab(self._bangun_panel_dilewati(), "Dilewati (0)")
 
         _beri_bayangan(self.tab_kanan)
-        return self.tab_kanan
+        kanan = QWidget()
+        susunan = QVBoxLayout(kanan)
+        susunan.setContentsMargins(0, 0, 0, 0)
+        susunan.setSpacing(10)
+        susunan.addWidget(self.tab_kanan, stretch=1)
+        susunan.addWidget(self._baris_survey)
+        return kanan
 
     def _bangun_panel_menunggu(self) -> QWidget:
         panel = QFrame()
@@ -533,6 +585,16 @@ class ServicePage(QWidget):
         self.label_jumlah.setStyleSheet(_pil(PRIMARY_DARK, PRIMARY_SOFT))
         baris_judul.addWidget(self.label_jumlah)
         susunan.addLayout(baris_judul)
+
+        # Ringkasan per layanan yang sedang ada antriannya, di atas daftar
+        # nomor: mengisi sisa tinggi panel dan memberi gambaran sekilas.
+        self.papan_tunggu = PapanTunggu(
+            TUNGGU_LAMA_MENIT, tinggi_menurut_isi=True
+        )
+        # Klik kartu layanan menyaring daftar nomor di bawahnya.
+        self.papan_tunggu.layananDipilih.connect(self._saring_menunggu)
+        self._menunggu_penuh: list[QueueInfo] = []
+        susunan.addWidget(self.papan_tunggu)
 
         self.tabel = QTableWidget(0, 4)
         # Judul kolom sengaja sesingkat mungkin. Panel ini hanya sepertiga
@@ -1005,6 +1067,9 @@ class ServicePage(QWidget):
 
         self.antrian = antrian
         self._tampilkan_antrian()
+        # Papan lebih dulu: ia mengembalikan pilihan ke "Semua" bila
+        # layanan yang dipilih sudah tidak punya antrian.
+        self.papan_tunggu.setel(menunggu, self.loket_kategori, clock.now())
         self._isi_tabel(menunggu)
         self._isi_tabel_dilewati(dilewati)
 
@@ -1256,6 +1321,10 @@ class ServicePage(QWidget):
         if self.auth is None or self.antrian is None:
             return False
         sesi = self.auth.current_session
+        if sesi is None:
+            # Sesi sudah berakhir (logout/jendela ditutup) selagi muat latar
+            # masih berjalan; tidak ada lagi yang dapat "dialihkan".
+            return False
         return (
             self.antrian.served_by_id is not None
             and self.antrian.served_by_id != sesi.user_id
@@ -1290,12 +1359,34 @@ class ServicePage(QWidget):
                     self.pelapor.set_aktif(False)
 
         aktif = self.antrian is not None
-        if aktif != self._kanan_aktif_sebelumnya:
-            self._kanan_aktif_sebelumnya = aktif
-            if self.panel_pengaduan is not None:
-                self.tab_kanan.setCurrentWidget(
-                    self.panel_pengaduan if aktif else self.panel_menunggu
-                )
+        kunci = (
+            (self.antrian.id, self.antrian.status) if self.antrian is not None else None
+        )
+        # Nomor dipanggil, mulai dilayani, atau berganti: buka Pengaduan.
+        # Selain itu pilihan tab petugas dibiarkan. Muatan pertama dengan
+        # nomor yang sudah dipegang juga termasuk peristiwa (kunci awal None).
+        peristiwa = kunci != self._kunci_antrian_sebelumnya
+        self._kunci_antrian_sebelumnya = kunci
+        berubah_aktif = aktif != self._kanan_aktif_sebelumnya
+        self._kanan_aktif_sebelumnya = aktif
+        if self.panel_pengaduan is not None:
+            if aktif and peristiwa:
+                self.tab_kanan.setCurrentWidget(self.panel_pengaduan)
+            elif not aktif and berubah_aktif:
+                self.tab_kanan.setCurrentWidget(self.panel_menunggu)
+            self._perbarui_judul_pengaduan()
+
+    def _perbarui_judul_pengaduan(self) -> None:
+        """Beri tanda ● pada judul tab bila ada isian yang belum disimpan."""
+        panel = self.panel_pengaduan
+        if panel is None:
+            return
+        judul = JUDUL_TAB_PENGADUAN
+        if self.antrian is not None and panel.berubah:
+            judul += " ●"
+        indeks = self.tab_kanan.indexOf(panel)
+        if indeks >= 0 and self.tab_kanan.tabText(indeks) != judul:
+            self.tab_kanan.setTabText(indeks, judul)
 
     def _perbarui_tombol_survey(self) -> None:
         aktif = self.settings.get_bool("survey.enabled", True)
@@ -1347,15 +1438,28 @@ class ServicePage(QWidget):
         from app.core import clock
 
         sekarang = clock.now()
-        self.label_jumlah.setText(str(len(menunggu)))
+        self._menunggu_penuh = list(menunggu)
+        pilihan = self.papan_tunggu.pilihan
+        tampil = (
+            [q for q in menunggu if q.category_id == pilihan]
+            if pilihan is not None
+            else list(menunggu)
+        )
+        if pilihan is not None and tampil:
+            self.label_jumlah.setText(f"{tampil[0].category_name} · {len(tampil)}")
+        else:
+            self.label_jumlah.setText(str(len(menunggu)))
         self.tabel.setVisible(bool(menunggu))
         self.panel_kosong.setVisible(not menunggu)
 
-        self.tabel.setRowCount(len(menunggu))
-        lama_menit: list[int] = []
-        for baris, q in enumerate(menunggu):
+        self.tabel.setRowCount(len(tampil))
+        # Judul tab dan warnanya selalu menghitung SELURUH antrian, bukan
+        # hanya yang sedang disaring.
+        lama_menit = [
+            int((sekarang - q.created_at).total_seconds() // 60) for q in menunggu
+        ]
+        for baris, q in enumerate(tampil):
             lama = int((sekarang - q.created_at).total_seconds() // 60)
-            lama_menit.append(lama)
             nilai = [
                 q.queue_number,
                 q.category_name,
@@ -1368,6 +1472,10 @@ class ServicePage(QWidget):
                 self.tabel.setItem(baris, kolom, sel)
 
         self._perbarui_judul_tab_menunggu(len(menunggu), lama_menit)
+
+    def _saring_menunggu(self, _kategori_id=None) -> None:
+        """Pilihan kartu berubah: gambar ulang daftar dari data terakhir."""
+        self._isi_tabel(self._menunggu_penuh)
 
     def _isi_tabel_dilewati(self, dilewati: list[QueueInfo]) -> None:
         """Perbarui tab dilewati sambil mempertahankan pilihan petugas."""
@@ -1403,7 +1511,9 @@ class ServicePage(QWidget):
         ada = bool(dilewati)
         self.tabel_dilewati.setVisible(ada)
         self.label_dilewati_kosong.setVisible(not ada)
-        self.tab_kanan.setTabText(1, f"Dilewati ({len(dilewati)})")
+        self.tab_kanan.setTabText(
+            self.tab_kanan.indexOf(self.panel_dilewati), f"Dilewati ({len(dilewati)})"
+        )
         self._perbarui_tombol_panggil_kembali()
 
     def _id_dilewati_terpilih(self) -> int | None:
@@ -1453,7 +1563,7 @@ class ServicePage(QWidget):
         terlambat = sum(1 for m in lama_menit if m >= TUNGGU_LAMA_MENIT)
         if terlambat:
             judul += f" · {terlambat} lama"
-        self.tab_kanan.setTabText(0, judul)
+        self.tab_kanan.setTabText(self.tab_kanan.indexOf(self.panel_menunggu), judul)
 
     def _gayai_sel(
         self, sel: QTableWidgetItem, *, baris: int, kolom: int, menit: int
