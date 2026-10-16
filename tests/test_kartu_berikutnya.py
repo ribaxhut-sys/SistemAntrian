@@ -11,7 +11,8 @@ from app.ui.queue.kartu_berikutnya import KartuBerikutnya
 
 
 class _Antrian:
-    def __init__(self, nomor, kategori_id, nama, menit):
+    def __init__(self, nomor, kategori_id, nama, menit, prioritas=None):
+        self.prioritas = prioritas
         self.queue_number = nomor
         self.category_id = kategori_id
         self.category_name = nama
@@ -32,13 +33,13 @@ def _kartu(qtbot, lebar=420, tinggi=200):
     return kartu
 
 
-def test_menampilkan_tiga_nomor_berikutnya_menurut_waktu_terbit(qtbot):
+def test_menampilkan_tiga_nomor_berikutnya_sesuai_urutan_panggil(qtbot):
     kartu = _kartu(qtbot, tinggi=240)
     kartu.setel(
         [
-            _Antrian("A-003", 1, "Konsultasi", 2),
             _Antrian("A-001", 1, "Konsultasi", 12),
             _Antrian("B-001", 2, "Pengaduan", 8),
+            _Antrian("A-003", 1, "Konsultasi", 2),
             _Antrian("A-004", 1, "Konsultasi", 1),
         ],
         (),
@@ -115,3 +116,19 @@ def test_nomor_lama_diberi_penanda(qtbot):
 
     assert "●" in kartu.baris_tampil[0]
     assert "15 mnt" in kartu.baris_tampil[0]
+
+
+def test_nomor_prioritas_ditandai_bintang(qtbot):
+    kartu = _kartu(qtbot, tinggi=240)
+    kartu.setel(
+        [
+            _Antrian("A-002", 1, "Konsultasi", 3, prioritas="LANSIA"),
+            _Antrian("A-001", 1, "Konsultasi", 9),
+        ],
+        (),
+        clock.now(),
+        None,
+    )
+
+    assert "★ A-002" in kartu.baris_tampil[0]
+    assert "★" not in kartu.baris_tampil[1]

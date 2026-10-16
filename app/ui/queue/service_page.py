@@ -41,6 +41,7 @@ from app.ui.common import (
 )
 from app.ui.efek import pasang_efek
 from app.ui.queue.note_panel import NotePanel
+from app.services.urutan_prioritas import MODE_BIASA, MODE_OTOMATIS, MODE_PRIORITAS
 from app.ui.queue.kartu_berikutnya import KartuBerikutnya
 from app.ui.queue.papan_tunggu import PapanTunggu
 from app.ui.queue.pelapor_form import PelaporForm
@@ -268,6 +269,20 @@ class ServicePage(QWidget):
         self.pilih_kategori = QComboBox()
         self.pilih_kategori.setMinimumWidth(200)
         susunan.addLayout(self._berlabel("JENIS LAYANAN", self.pilih_kategori))
+
+        # Pilihan sekali pakai untuk panggilan berikutnya: otomatis mengikuti
+        # rasio prioritas; petugas dapat langsung memilih yang prioritas atau
+        # yang biasa. Kembali ke otomatis sesudah dipakai.
+        self.pilih_urutan = QComboBox()
+        self.pilih_urutan.addItem("Otomatis", MODE_OTOMATIS)
+        self.pilih_urutan.addItem("Prioritas dulu", MODE_PRIORITAS)
+        self.pilih_urutan.addItem("Biasa dulu", MODE_BIASA)
+        self.pilih_urutan.setMinimumWidth(130)
+        self.pilih_urutan.setToolTip(
+            "Urutan panggil untuk nomor berikutnya. Otomatis mengikuti rasio "
+            "prioritas di Pengaturan."
+        )
+        susunan.addLayout(self._berlabel("URUTAN PANGGIL", self.pilih_urutan))
 
         self.tombol_istirahat = tombol("Mulai Istirahat")
         # Padding bawaan tombol (9 px) membuatnya 42 px, dua piksel lebih
@@ -1495,7 +1510,7 @@ class ServicePage(QWidget):
         for baris, q in enumerate(tampil):
             lama = int((sekarang - q.created_at).total_seconds() // 60)
             nilai = [
-                q.queue_number,
+                f"★ {q.queue_number}" if q.prioritas else q.queue_number,
                 q.category_name,
                 q.created_at.strftime("%H:%M"),
                 f"{lama} menit",
@@ -1721,14 +1736,22 @@ class ServicePage(QWidget):
         if self.loket_id is None or not self.tombol_panggil.isEnabled():
             return
         category_id = self.pilih_kategori.currentData()
+        urutan = self.pilih_urutan.currentData() or MODE_OTOMATIS
         loket_id = self.loket_id
         survey_lama = self.baru_selesai
+
+        def setelah(_hasil) -> None:
+            # Pilihan manual hanya berlaku untuk satu panggilan.
+            self.pilih_urutan.setCurrentIndex(0)
+            if survey_lama is not None:
+                self._lewati_survey_lama(survey_lama)
+
         self._jalankan(
-            lambda: self.queue.call_next(loket_id, category_id=category_id),
+            lambda: self.queue.call_next(
+                loket_id, category_id=category_id, urutan=urutan
+            ),
             "Gagal memanggil antrian",
-            (lambda _hasil: self._lewati_survey_lama(survey_lama))
-            if survey_lama is not None
-            else None,
+            setelah,
         )
 
     def _lewati_survey_lama(self, survey_lama: QueueInfo) -> None:

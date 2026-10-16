@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.models.enums import LABEL_PRIORITAS, UserRole
 from app.services.master_data_service import MasterDataService
 from app.services.queue_service import QueueInfo, QueueService
 from app.services.ticket_service import TicketService
@@ -101,6 +103,27 @@ class RegistrationPage(QWidget):
         self.label_sinkron.setStyleSheet(f"color: {DANGER}; font-weight: 600;")
         self.label_sinkron.setVisible(False)
         susunan.addWidget(self.label_sinkron)
+
+        # Prioritas hanya ditandai petugas pendaftaran, yang melihat
+        # pengunjungnya langsung. Pilihan kembali ke "Biasa" setiap nomor
+        # terbit supaya pengunjung berikutnya tidak ikut didahulukan.
+        self.pilih_prioritas = QComboBox()
+        self.pilih_prioritas.addItem("Biasa", None)
+        for kunci, label in LABEL_PRIORITAS.items():
+            self.pilih_prioritas.addItem(label, kunci)
+        self.pilih_prioritas.setMinimumWidth(180)
+        baris_prioritas = QHBoxLayout()
+        baris_prioritas.addWidget(QLabel("Pengunjung prioritas:"))
+        baris_prioritas.addWidget(self.pilih_prioritas)
+        baris_prioritas.addStretch()
+        self.baris_prioritas = QWidget()
+        self.baris_prioritas.setLayout(baris_prioritas)
+        baris_prioritas.setContentsMargins(0, 0, 0, 0)
+        sesi = getattr(self.queue.auth, "current_session", None)
+        self.baris_prioritas.setVisible(
+            sesi is not None and sesi.role is UserRole.REGISTRATION
+        )
+        susunan.addWidget(self.baris_prioritas)
 
         self.kisi = QGridLayout()
         self.kisi.setSpacing(12)
@@ -298,15 +321,24 @@ class RegistrationPage(QWidget):
                 QTimer.singleShot(500, self._akhiri_jeda_penerbitan)
             return
 
-        pekerja = PekerjaLatar(lambda: self._terbitkan_dan_hitung(category_id), self)
+        prioritas = self._prioritas_terpilih()
+        pekerja = PekerjaLatar(
+            lambda: self._terbitkan_dan_hitung(category_id, prioritas), self
+        )
         pekerja.berhasil.connect(self._selesai_terbit_latar)
         pekerja.gagal.connect(self._gagal_terbit_latar)
         pekerja.finished.connect(self._bersihkan_pekerja_terbit)
         self._pekerja_terbit = pekerja
         pekerja.start()
 
-    def _terbitkan_dan_hitung(self, category_id: int):
-        nomor = self.queue.create_queue(category_id)
+    def _prioritas_terpilih(self) -> str | None:
+        """Alasan prioritas yang dipilih, atau None untuk pengunjung biasa."""
+        if not self.baris_prioritas.isVisibleTo(self):
+            return None
+        return self.pilih_prioritas.currentData()
+
+    def _terbitkan_dan_hitung(self, category_id: int, prioritas: str | None = None):
+        nomor = self.queue.create_queue(category_id, prioritas=prioritas)
         try:
             menunggu = self.queue.list_waiting()
         except Exception:  # nomor sudah sah; ringkasan posisi boleh gagal
@@ -315,6 +347,7 @@ class RegistrationPage(QWidget):
 
     def _selesai_terbit_latar(self, hasil) -> None:
         nomor, menunggu = hasil
+        self.pilih_prioritas.setCurrentIndex(0)
         self.terakhir = nomor
         self._tampilkan_hasil(nomor, menunggu=menunggu)
         self.nomor_terbit.emit(nomor)
@@ -339,11 +372,15 @@ class RegistrationPage(QWidget):
 
     def terbitkan(self, category_id: int) -> None:
         """Terbitkan satu nomor untuk jenis layanan yang dipilih."""
+        prioritas = self._prioritas_terpilih()
         berhasil, nomor = jalankan_aman(
-            self, lambda: self.queue.create_queue(category_id), "Gagal menerbitkan nomor"
+            self,
+            lambda: self.queue.create_queue(category_id, prioritas=prioritas),
+            "Gagal menerbitkan nomor",
         )
         if not berhasil:
             return
+        self.pilih_prioritas.setCurrentIndex(0)
 
         self.terakhir = nomor
         self._tampilkan_hasil(nomor)
@@ -354,7 +391,11 @@ class RegistrationPage(QWidget):
         self, nomor: QueueInfo, *, menunggu=_BELUM_DISEDIAKAN
     ) -> None:
         self.label_nomor.setText(nomor.queue_number)
-        self.label_layanan.setText(nomor.category_name)
+        self.label_layanan.setText(
+            f"{nomor.category_name} · Prioritas {nomor.label_prioritas}"
+            if nomor.prioritas
+            else nomor.category_name
+        )
 
         berhasil = menunggu is not None
         if menunggu is _BELUM_DISEDIAKAN:

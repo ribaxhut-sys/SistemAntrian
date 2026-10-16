@@ -94,14 +94,11 @@ class KartuBerikutnya(QFrame):
 
     def _gambar(self) -> None:
         menunggu, dilayani, sekarang, ringkasan = self._data
-        milik = sorted(
-            (
-                a
-                for a in menunggu
-                if not dilayani or a.category_id in dilayani
-            ),
-            key=lambda a: a.created_at,
-        )
+        # `menunggu` sudah dalam urutan panggil (prioritas dan rasio dihitung
+        # service); jangan diurutkan ulang menurut waktu.
+        milik = [
+            a for a in menunggu if not dilayani or a.category_id in dilayani
+        ]
 
         # Setiap butir: (prioritas, urutan tampil, HTML, teks polos).
         butir: list[tuple[int, int, str, str]] = []
@@ -122,7 +119,8 @@ class KartuBerikutnya(QFrame):
             tambah(
                 1 if i == 1 else 3,
                 10 + i,
-                f"{i}. {antrian.queue_number} · {antrian.category_name}"
+                f"{i}. {'★ ' if antrian.prioritas else ''}{antrian.queue_number}"
+                f" · {antrian.category_name}"
                 f" · {_label_menit(detik)}{' ●' if lama else ''}",
                 WARNING if lama else TEXT,
             )

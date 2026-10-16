@@ -99,6 +99,12 @@ _SETTINGS: list[tuple[str, str, str]] = [
     ("display.loket_tampil", "petugas",
      "Loket di layar: petugas = hanya yang ada petugasnya, semua = semua loket aktif"),
     ("queue.max_call_attempts", "3", "Batas pemanggilan sebelum dianggap tidak hadir"),
+    (
+        "queue.rasio_prioritas",
+        "3",
+        "Setiap sekian nomor prioritas beruntun disisipkan satu nomor biasa; 0 = "
+        "prioritas selalu lebih dulu",
+    ),
     ("queue.registration_open", "true", "Loket dan kios sedang menerima nomor baru"),
     ("queue.registration_closed_date", "",
      "Tanggal pendaftaran terakhir ditutup; dikelola otomatis oleh sistem"),

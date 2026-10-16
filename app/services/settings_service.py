@@ -80,6 +80,7 @@ BAWAAN: dict[str, str] = {
     "display.sound_enabled": "true",
     "display.loket_tampil": "petugas",
     "queue.max_call_attempts": "3",
+    "queue.rasio_prioritas": "3",
     "queue.registration_open": "true",
     "queue.registration_closed_date": "",
     "survey.enabled": "true",
@@ -401,6 +402,19 @@ SKEMA: tuple[Pengaturan, ...] = (
         minimum=1,
         maksimum=10,
         satuan="kali",
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "queue.rasio_prioritas",
+        "Rasio nomor prioritas",
+        "Setiap sekian nomor prioritas (lansia, disabilitas, ibu hamil) yang "
+        "dipanggil beruntun, satu nomor biasa disisipkan supaya tidak menunggu "
+        "tanpa batas. Isi 0 bila prioritas selalu didahulukan.",
+        ANGKA,
+        minimum=0,
+        maksimum=20,
+        satuan="nomor",
+        nilai_khusus="Prioritas selalu lebih dulu",
         kelompok="Antrian",
     ),
     Pengaturan(

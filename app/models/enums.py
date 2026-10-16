@@ -21,6 +21,21 @@ class UserRole(str, Enum):
     KIOSK = "KIOSK"
 
 
+class AlasanPrioritas(str, Enum):
+    """Alasan sebuah nomor didahulukan. Nomor biasa tidak menyimpan apa pun."""
+
+    LANSIA = "LANSIA"
+    DISABILITAS = "DISABILITAS"
+    IBU_HAMIL = "IBU_HAMIL"
+
+
+LABEL_PRIORITAS: dict[str, str] = {
+    AlasanPrioritas.LANSIA.value: "Lansia",
+    AlasanPrioritas.DISABILITAS.value: "Disabilitas",
+    AlasanPrioritas.IBU_HAMIL.value: "Ibu hamil",
+}
+
+
 class RecordStatus(str, Enum):
     """Status aktif/nonaktif untuk data master."""
 
