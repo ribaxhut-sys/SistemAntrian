@@ -742,7 +742,6 @@ public final class MainActivity extends Activity {
     private static final int BATAS_NOMOR_ANIMASI = 24;
     private static final long JEDA_BARIS_NOMOR_MS = 200L;
     private static final long JEDA_KOLOM_NOMOR_MS = 70L;
-    private static final long DURASI_NOMOR_MS = 560L;
     private static final long BATAS_TOTAL_JEDA_NOMOR_MS = 1500L;
     /** Animasi mulai sekian milidetik sebelum iklan terakhir berakhir; 0 = sesudahnya. */
     private long animasiMulaiMs = 2000L;
@@ -3104,7 +3103,6 @@ public final class MainActivity extends Activity {
         int awal = waitingPage * nomorPerHalaman();
         int akhir = Math.min(awal + nomorPerHalaman(), waitingQueueNumbers.size());
         List<View> ubinBaru = new ArrayList<>();
-        int nomorBaruMasuk = 0;
         int jumlahBarisHalaman = ((akhir - awal) + KOLOM_NOMOR_MENUNGGU - 1) / KOLOM_NOMOR_MENUNGGU;
         LinearLayout baris = null;
         for (int index = awal; index < akhir; index++) {
@@ -3141,12 +3139,6 @@ public final class MainActivity extends Activity {
                         .setDuration(360)
                         .setInterpolator(new android.view.animation.DecelerateInterpolator())
                         .start();
-            } else if (animasiNomorAktif && animasiSistemAktif() && menungguPernahTampil
-                    && !nomorMenungguTerakhir.contains(isi)) {
-                // Nomor baru: gaya masuk acak yang sama; bila beberapa sekaligus,
-                // berurutan dengan selang pendek.
-                animasiMasukNomor(nomor, 0,
-                        Math.min(nomorBaruMasuk++, KOLOM_NOMOR_MENUNGGU - 1), 1);
             } else if (menungguPernahTampil && !nomorMenungguTerakhir.contains(isi)) {
                 // Nomor yang baru diambil muncul dengan "pop" kecil.
                 nomor.setAlpha(0f);
@@ -3251,15 +3243,18 @@ public final class MainActivity extends Activity {
 
     /**
      * Nomor menunggu masuk berurutan: baris demi baris, dan di dalam baris
-     * tiap nomor selang pendek dengan gaya acak (naik, mekar, atau geser dari
-     * samping) yang berbeda dari nomor sebelumnya. Total selang dibatasi
-     * supaya daftar yang panjang tidak terasa lambat.
+     * tiap nomor selang pendek. Gayanya diacak dari gaya lama papan: papan
+     * balik (berputar dari sumbu horizontal), papan balik tegak (sumbu
+     * vertikal), dan pop (membesar dengan pantulan), dan berbeda dari nomor
+     * sebelumnya. Total selang dibatasi supaya daftar panjang tidak lambat.
      */
     private void animasiMasukNomor(View nomor, int baris, int kolom, int jumlahBaris) {
         float skala = 1f;
         long maksJeda = (jumlahBaris - 1) * JEDA_BARIS_NOMOR_MS
                 + (KOLOM_NOMOR_MENUNGGU - 1) * JEDA_KOLOM_NOMOR_MS;
-        if (maksJeda > BATAS_TOTAL_JEDA_NOMOR_MS) skala = BATAS_TOTAL_JEDA_NOMOR_MS / (float) maksJeda;
+        if (maksJeda > BATAS_TOTAL_JEDA_NOMOR_MS) {
+            skala = BATAS_TOTAL_JEDA_NOMOR_MS / (float) maksJeda;
+        }
         long jeda = jedaAwalNomorMs
                 + (long) ((baris * JEDA_BARIS_NOMOR_MS + kolom * JEDA_KOLOM_NOMOR_MS) * skala);
         int gaya;
@@ -3267,27 +3262,29 @@ public final class MainActivity extends Activity {
             gaya = acakArah.nextInt(3);
         } while (gaya == gayaNomorTerakhir);
         gayaNomorTerakhir = gaya;
-        nomor.setAlpha(0f);
+        nomor.setAlpha(0.3f);
         android.view.ViewPropertyAnimator animasi = nomor.animate().alpha(1f);
-        android.view.animation.Interpolator lembut =
-                new android.view.animation.DecelerateInterpolator(1.6f);
+        android.view.animation.Interpolator kurva =
+                new android.view.animation.DecelerateInterpolator();
+        long durasi = 360L;
         if (gaya == 0) {
-            // Naik: memudar masuk sambil naik.
-            nomor.setTranslationY(dp(24));
-            animasi.translationY(0f);
+            // Papan balik: berputar dari sumbu horizontal.
+            nomor.setRotationX(90f);
+            animasi.rotationX(0f);
         } else if (gaya == 1) {
-            // Mekar: memudar masuk sambil membesar.
-            nomor.setScaleX(0.85f);
-            nomor.setScaleY(0.85f);
-            animasi.scaleX(1f).scaleY(1f);
-            lembut = new android.view.animation.OvershootInterpolator(1.2f);
+            // Papan balik tegak: berputar dari sumbu vertikal.
+            nomor.setRotationY(90f);
+            animasi.rotationY(0f);
         } else {
-            // Geser samping: dari kiri atau kanan.
-            nomor.setTranslationX((acakArah.nextBoolean() ? 1 : -1) * dp(40));
-            animasi.translationX(0f);
+            // Pop: membesar dengan pantulan.
+            nomor.setAlpha(0f);
+            nomor.setScaleX(0.6f);
+            nomor.setScaleY(0.6f);
+            animasi.scaleX(1f).scaleY(1f);
+            kurva = new android.view.animation.OvershootInterpolator(2f);
+            durasi = 420L;
         }
-        animasi.setStartDelay(jeda).setDuration(DURASI_NOMOR_MS)
-                .setInterpolator(lembut).start();
+        animasi.setStartDelay(jeda).setDuration(durasi).setInterpolator(kurva).start();
     }
 
     private LinearLayout.LayoutParams selNomorMenunggu() {
