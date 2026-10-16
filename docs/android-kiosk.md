@@ -278,6 +278,21 @@ Saklar **Animasi saat kembali ke antrian** (`kiosk.animasi_kembali`, bawaan
 nyala; `return_animation` pada `/v1/kiosk/display`); dilewati otomatis bila
 animasi dimatikan di pengaturan Android tablet.
 
+### Animasi nomor menunggu (setelah 2.4.34.1, belum dirilis)
+
+Nomor menunggu tidak lagi muncul sekaligus: **baris demi baris** (selang 200
+ms) dan **di dalam baris tiap nomor** selang 70 ms, dengan gaya acak per nomor
+(*naik*, *mekar*, atau *geser dari samping*) yang berbeda dari nomor
+sebelumnya; 560 ms per nomor, total selang dibatasi 1,5 detik, paling banyak
+24 nomor dianimasikan. Dipakai saat panel pertama tampil, saat **halaman
+berganti**, saat **kembali dari iklan** (mulai sesudah panelnya hampir tiba),
+dan saat **nomor baru bertambah** (hanya kartu baru yang masuk; beberapa
+sekaligus berurutan). Saklar **Animasi nomor menunggu**
+(`kiosk.animasi_nomor_menunggu`, bawaan nyala; `waiting_animation` pada
+`/v1/kiosk/display`); dilewati bila animasi Android dimatikan. Bila saklar
+mati, perilaku lama (papan balik saat halaman berganti, "pop" untuk nomor
+baru) tetap dipakai.
+
 ### Teks loket tanpa panggilan (setelah 2.4.34.1, belum dirilis)
 
 Loket yang aktif tetapi tidak sedang memanggil menampilkan **"Siap melayani"**

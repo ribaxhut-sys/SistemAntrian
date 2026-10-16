@@ -903,6 +903,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "return_animation": services.settings.get_bool(
                 "kiosk.animasi_kembali", True
             ),
+            # Nomor menunggu muncul berurutan dengan gaya acak.
+            "waiting_animation": services.settings.get_bool(
+                "kiosk.animasi_nomor_menunggu", True
+            ),
             # Detik sebelum iklan terakhir berakhir saat animasi mulai; 0 =
             # sesudah iklan selesai.
             "return_animation_lead_seconds": services.settings.get_int(
