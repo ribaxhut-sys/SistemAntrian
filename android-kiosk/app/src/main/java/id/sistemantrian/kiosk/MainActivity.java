@@ -679,6 +679,11 @@ public final class MainActivity extends Activity {
     /** Pengaturan server: detik tanpa sentuhan sebelum iklan layar penuh; 0 = mati. */
     private int iklanPenuhDetik = 60;
     private boolean iklanPenuh;
+    // Keadaan bingkai sebelum iklan memenuhi layar, untuk dipulihkan.
+    private int[] paddingRootAsli;
+    private int[] paddingInfoAsli;
+    private android.graphics.drawable.Drawable latarInfoAsli;
+    private float elevasiInfoAsli;
     /** Sisa gestur yang membangunkan layar iklan; tidak diteruskan ke tombol. */
     private boolean menelanSentuhan;
     private final Map<View, Integer> visibilitasSebelumIklanPenuh = new HashMap<>();
@@ -1459,7 +1464,7 @@ public final class MainActivity extends Activity {
             }
             ImageView image = new ImageView(this);
             image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            image.setBackgroundColor(KARTU);
+            image.setBackgroundColor(iklanPenuh ? Color.BLACK : KARTU);
             image.setAlpha(0f);
             mediaSlot.addView(image, new FrameLayout.LayoutParams(-1, -1));
             worker.execute(() -> {
@@ -1667,6 +1672,7 @@ public final class MainActivity extends Activity {
         transisi.setDuration(450);
         TransitionManager.beginDelayedTransition(rootLayout, transisi);
         sembunyikanUntukIklanPenuh();
+        bukaBingkaiIklanPenuh();
         ajakanIklanPenuh.setVisibility(View.VISIBLE);
         hentikanDenyutAjakanIklan();
         denyutAjakanIklan = android.animation.ObjectAnimator.ofFloat(
@@ -1702,6 +1708,55 @@ public final class MainActivity extends Activity {
         bingkaiMedia.setVisibility(View.VISIBLE);
     }
 
+    /**
+     * Iklan memenuhi SELURUH layar: tanpa margin, padding, sudut membulat,
+     * dan garis tepi, di atas latar hitam. Video tetap utuh (rasio dijaga,
+     * pita hitam bila rasionya berbeda), bukan dipotong.
+     */
+    private void bukaBingkaiIklanPenuh() {
+        if (rootLayout == null || panelInfo == null) return;
+        if (paddingRootAsli == null) {
+            paddingRootAsli = new int[]{rootLayout.getPaddingLeft(),
+                    rootLayout.getPaddingTop(), rootLayout.getPaddingRight(),
+                    rootLayout.getPaddingBottom()};
+            paddingInfoAsli = new int[]{panelInfo.getPaddingLeft(),
+                    panelInfo.getPaddingTop(), panelInfo.getPaddingRight(),
+                    panelInfo.getPaddingBottom()};
+            latarInfoAsli = panelInfo.getBackground();
+            elevasiInfoAsli = panelInfo.getElevation();
+        }
+        rootLayout.setPadding(0, 0, 0, 0);
+        rootLayout.setBackgroundColor(Color.BLACK);
+        panelInfo.setPadding(0, 0, 0, 0);
+        panelInfo.setBackgroundColor(Color.BLACK);
+        panelInfo.setElevation(0f);
+        aturLatarGambarMedia(Color.BLACK);
+    }
+
+    private void pulihkanBingkaiIklanPenuh() {
+        if (paddingRootAsli == null || rootLayout == null || panelInfo == null) return;
+        rootLayout.setPadding(paddingRootAsli[0], paddingRootAsli[1],
+                paddingRootAsli[2], paddingRootAsli[3]);
+        rootLayout.setBackgroundColor(LATAR);
+        panelInfo.setPadding(paddingInfoAsli[0], paddingInfoAsli[1],
+                paddingInfoAsli[2], paddingInfoAsli[3]);
+        panelInfo.setBackground(latarInfoAsli);
+        panelInfo.setElevation(elevasiInfoAsli);
+        aturLatarGambarMedia(KARTU);
+        paddingRootAsli = null;
+        paddingInfoAsli = null;
+        latarInfoAsli = null;
+    }
+
+    /** Warna di balik gambar yang tidak memenuhi bingkai (FIT_CENTER). */
+    private void aturLatarGambarMedia(int warna) {
+        if (mediaSlot == null) return;
+        for (int i = 0; i < mediaSlot.getChildCount(); i++) {
+            View anak = mediaSlot.getChildAt(i);
+            if (anak instanceof ImageView) anak.setBackgroundColor(warna);
+        }
+    }
+
     private void keluarIklanPenuh() {
         if (!iklanPenuh) return;
         iklanPenuh = false;
@@ -1714,6 +1769,7 @@ public final class MainActivity extends Activity {
             isi.getKey().setVisibility(isi.getValue());
         }
         visibilitasSebelumIklanPenuh.clear();
+        pulihkanBingkaiIklanPenuh();
         hentikanDenyutAjakanIklan();
         ajakanIklanPenuh.setVisibility(View.GONE);
         perbaruiJudul();

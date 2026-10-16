@@ -153,6 +153,11 @@ Layanan Anjungan menampilkan peringatan di baris Paket suara.
   ajakan "Sentuh layar untuk mengambil nomor antrian". Sentuhan pertama hanya
   mengembalikan layar biasa, tidak diteruskan ke tombol layanan. Tidak aktif
   selama dialog terbuka, pembaruan APK, atau bila media gagal diputar.
+  Mulai APK 2.4.35 iklan memenuhi **seluruh layar** tanpa margin, padding,
+  sudut membulat, dan garis tepi, di atas latar hitam. Video dan gambar tetap
+  utuh (rasio dijaga; pita hitam bila rasionya berbeda dengan layar), tidak
+  dipotong. Siapkan video dengan rasio yang sama dengan layar tablet agar
+  tidak ada pita hitam.
 - **Laporan tayang.** Tablet menghitung berapa kali tiap berkas mulai tampil
   (satu berkas yang tampil terus dihitung tiap putaran/lama tampilnya) dan
   berapa kali gagal, lalu mengirimnya tiap menit ke
