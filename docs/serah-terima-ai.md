@@ -16,7 +16,7 @@ jebakan; bagian riwayat commit-nya sudah lama), [istilah.md](istilah.md),
 [layar-antrian.md](layar-antrian.md), [prioritas-antrian.md](prioritas-antrian.md),
 [keamanan-sesi.md](keamanan-sesi.md).
 
-Terakhir diperbarui: **16 Oktober 2026**, oleh Claude.
+Terakhir diperbarui: **16 Oktober 2026**, oleh Codex.
 
 ---
 
@@ -144,7 +144,9 @@ commit berikut di atas `main`:
 
 **Database.**
 
-- `antrian_uji`: sudah di head; berisi data contoh.
+- `antrian_uji`: sudah di head; di-reset dan di-seed ulang selama audit Codex
+  16 Oktober 2026. Semua tes audit setelah koreksi dijalankan dengan URL
+  PostgreSQL `antrian_uji` yang diverifikasi eksplisit; SQLite tidak dipakai lagi.
 - `antrian` (kerja): di `d6a1f3b8c704`. **`e9c3b5a7d281` belum diterapkan**;
   berjalan otomatis saat aplikasi Windows dibuka berikutnya. Backup sebelum
   migrasi prioritas: `backup/queue-20261016-102726-sebelum-prioritas.dump`.
@@ -222,7 +224,7 @@ commit berikut di atas `main`:
   masuk iklan layar penuh. Kartu layanan dikurangi tingginya (`dp(66)`).
 - **Iklan layar penuh tanpa bingkai**: margin, padding, sudut, garis tepi
   dihapus di atas latar hitam (`bukaBingkaiIklanPenuh`). Rasio video dijaga
-  (pas). Label **"Sentuh layar…"** kini strip gradasi di dasar layar yang muncul 4 detik / hilang 9 detik (sebelumnya pil di atas); belum diuji di perangkat, hanya dikompilasi.
+  (pas). Label **"Sentuh layar…"** kini **panel tetap di ATAS layar** (navy pekat, tinggi ±12% layar memanjang / ±8% layar tegak, 44–96 dp); video di bawahnya, fit tanpa terpotong (`tampilkanPanelAjakanIklan`; sebelumnya strip gradasi di dasar yang muncul-hilang). Belum diuji di perangkat, hanya dikompilasi.
 - **Pemutar video `VideoTekstur`** (TextureView + MediaPlayer) menggantikan
   `VideoView`. Alasan: di BlueStacks `VideoView` (SurfaceView) tampil hitam
   padahal pemutar berjalan (decoder perangkat lunak mengeluarkan buffer
@@ -347,6 +349,88 @@ dengan `error: closed`):
   mengisolasi env; sudah diisolasi di `tests/conftest.py` (`app_config`,
   `env_mesin`).
 
+**Temuan audit Codex 16 Oktober 2026 (belum diperbaiki):**
+
+- Pembaruan Windows mengunduh metadata dan `.exe` melalui HTTP yang sama,
+  lalu hanya mencocokkan SHA-256 dari metadata tersebut sebelum menjalankan
+  installer. Penyerang di LAN yang dapat memodifikasi kedua jawaban dapat
+  mengganti installer; perlu tanda tangan yang diverifikasi terhadap kunci
+  publik tertanam atau HTTPS dengan identitas server yang dipercaya.
+- Token bersama menerima `X-Device-Id` dari pengirim. Endpoint verifikasi PIN,
+  status printer, status/salinan media, dan kontak perangkat memakai nilai itu;
+  pembatas PIN dapat dilewati dengan mengganti ID dan status perangkat lain
+  dapat dipalsukan selama token bersama masih aktif.
+- Kode pemasangan dibaca lalu ditandai terpakai tanpa `SELECT ... FOR UPDATE`
+  atau pembaruan bersyarat. Dua permintaan bersamaan berpotensi memakai kode
+  sekali-pakai yang sama. Daftar pembatas tebakan di API juga tidak dikunci.
+- `GET /v1/kiosk/display` terukur menjalankan **41 pernyataan SQL** per polling
+  pada PostgreSQL uji. Android memanggilnya tiap 5 detik, atau tiap 1 detik saat
+  iklan penuh dan interupsi panggilan aktif. Pengaturan perlu dibaca sekali,
+  hasil antrian prioritas dipakai ulang, dan respons statis layak di-cache.
+- Dua tes layout stabil gagal pada 1366 x 768: kelompok **Iklan Anjungan**
+  membutuhkan gulir vertikal 287 px pada mode loket maupun server. Dua tes
+  Pelayanan lain sempat gagal saat suite gabungan tetapi lulus saat diulang
+  terarah, menunjukkan state global tema/layout masih bergantung urutan tes.
+- `MainActivity` anjungan membuat executor `pembuatThumbnail`, tetapi tidak
+  mematikannya di `onDestroy`; executor lain sudah dimatikan.
+- Infrastruktur tes masih berbawaan SQLite (`tests/conftest.py` dan
+  `test-postgres.ps1` bahkan menyebut tes harian SQLite), bertentangan dengan
+  aturan proyek. Audit pertama sempat jatuh ke SQLite sebelum dikoreksi. Tambah
+  penjaga fail-fast agar pytest menolak selain PostgreSQL `antrian_uji`.
+
+Verifikasi audit: `ruff check app tests alembic` dan compile Python lulus;
+299 tes keamanan/API terarah lulus di PostgreSQL (2 dilewati); 513 tes
+wiring/UI lulus, 4 gagal, 2 dilewati; pengulangan empat kegagalan menghasilkan
+2 gagal layout yang stabil dan 2 lulus; 26 tes migrasi/database/penomoran lulus,
+4 tes khusus SQLite dilewati; kedua APK debug berhasil dikompilasi. Pencarian
+OSV terhadap 17 dependency langsung tidak menemukan advisory yang cocok dengan
+versi terpasang. Suite penuh tidak dijalankan karena aturan proyek membatasinya
+untuk sebelum push/PR.
+
+Audit teks tombol (16 Oktober 2026, Claude; menggantikan catatan Codex yang
+menyatakan "tidak ditemukan potongan" — pemeriksaan permanen ternyata menemukan
+tiga):
+
+- **Terbukti terpotong** (lebar < `sizeHint()`): (1) "Panggil Berikutnya · F2"
+  di Pelayanan, 250 px dari 254 px, karena `setFixedWidth(250)` pada
+  pembungkus tombol; (2) "Pasang ulang & nyalakan ulang" di Layanan Anjungan
+  pada 800×600 dan Windows 125%/150%, karena sebaris dengan kotak centang
+  panjang; (3) "Segarkan media" di tabel perangkat, 131 px dari 135 px, karena
+  lebar kolom aksi dihitung dari `sizeHint()` sebelum tombol dipolish.
+- **Perbaikan:** `service_page.py` (pembungkus tombol memakai kebijakan
+  `Minimum`, tanpa lebar tetap/minimum buatan); `layanan_anjungan_page.py`
+  (kotak centang pindah ke baris sendiri); `kartu_perangkat.py`
+  (`_atur_lebar_aksi`: polish dulu, dihitung ulang saat kartu tampil, sisa 16 px
+  karena widget sel ±12 px lebih sempit dari kolomnya).
+- **Tes permanen:** `tests/ukuran_tombol.py` (pengukur reusable) dan
+  `tests/test_teks_tombol.py`: 4 peran × 800×600 / 1280×720 / 1366×768; 4 peran
+  × ukuran logis Windows 125% (1093×614) dan 150% (911×512); admin & CRO dengan
+  font-size stylesheet ×1,25 dan ×1,5; keadaan khusus (pita pembaruan dua
+  label, pita anjungan, perangkat terpasang, nomor sedang dilayani, Buka/Tutup
+  Pendaftaran); 13 dialog × font 100%/150%. Semua label bergantian (Unduh &
+  Perbarui/Sedang mengunduh…, Mulai/Akhiri Istirahat, Ganti Loket/Batal,
+  Tampilkan/Sembunyikan, Aktifkan/Nonaktifkan, Pasang…) dipasang satu per satu.
+  Syarat lulus: lebar ≥ `sizeHint().width()` dan tinggi ≥ satu baris huruf
+  (tinggi tidak dibandingkan ke `sizeHint` karena layout boleh menekan 1–2 px
+  tanpa memotong huruf). Pengecualian: `PENGECUALIAN` di `ukuran_tombol.py`
+  (kosong).
+- **Hasil uji** (PostgreSQL `antrian_uji` via `~/.antrian-uji-db`, satu proses
+  pytest, divalidasi `postgresql` + nama tepat `antrian_uji`): `test_teks_tombol.py`
+  seluruhnya lulus (57 tes). Gabungan dengan `test_ui`, `test_dashboard_ui`,
+  `test_active_service_ui`, `test_notes_ui`, `test_daftar_putar_ui`,
+  `test_tema_petugas`: 357 lulus, 2 dilewati, 4 gagal — 2 itu `Iklan Anjungan`
+  287 px (temuan lama bagian ini), 2 itu tes Pelayanan 1366×768 yang **lulus
+  bila dijalankan sendiri** (ketergantungan urutan lama yang sudah tercatat;
+  belum dipastikan apakah tes baru memperparahnya). `ruff check app tests
+  alembic` lulus. Suite penuh tidak dijalankan.
+- **Belum teruji:** DPI Windows sungguhan (Qt offscreen tidak menskalakan
+  piksel; 125%/150% hanya didekati lewat ukuran jendela logis dan font-size
+  stylesheet), font Segoe UI pada mesin lain, `SurveyDialog`, dialog
+  `CounterCategoryDialog`, dan tombol yang hanya muncul pada data tertentu.
+  Catatan: `Unduh & Perbarui` (pita pembaruan) memakai `&` tunggal, sedangkan
+  halaman anjungan memakai `&&`; Qt dapat membaca `&` sebagai pintasan
+  keyboard. Belum diverifikasi tampilannya di layar nyata.
+
 ---
 
 ## 7. Perintah penting
@@ -417,6 +501,10 @@ menyeret APK ke jendela BlueStacks. Tangkapan layar:
 |---|---|---|
 | 2026-10-16 | Claude | Dokumen dibuat; mencakup seluruh pekerjaan Oktober 2026 di atas |
 | 2026-10-16 | Claude | Ditambah: panggilan mengalahkan iklan (setelan, `call_count`, banner, polling 1 detik) |
+| 2026-10-16 | Codex | Audit penuh bug, wiring, performa, dan keamanan; temuan serta hasil tes PostgreSQL dicatat di bagian 6. |
+| 2026-10-16 | Codex | Audit teks tombol pada tiga ukuran jendela; tidak ditemukan potongan, celah tes regresi dicatat di bagian 6. |
+| 2026-10-16 | Claude | Tes permanen teks tombol (`tests/test_teks_tombol.py`, `tests/ukuran_tombol.py`); tiga tombol terpotong diperbaiki (bagian 6). |
+| 2026-10-16 | Claude | Warna latar iklan penuh per tablet, murni Android (SharedPreferences `latar_iklan_penuh`, kontrol di dialog Pengaturan > Tampilan; tanpa server/DB); rincian di android-kiosk.md. APK debug terkompilasi, belum diuji di perangkat, belum di-commit. |
 
 Saat menutup sesi: perbarui bagian 3 (keadaan, commit, versi), 6 (belum
 selesai), dan tabel di atas.

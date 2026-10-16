@@ -119,6 +119,11 @@ public final class MainActivity extends Activity {
     private static final String TEMA_TABLET = "tema";
     /** Warna kilau petunjuk ajakan di tablet ini; "mati" mematikannya. */
     private static final String WARNA_KILAU = "warna_kilau";
+    /** Warna latar iklan penuh `#RRGGBB`, disimpan per tablet. */
+    private static final String LATAR_IKLAN_KUNCI = "latar_iklan_penuh";
+    private static final String[][] PILIHAN_LATAR_IKLAN = {{"Navy", "#0F172A"},
+            {"Hitam", "#000000"}, {"Hijau tua", "#064E3B"},
+            {"Merah marun", "#4C0519"}, {"Ungu tua", "#3B0764"}};
     private static final String KILAU_TEMA = "tema";
     /** Kecerahan terendah warna kilau bebas; yang lebih gelap tak terlihat di latar. */
     private static final float NILAI_MINIMUM_KILAU = 0.5f;
@@ -141,6 +146,18 @@ public final class MainActivity extends Activity {
             {"gelap", "Gelap elegan"},
             {"merah_putih", "Merah putih (perayaan)"},
     };
+    /** Latar kertas per tablet: polos (bawaan), ikut tema, atau selalu kertas. */
+    private static final String LATAR_KERTAS = "latar_kertas";
+    private static final String KERTAS_POLOS = "polos";
+    private static final String KERTAS_IKUT_TEMA = "tema";
+    private static final String KERTAS_SELALU = "kertas";
+    private static final String[][] PILIHAN_LATAR = {
+            {KERTAS_POLOS, "Polos"},
+            {KERTAS_IKUT_TEMA, "Ikut tema (kertas di tema terang)"},
+            {KERTAS_SELALU, "Kertas"},
+    };
+    private boolean kertasTerbangun;
+    private Bitmap butiranKertas;
     private Tema temaWarna;
     private String temaAktif = "";
     private String temaServer = "biru";
@@ -265,6 +282,44 @@ public final class MainActivity extends Activity {
         sembunyikanUntukIklanPenuh();
     }
 
+    /**
+     * Apakah latar kertas dipakai. "Ikut tema" hanya di tema terang: tema
+     * gelap dan kontras tinggi tetap polos agar keterbacaannya terjaga.
+     */
+    private boolean kertasAktif(Tema t, String namaTema) {
+        String pilihan = preferences == null ? KERTAS_POLOS
+                : preferences.getString(LATAR_KERTAS, KERTAS_POLOS);
+        if (KERTAS_SELALU.equals(pilihan)) return true;
+        return KERTAS_IKUT_TEMA.equals(pilihan) && !t.gelap && !"kontras".equals(namaTema);
+    }
+
+    /** Warna latar tema dihangatkan ke krem, lalu diberi butiran halus yang diulang. */
+    private android.graphics.drawable.Drawable latarKertas(int dasar) {
+        int krem = Color.rgb(244, 239, 230);
+        int warna = Color.rgb(
+                (Color.red(dasar) * 3 + Color.red(krem) * 7) / 10,
+                (Color.green(dasar) * 3 + Color.green(krem) * 7) / 10,
+                (Color.blue(dasar) * 3 + Color.blue(krem) * 7) / 10);
+        if (butiranKertas == null) {
+            int sisi = 128;
+            int[] titik = new int[sisi * sisi];
+            java.util.Random acak = new java.util.Random(7);
+            for (int i = 0; i < titik.length; i++) {
+                int r = acak.nextInt(100);
+                // Bintik gelap atau terang berkepekatan rendah (maks. ~5%).
+                if (r < 22) titik[i] = Color.argb(6 + acak.nextInt(7), 90, 70, 40);
+                else if (r < 34) titik[i] = Color.argb(6 + acak.nextInt(7), 255, 255, 255);
+            }
+            butiranKertas = Bitmap.createBitmap(titik, sisi, sisi, Bitmap.Config.ARGB_8888);
+        }
+        android.graphics.drawable.BitmapDrawable ubin =
+                new android.graphics.drawable.BitmapDrawable(getResources(), butiranKertas);
+        ubin.setTileModeXY(android.graphics.Shader.TileMode.REPEAT,
+                android.graphics.Shader.TileMode.REPEAT);
+        return new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{
+                new android.graphics.drawable.ColorDrawable(warna), ubin});
+    }
+
     /** Pilihan tablet bila diatur, selain itu tema dari server. */
     private String temaBerlaku() {
         String tablet = preferences == null ? IKUTI_SERVER_TEMA
@@ -278,7 +333,8 @@ public final class MainActivity extends Activity {
      * mencobanya lagi.
      */
     private void terapkanTemaBilaBerubah() {
-        if (temaBerlaku().equals(temaAktif)) return;
+        String baru = temaBerlaku();
+        if (baru.equals(temaAktif) && kertasAktif(tema(baru), baru) == kertasTerbangun) return;
         if (showingConfirmation || showingResult || requestInFlight
                 || updating || updateRequired) return;
         bangunUlangTampilan();
@@ -799,7 +855,22 @@ public final class MainActivity extends Activity {
     private FrameLayout bingkaiMedia;
     private View tiraiMedia;
     private TextView ajakanIklanPenuh;
+    /**
+     * SATU sumber warna latar iklan penuh (setelan tablet LATAR_IKLAN_KUNCI,
+     * bawaan navy):
+     * panel ajakan, sisi kiri/kanan video, latar gambar, rootLayout dan
+     * panelInfo semuanya memakainya. Sisi video tidak ikut berdenyut.
+     */
+    private static final int LATAR_IKLAN_BAWAAN = Color.rgb(15, 23, 42);
+    private int latarIklanPenuh = LATAR_IKLAN_BAWAAN;
+    /** Putih untuk latar gelap, hitam untuk latar terang. */
+    private int teksIklanPenuh = Color.WHITE;
+    /** Puncak denyut panel: warna dasar digeser 12% (terang untuk gelap). */
+    private int puncakDenyutIklan = Color.rgb(44, 51, 68);
+    /** Luminans relatif tertinggi yang diterima untuk latar panel. */
+    private static final double LUMINANS_MAKS_IKLAN = 0.6;
     private Runnable denyutAjakanIklan;
+    private android.animation.ValueAnimator animatorDenyutAjakan;
 
     // Laporan tayang ke server: jumlah tayang dan gagal sejak laporan
     // terakhir, dikirim tiap menit. Hanya untuk media dari server; berkas di
@@ -1056,13 +1127,15 @@ public final class MainActivity extends Activity {
         float heightDp = getResources().getDisplayMetrics().heightPixels / density;
         temaAktif = temaBerlaku();
         terapkanPalet(tema(temaAktif));
+        kertasTerbangun = kertasAktif(temaWarna, temaAktif);
         uiScale = Math.max(0.8f, Math.min(2.2f,
                 Math.min(widthDp / 360f, heightDp / 640f))) * temaWarna.skala;
 
         LinearLayout root = new LinearLayout(this);
         rootLayout = root;
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(LATAR);
+        if (kertasTerbangun) root.setBackground(latarKertas(LATAR));
+        else root.setBackgroundColor(LATAR);
         root.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         LinearLayout infoPanel = panel();
@@ -1132,19 +1205,17 @@ public final class MainActivity extends Activity {
         targetTirai = 0f;
         sedangBertransaksi = false;
         bingkaiMedia.addView(tiraiMedia, new FrameLayout.LayoutParams(-1, -1));
+        terapkanLatarIklanPenuh(preferences.getString(LATAR_IKLAN_KUNCI, ""));
         ajakanIklanPenuh = text("Sentuh layar untuk mengambil nomor antrian",
                 20, Color.WHITE, true);
-        ajakanIklanPenuh.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
-        ajakanIklanPenuh.setShadowLayer(dp(3), 0, dp(1), Color.argb(200, 0, 0, 0));
+        ajakanIklanPenuh.setShadowLayer(dp(2), 0, dp(1), Color.argb(160, 0, 0, 0));
         ajakanIklanPenuh.setGravity(Gravity.CENTER);
-        ajakanIklanPenuh.setPadding(dp(16), dp(30), dp(16), dp(12));
-        // Strip di dasar: gelap di bawah, memudar ke transparan di atas.
-        ajakanIklanPenuh.setBackground(new GradientDrawable(
-                GradientDrawable.Orientation.BOTTOM_TOP,
-                new int[]{Color.argb(170, 15, 23, 42), Color.TRANSPARENT}));
+        ajakanIklanPenuh.setMaxLines(1);
+        ajakanIklanPenuh.setBackgroundColor(latarIklanPenuh);
+        ajakanIklanPenuh.setTextColor(teksIklanPenuh);
         ajakanIklanPenuh.setVisibility(View.GONE);
-        bingkaiMedia.addView(ajakanIklanPenuh, new FrameLayout.LayoutParams(-1, -2,
-                Gravity.BOTTOM));
+        bingkaiMedia.addView(ajakanIklanPenuh, new FrameLayout.LayoutParams(-1, dp(56),
+                Gravity.TOP));
         infoPanel.addView(bingkaiMedia, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(infoPanel, new LinearLayout.LayoutParams(-1, 0, 1));
 
@@ -1207,7 +1278,7 @@ public final class MainActivity extends Activity {
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setGravity(Gravity.CENTER);
         layout.setBackground(roundedOutline(KARTU, GARIS, dp(24), dp(1)));
-        layout.setElevation(dp(1));
+        layout.setElevation(dp(kertasTerbangun ? 3 : 1));
         return layout;
     }
 
@@ -1741,6 +1812,7 @@ public final class MainActivity extends Activity {
             // dipudarkan; yang lama langsung diganti.
             mediaSlot.removeAllViews();
             VideoTekstur video = new VideoTekstur(this);
+            video.setBackgroundColor(iklanPenuh ? latarIklanPenuh : Color.BLACK);
             mediaSlot.addView(video, new FrameLayout.LayoutParams(-1, -1));
             video.setOnCompletionListener(player -> advanceSlide());
             video.setOnErrorListener((player, what, extra) -> {
@@ -1776,7 +1848,7 @@ public final class MainActivity extends Activity {
             }
             ImageView image = new ImageView(this);
             image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            image.setBackgroundColor(iklanPenuh ? Color.BLACK : KARTU);
+            image.setBackgroundColor(iklanPenuh ? latarIklanPenuh : KARTU);
             image.setAlpha(0f);
             mediaSlot.addView(image, new FrameLayout.LayoutParams(-1, -1));
             worker.execute(() -> {
@@ -2098,21 +2170,141 @@ public final class MainActivity extends Activity {
             bingkaiMedia.setAlpha(0f);
             bingkaiMedia.animate().alpha(1f).setDuration(450L).start();
         }
-        ajakanIklanPenuh.setVisibility(View.VISIBLE);
         hentikanDenyutAjakanIklan();
-        ajakanIklanPenuh.setAlpha(0f);
-        tampilkanAjakanIklan();
+        tampilkanPanelAjakanIklan();
     }
 
-    /** Ajakan tampil 4 detik, memudar, hilang 9 detik, lalu berulang. */
-    private void tampilkanAjakanIklan() {
-        ajakanIklanPenuh.animate().alpha(1f).setDuration(500).start();
-        denyutAjakanIklan = () -> {
-            ajakanIklanPenuh.animate().alpha(0f).setDuration(600).start();
-            denyutAjakanIklan = this::tampilkanAjakanIklan;
-            handler.postDelayed(denyutAjakanIklan, 9000);
-        };
-        handler.postDelayed(denyutAjakanIklan, 4000);
+    /**
+     * Panel ajakan di ATAS layar, tetap tampil selama iklan. Video diletakkan
+     * di bawahnya (margin atas `mediaSlot` = tinggi panel), jadi tidak ada
+     * bagian video yang tertutup dan rasio dijaga oleh mode pas. Tinggi
+     * proporsional: ~12% tinggi layar untuk layar memanjang (>2:1), ~8% untuk
+     * layar tegak/biasa, dibatasi 44-96 dp; huruf mengecil bila teks tak muat.
+     */
+    private void tampilkanPanelAjakanIklan() {
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        boolean memanjang = dm.widthPixels > 2f * dm.heightPixels;
+        int tinggi = Math.round(dm.heightPixels * (memanjang ? 0.09f : 0.06f));
+        tinggi = Math.max(dp(36), Math.min(dp(72), tinggi));
+        float huruf = tinggi * 0.5f;
+        String teks = ajakanIklanPenuh.getText().toString();
+        android.graphics.Paint ukur = new android.graphics.Paint(ajakanIklanPenuh.getPaint());
+        ukur.setTypeface(ajakanIklanPenuh.getTypeface());
+        int lebarSedia = dm.widthPixels - dp(32);
+        ukur.setTextSize(huruf);
+        while (huruf > dp(12) && ukur.measureText(teks) > lebarSedia) {
+            huruf -= dp(1);
+            ukur.setTextSize(huruf);
+        }
+        ajakanIklanPenuh.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, huruf);
+        FrameLayout.LayoutParams lp =
+                (FrameLayout.LayoutParams) ajakanIklanPenuh.getLayoutParams();
+        lp.height = tinggi;
+        lp.gravity = Gravity.TOP;
+        ajakanIklanPenuh.setLayoutParams(lp);
+        FrameLayout.LayoutParams lm = (FrameLayout.LayoutParams) mediaSlot.getLayoutParams();
+        lm.topMargin = tinggi;
+        mediaSlot.setLayoutParams(lm);
+        ajakanIklanPenuh.setAlpha(1f);
+        ajakanIklanPenuh.setVisibility(View.VISIBLE);
+        mulaiDenyutAjakanIklan();
+    }
+
+    /**
+     * Yang berdenyut hanya TEKS ajakan (~2,4 detik per siklus): alfa turun ke
+     * 55% dan ukuran naik 4%. Latar panel dan sisi kiri/kanan video tetap diam
+     * agar video tidak tampak berkedip; skala 4% pada teks (jauh lebih kecil
+     * daripada panel) tidak pernah menyentuh video di bawahnya.
+     */
+    private void mulaiDenyutAjakanIklan() {
+        hentikanAnimatorDenyutAjakan();
+        ajakanIklanPenuh.setBackgroundColor(latarIklanPenuh);
+        animatorDenyutAjakan = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        animatorDenyutAjakan.setDuration(1200);
+        animatorDenyutAjakan.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        animatorDenyutAjakan.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        animatorDenyutAjakan.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+        animatorDenyutAjakan.addUpdateListener(a -> {
+            float f = (Float) a.getAnimatedValue();
+            ajakanIklanPenuh.setAlpha(1f - 0.45f * f);
+            ajakanIklanPenuh.setScaleX(1f + 0.04f * f);
+            ajakanIklanPenuh.setScaleY(1f + 0.04f * f);
+        });
+        animatorDenyutAjakan.start();
+    }
+
+    /** Luminans relatif WCAG 0..1 (sama dengan app/services/warna_iklan.py). */
+    private static double luminansWarna(int warna) {
+        double[] c = {Color.red(warna) / 255.0, Color.green(warna) / 255.0,
+                Color.blue(warna) / 255.0};
+        for (int i = 0; i < 3; i++) {
+            c[i] = c[i] <= 0.03928 ? c[i] / 12.92 : Math.pow((c[i] + 0.055) / 1.055, 2.4);
+        }
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    }
+
+    /** `#RRGGBB` yang sah dan tidak terlalu terang, atau null. */
+    static Integer uraiLatarIklan(String hex) {
+        if (hex == null || !hex.matches("#[0-9A-Fa-f]{6}")) return null;
+        int warna = Color.parseColor(hex);
+        return luminansWarna(warna) > LUMINANS_MAKS_IKLAN ? null : warna;
+    }
+
+    /**
+     * Pakai warna latar iklan penuh dari server; nilai tak sah jatuh ke navy
+     * bawaan. Teks putih/hitam dan puncak denyut dihitung dari warna ini.
+     */
+    private void terapkanLatarIklanPenuh(String hex) {
+        Integer baru = uraiLatarIklan(hex);
+        int warna = baru != null ? baru : LATAR_IKLAN_BAWAAN;
+        if (warna == latarIklanPenuh) return;
+        latarIklanPenuh = warna;
+        double lum = luminansWarna(warna);
+        boolean teksPutih = 1.05 / (lum + 0.05) >= (lum + 0.05) / 0.05;
+        teksIklanPenuh = teksPutih ? Color.WHITE : Color.BLACK;
+        int sasaran = teksPutih ? 255 : 0;
+        puncakDenyutIklan = Color.rgb(
+                Math.round(Color.red(warna) + (sasaran - Color.red(warna)) * 0.12f),
+                Math.round(Color.green(warna) + (sasaran - Color.green(warna)) * 0.12f),
+                Math.round(Color.blue(warna) + (sasaran - Color.blue(warna)) * 0.12f));
+        if (ajakanIklanPenuh != null) {
+            ajakanIklanPenuh.setTextColor(teksIklanPenuh);
+            if (teksPutih) {
+                ajakanIklanPenuh.setShadowLayer(dp(2), 0, dp(1), Color.argb(160, 0, 0, 0));
+            } else {
+                ajakanIklanPenuh.setShadowLayer(0, 0, 0, Color.TRANSPARENT);
+            }
+        }
+        if (!iklanPenuh) {
+            if (ajakanIklanPenuh != null) ajakanIklanPenuh.setBackgroundColor(warna);
+            return;
+        }
+        // Sedang tampil: semua permukaan berganti sekaligus ke satu warna.
+        if (rootLayout != null) rootLayout.setBackgroundColor(warna);
+        if (panelInfo != null) panelInfo.setBackgroundColor(warna);
+        aturLatarGambarMedia(warna);
+        if (ajakanIklanPenuh != null
+                && ajakanIklanPenuh.getVisibility() == View.VISIBLE
+                && animatorDenyutAjakan != null) {
+            mulaiDenyutAjakanIklan();
+        } else if (ajakanIklanPenuh != null) {
+            ajakanIklanPenuh.setBackgroundColor(warna);
+        }
+    }
+
+    private void hentikanAnimatorDenyutAjakan() {
+        if (animatorDenyutAjakan != null) {
+            animatorDenyutAjakan.removeAllUpdateListeners();
+            animatorDenyutAjakan.cancel();
+            animatorDenyutAjakan = null;
+            if (ajakanIklanPenuh != null) {
+                ajakanIklanPenuh.setBackgroundColor(latarIklanPenuh);
+                ajakanIklanPenuh.setTextColor(teksIklanPenuh);
+                ajakanIklanPenuh.setScaleX(1f);
+                ajakanIklanPenuh.setScaleY(1f);
+                ajakanIklanPenuh.setAlpha(1f);
+            }
+        }
     }
 
     /**
@@ -2158,11 +2350,11 @@ public final class MainActivity extends Activity {
             elevasiInfoAsli = panelInfo.getElevation();
         }
         rootLayout.setPadding(0, 0, 0, 0);
-        rootLayout.setBackgroundColor(Color.BLACK);
+        rootLayout.setBackgroundColor(latarIklanPenuh);
         panelInfo.setPadding(0, 0, 0, 0);
-        panelInfo.setBackgroundColor(Color.BLACK);
+        panelInfo.setBackgroundColor(latarIklanPenuh);
         panelInfo.setElevation(0f);
-        aturLatarGambarMedia(Color.BLACK);
+        aturLatarGambarMedia(latarIklanPenuh);
     }
 
     private void pulihkanBingkaiIklanPenuh() {
@@ -2186,6 +2378,9 @@ public final class MainActivity extends Activity {
         for (int i = 0; i < mediaSlot.getChildCount(); i++) {
             View anak = mediaSlot.getChildAt(i);
             if (anak instanceof ImageView) anak.setBackgroundColor(warna);
+            else if (anak instanceof VideoTekstur) {
+                anak.setBackgroundColor(warna == KARTU ? Color.BLACK : warna);
+            }
         }
     }
 
@@ -2210,6 +2405,9 @@ public final class MainActivity extends Activity {
         terapkanMediaSambutan();
         hentikanDenyutAjakanIklan();
         ajakanIklanPenuh.setVisibility(View.GONE);
+        FrameLayout.LayoutParams lm = (FrameLayout.LayoutParams) mediaSlot.getLayoutParams();
+        lm.topMargin = 0;
+        mediaSlot.setLayoutParams(lm);
         perbaruiJudul();
         tampilanLoket = "";  // paksa baris loket ditata ulang
         terapkanBarisLoket();
@@ -2418,6 +2616,7 @@ public final class MainActivity extends Activity {
     }
 
     private void hentikanDenyutAjakanIklan() {
+        hentikanAnimatorDenyutAjakan();
         if (denyutAjakanIklan != null) {
             handler.removeCallbacks(denyutAjakanIklan);
             denyutAjakanIklan = null;
@@ -2959,8 +3158,8 @@ public final class MainActivity extends Activity {
             // prioritas?"), baru memilih layanan. Terlihat sejak menu awal, supaya
             // petugas yang berjaga dapat mengarahkan pengunjung lansia mencentangnya.
             if (prioritasAktifServer) {
-                LinearLayout.LayoutParams kotak = new LinearLayout.LayoutParams(-1, dp(58));
-                kotak.setMargins(dp(4), dp(4), dp(4), dp(4));
+                LinearLayout.LayoutParams kotak = new LinearLayout.LayoutParams(-1, dp(44));
+                kotak.setMargins(dp(4), dp(2), dp(4), dp(4));
                 content.addView(buatKotakPrioritas(), kotak);
             }
             int baris = (kartuList.size() + columns - 1) / columns;
@@ -3007,7 +3206,7 @@ public final class MainActivity extends Activity {
         float satuan = getResources().getDisplayMetrics().density * uiScale;
         int lebarPanel = contentSlot.getWidth();
         int tinggiPanel = contentSlot.getHeight() - dp(4)
-                - (prioritasAktifServer ? dp(66) : 0);
+                - (prioritasAktifServer ? dp(50) : 0);
         int kolomLayar = Math.max(1, Math.min(3,
                 Math.round(getResources().getDisplayMetrics().widthPixels
                         / getResources().getDisplayMetrics().density / 118f)));
@@ -3387,8 +3586,11 @@ public final class MainActivity extends Activity {
             nomor.setTypeface(huruf(800));
             nomor.setFontFeatureSettings("tnum");
             nomor.setGravity(Gravity.CENTER);
-            nomor.setPadding(dp(4), dp(4), dp(4), dp(4));
-            nomor.setBackground(rounded(milikSaya ? UTAMA
+            // Timbul seperti kartu layanan: muka berlereng cahaya + tebing
+            // lebih gelap di dasar. Padding bawah menambah tebal tebing agar
+            // angka tetap di tengah muka, bukan di tengah seluruh ubin.
+            nomor.setPadding(dp(4), dp(4), dp(4), dp(4) + dp(3));
+            nomor.setBackground(ubinTimbul(milikSaya ? UTAMA
                     : prioritasIni ? Color.rgb(254, 243, 199) : LEMBUT, dp(16)));
             nomor.setCameraDistance(kamera);
             pasangSatuBaris(nomor, 10, 20);
@@ -5314,9 +5516,19 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        if (iklanPenuh && !putarSaja && ajakanIklanPenuh != null
+                && ajakanIklanPenuh.getVisibility() == View.VISIBLE) {
+            mulaiDenyutAjakanIklan();
+        }
+    }
+
+    @Override
     protected void onStop() {
         // Layar mati atau tombol Home: pengaturan tidak boleh tertinggal terbuka.
         tutupSemuaPengaturan();
+        hentikanAnimatorDenyutAjakan();
         super.onStop();
     }
 
@@ -5594,8 +5806,16 @@ public final class MainActivity extends Activity {
                     preferences.edit().putString(TEMA_TABLET, nilai).apply();
                     terapkanTemaBilaBerubah();
                 }), new LinearLayout.LayoutParams(-1, -2));
+        tampilan.addView(labelPengaturan("Latar belakang tablet ini"));
+        tampilan.addView(pilihanTarik(PILIHAN_LATAR,
+                preferences.getString(LATAR_KERTAS, KERTAS_POLOS), nilai -> {
+                    preferences.edit().putString(LATAR_KERTAS, nilai).apply();
+                    terapkanTemaBilaBerubah();
+                }), new LinearLayout.LayoutParams(-1, -2));
         tampilan.addView(labelPengaturan("Warna kilau petunjuk"));
         tampilan.addView(barisWarnaKilau());
+        tampilan.addView(labelPengaturan("Warna latar iklan layar penuh"));
+        tampilan.addView(barisLatarIklan());
         // Berlaku seketika, terpisah dari tombol Simpan: tidak menyentuh
         // alamat server atau token.
         sumber.setOnCheckedChangeListener((group, checkedId) -> {
@@ -5844,6 +6064,130 @@ public final class MainActivity extends Activity {
         baris.addView(keterangan);
         segarkan.run();
         return gulir;
+    }
+
+    /** Baris bulatan pilihan cepat latar iklan penuh + "+" untuk isian hex. */
+    private View barisLatarIklan() {
+        android.widget.HorizontalScrollView gulir = new android.widget.HorizontalScrollView(this);
+        gulir.setHorizontalScrollBarEnabled(false);
+        LinearLayout baris = new LinearLayout(this);
+        baris.setGravity(Gravity.CENTER_VERTICAL);
+        baris.setPadding(0, dp(4), 0, dp(4));
+        gulir.addView(baris);
+        TextView keterangan = text("", 12, MUTED, false);
+        List<TextView> bulatan = new ArrayList<>();
+        TextView lain = text("+", 18, Color.WHITE, true);
+        lain.setGravity(Gravity.CENTER);
+        lain.setContentDescription("Warna lain");
+        Runnable segarkan = () -> {
+            String aktif = String.format(Locale.ROOT, "#%06X", latarIklanPenuh & 0xFFFFFF);
+            boolean cepat = false;
+            for (int i = 0; i < bulatan.size(); i++) {
+                boolean dipilih = PILIHAN_LATAR_IKLAN[i][1].equals(aktif);
+                cepat |= dipilih;
+                bulatan.get(i).setBackground(roundedOutline(
+                        Color.parseColor(PILIHAN_LATAR_IKLAN[i][1]), dipilih ? INK : GARIS,
+                        dp(18), dp(dipilih ? 3 : 1)));
+                if (dipilih) keterangan.setText(PILIHAN_LATAR_IKLAN[i][0]);
+            }
+            if (!cepat) keterangan.setText("Warna sendiri " + aktif);
+            lain.setBackground(roundedOutline(cepat ? KARTU : latarIklanPenuh,
+                    cepat ? GARIS : INK, dp(18), dp(cepat ? 1 : 3)));
+            lain.setTextColor(cepat ? MUTED : teksIklanPenuh);
+        };
+        for (String[] pilihan : PILIHAN_LATAR_IKLAN) {
+            TextView b = text("", 13, MUTED, true);
+            b.setContentDescription(pilihan[0]);
+            b.setOnClickListener(v -> {
+                simpanLatarIklan(pilihan[1]);
+                segarkan.run();
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(36), dp(36));
+            params.rightMargin = dp(8);
+            baris.addView(b, params);
+            bulatan.add(b);
+        }
+        lain.setOnClickListener(v -> bukaIsianLatarIklan(segarkan));
+        LinearLayout.LayoutParams paramLain = new LinearLayout.LayoutParams(dp(36), dp(36));
+        paramLain.rightMargin = dp(8);
+        baris.addView(lain, paramLain);
+        baris.addView(keterangan);
+        segarkan.run();
+        return gulir;
+    }
+
+    /** Simpan dan terapkan; nilai tak sah ditolak (warna tidak berubah). */
+    private boolean simpanLatarIklan(String hex) {
+        if (uraiLatarIklan(hex) == null) return false;
+        preferences.edit().putString(LATAR_IKLAN_KUNCI, hex.toUpperCase(Locale.ROOT)).apply();
+        terapkanLatarIklanPenuh(hex);
+        return true;
+    }
+
+    private void bukaIsianLatarIklan(Runnable sesudahSimpan) {
+        LinearLayout isi = new LinearLayout(this);
+        isi.setOrientation(LinearLayout.VERTICAL);
+        isi.setPadding(dp(20), dp(8), dp(20), 0);
+        View contoh = new View(this);
+        EditText isianHex = new EditText(this);
+        isianHex.setSingleLine(true);
+        isianHex.setTextColor(INK);
+        isianHex.setTextSize(14 * uiScale);
+        isianHex.setHint("#RRGGBB");
+        isianHex.setText(String.format(Locale.ROOT, "#%06X", latarIklanPenuh & 0xFFFFFF));
+        isianHex.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(7)});
+        TextView pesan = text("", 12, Color.rgb(185, 28, 28), false);
+        pesan.setPadding(0, dp(6), 0, 0);
+        LinearLayout bawah = new LinearLayout(this);
+        bawah.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams paramContoh = new LinearLayout.LayoutParams(dp(44), dp(44));
+        paramContoh.rightMargin = dp(12);
+        bawah.addView(contoh, paramContoh);
+        bawah.addView(isianHex, new LinearLayout.LayoutParams(0, -2, 1));
+        isi.addView(bawah, new LinearLayout.LayoutParams(-1, -2));
+        isi.addView(pesan);
+        AlertDialog dialog = pembuatDialog()
+                .setTitle("Warna latar iklan penuh")
+                .setView(gulungan(isi))
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Pakai warna ini", null).show();
+        rapikanTombolDialog(dialog);
+        Button pakai = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        Runnable periksa = () -> {
+            String teks = isianHex.getText().toString().trim();
+            Integer warna = uraiLatarIklan(teks);
+            pakai.setEnabled(warna != null);
+            if (warna != null) {
+                contoh.setBackground(roundedOutline(warna, GARIS, dp(12), dp(1)));
+                pesan.setText("");
+            } else {
+                contoh.setBackground(roundedOutline(KARTU, GARIS, dp(12), dp(1)));
+                pesan.setText(teks.matches("#[0-9a-fA-F]{6}")
+                        ? "Warna terlalu terang untuk panel. Pilih yang lebih gelap."
+                        : "Tulis warna sebagai #RRGGBB, misalnya #0F172A.");
+            }
+        };
+        isianHex.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence c, int a, int b, int d) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence c, int a, int b, int d) {
+            }
+
+            @Override
+            public void afterTextChanged(android.text.Editable e) {
+                periksa.run();
+            }
+        });
+        pakai.setOnClickListener(v -> {
+            if (simpanLatarIklan(isianHex.getText().toString().trim())) {
+                sesudahSimpan.run();
+                dialog.dismiss();
+            }
+        });
+        periksa.run();
     }
 
     /**
@@ -6936,6 +7280,24 @@ public final class MainActivity extends Activity {
 
     private int dp(int value) {
         return Math.round(value * uiScale * getResources().getDisplayMetrics().density);
+    }
+
+    /**
+     * Ubin bergaya 3D: muka (terang di atas, warna dasar di bawah, garis tepi
+     * halus) di atas "tebing" lebih gelap setebal 3 dp. Tanpa elevation,
+     * sehingga bayangan tidak terpotong baris induk dan animasi putar/pop
+     * ubin tetap mulus.
+     */
+    private android.graphics.drawable.Drawable ubinTimbul(int warna, int radius) {
+        int tebing = campur(warna, Color.BLACK, 0.22f);
+        int atas = campur(warna, Color.WHITE, 0.45f);
+        GradientDrawable muka = roundedGradient(atas, warna, radius,
+                campur(warna, Color.BLACK, 0.08f), dp(1));
+        android.graphics.drawable.LayerDrawable lapis =
+                new android.graphics.drawable.LayerDrawable(
+                        new android.graphics.drawable.Drawable[]{rounded(tebing, radius), muka});
+        lapis.setLayerInset(1, 0, 0, 0, dp(3));
+        return lapis;
     }
 
     private static GradientDrawable rounded(int color, int radius) {

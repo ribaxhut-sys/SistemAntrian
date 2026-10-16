@@ -162,9 +162,17 @@ Layanan Anjungan menampilkan peringatan di baris Paket suara.
   iklan memenuhi layar.
 - **Iklan layar penuh.** Setelah **Iklan layar penuh saat menganggur**
   (bawaan 60 detik, 0 = mati) tanpa sentuhan, iklan memenuhi layar dengan
-  ajakan "Sentuh layar untuk mengambil nomor antrian" (strip gradasi gelap
-  di dasar layar, muncul 4 detik lalu hilang 9 detik, berulang, agar tidak
-  menutupi iklan). Sentuhan pertama hanya
+  ajakan "Sentuh layar untuk mengambil nomor antrian" (**panel di ATAS layar**, latar
+  navy pekat, tetap tampil selama iklan; video diletakkan di bawah panel
+  sehingga tidak ada bagian video tertutup dan rasio tetap terjaga (mode
+  pas, pita hitam bila rasio berbeda). Tinggi panel ±12% tinggi layar untuk
+  layar memanjang (>2:1, mis. ±4,4:1) dan ±8% untuk layar tegak/biasa,
+  dibatasi 44–96 dp; huruf mengecil otomatis bila teks tak muat. Dibanding
+  menimpa video dengan panel yang muncul-hilang: menimpa menutup bagian atas
+  video pada layar memanjang (video sudah setinggi layar) dan perubahan
+  ukuran area video tiap siklus memicu tata ulang pemutar, jadi dipilih
+  panel tetap; ongkosnya hanya ±8–12% tinggi video). Kode:
+  `tampilkanPanelAjakanIklan`; panel berdenyut halus (~2,8 detik/siklus; latar warna dasar↔puncak +-12% dan teks memudar ringan, tanpa skala sehingga video tidak berubah ukuran; `mulaiDenyutAjakanIklan`), dihentikan saat iklan selesai/disentuh, mode putar saja, onStop, onDestroy; belum diuji di perangkat, hanya dikompilasi. Sentuhan pertama hanya
   mengembalikan layar biasa, tidak diteruskan ke tombol layanan. Tidak aktif
   selama dialog terbuka, pembaruan APK, atau bila media gagal diputar.
   Mulai APK 2.4.34.1 iklan memenuhi **seluruh layar** tanpa margin, padding,
@@ -332,6 +340,35 @@ Disimpan per tablet di `warna_kilau` sebagai `#RRGGBB`; pilihan lama (`emas`,
 `biru`, dst.) tetap berlaku. Kecerahan dibatasi minimal 0,5
 (`NILAI_MINIMUM_KILAU`) supaya sapuan terlihat; sapuan pratinjau jalan saat jari
 dilepas. Kode: `bukaPemilihWarnaKilau`, `BidangWarnaKilau`.
+
+### Warna latar iklan penuh per tablet (setelah 2.4.34.1, belum dirilis)
+
+Pengaturan (dialog yang dilindungi PIN) > bagian Tampilan > **Warna latar iklan
+layar penuh**: 5 bulatan cepat (navy, hitam, hijau tua, merah marun, ungu tua)
+dan bulatan "+" yang membuka isian `#RRGGBB` dengan pratinjau. Disimpan lokal di
+SharedPreferences kunci `latar_iklan_penuh` (bukan di server; tanpa kolom DB,
+tanpa API). Bawaan navy `#0F172A`.
+- Validasi (`uraiLatarIklan`): wajib `#RRGGBB` dan luminans relatif WCAG <= 0,6;
+  isian yang tak sah mematikan tombol "Pakai warna ini" dengan pesan, nilai
+  tersimpan yang tak sah jatuh ke navy.
+- Turunan otomatis (`terapkanLatarIklanPenuh`): teks putih di latar gelap,
+  hitam di latar terang (kontras tertinggi); puncak denyut = warna dasar
+  digeser 12% (ke putih untuk latar gelap, ke hitam untuk latar terang).
+  Siklus tetap 2,8 detik.
+- Satu sumber: variabel `latarIklanPenuh` (menggantikan konstanta
+  `LATAR_IKLAN_PENUH`) dipakai panel ajakan, sisi video (`VideoTekstur`), latar
+  gambar, `rootLayout`, dan `panelInfo`. Hanya panel atas yang berdenyut.
+  Perubahan saat iklan tampil langsung diterapkan. Kode: `barisLatarIklan`,
+  `bukaIsianLatarIklan`. Belum diuji di perangkat, hanya dikompilasi.
+
+### Latar kertas (setelah 2.4.34.1, belum dirilis)
+
+Latar di belakang panel anjungan bisa berupa kertas: warna tema dihangatkan ke
+krem dan diberi butiran halus (bitmap 128x128 dibuat di kode, diulang), panel
+mendapat bayangan sedikit lebih tebal. Pengaturan per tablet **Latar belakang
+tablet ini** (kunci `latar_kertas`): `polos` (bawaan, tampilan tidak berubah),
+`tema` (kertas hanya di tema terang; gelap dan kontras tinggi tetap polos),
+`kertas` (selalu). Berlaku seketika lewat bangun ulang tampilan.
 
 ### Dialog Media di tablet ini (setelah 2.4.34.1, belum dirilis)
 
