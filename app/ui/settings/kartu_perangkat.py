@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QInputDialog,
     QLabel,
+    QLineEdit,
+    QMenu,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -178,6 +180,18 @@ class KartuPerangkat(QFrame):
         self.token_bersama.toggled.connect(self._ubah_token_bersama)
         kepala.addWidget(self.token_bersama)
         kepala.addSpacing(12)
+        self.tombol_pin = tombol("PIN anjungan ▾")
+        self.tombol_pin.setToolTip(
+            "PIN 6 angka untuk tombol ⚙ di semua anjungan. Disimpan sebagai hash; "
+            "tablet yang terputus dari server masuk mode putar saja."
+        )
+        menu_pin = QMenu(self.tombol_pin)
+        menu_pin.addAction("Atur atau ganti PIN…").triggered.connect(self._atur_pin)
+        self.aksi_hapus_pin = menu_pin.addAction("Hapus PIN")
+        self.aksi_hapus_pin.triggered.connect(self._hapus_pin)
+        self.tombol_pin.setMenu(menu_pin)
+        kepala.addWidget(self.tombol_pin)
+        kepala.addSpacing(12)
         self.tambah = tombol("+ Tambah perangkat", variant="primary")
         self.tambah.clicked.connect(self._tambah)
         kepala.addWidget(self.tambah)
@@ -193,7 +207,7 @@ class KartuPerangkat(QFrame):
         kepala_tabel = self.tabel.horizontalHeader()
         kepala_tabel.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         kepala_tabel.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        kepala_tabel.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        kepala_tabel.setSectionResizeMode(K_AKSI, QHeaderView.ResizeMode.Fixed)
         self.tabel.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tabel.horizontalHeaderItem(2).setToolTip(
             "Hijau: menghubungi server dalam 1 menit terakhir · kuning: lebih "
@@ -406,6 +420,39 @@ class KartuPerangkat(QFrame):
             return
         DialogKodePasang(kode.kode, kode.kedaluwarsa, self).exec()
         self.muat_ulang()
+
+    def _atur_pin(self) -> None:
+        """Pasang atau ganti PIN 6 angka untuk tombol ⚙ semua anjungan."""
+        pin, ok = QInputDialog.getText(
+            self, "PIN anjungan", "PIN baru (6 angka):", QLineEdit.EchoMode.Password
+        )
+        if not ok:
+            return
+        ulang, ok = QInputDialog.getText(
+            self, "PIN anjungan", "Ketik ulang PIN:", QLineEdit.EchoMode.Password
+        )
+        if not ok:
+            return
+        if pin != ulang:
+            tampilkan_peringatan(self, "Kedua PIN tidak sama. PIN tidak diubah.", "PIN anjungan")
+            return
+        if self._jalankan(lambda: self.layanan.atur_pin(pin)):
+            tampilkan_info(
+                self,
+                "PIN tersimpan. Tablet yang tersambung memakainya pada pengecekan "
+                "berikutnya.",
+                "PIN anjungan",
+            )
+
+    def _hapus_pin(self) -> None:
+        if not konfirmasi(
+            self,
+            "Hapus PIN pengaturan anjungan? Tombol ⚙ di semua anjungan akan terbuka "
+            "tanpa PIN.",
+            "Hapus PIN",
+        ):
+            return
+        self._jalankan(self.layanan.hapus_pin)
 
     def _segarkan_media(self, p: PerangkatInfo) -> None:
         """Anjungan menyalin ulang medianya pada kontak berikutnya (±beberapa detik)."""

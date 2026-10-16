@@ -46,7 +46,7 @@ from app.services.apk_anjungan import (
     info_apk,
 )
 from app.services.pembaruan_windows import folder_pembaruan, info_pembaruan
-from app.services import daftar_putar
+from app.services import daftar_putar, pin_anjungan
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
 from app.services.paket_suara import folder_paket, info_paket, token_pengumuman
@@ -140,6 +140,10 @@ class MediaReportItem(BaseModel):
     error: str = Field(default="", max_length=500)
     #: Percobaan terakhir berkas ini di tablet gagal.
     last_failed: bool = False
+
+
+class PinRequest(BaseModel):
+    pin: str = Field(min_length=1, max_length=12)
 
 
 class MediaStatus(BaseModel):
@@ -389,6 +393,21 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             }
             for loket in state.loket
         ]
+
+    def isi_pin() -> dict:
+        try:
+            data = pin_anjungan.baca()
+        except Exception:
+            logger.warning("PIN anjungan gagal dibaca", exc_info=True)
+            data = None
+        if data is None:
+            return {"enabled": False}
+        return {
+            "enabled": True,
+            "salt": data.salt,
+            "hash": data.hash,
+            "iterations": data.iterations,
+        }
 
     def permintaan_segarkan(device_id: str) -> int:
         if perangkat is None or not device_id:
@@ -718,6 +737,32 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 logger.warning("Status printer %s gagal dicatat", device_id, exc_info=True)
         return {"status": "ok"}
 
+    batas_pin = pin_anjungan.BatasPercobaan()
+
+    @app.post("/v1/kiosk/pin/verifikasi")
+    def pin_verifikasi(
+        permintaan: PinRequest,
+        device_id: str = Depends(require_token),  # noqa: B008
+    ):
+        """
+        Periksa PIN pengaturan anjungan. Salah berulang menunda tablet itu
+        1 / 5 / 15 menit; selama ditunda jawabannya `locked_seconds` tanpa
+        memeriksa PIN, supaya penundaan tidak dapat ditembus dengan menebak.
+        """
+        sisa = batas_pin.sisa_tunda(device_id)
+        if sisa:
+            return {"ok": False, "locked_seconds": sisa}
+        data = pin_anjungan.baca()
+        if data is None:
+            # Tidak ada PIN yang perlu diperiksa: pengaturan terbuka.
+            return {"ok": True, "locked_seconds": 0}
+        if pin_anjungan.cocok(permintaan.pin, data):
+            batas_pin.catat_berhasil(device_id)
+            return {"ok": True, "locked_seconds": 0}
+        tunda = batas_pin.catat_gagal(device_id)
+        logger.warning("PIN pengaturan salah dari anjungan %s", device_id)
+        return {"ok": False, "locked_seconds": tunda}
+
     @app.post("/v1/kiosk/media-status")
     def media_status(
         laporan: MediaStatus,
@@ -850,6 +895,9 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 "kiosk.iklan_layar_penuh_detik", 60
             ),
             "registration_open": services.queue.pendaftaran_dibuka(),
+            # PIN pengaturan anjungan. Hash (bukan PIN) ikut dikirim supaya
+            # tablet yang terputus tetap dapat memeriksa PIN untuk jalan pulih.
+            "settings_pin": isi_pin(),
             # Berubah bila admin menekan "Segarkan media" untuk tablet ini;
             # tablet menyegarkan salinannya segera bila nilainya baru.
             "media_refresh": permintaan_segarkan(device_id),

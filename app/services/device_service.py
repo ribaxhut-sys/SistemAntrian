@@ -415,6 +415,44 @@ class PerangkatService:
             key=lambda p: (p.dicabut, -(p.terakhir_terlihat or datetime.min).timestamp()),
         )
 
+    def pin_diatur(self) -> bool:
+        """Apakah PIN pengaturan anjungan sudah ada (isinya tidak pernah dibaca UI)."""
+        self.auth.require_permission(Permission.CONFIG_MANAGE)
+        from app.services import pin_anjungan
+
+        return pin_anjungan.baca() is not None
+
+    def atur_pin(self, pin: str) -> None:
+        """Pasang atau ganti PIN pengaturan anjungan untuk SEMUA tablet."""
+        sesi = self.auth.require_permission(Permission.CONFIG_MANAGE)
+        from app.services import pin_anjungan
+
+        pin_anjungan.simpan(pin_anjungan.buat(pin))
+        with session_scope() as session:
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="application_setting",
+                pengaturan=pin_anjungan.KUNCI,
+                nilai="(PIN diganti)",
+            )
+
+    def hapus_pin(self) -> None:
+        sesi = self.auth.require_permission(Permission.CONFIG_MANAGE)
+        from app.services import pin_anjungan
+
+        pin_anjungan.simpan(None)
+        with session_scope() as session:
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="application_setting",
+                pengaturan=pin_anjungan.KUNCI,
+                nilai="(PIN dihapus)",
+            )
+
     def segarkan_media(self, perangkat_id: int) -> None:
         """Minta satu anjungan menyegarkan salinan medianya sekarang."""
         self.auth.require_permission(Permission.CONFIG_MANAGE)

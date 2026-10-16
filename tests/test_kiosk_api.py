@@ -282,6 +282,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "fullscreen_ad_idle_seconds": 60,
         "registration_open": True,
         "priority_enabled": True,
+        "settings_pin": {"enabled": False},
         "media_refresh": 0,
         "cooldown_remaining_seconds": 0,
         "waiting_queue_numbers": ["A-002", "A-003"],
