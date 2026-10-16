@@ -40,7 +40,14 @@ from app.repositories.queue_repository import (
     terbitkan_nomor,
 )
 from app.repositories.user_repository import UserRepository
+from app.models.enums import (
+    ASAL_MANDIRI,
+    ASAL_PENDAFTARAN,
+    LABEL_PRIORITAS,
+    AlasanPrioritas,
+)
 from app.services import audit_service
+from app.services.urutan_prioritas import MODE_OTOMATIS, MODE_SAH, susun
 from app.services.auth_service import AuthService
 from app.services.permissions import Permission
 from app.services.settings_service import SettingsService
@@ -119,6 +126,19 @@ class QueueInfo:
     #: Batas pemanggilan yang berlaku, dari pengaturan queue.max_call_attempts.
     #: Nol berarti batasnya tidak diketahui pada data ini.
     batas_panggilan: int = 0
+    #: Alasan prioritas (AlasanPrioritas.value); None untuk nomor biasa.
+    prioritas: str | None = None
+    #: PENDAFTARAN, MANDIRI, atau PETUGAS; None bila nomor biasa.
+    prioritas_asal: str | None = None
+
+    @property
+    def prioritas_mandiri(self) -> bool:
+        """Ditandai pengunjung sendiri di anjungan: perlu diperiksa petugas."""
+        return self.prioritas is not None and self.prioritas_asal == ASAL_MANDIRI
+
+    @property
+    def label_prioritas(self) -> str:
+        return LABEL_PRIORITAS.get(self.prioritas or "", "")
 
     @property
     def label_status(self) -> str:
@@ -214,6 +234,8 @@ def _as_info(
         completed_at=row.completed_at,
         jumlah_panggilan=jumlah_panggilan,
         batas_panggilan=batas_panggilan,
+        prioritas=row.prioritas,
+        prioritas_asal=row.prioritas_asal,
     )
 
 
@@ -384,6 +406,10 @@ class QueueService:
         """
         return self.settings.get_int("queue.max_call_attempts", 3)
 
+    def rasio_prioritas(self) -> int:
+        """Nomor prioritas beruntun sebelum satu nomor biasa; 0 = tanpa batas."""
+        return max(0, self.settings.get_int("queue.rasio_prioritas", 3))
+
     # =================================================================
     # Penerbitan nomor
     # =================================================================
@@ -395,6 +421,8 @@ class QueueService:
         perangkat: str = "",
         request_id: str | None = None,
         kunci_jeda: str | None = None,
+        prioritas: str | None = None,
+        prioritas_mandiri: bool = False,
     ) -> QueueInfo:
         """
         Terbitkan nomor antrian baru untuk sebuah jenis layanan.
@@ -413,6 +441,29 @@ class QueueService:
         membuat tablet kehilangan nomor yang sudah tercatat di antrian.
         """
         sesi = self.auth.require_permission(Permission.QUEUE_CREATE)
+        if prioritas is not None:
+            # Hanya petugas pendaftaran yang melihat pengunjungnya langsung.
+            # Anjungan dan akun lain tidak boleh menandai prioritas sendiri.
+            if sesi.role is not UserRole.REGISTRATION:
+                raise BusinessRuleError(
+                    "Hanya petugas pendaftaran yang dapat menandai nomor prioritas."
+                )
+            if prioritas not in {a.value for a in AlasanPrioritas}:
+                raise ValidationError("Alasan prioritas tidak dikenal.")
+        asal = None
+        if prioritas is not None:
+            asal = ASAL_PENDAFTARAN
+        elif prioritas_mandiri:
+            # Pilihan pengunjung di anjungan. Bila saklarnya dimatikan admin,
+            # tablet yang masih menampilkannya tetap mendapat nomor biasa:
+            # menolak penerbitan lebih merugikan daripada mengabaikannya.
+            if not sesi.kios:
+                raise BusinessRuleError(
+                    "Pilihan prioritas mandiri hanya tersedia di anjungan."
+                )
+            if self.settings.get_bool("kiosk.prioritas_aktif", True):
+                prioritas = AlasanPrioritas.PRIORITAS.value
+                asal = ASAL_MANDIRI
         kunci = None if request_id is None else KunciTiket(perangkat, request_id)
         if kunci_jeda is None:
             kunci_jeda = perangkat
@@ -488,8 +539,14 @@ class QueueService:
                 entity_type="queue",
                 entity_id=terbit.queue_id,
                 nomor=terbit.queue_number,
+                prioritas=prioritas,
+                asal=asal,
             )
-            info = _as_info(QueueRepository(session).get_by_id(terbit.queue_id))
+            baris = QueueRepository(session).get_by_id(terbit.queue_id)
+            if prioritas is not None:
+                baris.prioritas = prioritas
+                baris.prioritas_asal = asal
+            info = _as_info(baris)
 
         if sesi.kios:
             self._catat_jeda_kios(kunci_jeda)
@@ -644,8 +701,11 @@ class QueueService:
     def list_waiting(self, *, category_id: int | None = None) -> list[QueueInfo]:
         sesi = self.auth.require_permission(Permission.QUEUE_VIEW)
         with session_scope() as session:
-            rows = QueueRepository(session).list_menunggu(
-                sesi.branch_id, clock.today(), category_id=category_id
+            rows = QueueRepository(session).list_menunggu_berurutan(
+                sesi.branch_id,
+                clock.today(),
+                rasio=self.rasio_prioritas(),
+                category_id=category_id,
             )
             return [_as_info(r) for r in rows]
 
@@ -653,7 +713,29 @@ class QueueService:
         """Nomor hari ini yang aman ditampilkan pada perangkat publik."""
         sesi = self.auth.require_permission(Permission.DISPLAY_VIEW)
         with session_scope() as session:
-            return QueueRepository(session).nomor_menunggu(sesi.branch_id, clock.today())
+            # Urutan panggil (prioritas dan rasio), supaya daftar di layar
+            # dan anjungan sama dengan yang benar-benar akan terpanggil.
+            return [
+                q.queue_number
+                for q in QueueRepository(session).list_menunggu_berurutan(
+                    sesi.branch_id, clock.today(), rasio=self.rasio_prioritas()
+                )
+            ]
+
+    def nomor_prioritas_menunggu_untuk_layar(self) -> list[str]:
+        """
+        Nomor menunggu hari ini yang berstatus prioritas. HANYA nomornya: alasan
+        (lansia, disabilitas, ibu hamil) tidak boleh sampai ke perangkat publik.
+        """
+        sesi = self.auth.require_permission(Permission.DISPLAY_VIEW)
+        with session_scope() as session:
+            return [
+                q.queue_number
+                for q in QueueRepository(session).list_menunggu_berurutan(
+                    sesi.branch_id, clock.today(), rasio=self.rasio_prioritas()
+                )
+                if q.prioritas
+            ]
 
     def list_today(self, *, status: tuple[QueueStatus, ...] | None = None) -> list[QueueInfo]:
         sesi = self.auth.require_permission(Permission.QUEUE_VIEW)
@@ -721,7 +803,9 @@ class QueueService:
             # pengambilan nomor. Menghitung hanya yang sejenis akan
             # menghasilkan angka yang jauh lebih kecil daripada kenyataan
             # yang dirasakan pengunjung di ruang tunggu.
-            menunggu = repo.list_menunggu(sesi.branch_id, antrian.queue_date)
+            menunggu = repo.list_menunggu_berurutan(
+                sesi.branch_id, antrian.queue_date, rasio=self.rasio_prioritas()
+            )
             sisa = 0
             for antre in menunggu:
                 if antre.id == antrian.id:
@@ -782,8 +866,11 @@ class QueueService:
                 jangkauan.update(c.id for c in counter.categories)
 
             di_depan: list[int] = []
-            for antre in repo.list_menunggu(
-                sesi.branch_id, antrian.queue_date, category_ids=jangkauan
+            for antre in repo.list_menunggu_berurutan(
+                sesi.branch_id,
+                antrian.queue_date,
+                rasio=self.rasio_prioritas(),
+                category_ids=jangkauan,
             ):
                 if antre.id == antrian.id:
                     break
@@ -839,7 +926,9 @@ class QueueService:
                 else None
             )
 
-            menunggu = repo.list_menunggu(sesi.branch_id, hari)
+            menunggu = repo.list_menunggu_berurutan(
+                sesi.branch_id, hari, rasio=self.rasio_prioritas()
+            )
             berikutnya = [_as_info(q) for q in menunggu[:jumlah_berikutnya]]
             layanan = (
                 self._kelompokkan_per_layanan(
@@ -1048,7 +1137,13 @@ class QueueService:
                 "Loket %s %s", loket.code, "mulai istirahat" if istirahat else "aktif kembali"
             )
 
-    def call_next(self, counter_id: int, *, category_id: int | None = None) -> QueueInfo:
+    def call_next(
+        self,
+        counter_id: int,
+        *,
+        category_id: int | None = None,
+        urutan: str = MODE_OTOMATIS,
+    ) -> QueueInfo:
         """
         Panggil antrian paling depan ke sebuah loket.
 
@@ -1108,13 +1203,27 @@ class QueueService:
             # di antara pembacaan dan klaim; klaim itu gagal dan calon
             # berikutnya dicoba. Nomor yang sudah diambil satu loket karena
             # itu tidak pernah ikut dipanggil loket lain.
-            antrian = None
-            for calon in repo.list_menunggu(
+            if urutan not in MODE_SAH:
+                raise ValidationError("Urutan panggil tidak dikenal.")
+            daftar = repo.list_menunggu(
                 sesi.branch_id,
                 hari,
                 category_id=category_id,
                 category_ids=diizinkan or None,
-            ):
+            )
+            rasio = self.rasio_prioritas()
+            daftar = susun(
+                daftar,
+                rasio=rasio,
+                beruntun=(
+                    repo.prioritas_beruntun(sesi.branch_id, hari, rasio or 1)
+                    if rasio
+                    else 0
+                ),
+                mode=urutan,
+            )
+            antrian = None
+            for calon in daftar:
                 if repo.klaim_untuk_dipanggil(calon.id):
                     antrian = calon
                     break
@@ -1173,6 +1282,46 @@ class QueueService:
             return _as_info(
                 antrian, repo.jumlah_pemanggilan(antrian.id), self.batas_panggilan()
             )
+
+    def cabut_prioritas(self, queue_id: int) -> QueueInfo:
+        """
+        Cabut prioritas dari nomor yang belum selesai.
+
+        Penandaan hanya terjadi di anjungan (pilihan pengunjung) atau saat
+        petugas pendaftaran menerbitkan nomor. Petugas pelayanan hanya boleh
+        MENCABUT: pengunjung yang mencentang tetapi ternyata tidak berhak
+        kembali ke antrian biasa, dengan urutan datangnya tetap.
+        """
+        sesi = self.auth.require_permission(Permission.QUEUE_CALL)
+
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            antrian = self._ambil(repo, queue_id, for_update=True)
+            if antrian.branch_id != sesi.branch_id:
+                raise NotFoundError("Antrian tidak ditemukan.")
+            if antrian.status.is_final:
+                raise BusinessRuleError(
+                    f"{antrian.queue_number} sudah selesai; prioritasnya tidak "
+                    "dapat diubah."
+                )
+            if antrian.prioritas is None:
+                return _as_info(antrian, repo.jumlah_pemanggilan(antrian.id))
+            lama = antrian.prioritas
+            asal = antrian.prioritas_asal
+            antrian.prioritas = None
+            antrian.prioritas_asal = None
+            audit_service.record(
+                session,
+                AuditAction.CLEAR_PRIORITY,
+                user_id=sesi.user_id,
+                entity_type="queue",
+                entity_id=antrian.id,
+                nomor=antrian.queue_number,
+                alasan=lama,
+                asal=asal,
+            )
+            logger.info("Prioritas %s dicabut (%s)", antrian.queue_number, lama)
+            return _as_info(antrian, repo.jumlah_pemanggilan(antrian.id))
 
     def recall(self, queue_id: int) -> QueueInfo:
         """

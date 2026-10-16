@@ -54,6 +54,7 @@ from app.ui.common import (
     pesan_untuk_user,
     tombol,
 )
+from app.ui.tema_petugas import warna_tema
 from app.ui.style import (
     BORDER,
     DANGER,
@@ -168,7 +169,7 @@ class GrafikBatang(QWidget):
         sela = lebar / jumlah_batang
         terbesar = max([1, *self.nilai.values()])
 
-        pelukis.setPen(QPen(QColor(BORDER), 1))
+        pelukis.setPen(QPen(QColor(warna_tema(BORDER)), 1))
         pelukis.drawLine(0, batas_bawah, lebar, batas_bawah)
 
         for indeks, jam in enumerate(self.jam_tampil):
@@ -178,19 +179,19 @@ class GrafikBatang(QWidget):
             tinggi_batang = (batas_bawah - batas_atas) * jumlah / terbesar
             if jumlah:
                 pelukis.setPen(Qt.PenStyle.NoPen)
-                pelukis.setBrush(QColor(PRIMARY))
+                pelukis.setBrush(QColor(warna_tema(PRIMARY)))
                 pelukis.drawRoundedRect(
                     QRectF(kiri, batas_bawah - tinggi_batang, lebar_batang, tinggi_batang),
                     3,
                     3,
                 )
-                pelukis.setPen(QColor(TEXT))
+                pelukis.setPen(QColor(warna_tema(TEXT, teks=True)))
                 pelukis.drawText(
                     QRectF(indeks * sela, batas_bawah - tinggi_batang - 16, sela, 14),
                     Qt.AlignmentFlag.AlignCenter,
                     str(jumlah),
                 )
-            pelukis.setPen(QColor(TEXT_MUTED))
+            pelukis.setPen(QColor(warna_tema(TEXT_MUTED, teks=True)))
             pelukis.drawText(
                 QRectF(indeks * sela, batas_bawah + 4, sela, 16),
                 Qt.AlignmentFlag.AlignCenter,

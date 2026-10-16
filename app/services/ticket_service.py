@@ -917,7 +917,10 @@ class TicketService:
 
         return TicketData(
             queue_number=antrian.queue_number,
-            category_name=antrian.category_name,
+            # Nomor prioritas ditandai pada baris layanan supaya terbaca
+            # petugas dan pengunjung tanpa mengubah tata letak tiket.
+            category_name=antrian.category_name
+            + (" · Prioritas" if antrian.prioritas else ""),
             office_name=nama_kantor,
             issued_at=antrian.created_at or clock.now(),
             footer=self.settings.get("ticket.footer", ""),

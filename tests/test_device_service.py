@@ -580,3 +580,46 @@ def test_layar_dicabut_ditolak_di_semua_endpoint(layanan, path):
     jawab = klien.get(path, headers={"Authorization": f"Bearer {token}"})
 
     assert jawab.status_code == 401
+
+
+def test_status_salinan_media_tercatat_dan_diringkas(layanan):
+    device_service.catat_kontak(DEVICE, nama="Tablet")
+
+    device_service.catat_media(DEVICE, total=3, tersalin=2, byte=58 * 1_048_576)
+
+    (info,) = layanan.daftar()
+    assert info.media_total == 3 and info.media_tersalin == 2
+    assert info.teks_media == "2 dari 3 tersalin · 58 MB"
+    assert info.media_lengkap is False
+    device_service.catat_media(DEVICE, total=3, tersalin=3, byte=60 * 1_048_576)
+    assert layanan.daftar()[0].media_lengkap is True
+
+
+def test_status_media_tidak_melebihi_total_dan_abaikan_perangkat_asing(layanan):
+    device_service.catat_kontak(DEVICE, nama="Tablet")
+    device_service.catat_media(DEVICE, total=2, tersalin=9)
+    device_service.catat_media("tidak-dikenal", total=1, tersalin=1)
+
+    (info,) = layanan.daftar()
+    assert info.media_tersalin == 2
+
+
+def test_segarkan_media_mengubah_penanda_untuk_tablet_itu(layanan):
+    device_service.catat_kontak(DEVICE, nama="Tablet")
+    device_service.catat_kontak("tablet-lain-001", nama="Lain")
+    assert device_service.permintaan_segarkan_media(DEVICE) == 0
+    tablet = next(p for p in layanan.daftar() if p.nama == "Tablet")
+
+    layanan.segarkan_media(tablet.id)
+
+    assert device_service.permintaan_segarkan_media(DEVICE) > 0
+    assert device_service.permintaan_segarkan_media("tablet-lain-001") == 0
+
+
+def test_segarkan_media_ditolak_untuk_perangkat_dicabut(layanan):
+    device_service.catat_kontak(DEVICE, nama="Tablet")
+    tablet = layanan.daftar()[0]
+    layanan.cabut(tablet.id)
+
+    with pytest.raises(BusinessRuleError):
+        layanan.segarkan_media(tablet.id)

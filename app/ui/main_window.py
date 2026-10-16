@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from app.core.config import APP_NAME, get_config, teks_status_database
 from app.core.logger import get_logger
+from app.models.enums import UserRole
 from app.services.auth_service import AuthService
 from app.services.backup_service import BackupService
 from app.services.kesehatan_service import KesehatanService
@@ -51,6 +52,7 @@ from app.ui.dashboard.petugas_page import (
 from app.ui.dashboard.survey_result_page import SurveyResultPage
 from app.ui.login.change_password_dialog import ChangePasswordDialog
 from app.ui.settings.dialogs import LABEL_PERAN
+from app.ui.tampilan_page import TampilanPage
 from app.ui.dashboard.report_page import LaporanPage
 from app.ui.indikator_anjungan import PitaAnjungan
 from app.ui.pita_database import PitaDatabase
@@ -112,6 +114,7 @@ SELANG_PERIKSA_PEMBARUAN_MS = 30 * 60 * 1_000
 MENU_LAYANAN_ANJUNGAN = "Layanan Anjungan"
 MENU_PELAYANAN = "Pelayanan"
 MENU_RINGKASAN_SAYA = "Ringkasan Saya"
+MENU_TAMPILAN = "Tampilan"
 
 #: Utas pemeriksa yang masih berjalan saat jendelanya ditutup. Dilepas dari
 #: jendela dan disimpan di sini sampai selesai: QThread yang ikut dihapus
@@ -203,6 +206,11 @@ class _Menu:
     hanya_server: bool = False
     #: Hanya untuk sesi yang mewakili akun (bukan sesi kios tanpa login).
     hanya_akun: bool = False
+    #: Menu pelengkap: tampil hanya bila sesi punya menu kerja lain, supaya
+    #: akun tanpa kewenangan apa pun tetap melihat pesan "tidak ada menu".
+    pelengkap: bool = False
+    #: Peran yang tidak diberi menu ini.
+    tanpa_peran: tuple[UserRole, ...] = ()
 
 
 def _komputer_server() -> bool:
@@ -777,18 +785,41 @@ class MainWindow(QMainWindow):
                 Permission.SURVEY_VIEW,
                 lambda: SurveyResultPage(self.survey_service),
             ),
+            # Tema layar untuk komputer ini; tidak butuh hak khusus.
+            _Menu(
+                MENU_TAMPILAN,
+                None,
+                lambda: TampilanPage(),
+                hanya_akun=True,
+                pelengkap=True,
+                tanpa_peran=(UserRole.DISPLAY, UserRole.KIOSK),
+            ),
         ]
 
         self.auth.require_session()
         self.menu_aktif: list[_Menu] = []
-        for butir in daftar:
+        sesi_menu = self.auth.require_session()
+
+        def layak(butir: _Menu) -> bool:
+            if sesi_menu.role in butir.tanpa_peran:
+                return False
             if any(self.auth.has_permission(p) for p in butir.kecuali):
-                continue
+                return False
             if butir.hanya_server and not _komputer_server():
+                return False
+            if butir.hanya_akun and sesi_menu.user_id is None:
+                return False
+            return butir.permission is None or self.auth.has_permission(
+                butir.permission
+            )
+
+        # Menu pelengkap (Tampilan) hanya menemani menu kerja yang benar-benar
+        # tampil di komputer ini, bukan yang tersaring oleh aturan server.
+        ada_menu_kerja = any(layak(b) for b in daftar if not b.pelengkap)
+        for butir in daftar:
+            if butir.pelengkap and not ada_menu_kerja:
                 continue
-            if butir.hanya_akun and self.auth.require_session().user_id is None:
-                continue
-            if butir.permission is None or self.auth.has_permission(butir.permission):
+            if layak(butir):
                 self.menu_aktif.append(butir)
                 self.navigasi.addItem(butir.judul)
                 halaman = butir.pembuat()

@@ -56,8 +56,10 @@ class _Kartu(QLabel):
     diklik = Signal()
 
     def __init__(self, html: str, parent: QWidget | None = None) -> None:
-        super().__init__(html, parent)
+        super().__init__(parent)
         self.setTextFormat(Qt.TextFormat.RichText)
+        # Lewat setText (bukan konstruktor) supaya warna HTML mengikuti tema.
+        self.setText(html)
         self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -143,6 +145,8 @@ class PapanTunggu(QFrame):
 
         #: Judul kartu yang tampil ("Layanan (jumlah)"), untuk test.
         self.judul_kolom: list[str] = []
+        self.kartu_semua: _Kartu | None = None
+        self.kartu_layanan: dict[int, _Kartu] = {}
         #: Teks tiap kartu, untuk test dan pembacaan layar.
         self.teks_kartu: list[str] = []
 

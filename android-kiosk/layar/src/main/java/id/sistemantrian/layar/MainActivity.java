@@ -400,6 +400,46 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 getResources().getDisplayMetrics()));
     }
 
+    /**
+     * Nomor menunggu. Nomor prioritas ditandai bintang kecil di pojok kiri
+     * atas dan latar kuning lembut; teks nomornya tetap polos.
+     */
+    private static final class NomorMenunggu extends TextView {
+        private static final int AMBER = Color.rgb(245, 158, 11);
+        private final Paint bintang = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private boolean prioritas;
+
+        NomorMenunggu(Context context) {
+            super(context);
+            bintang.setColor(AMBER);
+        }
+
+        void setPrioritas(boolean nilai) {
+            if (prioritas == nilai) return;
+            prioritas = nilai;
+            if (nilai) {
+                GradientDrawable latar = new GradientDrawable();
+                latar.setColor(Color.argb(60, 245, 158, 11));
+                latar.setCornerRadius(12 * getResources().getDisplayMetrics().density);
+                setBackground(latar);
+            } else {
+                setBackground(null);
+            }
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            super.onDraw(canvas);
+            if (!prioritas) return;
+            float besar = Math.max(getTextSize() * 0.4f,
+                    10 * getResources().getDisplayMetrics().density);
+            bintang.setTextSize(besar);
+            canvas.drawText("★", 4 * getResources().getDisplayMetrics().density,
+                    besar + 2 * getResources().getDisplayMetrics().density, bintang);
+        }
+    }
+
     private TextView text(String value, float size, int color, boolean bold) {
         TextView view = new TextView(this);
         view.setText(value);
@@ -539,6 +579,14 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
     }
 
+    /**
+     * Teks pada loket yang aktif tetapi tidak sedang memanggil. Satu baris
+     * pendek: "KOSONG" mengaburkan apakah loketnya atau antriannya yang kosong.
+     */
+    private static String teksLoketTanpaPanggilan(String status) {
+        return "ISTIRAHAT".equals(status) ? "Istirahat" : "Siap melayani";
+    }
+
     private void fitNumber(TextView number) {
         boolean status = number.getCurrentTextColor() == MUTED;
         fitText(number, status ? 30 : 72, number.getWidth(), number.getHeight());
@@ -637,7 +685,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             TextView number = card.findViewWithTag("number");
             TextView category = card.findViewWithTag("category");
             boolean ada = !counter.isNull("queue_number");
-            String value = ada ? counter.optString("queue_number") : counter.optString("status", "KOSONG");
+            String value = ada ? counter.optString("queue_number")
+                    : teksLoketTanpaPanggilan(counter.optString("status", "KOSONG"));
             boolean changed = !value.contentEquals(number.getText())
                     || number.getCurrentTextColor() != (ada ? INK : MUTED);
             number.setText(value);
@@ -710,6 +759,11 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     private void applyNext(JSONObject state) {
         JSONArray next = state.optJSONArray("next");
+        java.util.Set<String> prioritas = new java.util.HashSet<>();
+        JSONArray prioritasRows = state.optJSONArray("next_priority");
+        for (int i = 0; prioritasRows != null && i < prioritasRows.length(); i++) {
+            prioritas.add(prioritasRows.optString(i));
+        }
         int available = next == null ? 0 : next.length();
         int per = perRow();
         int wanted = (int) Math.ceil(available / (double) per);
@@ -729,7 +783,11 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 for (int c = 0; c < per; c++) {
-                    TextView cell = text("", NEXT_SP, Color.WHITE, true);
+                    NomorMenunggu cell = new NomorMenunggu(this);
+                    cell.setText("");
+                    cell.setTextSize(NEXT_SP);
+                    cell.setTextColor(Color.WHITE);
+                    cell.setTypeface(Typeface.DEFAULT_BOLD);
                     cell.setPadding(0, dp(5), dp(4), dp(5));
                     row.addView(cell, new LinearLayout.LayoutParams(0, -2, 1));
                 }
@@ -738,8 +796,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         }
         for (int i = 0; i < rows * per; i++) {
             LinearLayout row = (LinearLayout) nextList.getChildAt(i / per);
-            TextView cell = (TextView) row.getChildAt(i % per);
+            NomorMenunggu cell = (NomorMenunggu) row.getChildAt(i % per);
             String value = i < shown ? next.optString(i) : "";
+            cell.setPrioritas(prioritas.contains(value));
             if (!value.contentEquals(cell.getText())) {
                 cell.setText(value);
                 cell.post(() -> fitText(cell, NEXT_SP, cell.getWidth(), 0));

@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
@@ -549,6 +549,38 @@ def _sel_bento(jumlah: int, unggulan: int) -> list[tuple[int, int, int, int]]:
     return [
         peta[0] if indeks == unggulan else next(lain) for indeks in range(jumlah)
     ]
+
+
+WARNA_BINTANG_PRIORITAS = "#F59E0B"
+
+
+class LabelNomorMenunggu(QLabel):
+    """
+    Nomor menunggu. Nomor prioritas ditandai bintang kecil di pojok kiri atas
+    ubin (digambar, bukan disisipkan ke teks) dan latar kuning lembut, jadi
+    nomornya sendiri tetap polos dan selebar nomor biasa.
+    """
+
+    def __init__(self, teks: str, prioritas: bool = False) -> None:
+        super().__init__(teks)
+        self.prioritas = prioritas
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self.prioritas:
+            return
+        pelukis = QPainter(self)
+        pelukis.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        huruf = QFont(self.font())
+        huruf.setPixelSize(max(9, min(18, round(self.height() * 0.24))))
+        pelukis.setFont(huruf)
+        pelukis.setPen(QColor(WARNA_BINTANG_PRIORITAS))
+        pelukis.drawText(
+            self.rect().adjusted(5, 2, 0, 0),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            "★",
+        )
+        pelukis.end()
 
 
 class KartuLoket(QFrame):
@@ -2329,9 +2361,12 @@ class DisplayPage(QWidget):
         # minimum yang rendah, panel selalu persis sebesar jatahnya, dan
         # kartu memuai sendiri mengisi sisanya lewat SizePolicy Expanding.
         label.setMinimumHeight(self._tinggi_baris_untuk(FONT_DAFTAR_MIN))
+        prioritas = bool(getattr(label, "prioritas", False))
+        latar = "rgba(245, 158, 11, 56)" if prioritas else p.chip
+        tepi = "rgba(245, 158, 11, 150)" if prioritas else p.chip_tepi
         label.setStyleSheet(
-            f"color: {p.chip_teks}; background: {p.chip};"
-            f" border: {TEPI_NOMOR}px solid {p.chip_tepi};"
+            f"color: {p.chip_teks}; background: {latar};"
+            f" border: {TEPI_NOMOR}px solid {tepi};"
             f" border-radius: {p.radius_chip}px;"
             f" font-size: {self._font_daftar}px; font-weight: 800;"
             f" letter-spacing: {p.renggang_nomor}px;"
@@ -2761,7 +2796,10 @@ class DisplayPage(QWidget):
                 continue
 
             for indeks, antrian in enumerate(potongan):
-                label = QLabel(antrian.queue_number)
+                label = LabelNomorMenunggu(
+                    self._teks_nomor_menunggu(antrian),
+                    bool(getattr(antrian, "prioritas", None)),
+                )
                 label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 label.setMinimumSize(1, 1)
                 label.setSizePolicy(
@@ -2782,6 +2820,11 @@ class DisplayPage(QWidget):
         for kolom in range(len(self._layanan) * self.kolom_per_layanan):
             self.baris_berikutnya.setColumnStretch(kolom, 1)
 
+    @staticmethod
+    def _teks_nomor_menunggu(antrian) -> str:
+        """Nomor menunggu. Bintang prioritas digambar `LabelNomorMenunggu`."""
+        return antrian.queue_number
+
     def _isi_berikutnya(self, berikutnya: list) -> None:
         """Daftar gabungan, dipakai papan kios dan saat jenis layanan terlalu banyak."""
         self._kosongkan_daftar()
@@ -2799,7 +2842,10 @@ class DisplayPage(QWidget):
         kolom = -(-len(berikutnya) // baris)
 
         for indeks, antrian in enumerate(berikutnya):
-            label = QLabel(antrian.queue_number)
+            label = LabelNomorMenunggu(
+                    self._teks_nomor_menunggu(antrian),
+                    bool(getattr(antrian, "prioritas", None)),
+                )
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setMinimumSize(1, 1)
             label.setSizePolicy(

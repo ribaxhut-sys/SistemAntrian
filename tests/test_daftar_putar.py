@@ -141,3 +141,46 @@ def test_aturan_rusak_yang_sudah_tersimpan_tidak_menjatuhkan_anjungan():
     )
 
     assert butir == [daftar_putar.Butir("a.jpg"), daftar_putar.Butir("b.jpg")]
+
+
+# ---------------------------------------------------------------------
+# Tempat tampil: panel atas, layar penuh, atau keduanya
+# ---------------------------------------------------------------------
+
+
+def test_tempat_tampil_bawaan_keduanya_dan_tidak_ditulis():
+    butir = daftar_putar.Butir("a.mp4")
+    assert butir.tampil == daftar_putar.TAMPIL_KEDUANYA
+    assert butir.ke_json() == "a.mp4"
+    assert butir.tampil_di(daftar_putar.TAMPIL_PANEL)
+    assert butir.tampil_di(daftar_putar.TAMPIL_PENUH)
+
+
+def test_tempat_tampil_dibatasi_dan_disimpan():
+    nilai = daftar_putar.tulis(
+        [
+            daftar_putar.Butir("strip.mp4", tampil=daftar_putar.TAMPIL_PANEL),
+            daftar_putar.Butir("tegak.mp4", tampil=daftar_putar.TAMPIL_PENUH),
+            "biasa.jpg",
+        ]
+    )
+
+    butir = {b.nama: b for b in daftar_putar.baca_butir(nilai)}
+    assert butir["strip.mp4"].tampil_di(daftar_putar.TAMPIL_PANEL)
+    assert not butir["strip.mp4"].tampil_di(daftar_putar.TAMPIL_PENUH)
+    assert butir["tegak.mp4"].tampil_di(daftar_putar.TAMPIL_PENUH)
+    assert not butir["tegak.mp4"].tampil_di(daftar_putar.TAMPIL_PANEL)
+    assert butir["biasa.jpg"].tampil == daftar_putar.TAMPIL_KEDUANYA
+    assert daftar_putar.tampil_per_berkas(nilai) == {
+        "strip.mp4": "panel",
+        "tegak.mp4": "penuh",
+        "biasa.jpg": "keduanya",
+    }
+
+
+def test_tempat_tampil_tidak_sah_ditolak_saat_disimpan_dan_diabaikan_saat_dibaca():
+    mentah = '[{"nama": "a.mp4", "tampil": "melayang"}]'
+
+    assert daftar_putar.baca_butir(mentah)[0].tampil == daftar_putar.TAMPIL_KEDUANYA
+    with pytest.raises(ValidationError):
+        daftar_putar.baku(mentah)

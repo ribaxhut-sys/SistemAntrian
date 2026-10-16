@@ -3,6 +3,11 @@
 Dokumen serah terima. Berisi tujuan, keadaan sekarang, apa yang belum
 selesai, dan hal-hal yang **jangan** diubah beserta alasannya.
 
+> **Keadaan terbaru ada di [serah-terima-ai.md](serah-terima-ai.md)**
+> (dipakai bergantian oleh Codex dan Claude). Dokumen ini tetap berlaku
+> untuk aturan kode dan jebakan; riwayat commit dan keadaan test di bawah
+> adalah catatan sejarah.
+
 > **Catatan Oktober 2026:** anjungan tidak lagi berjalan di Windows. Peran
 > dan mode `anjungan`/`anjungan-totem` (`--kios`, `--kios-totem`, `--layar`)
 > sudah dihapus; anjungan adalah tablet Android. Lihat

@@ -46,7 +46,7 @@ from app.services.apk_anjungan import (
     info_apk,
 )
 from app.services.pembaruan_windows import folder_pembaruan, info_pembaruan
-from app.services import daftar_putar
+from app.services import daftar_putar, pin_anjungan
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
 from app.services.paket_suara import folder_paket, info_paket, token_pengumuman
@@ -59,6 +59,7 @@ from app.services.ticket_service import (
     tata_letak_tiket_anjungan,
 )
 
+_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".3gp"}
 _MEDIA_EXTENSIONS = {
     ".png",
     ".jpg",
@@ -115,6 +116,9 @@ def _serve_discovery(
 class TicketRequest(BaseModel):
     category_id: int = Field(gt=0)
     request_id: UUID
+    #: Pengunjung mencentang "Saya lansia / disabilitas / ibu hamil".
+    #: Opsional: APK lama tidak mengirimnya dan tetap mendapat nomor biasa.
+    priority: bool = False
 
 
 class PairRequest(BaseModel):
@@ -136,6 +140,18 @@ class MediaReportItem(BaseModel):
     error: str = Field(default="", max_length=500)
     #: Percobaan terakhir berkas ini di tablet gagal.
     last_failed: bool = False
+
+
+class PinRequest(BaseModel):
+    pin: str = Field(min_length=1, max_length=12)
+
+
+class MediaStatus(BaseModel):
+    """Status salinan media di tablet: tersalin dari total berkas."""
+
+    total: int = Field(ge=0, le=10_000)
+    copied: int = Field(ge=0, le=10_000)
+    bytes: int = Field(default=0, ge=0)
 
 
 class MediaReport(BaseModel):
@@ -369,6 +385,11 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 "name": loket.counter_name,
                 "queue_number": loket.antrian.queue_number if loket.antrian else None,
                 "category": loket.antrian.category_name if loket.antrian else None,
+                # Bertambah tiap panggilan DAN panggilan ulang: anjungan
+                # mengenali panggilan baru dari perubahan angka ini.
+                "call_count": (
+                    loket.antrian.jumlah_panggilan if loket.antrian else 0
+                ),
                 "status": (
                     loket.antrian.label_status
                     if loket.antrian is not None
@@ -377,6 +398,47 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             }
             for loket in state.loket
         ]
+
+    def isi_pin() -> dict:
+        try:
+            data = pin_anjungan.baca()
+        except Exception:
+            logger.warning("PIN anjungan gagal dibaca", exc_info=True)
+            data = None
+        if data is None:
+            return {"enabled": False}
+        return {
+            "enabled": True,
+            "salt": data.salt,
+            "hash": data.hash,
+            "iterations": data.iterations,
+        }
+
+    def permintaan_segarkan(device_id: str) -> int:
+        if perangkat is None or not device_id:
+            return 0
+        try:
+            return int(perangkat.permintaan_segarkan_media(device_id))
+        except Exception:
+            return 0
+
+    def pustaka_media() -> list[Path]:
+        """SEMUA gambar/video di folder media server, bukan hanya daftar putar."""
+        folder = (base_dir() / "media" / "kiosk").resolve()
+        if not folder.is_dir():
+            return []
+        hasil = []
+        for item in sorted(folder.iterdir(), key=lambda item: item.name.lower()):
+            if not item.is_file() or item.name.startswith("."):
+                continue
+            if item.suffix.lower() not in _MEDIA_EXTENSIONS:
+                continue
+            try:
+                item.resolve().relative_to(folder)
+            except ValueError:
+                continue
+            hasil.append(item.resolve())
+        return hasil
 
     def welcome_media_paths() -> list[Path]:
         kind = services.settings.get("kiosk.welcome_kind", "teks")
@@ -530,6 +592,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "sound_enabled": services.settings.get_bool("display.sound_enabled", True),
             "counters": isi_loket(state),
             "next": [q.queue_number for q in state.berikutnya],
+            # Subset "next" yang prioritas (hanya nomor; tanpa alasan).
+            "next_priority": [
+                q.queue_number for q in state.berikutnya if q.prioritas
+            ],
             "total_waiting": state.total_menunggu,
             "server_time_ms": int(time.time() * 1000),
             "timezone": TIMEZONE,
@@ -680,6 +746,49 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 logger.warning("Status printer %s gagal dicatat", device_id, exc_info=True)
         return {"status": "ok"}
 
+    batas_pin = pin_anjungan.BatasPercobaan()
+
+    @app.post("/v1/kiosk/pin/verifikasi")
+    def pin_verifikasi(
+        permintaan: PinRequest,
+        device_id: str = Depends(require_token),  # noqa: B008
+    ):
+        """
+        Periksa PIN pengaturan anjungan. Salah berulang menunda tablet itu
+        1 / 5 / 15 menit; selama ditunda jawabannya `locked_seconds` tanpa
+        memeriksa PIN, supaya penundaan tidak dapat ditembus dengan menebak.
+        """
+        sisa = batas_pin.sisa_tunda(device_id)
+        if sisa:
+            return {"ok": False, "locked_seconds": sisa}
+        data = pin_anjungan.baca()
+        if data is None:
+            # Tidak ada PIN yang perlu diperiksa: pengaturan terbuka.
+            return {"ok": True, "locked_seconds": 0}
+        if pin_anjungan.cocok(permintaan.pin, data):
+            batas_pin.catat_berhasil(device_id)
+            return {"ok": True, "locked_seconds": 0}
+        tunda = batas_pin.catat_gagal(device_id)
+        logger.warning("PIN pengaturan salah dari anjungan %s", device_id)
+        return {"ok": False, "locked_seconds": tunda}
+
+    @app.post("/v1/kiosk/media-status")
+    def media_status(
+        laporan: MediaStatus,
+        device_id: str = Depends(require_token),  # noqa: B008
+    ):
+        """Berapa berkas daftar putar yang sudah tersalin utuh di tablet."""
+        if perangkat is not None and device_id:
+            try:
+                perangkat.catat_media(
+                    device_id, laporan.total, laporan.copied, laporan.bytes
+                )
+            except Exception:
+                logger.warning(
+                    "Status media %s gagal dicatat", device_id, exc_info=True
+                )
+        return {"status": "ok"}
+
     @app.post("/v1/kiosk/media-report")
     def media_report(
         report: MediaReport,
@@ -750,6 +859,9 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         detik_khusus = daftar_putar.detik_per_berkas(
             services.settings.get(daftar_putar.KUNCI, "")
         )
+        tampil_berkas = daftar_putar.tampil_per_berkas(
+            services.settings.get(daftar_putar.KUNCI, "")
+        )
         apk = info_apk(folder_apk(base_dir()))
         paket = info_paket(folder_paket(base_dir()))
         judul = (services.settings.get("kiosk.judul", "") or "").strip()
@@ -777,6 +889,12 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                     "modified_ms": int(item.stat().st_mtime * 1000),
                     # Lama tampil gambar ini; null = welcome_slide_seconds.
                     "seconds": detik_khusus.get(item.name),
+                    # Di mana berkas ini tampil: panel (strip atas), penuh
+                    # (layar penuh saat menganggur), atau keduanya. APK lama
+                    # mengabaikannya dan memutar semuanya seperti dulu.
+                    "show": tampil_berkas.get(
+                        item.name, daftar_putar.TAMPIL_KEDUANYA
+                    ),
                 }
                 for item in media
             ],
@@ -785,13 +903,53 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "fullscreen_ad_idle_seconds": services.settings.get_int(
                 "kiosk.iklan_layar_penuh_detik", 60
             ),
+            # Berapa putaran iklan layar penuh sebelum kembali ke tampilan
+            # antrian; 0 = berputar terus sampai disentuh.
+            "fullscreen_ad_loops": services.settings.get_int(
+                "kiosk.iklan_putaran", 2
+            ),
+            # Animasi tiga panel masuk dari arah acak saat kembali ke antrian.
+            "return_animation": services.settings.get_bool(
+                "kiosk.animasi_kembali", True
+            ),
+            # Tiga panel keluar sebelum iklan layar penuh muncul.
+            "ad_entry_animation": services.settings.get_bool(
+                "kiosk.animasi_iklan_muncul", True
+            ),
+            # Panggilan petugas mengalahkan iklan layar penuh.
+            "call_interrupts_ad": services.settings.get_bool(
+                "kiosk.panggilan_hentikan_iklan", True
+            ),
+            # Nomor menunggu muncul berurutan dengan gaya acak.
+            "waiting_animation": services.settings.get_bool(
+                "kiosk.animasi_nomor_menunggu", True
+            ),
+            # Detik sebelum iklan terakhir berakhir saat animasi mulai; 0 =
+            # sesudah iklan selesai.
+            "return_animation_lead_seconds": services.settings.get_int(
+                "kiosk.animasi_mulai_detik", 2
+            ),
             "registration_open": services.queue.pendaftaran_dibuka(),
+            # PIN pengaturan anjungan. Hash (bukan PIN) ikut dikirim supaya
+            # tablet yang terputus tetap dapat memeriksa PIN untuk jalan pulih.
+            "settings_pin": isi_pin(),
+            # Berubah bila admin menekan "Segarkan media" untuk tablet ini;
+            # tablet menyegarkan salinannya segera bila nilainya baru.
+            "media_refresh": permintaan_segarkan(device_id),
+            # Tablet menampilkan kotak prioritas hanya bila true.
+            "priority_enabled": services.settings.get_bool(
+                "kiosk.prioritas_aktif", True
+            ),
             # Tablet hanya memuat /categories saat menyala. Tanpa sidik ini
             # layanan yang ditambah, diganti nama, atau dinonaktifkan di
             # Data Master baru terlihat sesudah tablet dibuka ulang.
             "categories_version": versi_layanan(isi_layanan()),
             "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(device_id),
             "waiting_queue_numbers": services.queue.nomor_menunggu_untuk_layar(),
+            # Nomor yang diberi tanda bintang; tanpa alasan prioritasnya.
+            "waiting_priority_numbers": (
+                services.queue.nomor_prioritas_menunggu_untuk_layar()
+            ),
             # Baris "NOMOR DI LOKET". Posisinya (otomatis/atas/bawah) dipilih
             # di server supaya semua tablet seragam; tablet sendiri yang
             # memutuskan "otomatis", karena hanya tablet yang tahu apakah
@@ -909,6 +1067,44 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         media_type = mimetypes.guess_type(media.name)[0] or "application/octet-stream"
         return FileResponse(media, media_type=media_type)
 
+    @app.get("/v1/kiosk/media-library", dependencies=[Depends(require_token)])
+    def media_library():
+        """
+        Semua berkas media di server beserta ukuran dan waktu ubahnya, untuk
+        "Salin dari server" di tablet. Berbeda dengan daftar putar: yang
+        tidak dicentang pun terdaftar.
+        """
+        return [
+            {
+                "name": item.name,
+                "size": item.stat().st_size,
+                "modified_ms": int(item.stat().st_mtime * 1000),
+                "video": item.suffix.lower() in _VIDEO_EXTENSIONS,
+            }
+            for item in pustaka_media()
+        ]
+
+    @app.get(
+        "/v1/kiosk/media-library/{filename}",
+        dependencies=[Depends(require_token)],
+        response_class=FileResponse,
+    )
+    def media_library_file(filename: str):
+        """Satu berkas dari pustaka media server (untuk disalin ke tablet)."""
+        if not filename or filename != Path(filename).name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Media tidak ditemukan.",
+            )
+        media = next((item for item in pustaka_media() if item.name == filename), None)
+        if media is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Media tidak ditemukan.",
+            )
+        media_type = mimetypes.guess_type(media.name)[0] or "application/octet-stream"
+        return FileResponse(media, media_type=media_type)
+
     @app.get(
         "/v1/kiosk/app/apk",
         dependencies=[Depends(require_token)],
@@ -960,6 +1156,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 perangkat=device_id,
                 kunci_jeda=kunci_jeda,
                 request_id=str(request.request_id),
+                prioritas_mandiri=request.priority,
             )
             ticket_warning = None
             ticket_layout = None
