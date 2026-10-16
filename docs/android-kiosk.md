@@ -257,6 +257,17 @@ gambar = tampil sekali selama lama tampilnya). Dikirim ke tablet sebagai
 kembali ke menu dan menyetel ulang hitungan. Mode putar saja tetap berputar
 terus (tidak ada tampilan antrian untuk kembali).
 
+### Animasi kembali ke antrian (setelah 2.4.34.1, belum dirilis)
+
+Saat iklan layar penuh selesai, tiga panel (judul dan loket, pilihan layanan,
+hasil nomor) masuk dari **arah acak yang berbeda satu sama lain** (kiri,
+kanan, atas, bawah) dan berbeda dari kali sebelumnya, dengan pantulan kecil.
+Putaran habis: 650 ms, berurutan 100 ms. Pengunjung menyentuh: 350 ms tanpa
+jeda, supaya tidak menunda pilihan layanan. Hanya geser dan transparansi.
+Saklar **Animasi saat kembali ke antrian** (`kiosk.animasi_kembali`, bawaan
+nyala; `return_animation` pada `/v1/kiosk/display`); dilewati otomatis bila
+animasi dimatikan di pengaturan Android tablet.
+
 ### Teks loket tanpa panggilan (setelah 2.4.34.1, belum dirilis)
 
 Loket yang aktif tetapi tidak sedang memanggil menampilkan **"Siap melayani"**

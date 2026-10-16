@@ -899,6 +899,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "fullscreen_ad_loops": services.settings.get_int(
                 "kiosk.iklan_putaran", 2
             ),
+            # Animasi tiga panel masuk dari arah acak saat kembali ke antrian.
+            "return_animation": services.settings.get_bool(
+                "kiosk.animasi_kembali", True
+            ),
             "registration_open": services.queue.pendaftaran_dibuka(),
             # PIN pengaturan anjungan. Hash (bukan PIN) ikut dikirim supaya
             # tablet yang terputus tetap dapat memeriksa PIN untuk jalan pulih.

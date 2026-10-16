@@ -730,6 +730,12 @@ public final class MainActivity extends Activity {
     /** Putaran iklan layar penuh sebelum kembali ke antrian; 0 = terus. */
     private int iklanPutaran = 2;
     private int putaranIklanSelesai;
+    /** Server menyalakan animasi tiga panel saat kembali ke antrian. */
+    private boolean animasiKembali = true;
+    /** Kembali karena putaran habis (bukan sentuhan): animasi penuh. */
+    private boolean keluarDenganAnimasiPenuh;
+    private int arahAnimasiTerakhir = -1;
+    private final java.util.Random acakArah = new java.util.Random();
     private boolean iklanPenuh;
     // Keadaan bingkai sebelum iklan memenuhi layar, untuk dipulihkan.
     private int[] paddingRootAsli;
@@ -1260,6 +1266,7 @@ public final class MainActivity extends Activity {
             }
             iklanPenuhDetik = Math.max(0, display.optInt("fullscreen_ad_idle_seconds", 60));
             iklanPutaran = Math.max(0, display.optInt("fullscreen_ad_loops", 2));
+            animasiKembali = display.optBoolean("return_animation", true);
             serverKind = display.optString("welcome_kind", "teks");
             serverMedia = media;
             welcomeFallbackText = display.optString("welcome_text", "");
@@ -1828,6 +1835,7 @@ public final class MainActivity extends Activity {
      */
     private void selesaiPutaranIklan() {
         sentuhTerakhirMillis = System.currentTimeMillis();
+        keluarDenganAnimasiPenuh = true;
         keluarIklanPenuh();
     }
 
@@ -2011,7 +2019,8 @@ public final class MainActivity extends Activity {
     private void keluarIklanPenuh() {
         if (!iklanPenuh) return;
         iklanPenuh = false;
-        if (rootLayout != null) {
+        boolean animasiPanel = animasiPanelDipakai();
+        if (rootLayout != null && !animasiPanel) {
             AutoTransition transisi = new AutoTransition();
             transisi.setDuration(300);
             TransitionManager.beginDelayedTransition(rootLayout, transisi);
@@ -2028,6 +2037,62 @@ public final class MainActivity extends Activity {
         perbaruiJudul();
         tampilanLoket = "";  // paksa baris loket ditata ulang
         terapkanBarisLoket();
+        if (animasiPanel) animasiPanelMasuk(keluarDenganAnimasiPenuh);
+        keluarDenganAnimasiPenuh = false;
+    }
+
+    /** Animasi dipakai bila server menyalakannya dan Android tidak mematikan animasi. */
+    private boolean animasiPanelDipakai() {
+        if (!animasiKembali || rootLayout == null) return false;
+        float skala = android.provider.Settings.Global.getFloat(getContentResolver(),
+                android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f);
+        return skala > 0f;
+    }
+
+    /**
+     * Tiga panel (judul dan loket, pilihan layanan, hasil nomor) masuk dari
+     * arah acak yang berbeda satu sama lain, dan berbeda dari kali
+     * sebelumnya. Penuh (putaran habis): 650 ms berurutan 100 ms; singkat
+     * (pengunjung menyentuh): 350 ms tanpa jeda agar tidak menunda pilihan.
+     * Hanya geser dan transparansi; tata letak akhirnya tidak berubah.
+     */
+    private void animasiPanelMasuk(boolean penuh) {
+        View[] panel = {panelInfo, panelLayanan, panelHasil};
+        // Arah: 0 kiri, 1 kanan, 2 atas, 3 bawah. Tiga arah berbeda dari empat.
+        List<Integer> arah = new ArrayList<>(java.util.Arrays.asList(0, 1, 2, 3));
+        java.util.Collections.shuffle(arah, acakArah);
+        int kombinasi = arah.get(0) * 16 + arah.get(1) * 4 + arah.get(2);
+        if (kombinasi == arahAnimasiTerakhir) {
+            java.util.Collections.rotate(arah, 1);
+            kombinasi = arah.get(0) * 16 + arah.get(1) * 4 + arah.get(2);
+        }
+        arahAnimasiTerakhir = kombinasi;
+        long durasi = penuh ? 650L : 350L;
+        long jeda = penuh ? 100L : 0L;
+        int lebar = rootLayout.getWidth();
+        int tinggi = rootLayout.getHeight();
+        for (int i = 0; i < panel.length; i++) {
+            View tampilan = panel[i];
+            if (tampilan == null || tampilan.getVisibility() != View.VISIBLE) continue;
+            float dx = 0f;
+            float dy = 0f;
+            switch (arah.get(i)) {
+                case 0: dx = -lebar; break;
+                case 1: dx = lebar; break;
+                case 2: dy = -tinggi; break;
+                default: dy = tinggi; break;
+            }
+            tampilan.animate().cancel();
+            tampilan.setTranslationX(dx);
+            tampilan.setTranslationY(dy);
+            tampilan.setAlpha(0f);
+            tampilan.animate()
+                    .translationX(0f).translationY(0f).alpha(1f)
+                    .setStartDelay(i * jeda)
+                    .setDuration(durasi)
+                    .setInterpolator(new android.view.animation.OvershootInterpolator(0.5f))
+                    .start();
+        }
     }
 
     private void hentikanDenyutAjakanIklan() {
@@ -4875,6 +4940,7 @@ public final class MainActivity extends Activity {
         handler.removeCallbacks(bukaPulih);
         welcome.setTextColor(INK);
         ajakanIklanPenuh.setText("Sentuh layar untuk mengambil nomor antrian");
+        keluarDenganAnimasiPenuh = true;
         keluarIklanPenuh();
         mediaModePenuh = false;
         terapkanMediaSambutan();
