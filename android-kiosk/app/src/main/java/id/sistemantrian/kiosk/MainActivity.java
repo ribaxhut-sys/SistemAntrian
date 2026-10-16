@@ -119,6 +119,8 @@ public final class MainActivity extends Activity {
     /** Warna kilau petunjuk ajakan di tablet ini; "mati" mematikannya. */
     private static final String WARNA_KILAU = "warna_kilau";
     private static final String KILAU_TEMA = "tema";
+    /** Kecerahan terendah warna kilau bebas; yang lebih gelap tak terlihat di latar. */
+    private static final float NILAI_MINIMUM_KILAU = 0.5f;
     private static final String[][] PILIHAN_KILAU = {
             {KILAU_TEMA, "Ikut tema"},
             {"putih", "Putih"},
@@ -4142,7 +4144,10 @@ public final class MainActivity extends Activity {
 
     /** Satu sapuan kiri ke kanan; tidak terjadi apa-apa bila kilau dimatikan. */
     private void sapukanKilau() {
-        Integer warna = warnaKilau();
+        sapukanKilau(warnaKilau());
+    }
+
+    private void sapukanKilau(Integer warna) {
         if (warna == null || hint == null) return;
         if (kilauAjakan == null || hint.getForeground() != kilauAjakan) {
             kilauAjakan = new KilauDrawable(dp(24));
@@ -4172,6 +4177,17 @@ public final class MainActivity extends Activity {
     }
 
     private Integer warnaKilau(String pilihan) {
+        if (pilihan.startsWith("#")) {
+            // Warna bebas pilihan petugas; dijaga cukup terang agar sapuannya terlihat.
+            try {
+                float[] hsv = new float[3];
+                Color.colorToHSV(Color.parseColor(pilihan), hsv);
+                hsv[2] = Math.max(hsv[2], NILAI_MINIMUM_KILAU);
+                return Color.HSVToColor(hsv);
+            } catch (IllegalArgumentException e) {
+                return EMAS;
+            }
+        }
         switch (pilihan) {
             case "mati":
                 return null;
@@ -5622,8 +5638,25 @@ public final class MainActivity extends Activity {
         gulir.addView(baris);
         TextView keterangan = text("", 12, MUTED, false);
         List<TextView> bulatan = new ArrayList<>();
+        TextView lain = text("+", 18, Color.WHITE, true);
+        lain.setGravity(Gravity.CENTER);
+        lain.setShadowLayer(dp(2), 0f, 0f, Color.BLACK);
+        lain.setContentDescription("Warna lain");
+        Runnable[] segarkanRef = new Runnable[1];
         Runnable segarkan = () -> {
             String aktif = preferences.getString(WARNA_KILAU, KILAU_TEMA);
+            if (aktif.startsWith("#")) {
+                lain.setBackground(roundedOutline(warnaKilau(aktif), INK, dp(18), dp(3)));
+                keterangan.setText("Warna sendiri " + aktif.toUpperCase(Locale.ROOT));
+            } else {
+                GradientDrawable pelangi = new GradientDrawable();
+                pelangi.setShape(GradientDrawable.OVAL);
+                pelangi.setGradientType(GradientDrawable.SWEEP_GRADIENT);
+                pelangi.setColors(new int[]{Color.RED, Color.YELLOW, Color.GREEN,
+                        Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED});
+                pelangi.setStroke(dp(1), GARIS);
+                lain.setBackground(pelangi);
+            }
             for (int i = 0; i < bulatan.size(); i++) {
                 TextView b = bulatan.get(i);
                 String kunci = PILIHAN_KILAU[i][0];
@@ -5635,6 +5668,7 @@ public final class MainActivity extends Activity {
                 if (dipilih) keterangan.setText(PILIHAN_KILAU[i][1]);
             }
         };
+        segarkanRef[0] = segarkan;
         for (String[] pilihan : PILIHAN_KILAU) {
             TextView b = text("mati".equals(pilihan[0]) ? "✕"
                     : KILAU_TEMA.equals(pilihan[0]) ? "T" : "", 13, MUTED, true);
@@ -5650,9 +5684,200 @@ public final class MainActivity extends Activity {
             baris.addView(b, params);
             bulatan.add(b);
         }
+        lain.setOnClickListener(v -> bukaPemilihWarnaKilau(segarkanRef[0]));
+        LinearLayout.LayoutParams paramLain = new LinearLayout.LayoutParams(dp(36), dp(36));
+        paramLain.rightMargin = dp(8);
+        baris.addView(lain, paramLain);
         baris.addView(keterangan);
         segarkan.run();
         return gulir;
+    }
+
+    /**
+     * Pemilih warna bebas: pita jenis warna (hue), bidang kejenuhan x kecerahan,
+     * dan isian hex. Kecerahan dibatasi dari NILAI_MINIMUM_KILAU supaya sapuan
+     * tidak hilang di latar gelap. Disimpan sebagai "#RRGGBB" di WARNA_KILAU.
+     */
+    private void bukaPemilihWarnaKilau(Runnable sesudahSimpan) {
+        float[] hsv = new float[3];
+        Color.colorToHSV(warnaKilau(preferences.getString(WARNA_KILAU, KILAU_TEMA)) == null
+                ? EMAS : warnaKilau(preferences.getString(WARNA_KILAU, KILAU_TEMA)), hsv);
+        hsv[2] = Math.max(hsv[2], NILAI_MINIMUM_KILAU);
+
+        LinearLayout isi = new LinearLayout(this);
+        isi.setOrientation(LinearLayout.VERTICAL);
+        isi.setPadding(dp(20), dp(8), dp(20), 0);
+
+        TextView hex = text("", 14, INK, true);
+        EditText isianHex = new EditText(this);
+        isianHex.setSingleLine(true);
+        isianHex.setTextColor(INK);
+        isianHex.setTextSize(14 * uiScale);
+        isianHex.setHint("#RRGGBB");
+        isianHex.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(7)});
+        View contoh = new View(this);
+
+        boolean[] sedangMenulis = new boolean[1];
+        BidangWarnaKilau[] bidang = new BidangWarnaKilau[2];
+        Runnable perbarui = () -> {
+            int warna = Color.HSVToColor(hsv);
+            contoh.setBackground(roundedOutline(warna, GARIS, dp(12), dp(1)));
+            sedangMenulis[0] = true;
+            isianHex.setText(String.format(Locale.ROOT, "#%06X", warna & 0xFFFFFF));
+            sedangMenulis[0] = false;
+            for (BidangWarnaKilau b : bidang) if (b != null) b.invalidate();
+        };
+        Runnable lepas = () -> sapukanKilau(Color.HSVToColor(hsv));
+
+        BidangWarnaKilau bidangSv = new BidangWarnaKilau(this, hsv, false, perbarui, lepas);
+        BidangWarnaKilau bidangHue = new BidangWarnaKilau(this, hsv, true, perbarui, lepas);
+        bidang[0] = bidangSv;
+        bidang[1] = bidangHue;
+        isi.addView(bidangSv, new LinearLayout.LayoutParams(-1, dp(180)));
+        LinearLayout.LayoutParams paramHue = new LinearLayout.LayoutParams(-1, dp(32));
+        paramHue.topMargin = dp(12);
+        isi.addView(bidangHue, paramHue);
+
+        LinearLayout bawah = new LinearLayout(this);
+        bawah.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams paramContoh = new LinearLayout.LayoutParams(dp(44), dp(44));
+        paramContoh.rightMargin = dp(12);
+        bawah.addView(contoh, paramContoh);
+        bawah.addView(isianHex, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams paramBawah = new LinearLayout.LayoutParams(-1, -2);
+        paramBawah.topMargin = dp(12);
+        isi.addView(bawah, paramBawah);
+        TextView catatan = text("Warna yang terlalu gelap otomatis dicerahkan agar sapuannya terlihat.",
+                12, MUTED, false);
+        catatan.setPadding(0, dp(6), 0, 0);
+        isi.addView(catatan);
+
+        isianHex.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence c, int a, int b, int d) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence c, int a, int b, int d) {
+            }
+
+            @Override
+            public void afterTextChanged(android.text.Editable e) {
+                if (sedangMenulis[0]) return;
+                String teks = e.toString().trim();
+                if (!teks.matches("#?[0-9a-fA-F]{6}")) return;
+                Color.colorToHSV(Color.parseColor(teks.startsWith("#") ? teks : "#" + teks), hsv);
+                hsv[2] = Math.max(hsv[2], NILAI_MINIMUM_KILAU);
+                contoh.setBackground(roundedOutline(Color.HSVToColor(hsv), GARIS, dp(12), dp(1)));
+                for (BidangWarnaKilau b : bidang) b.invalidate();
+            }
+        });
+        perbarui.run();
+
+        AlertDialog dialog = pembuatDialog()
+                .setTitle("Warna kilau sendiri")
+                .setView(gulungan(isi))
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Pakai warna ini", (d, w) -> {
+                    preferences.edit().putString(WARNA_KILAU,
+                            String.format(Locale.ROOT, "#%06X", Color.HSVToColor(hsv) & 0xFFFFFF))
+                            .apply();
+                    if (sesudahSimpan != null) sesudahSimpan.run();
+                    sapukanKilau();
+                }).show();
+        rapikanTombolDialog(dialog);
+    }
+
+    /** Bidang sentuh pemilih warna: pita hue (bilahHue) atau kejenuhan x kecerahan. */
+    private static final class BidangWarnaKilau extends View {
+        private final float[] hsv;
+        private final boolean bilahHue;
+        private final Runnable saatBerubah;
+        private final Runnable saatLepas;
+        private final android.graphics.Paint cat =
+                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+
+        BidangWarnaKilau(android.content.Context konteks, float[] hsv, boolean bilahHue,
+                Runnable saatBerubah, Runnable saatLepas) {
+            super(konteks);
+            this.hsv = hsv;
+            this.bilahHue = bilahHue;
+            this.saatBerubah = saatBerubah;
+            this.saatLepas = saatLepas;
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas kanvas) {
+            int w = getWidth();
+            int h = getHeight();
+            float tebal = getResources().getDisplayMetrics().density * 3f;
+            cat.setStyle(android.graphics.Paint.Style.FILL);
+            if (bilahHue) {
+                int[] warna = new int[7];
+                for (int i = 0; i < warna.length; i++) {
+                    warna[i] = Color.HSVToColor(new float[]{i * 60f, 1f, 1f});
+                }
+                cat.setShader(new android.graphics.LinearGradient(0, 0, w, 0, warna, null,
+                        android.graphics.Shader.TileMode.CLAMP));
+                kanvas.drawRect(0, 0, w, h, cat);
+                cat.setShader(null);
+                float x = hsv[0] / 360f * w;
+                cat.setStyle(android.graphics.Paint.Style.STROKE);
+                cat.setStrokeWidth(tebal);
+                cat.setColor(Color.WHITE);
+                kanvas.drawRect(x - tebal, tebal / 2, x + tebal, h - tebal / 2, cat);
+                return;
+            }
+            cat.setShader(new android.graphics.LinearGradient(0, 0, w, 0, Color.WHITE,
+                    Color.HSVToColor(new float[]{hsv[0], 1f, 1f}),
+                    android.graphics.Shader.TileMode.CLAMP));
+            kanvas.drawRect(0, 0, w, h, cat);
+            cat.setShader(new android.graphics.LinearGradient(0, 0, 0, h, 0x00000000,
+                    (int) (255 * (1f - NILAI_MINIMUM_KILAU)) << 24,
+                    android.graphics.Shader.TileMode.CLAMP));
+            kanvas.drawRect(0, 0, w, h, cat);
+            cat.setShader(null);
+            float cx = hsv[1] * w;
+            float cy = (1f - hsv[2]) / (1f - NILAI_MINIMUM_KILAU) * h;
+            cat.setStyle(android.graphics.Paint.Style.STROKE);
+            cat.setStrokeWidth(tebal);
+            cat.setColor(Color.BLACK);
+            kanvas.drawCircle(cx, cy, tebal * 3.3f, cat);
+            cat.setColor(Color.WHITE);
+            kanvas.drawCircle(cx, cy, tebal * 3f, cat);
+        }
+
+        @Override
+        public boolean onTouchEvent(android.view.MotionEvent e) {
+            int aksi = e.getActionMasked();
+            if (aksi == android.view.MotionEvent.ACTION_DOWN && getParent() != null) {
+                getParent().requestDisallowInterceptTouchEvent(true);
+            }
+            if (aksi == android.view.MotionEvent.ACTION_DOWN
+                    || aksi == android.view.MotionEvent.ACTION_MOVE) {
+                float x = Math.max(0f, Math.min(1f, e.getX() / Math.max(1, getWidth())));
+                float y = Math.max(0f, Math.min(1f, e.getY() / Math.max(1, getHeight())));
+                if (bilahHue) {
+                    hsv[0] = Math.min(359.99f, x * 360f);
+                } else {
+                    hsv[1] = x;
+                    hsv[2] = 1f - y * (1f - NILAI_MINIMUM_KILAU);
+                }
+                saatBerubah.run();
+                return true;
+            }
+            if (aksi == android.view.MotionEvent.ACTION_UP) {
+                saatLepas.run();
+                performClick();
+                return true;
+            }
+            return super.onTouchEvent(e);
+        }
+
+        @Override
+        public boolean performClick() {
+            return super.performClick();
+        }
     }
 
     /** Tab Pengaturan terakhir; dibuka lagi di tab yang sama selama aplikasi hidup. */

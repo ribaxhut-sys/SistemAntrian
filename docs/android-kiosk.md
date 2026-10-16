@@ -298,6 +298,15 @@ untuk nomor baru) dipakai.
 ruang kosong ada di bawah (sebelumnya blok nomor di tengah vertikal dan ikut
 bergeser tiap ada nomor dipanggil). Titik halaman tetap di bagian bawah.
 
+### Warna kilau bebas (setelah 2.4.34.1, belum dirilis)
+
+Pengaturan > warna kilau: selain 7 warna tetap ada bulatan pelangi "+" yang
+membuka pemilih (pita jenis warna, bidang kejenuhan x kecerahan, isian hex).
+Disimpan per tablet di `warna_kilau` sebagai `#RRGGBB`; pilihan lama (`emas`,
+`biru`, dst.) tetap berlaku. Kecerahan dibatasi minimal 0,5
+(`NILAI_MINIMUM_KILAU`) supaya sapuan terlihat; sapuan pratinjau jalan saat jari
+dilepas. Kode: `bukaPemilihWarnaKilau`, `BidangWarnaKilau`.
+
 ### Dialog Media di tablet ini (setelah 2.4.34.1, belum dirilis)
 
 Pengaturan > Kelola media tablet (`showMediaTablet`). Isi: ringkasan (jumlah,

@@ -250,6 +250,9 @@ commit berikut di atas `main`:
   gambar mini, menu Aksi, Hapus semua); lihat android-kiosk.md. APK debug saja,
   belum diverifikasi di perangkat.
 
+- **Warna kilau bebas** per tablet (pemilih warna + hex); lihat android-kiosk.md.
+  APK debug saja, belum diverifikasi di perangkat.
+
 ### 4.4b PIN pengaturan anjungan dan mode putar saja
 
 Rinci di [android-kiosk.md](android-kiosk.md) (bagian "PIN pengaturan dan
