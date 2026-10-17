@@ -152,6 +152,55 @@ hash yang sah.
   berlaku pada sesi berikutnya. Layar pemantauan yang sengaja dibiarkan
   menyala dapat diatur ke `0`.
 
+## API anjungan: token bersama dan pembatas tebakan
+
+- `X-Device-Id` pada **token bersama** diisi pengirim sendiri. Bila ID itu
+  milik tablet yang **sudah dipasangkan**, permintaan diperlakukan tanpa ID:
+  tidak mencatat kontak, status printer, maupun status media atas nama
+  tablet itu (`device_service.keadaan_perangkat`).
+- Penundaan **PIN pengaturan** dikunci per tablet terpasang, atau per
+  **alamat IP** untuk token bersama; mengganti `X-Device-Id` tidak lagi
+  mengosongkan hitungan.
+- **Hash PIN** (`settings_pin` di `/v1/kiosk/display`) hanya dikirim ke tablet
+  terpasang. PIN 6 angka = sejuta kemungkinan, jadi hash yang bocor dapat
+  ditebak habis di luar server dalam hitungan menit. Tablet token bersama
+  memakai salinan yang sudah ia simpan (atau tanpa PIN bila belum pernah).
+- **Kode pasang**: tebakan salah dibatasi 10 per IP dalam 10 menit (IP itu
+  mendapat 429), dan semua kode terbuka dihanguskan bila satu IP mencapai
+  10 atau gabungan semua IP mencapai 30. Kode ditandai terpakai dengan
+  pembaruan bersyarat, sehingga dua permintaan bersamaan tidak dapat
+  memakai kode yang sama.
+
+## Pembaruan Windows bertanda tangan
+
+- PC loket hanya menawarkan pembaruan dari server yang **bertanda tangan
+  Ed25519** atas (versi, ukuran, SHA-256), diverifikasi terhadap kunci
+  publik yang sama dengan pemulihan admin (`app/core/kunci_publik.py`),
+  dengan pemisah domain `antrian-pembaruan-windows-v1`. Tanpa tanda tangan
+  sah, pembaruan diabaikan dan dicatat di log.
+- Alur rilis: `build-installer.ps1`, lalu di komputer pengembang
+  `.\.venv\Scripts\python.exe alat\tandatangani_pembaruan.py
+  dist\Pembaruan-AntrianCRO.exe --kunci "<folder kunci>\kunci-reset.pem"`.
+  Alat menulis `.version` dan `.sig`; salin ketiga berkas ke folder
+  `pembaruan` di komputer server. Alat menolak menulis bila kuncinya tidak
+  cocok dengan kunci publik tertanam.
+- **Kesehatan Sistem** memberi peringatan bila installer di server tidak
+  bertanda tangan sah.
+
+## Kata sandi bawaan
+
+**Kesehatan Sistem › Kata sandi bawaan** (MASALAH) menyebut akun aktif yang
+masih memakai kata sandi seed. Yang ditampilkan hanya nama akunnya.
+
+## Berkas rahasia di komputer
+
+`mesin.json` (sandi PostgreSQL) dan `anjungan-token.txt` berada di folder
+data di bawah `%LOCALAPPDATA%` (installer per pengguna), sehingga izin
+bawaan profil Windows sudah membatasinya ke pemilik akun, SYSTEM, dan
+Administrator. ACL tambahan sengaja tidak dipasang: berisiko memutus tugas
+SYSTEM yang membaca token. Pengecualian: menjalankan dari kode di drive lain
+(mis. `D:\SistemAntrian\data`) mengikuti izin drive tersebut.
+
 ## Yang sengaja belum dikerjakan
 
 - Parameter scrypt tidak dinaikkan (menambah waktu hash pada seluruh login

@@ -86,6 +86,35 @@ def test_hanya_supervisor(auth, antrian_siap):
         ReportService(auth).laporan(hari, hari)
 
 
+def test_laporan_petugas_hanya_memuat_nomor_miliknya(
+    auth, laporan_hari_ini
+):
+    from app.services.report_service import ReportService
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    hari = clock.today()
+
+    laporan = ReportService(auth).laporan_petugas(hari, hari)
+
+    assert laporan.nama_petugas == "Petugas Cro"
+    assert laporan.total.terbit == 3
+    assert len(laporan.riwayat) == 3
+    assert {baris.petugas for baris in laporan.riwayat} == {"Petugas Cro"}
+    assert "Menunggu" not in {baris.status for baris in laporan.riwayat}
+
+
+def test_admin_tidak_dapat_memakai_jalur_laporan_pribadi(auth, antrian_siap):
+    from app.services.report_service import ReportService
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    hari = clock.today()
+
+    with pytest.raises(AuthorizationError):
+        ReportService(auth).laporan_petugas(hari, hari)
+
+
 def test_ekspor_pdf_dan_excel(laporan_hari_ini, tmp_path):
     from openpyxl import load_workbook
 
@@ -119,6 +148,30 @@ def test_ekspor_pdf_dan_excel(laporan_hari_ini, tmp_path):
     assert riwayat.max_row == 1 + 4  # judul + satu baris per nomor
     assert riwayat["G2"].is_date  # jam terbit tersimpan sebagai waktu
     assert sorted(riwayat.cell(row=r, column=13).value or 0 for r in range(2, 6)) == [0, 0, 0, 5]
+
+
+def test_ekspor_pribadi_tidak_memuat_tabel_petugas_lain(
+    auth, laporan_hari_ini, tmp_path
+):
+    from openpyxl import load_workbook
+
+    from app.services.report_export import ekspor_excel, ekspor_pdf, nama_berkas_bawaan
+    from app.services.report_service import ReportService
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    hari = clock.today()
+    laporan = ReportService(auth).laporan_petugas(hari, hari)
+
+    assert nama_berkas_bawaan(laporan, "pdf").startswith("laporan-saya-petugas-cro-")
+    pdf = ekspor_pdf(laporan, tmp_path / "saya.pdf", "KANTOR UJI")
+    assert pdf.read_bytes().startswith(b"%PDF")
+    xlsx = ekspor_excel(laporan, tmp_path / "saya.xlsx")
+    buku = load_workbook(xlsx)
+    assert buku["Ringkasan"]["A1"].value == "Laporan Pelayanan Saya"
+    assert buku["Ringkasan"]["A3"].value == "Petugas Cro"
+    assert "Per petugas" not in buku.sheetnames
+    assert "Petugas per layanan" not in buku.sheetnames
 
 
 def test_petugas_per_layanan_dan_riwayat(laporan_hari_ini):
@@ -167,6 +220,30 @@ def test_halaman_laporan_tampil(qtbot, laporan_hari_ini, auth):
     assert halaman.ekspor_pdf.isEnabled()
 
 
+def test_halaman_laporan_pribadi_menyimpan_excel_secara_atomik(
+    qtbot, laporan_hari_ini, auth, monkeypatch, tmp_path
+):
+    from app.services.report_service import ReportService
+    from app.ui.dashboard.report_page import LaporanPage
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman = LaporanPage(ReportService(auth), "KANTOR", pribadi=True)
+    qtbot.addWidget(halaman)
+    tujuan_tanpa_akhiran = tmp_path / "laporan-saya"
+    monkeypatch.setattr(
+        "app.ui.dashboard.report_page.QFileDialog.getSaveFileName",
+        lambda *_: (str(tujuan_tanpa_akhiran), "Excel (*.xlsx)"),
+    )
+
+    halaman._ekspor("xlsx")
+
+    tujuan = tujuan_tanpa_akhiran.with_suffix(".xlsx")
+    assert tujuan.is_file()
+    assert not tujuan.with_name(f".{tujuan.name}.sementara").exists()
+    assert tujuan.name in halaman.status_ekspor.text()
+
+
 @pytest.mark.parametrize("peran", ["supervisor", "admin"])
 def test_menu_laporan_untuk_supervisor_dan_admin(qtbot, auth, antrian_siap, peran):
     from app.ui.main_window import MainWindow
@@ -177,3 +254,17 @@ def test_menu_laporan_untuk_supervisor_dan_admin(qtbot, auth, antrian_siap, pera
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
     assert "Laporan" in menu
+    assert "Laporan Saya" not in menu
+
+
+def test_menu_laporan_saya_hanya_untuk_cro(qtbot, auth, antrian_siap):
+    from app.ui.main_window import MainWindow
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    jendela = MainWindow(auth)
+    qtbot.addWidget(jendela)
+    menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
+
+    assert "Laporan Saya" in menu
+    assert "Laporan" not in menu

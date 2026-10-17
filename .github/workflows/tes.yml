@@ -24,6 +24,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Kerentanan yang diketahui (OSV/PyPI) pada dependency runtime yang ikut
+  # installer. Job terpisah di Ubuntu: hanya membaca daftar paket, tidak
+  # menjalankan aplikasi, jadi tidak perlu runner Windows yang lambat.
+  audit-dependency:
+    name: Audit dependency
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: pip-audit
+        run: |
+          python -m pip install pip-audit==2.9.0
+          # Versi di requirements.txt sudah dipatok; --no-deps memeriksanya
+          # apa adanya tanpa memasang PySide6 dan kawan-kawan.
+          python -m pip_audit -r requirements.txt --no-deps --disable-pip --progress-spinner off
+
   postgresql:
     name: PostgreSQL
     runs-on: windows-latest

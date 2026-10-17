@@ -196,6 +196,28 @@ def perangkat_dicabut(device_id: str) -> bool:
         )
 
 
+def keadaan_perangkat(device_id: str) -> tuple[bool, bool]:
+    """
+    (dicabut, dipasangkan) untuk device_id yang disebut header token bersama.
+
+    Satu kueri untuk dua pertanyaan API: perangkat yang dicabut ditolak, dan
+    perangkat yang sudah punya token sendiri tidak boleh "diwakili" token
+    bersama — kalau boleh, siapa pun pemegang token bersama dapat menulis
+    status printer/media atas nama tablet itu atau memakai jatah tebakan
+    PIN-nya.
+    """
+    with session_scope() as session:
+        baris = session.execute(
+            sa.select(KioskDevice.dicabut_pada, KioskDevice.token_hash).where(
+                KioskDevice.device_id == device_id
+            )
+        ).first()
+    if baris is None:
+        return False, False
+    dicabut = baris.dicabut_pada is not None
+    return dicabut, (not dicabut and baris.token_hash is not None)
+
+
 def catat_kontak(
     device_id: str,
     *,
@@ -300,19 +322,23 @@ def pasangkan(kode: str, device_id: str, nama: str, jenis: str) -> str:
     sekarang = clock.now()
     token = secrets.token_urlsafe(48)
     with session_scope() as session:
-        baris_kode = session.scalar(
-            sa.select(KioskPairingCode).where(
+        # Pembaruan bersyarat, bukan baca-lalu-tandai: dua permintaan
+        # bersamaan dengan kode yang sama hanya satu yang mendapat baris.
+        dipakai = session.execute(
+            sa.update(KioskPairingCode)
+            .where(
                 KioskPairingCode.kode == kode,
                 KioskPairingCode.dipakai_pada.is_(None),
                 KioskPairingCode.kedaluwarsa >= sekarang,
             )
+            .values(dipakai_pada=sekarang)
+            .execution_options(synchronize_session=False)
         )
-        if baris_kode is None:
+        if not dipakai.rowcount:
             raise BusinessRuleError(
                 "Kode pasang salah atau sudah kedaluwarsa. Buat kode baru di "
                 "Layanan Anjungan pada komputer server."
             )
-        baris_kode.dipakai_pada = sekarang
 
         baris = session.scalar(sa.select(KioskDevice).where(KioskDevice.device_id == device_id))
         if baris is None:

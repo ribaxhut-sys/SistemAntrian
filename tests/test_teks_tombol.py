@@ -186,7 +186,7 @@ def test_tombol_admin_dengan_pita_dan_perangkat_terpasang(
     jendela.pita_pembaruan.sedang_mengunduh()
     masalah += _periksa_jendela(qtbot, jendela, dilihat)
 
-    assert {"Unduh & Perbarui", "Periksa lagi", "Segarkan media"} <= dilihat
+    assert {"Unduh pembaruan", "Periksa lagi", "Segarkan media"} <= dilihat
     assert list(dict.fromkeys(masalah)) == []
 
 

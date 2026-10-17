@@ -32,7 +32,14 @@ PENGECUALIAN: dict[str, str] = {}
 # Label yang saling bergantian pada tombol yang sama. Tiap kelompok diuji
 # dengan SEMUA anggotanya, karena layout dibangun dengan salah satunya saja.
 KELOMPOK_LABEL_DINAMIS: tuple[tuple[str, ...], ...] = (
-    ("Unduh & Perbarui", "Sedang mengunduh…"),
+    (
+        "Unduh pembaruan",
+        "Unduh di latar belakang",
+        "Mengunduh…",
+        "Pasang sekarang",
+        "Pasang setelah pelayanan",
+        "Pemasang dibuka",
+    ),
     ("Tutup Pendaftaran", "Buka Pendaftaran"),
     ("Mulai Istirahat", "Akhiri Istirahat"),
     ("Ganti Loket", "Batal"),

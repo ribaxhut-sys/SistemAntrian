@@ -39,7 +39,7 @@ from app.services.report_service import (
     ReportService,
     angka_ringkasan,
 )
-from app.ui.common import judul, keterangan, pesan_untuk_user, tampilkan_info, tampilkan_peringatan, tombol
+from app.ui.common import judul, keterangan, pesan_untuk_user, tampilkan_peringatan, tombol
 from app.ui.dashboard.dashboard_page import KartuAngka
 from app.ui.style import DANGER, SUCCESS, TEXT, WARNING
 
@@ -75,10 +75,13 @@ class LaporanPage(QWidget):
         layanan: ReportService,
         kantor: str = "",
         parent: QWidget | None = None,
+        *,
+        pribadi: bool = False,
     ) -> None:
         super().__init__(parent)
         self.layanan = layanan
         self.kantor = kantor
+        self.pribadi = pribadi
         self.laporan: Laporan | None = None
         self._bangun()
         self._pakai_rentang("bulan_ini")
@@ -89,8 +92,14 @@ class LaporanPage(QWidget):
         susunan = QVBoxLayout(self)
         susunan.setContentsMargins(24, 20, 24, 20)
         susunan.setSpacing(14)
-        susunan.addWidget(judul("Laporan"))
-        susunan.addWidget(keterangan("Antrian dan kepuasan pada rentang tanggal yang dipilih."))
+        susunan.addWidget(judul("Laporan Saya" if self.pribadi else "Laporan"))
+        susunan.addWidget(
+            keterangan(
+                "Riwayat pelayanan Anda pada rentang tanggal yang dipilih."
+                if self.pribadi
+                else "Antrian dan kepuasan pada rentang tanggal yang dipilih."
+            )
+        )
 
         bar = QHBoxLayout()
         bar.setSpacing(8)
@@ -117,13 +126,16 @@ class LaporanPage(QWidget):
             self.tombol_cepat[kunci] = btn
             bar.addWidget(btn)
         bar.addStretch()
-        self.ekspor_pdf = tombol("Ekspor PDF")
+        self.ekspor_pdf = tombol("Unduh PDF")
         self.ekspor_pdf.clicked.connect(lambda: self._ekspor("pdf"))
-        self.ekspor_excel = tombol("Ekspor Excel")
+        self.ekspor_excel = tombol("Unduh Excel")
         self.ekspor_excel.clicked.connect(lambda: self._ekspor("xlsx"))
         bar.addWidget(self.ekspor_pdf)
         bar.addWidget(self.ekspor_excel)
         susunan.addLayout(bar)
+        self.status_ekspor = keterangan("")
+        self.status_ekspor.hide()
+        susunan.addWidget(self.status_ekspor)
 
         kisi = QGridLayout()
         kisi.setSpacing(10)
@@ -137,6 +149,8 @@ class LaporanPage(QWidget):
         self.tab = QTabWidget()
         self.tabel: dict[str, QTableWidget] = {}
         for kunci, label in JUDUL_TABEL.items():
+            if self.pribadi and kunci == "per_petugas":
+                continue
             kolom = KOLOM_TABEL[kunci]
             tabel = QTableWidget(0, len(kolom))
             tabel.setHorizontalHeaderLabels([k[0] for k in kolom])
@@ -194,7 +208,11 @@ class LaporanPage(QWidget):
         sampai = _dari_qdate(self.sampai.date())
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            self.laporan = self.layanan.laporan(dari, sampai)
+            self.laporan = (
+                self.layanan.laporan_petugas(dari, sampai)
+                if self.pribadi
+                else self.layanan.laporan(dari, sampai)
+            )
         except Exception as exc:  # noqa: BLE001 - tampilkan ke supervisor
             self.laporan = None
             tampilkan_peringatan(self, pesan_untuk_user(exc), "Laporan")
@@ -231,20 +249,49 @@ class LaporanPage(QWidget):
     def _ekspor(self, akhiran: str) -> None:
         if self.laporan is None:
             return
-        awal = str(Path.home() / "Documents" / nama_berkas_bawaan(self.laporan, akhiran))
+        folder_awal = Path.home() / "Documents"
+        if not folder_awal.is_dir():
+            folder_awal = Path.home()
+        awal = str(folder_awal / nama_berkas_bawaan(self.laporan, akhiran))
         saring = "PDF (*.pdf)" if akhiran == "pdf" else "Excel (*.xlsx)"
         path, _ = QFileDialog.getSaveFileName(self, "Simpan laporan", awal, saring)
         if not path:
             return
+        tujuan = Path(path)
+        ekstensi = f".{akhiran}"
+        if tujuan.suffix.lower() != ekstensi:
+            tujuan = tujuan.with_suffix(ekstensi)
+        sementara = tujuan.with_name(f".{tujuan.name}.sementara")
+        self.ekspor_pdf.setEnabled(False)
+        self.ekspor_excel.setEnabled(False)
+        self.status_ekspor.setText(
+            f"Menyusun {'PDF' if akhiran == 'pdf' else 'Excel'}…"
+        )
+        self.status_ekspor.show()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        QApplication.processEvents()
         try:
             if akhiran == "pdf":
-                hasil = ekspor_pdf(self.laporan, Path(path), self.kantor)
+                ekspor_pdf(self.laporan, sementara, self.kantor)
             else:
-                hasil = ekspor_excel(self.laporan, Path(path))
+                ekspor_excel(self.laporan, sementara)
+            sementara.replace(tujuan)
         except Exception as exc:  # noqa: BLE001
-            tampilkan_peringatan(self, f"Laporan gagal disimpan: {exc}", "Laporan")
+            sementara.unlink(missing_ok=True)
+            self.status_ekspor.setText("Laporan belum berhasil disimpan.")
+            tampilkan_peringatan(
+                self,
+                f"Laporan gagal disimpan: {pesan_untuk_user(exc)}",
+                "Laporan",
+            )
             return
-        tampilkan_info(self, f"Laporan tersimpan:\n{hasil}", "Laporan")
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.ekspor_pdf.setEnabled(self.laporan is not None)
+            self.ekspor_excel.setEnabled(self.laporan is not None)
+        jenis = "PDF" if akhiran == "pdf" else "Excel"
+        self.status_ekspor.setText(f"{jenis} tersimpan: {tujuan.name}")
+        self.status_ekspor.setToolTip(str(tujuan))
 
 
 def angka_ringkasan_kosong() -> list[tuple[str, str]]:

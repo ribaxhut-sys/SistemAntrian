@@ -224,6 +224,42 @@ def test_api_mencatat_hasil_cetak(layanan):
     assert info.printer_ok is True
 
 
+def test_api_token_bersama_tidak_menulis_atas_nama_tablet_terpasang(layanan):
+    """Status printer tablet terpasang hanya dapat ditulis tokennya sendiri."""
+    klien = _klien()
+    token = klien.post(
+        "/v1/kiosk/pair",
+        json={"code": layanan.buat_kode().kode, "device_id": DEVICE, "name": "Lobi"},
+    ).json()["token"]
+    klien.post(
+        "/v1/kiosk/printer",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"ok": True, "message": "Tercetak"},
+    )
+
+    palsu = klien.post(
+        "/v1/kiosk/printer",
+        headers={"Authorization": f"Bearer {TOKEN}", "X-Device-Id": DEVICE},
+        json={"ok": False, "message": "Kertas habis"},
+    )
+
+    assert palsu.status_code == 200
+    (info,) = layanan.daftar()
+    assert info.printer_ok is True
+    assert info.printer_pesan == "Tercetak"
+
+
+def test_keadaan_perangkat(layanan):
+    assert device_service.keadaan_perangkat(DEVICE) == (False, False)
+    device_service.catat_kontak(DEVICE, nama="Tablet")
+    assert device_service.keadaan_perangkat(DEVICE) == (False, False)
+    device_service.pasangkan(layanan.buat_kode().kode, DEVICE, "A", "anjungan")
+    assert device_service.keadaan_perangkat(DEVICE) == (False, True)
+    (info,) = layanan.daftar()
+    layanan.cabut(info.id)
+    assert device_service.keadaan_perangkat(DEVICE) == (True, False)
+
+
 # ---------------------------------------------------------------------
 # Layar antrian (TV Android)
 # ---------------------------------------------------------------------

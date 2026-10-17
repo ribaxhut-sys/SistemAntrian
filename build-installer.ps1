@@ -140,3 +140,7 @@ Copy-Item -LiteralPath $installer -Destination $pembaruan -Force
 Write-Host ""
 Write-Host "Selesai: $installer" -ForegroundColor Green
 Write-Host "Untuk petugas: $pembaruan" -ForegroundColor Green
+# PC loket hanya menerima pembaruan lewat server yang DITANDATANGANI kunci
+# pengembang (app/services/pembaruan_windows.py).
+Write-Host "Sebelum dibagikan lewat server, tandatangani:" -ForegroundColor Yellow
+Write-Host "  .\.venv\Scripts\python.exe alat\tandatangani_pembaruan.py `"$pembaruan`" --kunci <kunci-reset.pem>" -ForegroundColor Yellow

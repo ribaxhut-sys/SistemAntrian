@@ -365,6 +365,73 @@ def _periksa_kata_sandi() -> Pemeriksaan:
     return nilai_hash_kata_sandi(tidak_sah, total)
 
 
+def nilai_sandi_bawaan(akun: list[str]) -> Pemeriksaan:
+    """
+    Akun aktif yang masih memakai kata sandi bawaan seed (`admin123`).
+
+    Kata sandi itu tertulis di repository dan dokumentasi; siapa pun yang
+    pernah membaca panduan dapat memakainya. Hanya nama akun yang keluar.
+    """
+    nama = "Kata sandi bawaan"
+    if not akun:
+        return Pemeriksaan(nama, NORMAL, "Tidak ada akun aktif yang memakai kata sandi bawaan.")
+    return Pemeriksaan(
+        nama,
+        MASALAH,
+        f"Akun {', '.join(akun)} masih memakai kata sandi bawaan.",
+        ("Masuk dengan akun itu lalu ganti kata sandinya, atau setel ulang lewat "
+         "Data Master › Setel Ulang Kata Sandi.",),
+    )
+
+
+def _periksa_sandi_bawaan() -> Pemeriksaan:
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.core.security import verify_password
+    from app.core.seed import DEFAULT_ADMIN_PASSWORD
+    from app.models import RecordStatus, User
+
+    with session_scope() as session:
+        baris = session.execute(
+            sa.select(User.username, User.password_hash).where(
+                User.status == RecordStatus.ACTIVE
+            )
+        ).all()
+    # scrypt ±50 ms per akun; jumlah petugas satu kantor hanya belasan.
+    return nilai_sandi_bawaan(
+        sorted(u for u, h in baris if verify_password(DEFAULT_ADMIN_PASSWORD, h))
+    )
+
+
+def nilai_tanda_pembaruan(ada: bool, versi: str = "", sah: bool = False) -> Pemeriksaan:
+    """Installer di folder pembaruan server harus bertanda tangan pengembang."""
+    nama = "Pembaruan Windows di server"
+    if not ada:
+        return Pemeriksaan(nama, INFO, "Belum ada installer yang dibagikan.")
+    if sah:
+        return Pemeriksaan(nama, NORMAL, f"Versi {versi} bertanda tangan sah.")
+    return Pemeriksaan(
+        nama,
+        PERINGATAN,
+        f"Versi {versi} tidak bertanda tangan sah; PC loket tidak akan menawarkannya.",
+        ("Tandatangani dengan alat\\tandatangani_pembaruan.py di komputer pengembang, "
+         "lalu salin berkas .sig ke folder pembaruan server.",),
+    )
+
+
+def _periksa_tanda_pembaruan() -> list[Pemeriksaan]:
+    from app.services.kiosk_server import komputer_server
+    from app.services.pembaruan_windows import folder_pembaruan, info_pembaruan, tanda_sah
+
+    if not komputer_server():
+        return []
+    info = info_pembaruan(folder_pembaruan(base_dir()))
+    if info is None:
+        return [nilai_tanda_pembaruan(False)]
+    return [nilai_tanda_pembaruan(True, info.versi, tanda_sah(info))]
+
+
 def ringkas_galat(baris: list[str], sekarang: datetime | None = None) -> Pemeriksaan:
     """Hitung galat penting pada `JENDELA_GALAT` dari baris-baris app.log."""
     sekarang = sekarang or clock.now()
@@ -643,7 +710,9 @@ class KesehatanService:
         jalankan("Database", _periksa_database)
         jalankan("Revisi migrasi", _periksa_migrasi)
         jalankan("Penyimpanan kata sandi", _periksa_kata_sandi)
+        jalankan("Kata sandi bawaan", _periksa_sandi_bawaan)
         jalankan("API anjungan", _periksa_api)
+        jalankan("Pembaruan Windows di server", _periksa_tanda_pembaruan)
         jalankan("Perangkat Android", lambda: _periksa_perangkat(self.auth))
         jalankan("Printer tiket (komputer ini)", lambda: _periksa_printer(self.backup.settings))
         jalankan("Backup terakhir", lambda: _periksa_backup(self.backup))

@@ -111,18 +111,78 @@ def test_api_menunda_tablet_setelah_lima_salah_dan_tidak_menebak_lagi(monkeypatc
     assert benar["ok"] is False and benar["locked_seconds"] > 0
 
 
+def test_api_penundaan_tidak_lolos_dengan_mengganti_device_id(monkeypatch):
+    """X-Device-Id token bersama diisi pengirim; penundaan mengikuti IP-nya."""
+    klien = _klien(monkeypatch, pin_anjungan.buat("112233"))
+
+    def tebak(pin, perangkat):
+        return klien.post(
+            "/v1/kiosk/pin/verifikasi",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "X-Device-Id": perangkat,
+                **VERSI_APK,
+            },
+            json={"pin": pin},
+        ).json()
+
+    for i in range(5):
+        tebak("000000", f"tablet-palsu-{i:04d}")
+
+    benar = tebak("112233", "tablet-palsu-baru")
+    assert benar["ok"] is False and benar["locked_seconds"] > 0
+
+
 def test_api_tanpa_pin_tersimpan_pengaturan_terbuka(monkeypatch):
     klien = _klien(monkeypatch, None)
 
     assert _verifikasi(klien, "123456")["ok"] is True
 
 
-def test_display_mengirim_hash_bukan_pin(monkeypatch):
+TOKEN_TABLET = "token-tablet-terpasang-panjang"
+
+
+class _PerangkatPalsu:
+    """Satu tablet terpasang; cukup untuk require_token dan /display."""
+
+    def perangkat_dari_token(self, token):
+        from types import SimpleNamespace
+
+        if token != TOKEN_TABLET:
+            return None
+        return SimpleNamespace(device_id="tablet-lobi-01", dicabut=False, jenis="anjungan")
+
+    def token_bersama_aktif(self):
+        return True
+
+    def keadaan_perangkat(self, device_id):
+        return False, False
+
+    def catat_kontak(self, *args, **kwargs):
+        pass
+
+    def anjungan_bersuara(self):
+        return ""
+
+    def permintaan_segarkan_media(self, device_id):
+        return 0
+
+
+def _klien_terpasang(monkeypatch, data):
+    from app.kiosk_api import create_app
+
+    monkeypatch.setattr(pin_anjungan, "baca", lambda: data)
+    layanan = _Services()
+    layanan.perangkat = _PerangkatPalsu()
+    return TestClient(create_app(TOKEN, layanan))
+
+
+def test_display_mengirim_hash_bukan_pin_ke_tablet_terpasang(monkeypatch):
     data = pin_anjungan.buat("112233")
-    klien = _klien(monkeypatch, data)
+    klien = _klien_terpasang(monkeypatch, data)
 
     isi = klien.get(
-        "/v1/kiosk/display", headers={"Authorization": f"Bearer {TOKEN}"}
+        "/v1/kiosk/display", headers={"Authorization": f"Bearer {TOKEN_TABLET}"}
     ).json()
 
     assert isi["settings_pin"] == {
@@ -134,11 +194,23 @@ def test_display_mengirim_hash_bukan_pin(monkeypatch):
     assert "112233" not in str(isi)
 
 
-def test_display_tanpa_pin_menyatakan_tidak_aktif(monkeypatch):
-    klien = _klien(monkeypatch, None)
+def test_display_tidak_mengirim_hash_pin_ke_token_bersama(monkeypatch):
+    """Hash PIN 6 angka dapat ditebak habis; pemegang token bersama tidak mendapatnya."""
+    klien = _klien_terpasang(monkeypatch, pin_anjungan.buat("112233"))
 
     isi = klien.get(
-        "/v1/kiosk/display", headers={"Authorization": f"Bearer {TOKEN}"}
+        "/v1/kiosk/display",
+        headers={"Authorization": f"Bearer {TOKEN}", "X-Device-Id": "tablet-lobi-01"},
+    ).json()
+
+    assert "settings_pin" not in isi
+
+
+def test_display_tanpa_pin_menyatakan_tidak_aktif(monkeypatch):
+    klien = _klien_terpasang(monkeypatch, None)
+
+    isi = klien.get(
+        "/v1/kiosk/display", headers={"Authorization": f"Bearer {TOKEN_TABLET}"}
     ).json()
 
     assert isi["settings_pin"] == {"enabled": False}

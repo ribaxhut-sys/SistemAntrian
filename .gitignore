@@ -43,6 +43,8 @@ data/anjungan-token.txt.tmp
 backup/*.db
 backup/*.dump
 backup/*.zip
+# Salinan cabang git sebelum push (git bundle); bisa memuat riwayat penuh.
+backup/*.bundle
 # Ditulis aplikasi setiap backup: sidik berkas dan waktu backup terakhir.
 backup/*.sha256
 backup/.status-backup.json

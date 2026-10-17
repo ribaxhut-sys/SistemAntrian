@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import APP_NAME, get_config, teks_status_database
+from app.core.errors import AppError
 from app.core.logger import get_logger
 from app.models.enums import UserRole
 from app.services.auth_service import AuthService
@@ -36,6 +37,7 @@ from app.services.device_service import PerangkatService
 from app.services.report_service import ReportService
 from app.services.master_data_service import MasterDataService
 from app.services.permissions import Permission
+from app.services.pembaruan_windows import PembaruanWindowsService
 from app.services.queue_service import QueueService
 from app.services.settings_service import SettingsService
 from app.services.sound_service import buat_pemutar, suara_diaktifkan
@@ -178,6 +180,7 @@ class _PemeriksaPembaruan(QThread):
 
 class _PengunduhPembaruan(QThread):
     selesai = Signal(object, object)
+    kemajuan = Signal(int, int)
 
     def __init__(self, info, parent=None) -> None:
         super().__init__(parent)
@@ -187,7 +190,11 @@ class _PengunduhPembaruan(QThread):
         from app.services.pembaruan_windows import unduh_pembaruan
 
         try:
-            self.selesai.emit(unduh_pembaruan(self.info), None)
+            path = unduh_pembaruan(
+                self.info,
+                kemajuan=lambda jumlah, total: self.kemajuan.emit(jumlah, total),
+            )
+            self.selesai.emit(path, None)
         except Exception as exc:  # noqa: BLE001 - diteruskan ke batas UI
             self.selesai.emit(None, exc)
 
@@ -441,6 +448,7 @@ class MainWindow(QMainWindow):
         self.master_service = MasterDataService(auth)
         self.user_service = UserService(auth)
         self.queue_service = QueueService(auth)
+        self.pembaruan_service = PembaruanWindowsService(auth)
         self.settings_service = SettingsService(auth)
         self.survey_service = SurveyService(auth)
         self.note_service = NoteService(auth)
@@ -559,7 +567,9 @@ class MainWindow(QMainWindow):
                 self._jadwalkan_periksa_database, untuk_admin=self._info_teknis
             )
             susunan_utama.addWidget(self.pita_database)
-            self.pita_pembaruan = PitaPembaruan(self._unduh_dan_perbarui)
+            self.pita_pembaruan = PitaPembaruan(
+                self._tindakan_pembaruan, untuk_admin=self._info_teknis
+            )
             susunan_utama.addWidget(self.pita_pembaruan)
 
         self.halaman = QStackedWidget()
@@ -764,6 +774,17 @@ class MainWindow(QMainWindow):
                     self.dashboard_service,
                     self.settings_service,
                     buka_menu=self.buka_menu,
+                ),
+            ),
+            # CRO hanya boleh mengunduh riwayat miliknya sendiri. Penyaringan
+            # ditegakkan lagi oleh ReportService berdasarkan sesi aktif.
+            _Menu(
+                "Laporan Saya",
+                Permission.QUEUE_CALL,
+                lambda: LaporanPage(
+                    ReportService(self.auth),
+                    self.settings_service.get("ticket.header", ""),
+                    pribadi=True,
                 ),
             ),
             # Rentang tanggal, per loket dan per petugas: pertanyaan sesudah
@@ -1044,6 +1065,7 @@ class MainWindow(QMainWindow):
         self._pemeriksa_pembaruan: _PemeriksaPembaruan | None = None
         self._pengunduh_pembaruan: _PengunduhPembaruan | None = None
         self._sedang_memeriksa_pembaruan = False
+        self._installer_pembaruan = None
         self._pewaktu_pembaruan_awal = QTimer(self)
         self._pewaktu_pembaruan_awal.setSingleShot(True)
         self._pewaktu_pembaruan_awal.setInterval(TUNDA_PERIKSA_PEMBARUAN_AWAL_MS)
@@ -1057,7 +1079,12 @@ class MainWindow(QMainWindow):
         self._pewaktu_pembaruan.start()
 
     def _jadwalkan_periksa_pembaruan(self) -> None:
-        if self._ditutup or self._sedang_memeriksa_pembaruan:
+        if (
+            self._ditutup
+            or self._sedang_memeriksa_pembaruan
+            or self._pengunduh_pembaruan is not None
+            or self._installer_pembaruan is not None
+        ):
             return
         self._sedang_memeriksa_pembaruan = True
         pemeriksa = _PemeriksaPembaruan(self)
@@ -1073,21 +1100,32 @@ class MainWindow(QMainWindow):
         if pemeriksa is not None:
             pemeriksa.deleteLater()
 
-    def _unduh_dan_perbarui(self) -> None:
+    def _tindakan_pembaruan(self) -> None:
+        if self._installer_pembaruan is not None:
+            self._pasang_pembaruan()
+            return
         info = self.pita_pembaruan.info
         if info is None or self._pengunduh_pembaruan is not None:
             return
+        sesi = self.auth.require_session()
+        pesan = (
+            f"Unduh pembaruan versi {info.versi} dan siapkan pemasangan?"
+            if sesi.role is UserRole.ADMIN
+            else (
+                f"Unduh pembaruan versi {info.versi} di latar belakang?\n\n"
+                "Anda tetap dapat melayani selama pengunduhan. Pemasangan "
+                "baru dimulai setelah Anda menekan tombol sekali lagi."
+            )
+        )
         if not konfirmasi(
             self,
-            f"Unduh pembaruan versi {info.versi} dari server dan mulai pemasangan?\n\n"
-            "Selesaikan pelayanan yang sedang berjalan terlebih dahulu. "
-            "Saat pemasangan dimulai, aplikasi akan ditutup otomatis; data "
-            "antrian dan pengaturan tidak berubah.",
-            "Perbarui Sistem Antrian CRO",
+            pesan,
+            "Unduh Pembaruan Sistem Antrian CRO",
         ):
             return
         self.pita_pembaruan.sedang_mengunduh()
         pengunduh = _PengunduhPembaruan(info, self)
+        pengunduh.kemajuan.connect(self.pita_pembaruan.perbarui_kemajuan)
         pengunduh.selesai.connect(self._pembaruan_selesai_diunduh)
         pengunduh.finished.connect(self._selesai_mengunduh_pembaruan)
         self._pengunduh_pembaruan = pengunduh
@@ -1098,12 +1136,33 @@ class MainWindow(QMainWindow):
             self.pita_pembaruan.tampilkan(self.pita_pembaruan.info)
             tampilkan_error(self, exc, "Pembaruan Gagal")
             return
+        self._installer_pembaruan = path
+        self.pita_pembaruan.siap_dipasang()
+
+    def _pasang_pembaruan(self) -> None:
+        path = self._installer_pembaruan
+        info = self.pita_pembaruan.info
+        if path is None or info is None:
+            return
+        try:
+            self.pembaruan_service.pastikan_pemasangan_diizinkan()
+        except AppError as exc:
+            tampilkan_error(self, exc, "Pembaruan Ditunda")
+            return
+        if not konfirmasi(
+            self,
+            f"Pasang pembaruan versi {info.versi} sekarang?\n\n"
+            "Aplikasi akan ditutup otomatis oleh pemasang. Data antrian dan "
+            "pengaturan tidak berubah.",
+            "Pasang Pembaruan Sistem Antrian CRO",
+        ):
+            return
         try:
             subprocess.Popen([str(path)], close_fds=True)  # noqa: S603
         except OSError as gagal:
             from app.services.pembaruan_windows import PembaruanError
 
-            self.pita_pembaruan.tampilkan(self.pita_pembaruan.info)
+            self.pita_pembaruan.siap_dipasang()
             tampilkan_error(
                 self,
                 PembaruanError(
@@ -1112,6 +1171,8 @@ class MainWindow(QMainWindow):
                 ),
                 "Pembaruan Gagal",
             )
+            return
+        self.pita_pembaruan.pemasang_dibuka()
 
     def _selesai_mengunduh_pembaruan(self) -> None:
         pengunduh = self._pengunduh_pembaruan

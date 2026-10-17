@@ -16,7 +16,7 @@ jebakan; bagian riwayat commit-nya sudah lama), [istilah.md](istilah.md),
 [layar-antrian.md](layar-antrian.md), [prioritas-antrian.md](prioritas-antrian.md),
 [keamanan-sesi.md](keamanan-sesi.md).
 
-Terakhir diperbarui: **16 Oktober 2026**, oleh Codex.
+Terakhir diperbarui: **17 Oktober 2026**, oleh Codex.
 
 ---
 
@@ -106,7 +106,7 @@ memanjang).
 
 ---
 
-## 3. Keadaan sekarang (16 Oktober 2026)
+## 3. Keadaan sekarang (17 Oktober 2026)
 
 **Cabang kerja:** `fitur/tema-tampilan-dan-kartu-berikutnya`, dibuat dari
 `origin/main` (PR #2 sudah ter-merge). **Belum di-push**, belum ada PR. Isinya
@@ -349,20 +349,27 @@ dengan `error: closed`):
   mengisolasi env; sudah diisolasi di `tests/conftest.py` (`app_config`,
   `env_mesin`).
 
-**Temuan audit Codex 16 Oktober 2026 (belum diperbaiki):**
+**Perbaikan keamanan 16 Oktober 2026 (Claude)**, rinci di
+[keamanan-sesi.md](keamanan-sesi.md). Tiga temuan keamanan Codex di bawah
+sudah ditutup:
 
-- Pembaruan Windows mengunduh metadata dan `.exe` melalui HTTP yang sama,
-  lalu hanya mencocokkan SHA-256 dari metadata tersebut sebelum menjalankan
-  installer. Penyerang di LAN yang dapat memodifikasi kedua jawaban dapat
-  mengganti installer; perlu tanda tangan yang diverifikasi terhadap kunci
-  publik tertanam atau HTTPS dengan identitas server yang dipercaya.
-- Token bersama menerima `X-Device-Id` dari pengirim. Endpoint verifikasi PIN,
-  status printer, status/salinan media, dan kontak perangkat memakai nilai itu;
-  pembatas PIN dapat dilewati dengan mengganti ID dan status perangkat lain
-  dapat dipalsukan selama token bersama masih aktif.
-- Kode pemasangan dibaca lalu ditandai terpakai tanpa `SELECT ... FOR UPDATE`
-  atau pembaruan bersyarat. Dua permintaan bersamaan berpotensi memakai kode
-  sekali-pakai yang sama. Daftar pembatas tebakan di API juga tidak dikunci.
+- Pembaruan Windows wajib bertanda tangan Ed25519 (`tanda_sah`,
+  `alat/tandatangani_pembaruan.py`, berkas `Pembaruan-AntrianCRO.sig`).
+  **Rilis 1.0.11 berikutnya harus ditandatangani pemilik**; tanpa `.sig`,
+  PC loket 1.0.11 tidak menawarkan pembaruan. PC 1.0.10 (tanpa verifikasi)
+  tetap menerima seperti dulu.
+- `X-Device-Id` token bersama yang milik tablet terpasang diabaikan; pembatas
+  PIN per IP; hash PIN hanya ke tablet terpasang.
+- Kode pasang ditandai dengan UPDATE bersyarat; pembatas tebakan per IP +
+  gabungan, di bawah `lock_tebakan`.
+- Juga: Kesehatan Sistem › **Kata sandi bawaan** dan **Pembaruan Windows di
+  server**; job CI **Audit dependency** (`pip-audit==2.9.0 --no-deps`);
+  `backup/*.bundle` di `.gitignore`.
+- **Menunggu keputusan pemilik:** enkripsi berkas backup; mematikan token
+  bersama dan mengikat API ke IP LAN (langkah operasional).
+
+**Temuan audit Codex 16 Oktober 2026 (sisa yang belum diperbaiki):**
+
 - `GET /v1/kiosk/display` terukur menjalankan **41 pernyataan SQL** per polling
   pada PostgreSQL uji. Android memanggilnya tiap 5 detik, atau tiap 1 detik saat
   iklan penuh dan interupsi panggilan aktif. Pengaturan perlu dibaca sekali,
@@ -428,9 +435,42 @@ tiga):
   piksel; 125%/150% hanya didekati lewat ukuran jendela logis dan font-size
   stylesheet), font Segoe UI pada mesin lain, `SurveyDialog`, dialog
   `CounterCategoryDialog`, dan tombol yang hanya muncul pada data tertentu.
-  Catatan: `Unduh & Perbarui` (pita pembaruan) memakai `&` tunggal, sedangkan
-  halaman anjungan memakai `&&`; Qt dapat membaca `&` sebagai pintasan
-  keyboard. Belum diverifikasi tampilannya di layar nyata.
+  Label pita pembaruan tidak lagi memakai `&`, sehingga risiko Qt membacanya
+  sebagai penanda pintasan sudah hilang.
+
+**Pengalaman pembaruan Windows 17 Oktober 2026 (Codex):**
+
+- Alur dipisah menjadi **unduh → siap dipasang → pasang**, sehingga selesai
+  mengunduh tidak lagi langsung membuka installer. Pita menampilkan progres
+  persen dan MB. Admin melihat ukuran serta status terverifikasi dengan tombol
+  **Unduh pembaruan / Pasang sekarang**; petugas memakai **Unduh di latar
+  belakang / Pasang setelah pelayanan**.
+- `PembaruanWindowsService` menolak pemasangan oleh CRO yang masih memegang
+  nomor aktif. Penjaga berada di service layer. Pemeriksaan ruang disk menyisakan
+  cadangan 64 MB; gagal unduh atau gagal membuka installer dapat dicoba lagi.
+- Tes PostgreSQL terarah `test_pembaruan_windows.py` + `test_teks_tombol.py`:
+  **76 lulus**, satu peringatan deprecation Starlette. `ruff check app tests
+  alembic` dan `git diff --check` lulus.
+- Belum dibuat: tombol tunda per versi, melanjutkan unduhan terputus, catatan
+  rilis, pemasangan terjadwal, audit hasil setelah aplikasi hidup kembali, dan
+  pemantauan versi seluruh PC.
+
+**Unduh PDF/Excel admin dan petugas 17 Oktober 2026 (Codex):**
+
+- Admin/supervisor tetap mendapat menu **Laporan** seluruh cabang. CRO kini
+  mendapat **Laporan Saya** dengan rentang tanggal, PDF, dan Excel berisi hanya
+  nomor yang ditangani akun yang sedang masuk. `laporan_petugas()` tidak
+  menerima id petugas dari UI; cakupan ditentukan dari sesi dan ditegakkan oleh
+  `QUEUE_CALL` di service layer.
+- Laporan pribadi tidak menampilkan lembar **Per petugas** maupun **Petugas per
+  layanan** yang redundan. Nama petugas, judul personal, serta nama berkas
+  `laporan-saya-...` membedakannya dari laporan seluruh cabang.
+- Tombol menjadi **Unduh PDF/Unduh Excel**. UI menampilkan proses dan hasil
+  secara sebaris, menambahkan ekstensi yang hilang, memakai folder home bila
+  Documents tidak ada, dan menulis ke berkas sementara sebelum mengganti tujuan
+  supaya laporan lama tidak rusak bila ekspor gagal.
+- Tes terarah PostgreSQL `test_report_service.py` + `test_teks_tombol.py`:
+  **73 lulus**. Suite penuh belum dijalankan karena tidak sedang push/PR.
 
 ---
 
@@ -506,6 +546,10 @@ menyeret APK ke jendela BlueStacks. Tangkapan layar:
 | 2026-10-16 | Codex | Audit teks tombol pada tiga ukuran jendela; tidak ditemukan potongan, celah tes regresi dicatat di bagian 6. |
 | 2026-10-16 | Claude | Tes permanen teks tombol (`tests/test_teks_tombol.py`, `tests/ukuran_tombol.py`); tiga tombol terpotong diperbaiki (bagian 6). |
 | 2026-10-16 | Claude | Warna latar iklan penuh per tablet, murni Android (SharedPreferences `latar_iklan_penuh`, kontrol di dialog Pengaturan > Tampilan; tanpa server/DB); rincian di android-kiosk.md. APK debug terkompilasi, belum diuji di perangkat, belum di-commit. |
+| 2026-10-16 | Claude | Perbaikan keamanan: pembaruan Windows bertanda tangan, celah `X-Device-Id`, hash PIN, kode pasang, Kesehatan, pip-audit (bagian 6) |
+| 2026-10-17 | Codex | Audit pengalaman pembaruan Windows untuk admin dan petugas; saran pembedaan alur peran dicatat di bagian 6. |
+| 2026-10-17 | Codex | Alur pembaruan admin/petugas dibuat dua tahap dengan progres, pemeriksaan ruang disk, dan pengunci pelayanan aktif. |
+| 2026-10-17 | Codex | Laporan Saya PDF/Excel ditambahkan untuk CRO; ekspor admin/petugas memakai status sebaris dan penyimpanan atomik. |
 
 Saat menutup sesi: perbarui bagian 3 (keadaan, commit, versi), 6 (belum
 selesai), dan tabel di atas.

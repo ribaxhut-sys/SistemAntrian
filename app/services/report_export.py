@@ -12,6 +12,7 @@ antrian hanya ke Excel, karena setahun penuh bisa ratusan halaman PDF.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from app.core import clock
@@ -34,8 +35,16 @@ def judul_rentang(laporan: Laporan) -> str:
     return f"{tanggal_panjang(laporan.dari)} – {tanggal_panjang(laporan.sampai)}"
 
 
+def judul_laporan(laporan: Laporan) -> str:
+    return "Laporan Pelayanan Saya" if laporan.nama_petugas else "Laporan Antrian dan Kepuasan"
+
+
 def nama_berkas_bawaan(laporan: Laporan, akhiran: str) -> str:
-    return f"laporan-antrian-{laporan.dari:%Y%m%d}-{laporan.sampai:%Y%m%d}.{akhiran}"
+    cakupan = "antrian"
+    if laporan.nama_petugas:
+        nama = re.sub(r"[^a-z0-9]+", "-", laporan.nama_petugas.lower()).strip("-")
+        cakupan = f"saya-{nama or 'petugas'}"
+    return f"laporan-{cakupan}-{laporan.dari:%Y%m%d}-{laporan.sampai:%Y%m%d}.{akhiran}"
 
 
 def ekspor_pdf(laporan: Laporan, tujuan: Path, kantor: str = "") -> Path:
@@ -60,12 +69,14 @@ def ekspor_pdf(laporan: Laporan, tujuan: Path, kantor: str = "") -> Path:
         rightMargin=14 * mm,
         topMargin=12 * mm,
         bottomMargin=12 * mm,
-        title=f"Laporan Antrian {judul_rentang(laporan)}",
+        title=f"{judul_laporan(laporan)} {judul_rentang(laporan)}",
     )
     isi = []
     if kantor:
         isi.append(Paragraph(kantor, gaya["Heading3"]))
-    isi.append(Paragraph("Laporan Antrian dan Kepuasan", gaya["Title"]))
+    isi.append(Paragraph(judul_laporan(laporan), gaya["Title"]))
+    if laporan.nama_petugas:
+        isi.append(Paragraph(laporan.nama_petugas, gaya["Heading3"]))
     isi.append(Paragraph(judul_rentang(laporan), gaya["Normal"]))
     isi.append(Spacer(1, 6 * mm))
 
@@ -92,6 +103,8 @@ def ekspor_pdf(laporan: Laporan, tujuan: Path, kantor: str = "") -> Path:
     isi.append(tabel_ringkas)
 
     for kunci, judul in JUDUL_TABEL.items():
+        if laporan.nama_petugas and kunci == "per_petugas":
+            continue
         baris = getattr(laporan, kunci)
         if not baris:
             continue
@@ -115,7 +128,7 @@ def ekspor_pdf(laporan: Laporan, tujuan: Path, kantor: str = "") -> Path:
         tabel.setStyle(TableStyle(perintah))
         isi.append(tabel)
 
-    if laporan.petugas_layanan:
+    if laporan.petugas_layanan and not laporan.nama_petugas:
         # Dikelompokkan per petugas: nama hanya di baris pertamanya, lalu
         # baris jumlah yang sama persis dengan tabel Per petugas.
         kolom = KOLOM_PETUGAS_LAYANAN
@@ -172,9 +185,11 @@ def ekspor_excel(laporan: Laporan, tujuan: Path) -> Path:
     buku = Workbook()
     ringkas = buku.active
     ringkas.title = "Ringkasan"
-    ringkas.append(["Laporan Antrian dan Kepuasan"])
+    ringkas.append([judul_laporan(laporan)])
     ringkas["A1"].font = Font(bold=True, size=14)
     ringkas.append([judul_rentang(laporan)])
+    if laporan.nama_petugas:
+        ringkas.append([laporan.nama_petugas])
     ringkas.append([])
     for nama, nilai in angka_ringkasan(laporan):
         ringkas.append([nama, nilai])
@@ -215,13 +230,16 @@ def ekspor_excel(laporan: Laporan, tujuan: Path) -> Path:
             lembar.auto_filter.ref = lembar.dimensions
 
     for kunci, judul in JUDUL_TABEL.items():
+        if laporan.nama_petugas and kunci == "per_petugas":
+            continue
         isi_lembar(judul, KOLOM_TABEL[kunci], getattr(laporan, kunci))
-    isi_lembar(
-        JUDUL_TABEL_PETUGAS_LAYANAN,
-        KOLOM_PETUGAS_LAYANAN,
-        [baris for _, rincian in laporan.petugas_layanan for baris in rincian],
-        saring=True,
-    )
+    if not laporan.nama_petugas:
+        isi_lembar(
+            JUDUL_TABEL_PETUGAS_LAYANAN,
+            KOLOM_PETUGAS_LAYANAN,
+            [baris for _, rincian in laporan.petugas_layanan for baris in rincian],
+            saring=True,
+        )
     isi_lembar(JUDUL_TABEL_RIWAYAT, KOLOM_RIWAYAT, laporan.riwayat, saring=True)
 
     tujuan = Path(tujuan)

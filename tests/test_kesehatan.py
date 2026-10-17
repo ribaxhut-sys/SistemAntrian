@@ -357,6 +357,49 @@ def test_nilai_hash_kata_sandi_normal_dan_peringatan():
     assert "2 dari 5" in hasil.ringkasan
 
 
+def test_nilai_sandi_bawaan():
+    assert ks.nilai_sandi_bawaan([]).tingkat == NORMAL
+    hasil = ks.nilai_sandi_bawaan(["admin"])
+    assert hasil.tingkat == MASALAH
+    assert "admin" in hasil.ringkasan
+    assert "admin123" not in " ".join((hasil.ringkasan, *hasil.saran))
+
+
+def test_periksa_sandi_bawaan_menemukan_akun(auth, users):
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.core.security import hash_password
+    from app.core.seed import DEFAULT_ADMIN_PASSWORD
+    from app.models import User
+
+    with session_scope() as s:
+        s.execute(
+            sa.update(User).where(User.username != "cro").values(
+                password_hash=hash_password(TEST_PASSWORD)
+            )
+        )
+    assert ks._periksa_sandi_bawaan().tingkat == NORMAL
+
+    with session_scope() as s:
+        s.execute(
+            sa.update(User).where(User.username == "cro").values(
+                password_hash=hash_password(DEFAULT_ADMIN_PASSWORD)
+            )
+        )
+    hasil = ks._periksa_sandi_bawaan()
+    assert hasil.tingkat == MASALAH
+    assert "cro" in hasil.ringkasan
+
+
+def test_nilai_tanda_pembaruan():
+    assert ks.nilai_tanda_pembaruan(False).tingkat == ks.INFO
+    assert ks.nilai_tanda_pembaruan(True, "1.0.12", True).tingkat == NORMAL
+    tanpa = ks.nilai_tanda_pembaruan(True, "1.0.12", False)
+    assert tanpa.tingkat == PERINGATAN
+    assert "1.0.12" in tanpa.ringkasan
+
+
 def test_periksa_kata_sandi_mendeteksi_nilai_tanpa_hash(auth, users):
     import sqlalchemy as sa
 

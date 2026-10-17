@@ -417,8 +417,10 @@ antrian menampilkan "KOSONG".
   (`POST /v1/kiosk/pin/verifikasi`, penundaan 1/5/15 menit per tablet setelah
   5/10/15 kali salah, dihitung di server) dan, bila server tidak terjangkau,
   dengan hash terakhir yang dikirim pada `/v1/kiosk/display`
-  (`settings_pin`). Pengaturan menutup sendiri setelah 2 menit tanpa
-  sentuhan.
+  (`settings_pin`). Hash itu **hanya dikirim ke tablet yang dipasangkan**;
+  tablet token bersama tidak menerimanya (lihat keamanan-sesi.md). Pada
+  token bersama penundaan dihitung per alamat IP. Pengaturan menutup sendiri
+  setelah 2 menit tanpa sentuhan.
   - **Tidak diminta** pada tablet yang belum pernah tersambung (belum
     dipasang, supaya alamat server dapat diisi) dan bila server belum
     memasang PIN.

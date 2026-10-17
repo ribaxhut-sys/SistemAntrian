@@ -1,6 +1,8 @@
+import base64
 import hashlib
 import io
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,13 +10,39 @@ from fastapi.testclient import TestClient
 from app.services.pembaruan_windows import (
     InfoPembaruan,
     NAMA_INSTALLER,
+    NAMA_TANDA,
     NAMA_VERSI,
     PembaruanError,
+    PembaruanWindowsService,
     info_pembaruan,
     lebih_baru,
     periksa_pembaruan,
+    pesan_tanda_tangan,
+    tanda_sah,
     unduh_pembaruan,
 )
+
+
+def _pasangan_kunci():
+    """Kunci uji sekali pakai; kunci pengembang asli tidak pernah ada di tes."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    rahasia = Ed25519PrivateKey.generate()
+    publik = rahasia.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    return rahasia, base64.b64encode(publik).decode("ascii")
+
+
+def _tandatangani(rahasia, versi, ukuran, sha):
+    return base64.b64encode(rahasia.sign(pesan_tanda_tangan(versi, ukuran, sha))).decode()
+
+
+def _server(monkeypatch, isi):
+    monkeypatch.setattr(
+        "urllib.request.urlopen", lambda *_, **__: _Jawaban(json.dumps(isi).encode())
+    )
 
 
 class _Jawaban(io.BytesIO):
@@ -56,11 +84,75 @@ def test_periksa_pembaruan_hanya_menerima_versi_lebih_baru(monkeypatch):
         )
 
     monkeypatch.setattr("urllib.request.urlopen", buka)
-    info = periksa_pembaruan("http://server:8765", versi_terpasang="1.0.8")
+    # Tanpa kunci publik (build tanpa fitur kunci): perilaku lama.
+    info = periksa_pembaruan(
+        "http://server:8765", versi_terpasang="1.0.8", kunci_publik_b64=""
+    )
     assert info is not None and info.versi == "1.0.9"
     assert periksa_pembaruan(
-        "http://server:8765", versi_terpasang="1.0.9"
+        "http://server:8765", versi_terpasang="1.0.9", kunci_publik_b64=""
     ) is None
+
+
+def test_pembaruan_bertanda_tangan_sah_diterima(monkeypatch):
+    rahasia, publik = _pasangan_kunci()
+    sha = "b" * 64
+    _server(monkeypatch, {
+        "latest_version": "1.0.9", "size": 123, "sha256": sha,
+        "signature": _tandatangani(rahasia, "1.0.9", 123, sha),
+    })
+
+    info = periksa_pembaruan(
+        "http://server:8765", versi_terpasang="1.0.8", kunci_publik_b64=publik
+    )
+
+    assert info is not None and tanda_sah(info, publik)
+
+
+@pytest.mark.parametrize("ubah", ["tanpa", "versi", "ukuran", "sha", "kunci_lain"])
+def test_pembaruan_tanpa_tanda_tangan_sah_tidak_ditawarkan(monkeypatch, ubah):
+    """Penyerang yang menyamar sebagai server tidak dapat menyodorkan installer."""
+    rahasia, publik = _pasangan_kunci()
+    lain, _ = _pasangan_kunci()
+    sha = "c" * 64
+    tanda = {
+        "tanpa": "",
+        "versi": _tandatangani(rahasia, "1.0.10", 123, sha),
+        "ukuran": _tandatangani(rahasia, "1.0.9", 124, sha),
+        "sha": _tandatangani(rahasia, "1.0.9", 123, "d" * 64),
+        "kunci_lain": _tandatangani(lain, "1.0.9", 123, sha),
+    }[ubah]
+    _server(monkeypatch, {
+        "latest_version": "1.0.9", "size": 123, "sha256": sha, "signature": tanda,
+    })
+
+    assert periksa_pembaruan(
+        "http://server:8765", versi_terpasang="1.0.8", kunci_publik_b64=publik
+    ) is None
+
+
+def test_tanda_tangan_pemulihan_admin_tidak_sah_sebagai_pembaruan():
+    """Domain berbeda: kunci yang sama menandatangani dua hal."""
+    from app.services import pemulihan_admin
+
+    rahasia, publik = _pasangan_kunci()
+    sha = "e" * 64
+    mentah = f"1.0.9\n123\n{sha}".encode()
+    tanda = base64.b64encode(rahasia.sign(pemulihan_admin.DOMAIN + mentah)).decode()
+
+    assert not tanda_sah(InfoPembaruan("1.0.9", None, 123, sha, tanda), publik)
+
+
+def test_kunci_publik_tertanam_dipakai_bawaan(monkeypatch):
+    """Tanpa argumen, kunci di app/core/kunci_publik.py yang menentukan."""
+    rahasia, _ = _pasangan_kunci()
+    sha = "f" * 64
+    _server(monkeypatch, {
+        "latest_version": "99.0", "size": 1, "sha256": sha,
+        "signature": _tandatangani(rahasia, "99.0", 1, sha),
+    })
+
+    assert periksa_pembaruan("http://server:8765", versi_terpasang="1.0.8") is None
 
 
 def test_unduhan_ditolak_bila_checksum_berbeda(monkeypatch, tmp_path):
@@ -74,6 +166,38 @@ def test_unduhan_ditolak_bila_checksum_berbeda(monkeypatch, tmp_path):
         unduh_pembaruan(info, "http://server:8765")
 
 
+def test_unduhan_melaporkan_kemajuan(monkeypatch, tmp_path):
+    isi = b"installer-yang-cukup-panjang"
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(
+        "urllib.request.urlopen", lambda *_, **__: _Jawaban(isi)
+    )
+    info = InfoPembaruan(
+        "1.0.9", tmp_path / NAMA_INSTALLER, len(isi), hashlib.sha256(isi).hexdigest()
+    )
+    kemajuan = []
+
+    hasil = unduh_pembaruan(
+        info, "http://server:8765", kemajuan=lambda jumlah, total: kemajuan.append((jumlah, total))
+    )
+
+    assert hasil.read_bytes() == isi
+    assert kemajuan[0] == (0, len(isi))
+    assert kemajuan[-1] == (len(isi), len(isi))
+
+
+def test_unduhan_ditolak_bila_ruang_tidak_cukup(monkeypatch, tmp_path):
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(
+        "app.services.pembaruan_windows.shutil.disk_usage",
+        lambda *_: SimpleNamespace(free=0),
+    )
+    info = InfoPembaruan("1.0.9", tmp_path / NAMA_INSTALLER, 100, "0" * 64)
+
+    with pytest.raises(PembaruanError, match="Ruang penyimpanan"):
+        unduh_pembaruan(info, "http://server:8765")
+
+
 def test_api_membagikan_installer_windows(monkeypatch, tmp_path):
     from app import kiosk_api
 
@@ -82,6 +206,7 @@ def test_api_membagikan_installer_windows(monkeypatch, tmp_path):
     isi = b"installer-rilis"
     (folder / NAMA_INSTALLER).write_bytes(isi)
     (folder / NAMA_VERSI).write_text("1.0.9", encoding="utf-8")
+    (folder / NAMA_TANDA).write_text("dGFuZGE=\n", encoding="utf-8")
     monkeypatch.setattr(kiosk_api, "base_dir", lambda: tmp_path)
 
     client = TestClient(kiosk_api.create_app("token-rilis-panjang", object()))
@@ -93,22 +218,71 @@ def test_api_membagikan_installer_windows(monkeypatch, tmp_path):
         "latest_version": "1.0.9",
         "size": len(isi),
         "sha256": hashlib.sha256(isi).hexdigest(),
+        "signature": "dGFuZGE=",
     }
     assert unduhan.status_code == 200
     assert unduhan.content == isi
 
 
-def test_pita_menampilkan_versi_dan_keadaan_unduh(qtbot, tmp_path):
+@pytest.mark.parametrize("untuk_admin", [False, True])
+def test_pita_menampilkan_versi_progres_dan_siap_pasang(
+    qtbot, tmp_path, untuk_admin
+):
     from app.ui.pita_pembaruan import PitaPembaruan
 
-    pita = PitaPembaruan(lambda: None)
+    pita = PitaPembaruan(lambda: None, untuk_admin=untuk_admin)
     qtbot.addWidget(pita)
-    info = InfoPembaruan("1.1.0", tmp_path / NAMA_INSTALLER, 123, "a" * 64)
+    info = InfoPembaruan(
+        "1.1.0", tmp_path / NAMA_INSTALLER, 10 * 1024 * 1024, "a" * 64
+    )
 
     pita.tampilkan(info)
 
     assert not pita.isHidden()
     assert "1.1.0" in pita.pesan.text()
     assert pita.tombol.isEnabled()
+    assert pita.tombol.text() == (
+        "Unduh pembaruan" if untuk_admin else "Unduh di latar belakang"
+    )
     pita.sedang_mengunduh()
     assert not pita.tombol.isEnabled()
+    pita.perbarui_kemajuan(5 * 1024 * 1024, 10 * 1024 * 1024)
+    assert pita.progres.value() == 50
+    assert "5.0 MB" in pita.pesan.text()
+    pita.siap_dipasang()
+    assert pita.tombol.isEnabled()
+    assert pita.tombol.text() == (
+        "Pasang sekarang" if untuk_admin else "Pasang setelah pelayanan"
+    )
+
+
+def test_cro_tidak_boleh_memasang_saat_memegang_nomor(
+    auth, antrian_siap, terbitkan
+):
+    from app.core.errors import BusinessRuleError
+    from app.services.queue_service import QueueService
+    from tests.conftest import TEST_PASSWORD
+
+    terbitkan("A")
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    aktif = QueueService(auth).call_next(antrian_siap["loket"][0])
+
+    with pytest.raises(BusinessRuleError, match=aktif.queue_number):
+        PembaruanWindowsService(auth).pastikan_pemasangan_diizinkan()
+
+
+def test_admin_boleh_memasang_walau_cabang_masih_melayani(
+    auth, antrian_siap, terbitkan
+):
+    from app.services.queue_service import QueueService
+    from tests.conftest import TEST_PASSWORD
+
+    terbitkan("A")
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    QueueService(auth).call_next(antrian_siap["loket"][0])
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+
+    PembaruanWindowsService(auth).pastikan_pemasangan_diizinkan()

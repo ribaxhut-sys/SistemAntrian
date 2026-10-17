@@ -178,6 +178,8 @@ class MediaTayangDb:
 
 #: Tebakan kode pasang yang salah sebelum semua kode aktif dihanguskan.
 BATAS_TEBAKAN_KODE = 10
+#: Tebakan salah gabungan semua IP sebelum semua kode aktif dihanguskan.
+BATAS_TEBAKAN_GLOBAL = 30
 SELANG_TEBAKAN_DETIK = 600
 SELANG_TULIS_KONTAK_DETIK = 30
 
@@ -258,7 +260,11 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
     # perangkat) hanya token bersama yang dikenal.
     perangkat = getattr(services, "perangkat", None)
     kontak_terakhir: dict[str, float] = {}
-    tebakan_salah: list[float] = []
+    #: Waktu tebakan kode pasang yang salah, per IP pengirim.
+    tebakan_salah: dict[str, list[float]] = {}
+    #: Endpoint sinkron FastAPI berjalan di thread pool; pembatas tebakan
+    #: (kode pasang dan PIN) dibaca-ubah di bawah kunci ini.
+    lock_tebakan = threading.Lock()
 
     def tolak() -> HTTPException:
         return HTTPException(
@@ -330,8 +336,14 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                     ),
                 )
             if device_id:
-                if perangkat.perangkat_dicabut(device_id):
+                dicabut, dipasangkan = perangkat.keadaan_perangkat(device_id)
+                if dicabut:
                     raise tolak()
+                if dipasangkan:
+                    # Tablet itu punya token sendiri; token bersama tidak
+                    # boleh berbicara atas namanya (status printer, media,
+                    # jatah tebakan PIN). Diperlakukan tanpa ID.
+                    return ""
                 catat_kontak(request, device_id)
         return device_id
 
@@ -534,6 +546,9 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "latest_version": info.versi,
             "size": info.ukuran_byte,
             "sha256": info.sha256,
+            # Tanda tangan pengembang atas tiga nilai di atas; klien
+            # memverifikasinya dengan kunci publik tertanam.
+            "signature": info.tanda,
         }
 
     @app.get("/v1/windows/update/download")
@@ -703,32 +718,67 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
     def kiosk_calls(after: int | None = None):
         return panggilan_sejak(after)
 
+    def kunci_pembatas(request: Request, device_id: str) -> str:
+        """
+        Kunci pembatas tebakan: tablet terpasang, atau IP pengirim.
+
+        X-Device-Id token bersama diisi pengirim sendiri, jadi tidak dipakai;
+        alamat IP koneksi TCP tidak dapat dipilih semaunya oleh pengirim.
+        """
+        if getattr(request.state, "perangkat_terpasang", False) and device_id:
+            return device_id
+        return "ip:" + (request.client.host if request.client else "")
+
     @app.post("/v1/kiosk/pair")
-    def pair(request: PairRequest):
-        """Tukar kode 6 angka dari Layanan Anjungan dengan token perangkat."""
+    def pair(permintaan: PairRequest, request: Request):
+        """
+        Tukar kode 6 angka dari Layanan Anjungan dengan token perangkat.
+
+        Tebakan salah dibatasi per IP pengirim (BATAS_TEBAKAN_KODE), supaya
+        satu pengganggu tidak dapat menghalangi pemasangan tablet lain.
+        Jumlah gabungan semua IP tetap dijaga (BATAS_TEBAKAN_GLOBAL): bila
+        terlampaui, semua kode terbuka dihanguskan, karena tebakan dari
+        banyak alamat sekaligus adalah tanda penebakan terencana.
+        """
         if perangkat is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Pemasangan perangkat tidak tersedia.",
             )
-        sekarang = time.monotonic()
-        tebakan_salah[:] = [t for t in tebakan_salah if sekarang - t < SELANG_TEBAKAN_DETIK]
-        if len(tebakan_salah) >= BATAS_TEBAKAN_KODE:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Terlalu banyak kode salah. Buat kode baru di Layanan Anjungan.",
-            )
-        try:
-            device_token = perangkat.pasangkan(
-                request.code, request.device_id, request.name, request.kind
-            )
-        except AppError:
-            tebakan_salah.append(sekarang)
-            if len(tebakan_salah) >= BATAS_TEBAKAN_KODE:
-                # Tebakan beruntun: hanguskan semua kode yang masih terbuka.
-                perangkat.batalkan_kode_aktif()
-                logger.warning("Kode pasang dihanguskan setelah %s tebakan salah", len(tebakan_salah))
-            raise
+        ip = request.client.host if request.client else ""
+        with lock_tebakan:
+            sekarang = time.monotonic()
+            for kunci in list(tebakan_salah):
+                segar = [t for t in tebakan_salah[kunci] if sekarang - t < SELANG_TEBAKAN_DETIK]
+                if segar:
+                    tebakan_salah[kunci] = segar
+                else:
+                    del tebakan_salah[kunci]
+            if len(tebakan_salah.get(ip, ())) >= BATAS_TEBAKAN_KODE:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Terlalu banyak kode salah. Buat kode baru di Layanan Anjungan.",
+                )
+            try:
+                device_token = perangkat.pasangkan(
+                    permintaan.code, permintaan.device_id, permintaan.name, permintaan.kind
+                )
+            except AppError:
+                tebakan_salah.setdefault(ip, []).append(sekarang)
+                jumlah = sum(len(v) for v in tebakan_salah.values())
+                if (
+                    len(tebakan_salah[ip]) >= BATAS_TEBAKAN_KODE
+                    or jumlah >= BATAS_TEBAKAN_GLOBAL
+                ):
+                    # Tebakan beruntun: hanguskan semua kode yang masih terbuka.
+                    perangkat.batalkan_kode_aktif()
+                    logger.warning(
+                        "Kode pasang dihanguskan setelah tebakan salah (%s dari %s, %s total)",
+                        len(tebakan_salah[ip]),
+                        ip,
+                        jumlah,
+                    )
+                raise
         return {"token": device_token}
 
     @app.post("/v1/kiosk/printer")
@@ -751,25 +801,33 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
     @app.post("/v1/kiosk/pin/verifikasi")
     def pin_verifikasi(
         permintaan: PinRequest,
+        request: Request,
         device_id: str = Depends(require_token),  # noqa: B008
     ):
         """
         Periksa PIN pengaturan anjungan. Salah berulang menunda tablet itu
         1 / 5 / 15 menit; selama ditunda jawabannya `locked_seconds` tanpa
         memeriksa PIN, supaya penundaan tidak dapat ditembus dengan menebak.
+
+        Kuncinya `kunci_pembatas`: dengan X-Device-Id sebagai kunci, cukup
+        mengganti header tiap tebakan untuk lolos dari penundaan.
         """
-        sisa = batas_pin.sisa_tunda(device_id)
-        if sisa:
-            return {"ok": False, "locked_seconds": sisa}
-        data = pin_anjungan.baca()
-        if data is None:
-            # Tidak ada PIN yang perlu diperiksa: pengaturan terbuka.
-            return {"ok": True, "locked_seconds": 0}
-        if pin_anjungan.cocok(permintaan.pin, data):
-            batas_pin.catat_berhasil(device_id)
-            return {"ok": True, "locked_seconds": 0}
-        tunda = batas_pin.catat_gagal(device_id)
-        logger.warning("PIN pengaturan salah dari anjungan %s", device_id)
+        kunci = kunci_pembatas(request, device_id)
+        # Dikunci: dua tebakan bersamaan tidak boleh sama-sama lolos
+        # sebelum hitungan gagal bertambah.
+        with lock_tebakan:
+            sisa = batas_pin.sisa_tunda(kunci)
+            if sisa:
+                return {"ok": False, "locked_seconds": sisa}
+            data = pin_anjungan.baca()
+            if data is None:
+                # Tidak ada PIN yang perlu diperiksa: pengaturan terbuka.
+                return {"ok": True, "locked_seconds": 0}
+            if pin_anjungan.cocok(permintaan.pin, data):
+                batas_pin.catat_berhasil(kunci)
+                return {"ok": True, "locked_seconds": 0}
+            tunda = batas_pin.catat_gagal(kunci)
+        logger.warning("PIN pengaturan salah dari anjungan %s", kunci)
         return {"ok": False, "locked_seconds": tunda}
 
     @app.post("/v1/kiosk/media-status")
@@ -932,7 +990,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "registration_open": services.queue.pendaftaran_dibuka(),
             # PIN pengaturan anjungan. Hash (bukan PIN) ikut dikirim supaya
             # tablet yang terputus tetap dapat memeriksa PIN untuk jalan pulih.
-            "settings_pin": isi_pin(),
+            # Hash PIN 6 angka dapat ditebak habis di luar server, jadi hanya
+            # tablet TERPASANG yang menerimanya; pemegang token bersama tidak.
+            # Tanpa kunci ini tablet memakai salinan yang sudah ia simpan.
+            **({"settings_pin": isi_pin()} if device_id else {}),
             # Berubah bila admin menekan "Segarkan media" untuk tablet ini;
             # tablet menyegarkan salinannya segera bila nilainya baru.
             "media_refresh": permintaan_segarkan(device_id),
