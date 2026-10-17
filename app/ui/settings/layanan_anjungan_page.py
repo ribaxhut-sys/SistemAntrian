@@ -22,6 +22,7 @@ from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -232,6 +233,7 @@ class LayananAnjunganPage(QWidget):
         self._sibuk = False
         self._status: StatusLayanan | None = None
         self._alamat = alamat_ipv4_lan()
+        self._perangkat = perangkat
 
         # Gulir hanya cadangan untuk jendela yang diperkecil; pada layar
         # penuh 1366 x 768 susunan dua kolom di bawah sudah muat.
@@ -391,6 +393,24 @@ class LayananAnjunganPage(QWidget):
         tindakan.addStretch()
         kanan.addLayout(tindakan)
         kanan.addWidget(self.api_otomatis)
+
+        # Alamat tempat API mendengarkan. Bawaannya semua antarmuka supaya
+        # tidak ada tablet yang putus; admin dapat mengikatnya ke IP LAN.
+        self.alamat_api = QComboBox()
+        self.alamat_api.setObjectName("alamatApi")
+        self.alamat_api.setToolTip(
+            "API tetap juga mendengar di 127.0.0.1 untuk pemeriksaan di komputer "
+            "ini. Bila IP terpilih hilang (DHCP), API kembali ke semua antarmuka."
+        )
+        baris_alamat = QHBoxLayout()
+        baris_alamat.addWidget(QLabel("Dengarkan di"))
+        baris_alamat.addWidget(self.alamat_api, stretch=1)
+        if perangkat is not None:
+            kanan.addLayout(baris_alamat)
+            self._isi_alamat_api()
+            self.alamat_api.currentIndexChanged.connect(self._ubah_alamat_api)
+        else:
+            self.alamat_api.hide()
         kanan.addStretch()
 
         self.kartu_perangkat = None
@@ -660,6 +680,35 @@ class LayananAnjunganPage(QWidget):
         self.catatan.setText(
             f"Token baru tersimpan. Tekan {LABEL_PASANG_ULANG} agar API "
             "memakainya, lalu isi token baru di setiap tablet."
+        )
+        self.catatan.show()
+
+    def _isi_alamat_api(self) -> None:
+        try:
+            tersimpan = self._perangkat.alamat_api()
+        except Exception:  # noqa: BLE001 - tanpa hak/basis data: tampilkan bawaan
+            tersimpan = ""
+        self.alamat_api.blockSignals(True)
+        self.alamat_api.clear()
+        self.alamat_api.addItem("Semua antarmuka (bawaan)", "")
+        for alamat in self._alamat:
+            self.alamat_api.addItem(alamat, alamat)
+        if tersimpan and self.alamat_api.findData(tersimpan) < 0:
+            self.alamat_api.addItem(f"{tersimpan} (tidak ada di komputer ini)", tersimpan)
+        self.alamat_api.setCurrentIndex(max(0, self.alamat_api.findData(tersimpan)))
+        self.alamat_api.blockSignals(False)
+
+    def _ubah_alamat_api(self) -> None:
+        alamat = self.alamat_api.currentData() or ""
+        try:
+            self._perangkat.setel_alamat_api(alamat)
+        except Exception as exc:  # noqa: BLE001
+            tampilkan_peringatan(self, str(exc), "Gagal menyimpan alamat API")
+            self._isi_alamat_api()
+            return
+        self.catatan.setText(
+            f"Alamat API tersimpan. Tekan {LABEL_PASANG_ULANG} agar API "
+            "mendengarkan di alamat ini."
         )
         self.catatan.show()
 

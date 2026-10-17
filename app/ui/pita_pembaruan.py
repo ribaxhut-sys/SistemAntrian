@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QProgressBar
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar
 
 from app.services.pembaruan_windows import InfoPembaruan
 from app.ui.common import tombol
@@ -45,6 +45,10 @@ class PitaPembaruan(QFrame):
         self.tombol = tombol(self._teks_unduh(), variant="primary")
         self.tombol.clicked.connect(tindakan)
         susunan.addWidget(self.tombol, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self.tombol_catatan = tombol("Apa yang baru?")
+        self.tombol_catatan.clicked.connect(self.tampilkan_catatan)
+        self.tombol_catatan.hide()
+        susunan.addWidget(self.tombol_catatan, alignment=Qt.AlignmentFlag.AlignVCenter)
         self.tombol_tunda = tombol("Ingatkan besok")
         if tunda is not None:
             self.tombol_tunda.clicked.connect(tunda)
@@ -76,7 +80,19 @@ class PitaPembaruan(QFrame):
         self.tombol.setEnabled(True)
         self.tombol.setText(self._teks_unduh())
         self.tombol_tunda.setVisible(self._boleh_tunda)
+        self.tombol_catatan.setVisible(bool(info.catatan))
         self.show()
+
+    def tampilkan_catatan(self) -> None:
+        """Catatan rilis sebagai teks biasa: isinya datang dari server lewat HTTP."""
+        if self.info is None or not self.info.catatan:
+            return
+        kotak = QMessageBox(self)
+        kotak.setWindowTitle(f"Apa yang baru di versi {self.info.versi}")
+        kotak.setTextFormat(Qt.TextFormat.PlainText)
+        kotak.setText(self.info.catatan)
+        kotak.setIcon(QMessageBox.Icon.Information)
+        kotak.exec()
 
     def sedang_mengunduh(self) -> None:
         if self.info is None:

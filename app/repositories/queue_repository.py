@@ -318,6 +318,25 @@ class QueueRepository:
         )
         return daftar[0] if daftar else None
 
+    def jumlah_prioritas_terbit_sejak(
+        self,
+        branch_id: int,
+        tanggal: date,
+        sejak: datetime,
+        *,
+        category_ids: Sequence[int] | None = None,
+    ) -> int:
+        """Nomor prioritas yang terbit hari ini sejak `sejak` (apa pun statusnya)."""
+        stmt = sa.select(sa.func.count(Queue.id)).where(
+            Queue.branch_id == branch_id,
+            Queue.queue_date == tanggal,
+            Queue.prioritas.is_not(None),
+            Queue.created_at >= sejak,
+        )
+        if category_ids is not None:
+            stmt = stmt.where(Queue.category_id.in_(list(category_ids)))
+        return int(self.session.scalar(stmt) or 0)
+
     def prioritas_beruntun(self, branch_id: int, tanggal: date, batas: int) -> int:
         """
         Berapa nomor prioritas yang baru saja dipanggil berturut-turut.

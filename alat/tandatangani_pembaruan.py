@@ -7,8 +7,9 @@ Dijalankan pengembang di komputernya sendiri, SETELAH build-installer.ps1:
         dist\\Pembaruan-AntrianCRO.exe --kunci "D:\\sistemantrian kunci\\kunci-reset.pem"
 
 Menulis `Pembaruan-AntrianCRO.version` dan `Pembaruan-AntrianCRO.sig` di
-sebelah installer. Ketiganya disalin bersama ke folder `pembaruan` di
-komputer server. Kata sandi kunci ditanya lewat papan ketik dan tidak
+sebelah installer, serta `Pembaruan-AntrianCRO.catatan.txt` bila `--catatan`
+diberikan (teks "apa yang baru" untuk petugas). Semuanya disalin bersama ke
+folder `pembaruan` di komputer server. Kata sandi kunci ditanya lewat papan ketik dan tidak
 pernah ditulis ke mana pun.
 
 Berkas ini tidak memuat rahasia dan tidak ikut installer; kunci rahasia
@@ -29,10 +30,12 @@ sys.path.insert(0, str(AKAR))
 
 from app import __version__  # noqa: E402
 from app.services.pembaruan_windows import (  # noqa: E402
+    NAMA_CATATAN,
     NAMA_TANDA,
     NAMA_VERSI,
     InfoPembaruan,
     bagian_versi,
+    bersihkan_catatan,
     pesan_tanda_tangan,
     tanda_sah,
 )
@@ -52,6 +55,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--kunci", type=Path, required=True, help="kunci-reset.pem")
     parser.add_argument(
         "--versi", default=__version__, help=f"versi installer (bawaan {__version__})"
+    )
+    parser.add_argument(
+        "--catatan", type=Path, help="berkas teks catatan rilis (opsional, tidak ditandatangani)"
     )
     args = parser.parse_args(argv)
 
@@ -81,7 +87,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Versi {args.versi}, {ukuran} byte, SHA-256 {sha256}")
     print(f"Ditulis: {folder / NAMA_VERSI}")
     print(f"Ditulis: {folder / NAMA_TANDA}")
-    print("Salin installer, .version, dan .sig ke folder 'pembaruan' di komputer server.")
+    if args.catatan is not None:
+        catatan = bersihkan_catatan(args.catatan.read_text(encoding="utf-8-sig"))
+        (folder / NAMA_CATATAN).write_text(catatan + "\n", encoding="utf-8")
+        print(f"Ditulis: {folder / NAMA_CATATAN}")
+    print(
+        "Salin installer, .version, .sig (dan catatan bila ada) ke folder "
+        "'pembaruan' di komputer server."
+    )
     return 0
 
 

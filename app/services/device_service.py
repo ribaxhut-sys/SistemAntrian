@@ -52,6 +52,10 @@ KUNCI_TOKEN_BERSAMA = "kiosk.token_bersama_aktif"
 #: Satu nilai, bukan centang per perangkat: dua anjungan yang sama-sama
 #: bersuara mengulang pengumuman yang sama dengan selisih setengah detik.
 KUNCI_ANJUNGAN_BERSUARA = "kiosk.suara_panggilan_perangkat"
+#: Alamat IPv4 LAN tempat API anjungan mendengarkan; kosong = semua antarmuka.
+#: Dibaca proses API (tugas SYSTEM) saat menyala, jadi berubahnya baru berlaku
+#: setelah API dinyalakan ulang.
+KUNCI_ALAMAT_API = "kiosk.api_alamat"
 
 
 def hash_token(token: str) -> str:
@@ -152,6 +156,28 @@ def token_bersama_aktif() -> bool:
             sa.select(ApplicationSetting).where(ApplicationSetting.key == KUNCI_TOKEN_BERSAMA)
         )
         return baris is None or baris.value.strip().lower() not in {"false", "0", "tidak"}
+
+
+def alamat_api_tersimpan() -> str:
+    """Alamat yang dipilih admin di Layanan Anjungan, atau kosong."""
+    with session_scope() as session:
+        nilai = session.scalar(
+            sa.select(ApplicationSetting.value).where(ApplicationSetting.key == KUNCI_ALAMAT_API)
+        )
+    return (nilai or "").strip()
+
+
+def alamat_api_sah(alamat: str) -> bool:
+    """Kosong (semua antarmuka) atau IPv4 privat non-loopback."""
+    import ipaddress
+
+    if not alamat:
+        return True
+    try:
+        ip = ipaddress.IPv4Address(alamat)
+    except ValueError:
+        return False
+    return ip.is_private and not ip.is_loopback and not ip.is_unspecified
 
 
 def anjungan_bersuara() -> str:
@@ -583,6 +609,33 @@ class PerangkatService:
                 entity_type="setting",
                 key=KUNCI_TOKEN_BERSAMA,
                 value=nilai,
+            )
+
+    def alamat_api(self) -> str:
+        self.auth.require_permission(Permission.CONFIG_MANAGE)
+        return alamat_api_tersimpan()
+
+    def setel_alamat_api(self, alamat: str) -> None:
+        """Ikat API ke satu IPv4 LAN (kosong = semua antarmuka)."""
+        sesi = self.auth.require_permission(Permission.CONFIG_MANAGE)
+        alamat = (alamat or "").strip()
+        if not alamat_api_sah(alamat):
+            raise ValidationError("Alamat API harus IPv4 jaringan lokal, misalnya 192.168.1.10.")
+        with session_scope() as session:
+            baris = session.scalar(
+                sa.select(ApplicationSetting).where(ApplicationSetting.key == KUNCI_ALAMAT_API)
+            )
+            if baris is None:
+                session.add(ApplicationSetting(key=KUNCI_ALAMAT_API, value=alamat))
+            else:
+                baris.value = alamat
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="setting",
+                key=KUNCI_ALAMAT_API,
+                value=alamat or "semua antarmuka",
             )
 
     def anjungan_bersuara(self) -> str:

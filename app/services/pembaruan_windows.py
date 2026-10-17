@@ -42,6 +42,9 @@ NAMA_FOLDER = "pembaruan"
 NAMA_INSTALLER = "Pembaruan-AntrianCRO.exe"
 NAMA_VERSI = "Pembaruan-AntrianCRO.version"
 NAMA_TANDA = "Pembaruan-AntrianCRO.sig"
+#: Catatan rilis opsional, teks biasa, ditulis alat tanda tangan.
+NAMA_CATATAN = "Pembaruan-AntrianCRO.catatan.txt"
+BATAS_CATATAN = 1500
 #: Pemisah domain: kunci yang sama juga menandatangani pemulihan admin
 #: (`pemulihan_admin.DOMAIN`); tanda tangan satu jenis tidak boleh sah
 #: sebagai jenis lainnya.
@@ -64,6 +67,22 @@ class InfoPembaruan:
     sha256: str
     #: Tanda tangan Ed25519 (base64) atas `pesan_tanda_tangan`; "" bila tidak ada.
     tanda: str = ""
+    #: "Apa yang baru" untuk petugas. TIDAK ikut ditandatangani: hanya
+    #: keterangan yang ditampilkan sebagai teks biasa, bukan penentu apa
+    #: pun; installer tetap dijaga tanda tangan atas versi, ukuran, SHA-256.
+    catatan: str = ""
+
+
+def bersihkan_catatan(teks: str) -> str:
+    """Teks biasa tanpa karakter kendali, dipotong ke BATAS_CATATAN."""
+    baris = [
+        "".join(c for c in b if c == "\t" or c.isprintable()).rstrip()
+        for b in str(teks or "").strip().splitlines()
+    ]
+    bersih = "\n".join(baris).strip()
+    if len(bersih) > BATAS_CATATAN:
+        bersih = bersih[: BATAS_CATATAN - 1].rstrip() + "…"
+    return bersih
 
 
 def _path_status_lokal(config: AppConfig | None = None) -> Path:
@@ -247,7 +266,13 @@ def info_pembaruan(folder: Path) -> InfoPembaruan | None:
         # Tetap dibagikan: klien yang memegang kunci publik menolaknya
         # sendiri, dan Kesehatan/log server yang memberi tahu pemasang.
         tanda = ""
-    return InfoPembaruan(versi, installer, ukuran, sha256, tanda)
+    try:
+        catatan = bersihkan_catatan(
+            (folder / NAMA_CATATAN).read_text(encoding="utf-8-sig")
+        )
+    except (OSError, UnicodeDecodeError):
+        catatan = ""
+    return InfoPembaruan(versi, installer, ukuran, sha256, tanda, catatan)
 
 
 def alamat_api_pembaruan(config: AppConfig | None = None) -> str | None:
@@ -297,9 +322,10 @@ def periksa_pembaruan(
         if len(sha256) != 64 or any(c not in "0123456789abcdef" for c in sha256):
             return None
         tanda = str(data.get("signature") or "")
+        catatan = bersihkan_catatan(data.get("release_notes") or "")
     except (OSError, ValueError, KeyError, TypeError, AttributeError, json.JSONDecodeError):
         return None
-    info = InfoPembaruan(versi, Path(NAMA_INSTALLER), ukuran, sha256, tanda)
+    info = InfoPembaruan(versi, Path(NAMA_INSTALLER), ukuran, sha256, tanda, catatan)
     if kunci.strip() and not tanda_sah(info, kunci):
         logger.warning(
             "Pembaruan %s dari server diabaikan: tanda tangan %s",

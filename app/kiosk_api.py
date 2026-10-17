@@ -560,6 +560,8 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             # Tanda tangan pengembang atas tiga nilai di atas; klien
             # memverifikasinya dengan kunci publik tertanam.
             "signature": info.tanda,
+            # Teks biasa "apa yang baru"; tidak ditandatangani.
+            "release_notes": info.catatan,
         }
 
     @app.get("/v1/windows/update/download")
@@ -1282,6 +1284,65 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
     return app
 
 
+def pilih_alamat_dengar(
+    dari_env: str | None, tersimpan: str, alamat_lokal: list[str]
+) -> list[str]:
+    """
+    Alamat tempat API mendengarkan.
+
+    `ANTRIAN_KIOS_API_HOST` (bila diisi) menang, untuk pengembangan. Alamat
+    pilihan admin dipakai bersama 127.0.0.1: pemeriksa kesehatan, status
+    bar, dan pencegah proses ganda di komputer server mengetuk 127.0.0.1.
+    Alamat yang tidak lagi dimiliki komputer ini (DHCP memberi IP lain)
+    TIDAK membuat API mati: kembali ke semua antarmuka dengan peringatan,
+    karena tablet yang tidak dapat mengambil nomor lebih buruk daripada
+    API yang mendengar di antarmuka lebih banyak dari seharusnya.
+    """
+    if dari_env:
+        return [dari_env]
+    if tersimpan:
+        if tersimpan in alamat_lokal:
+            return [tersimpan, "127.0.0.1"]
+        logger.warning(
+            "Alamat API %s tidak ada di komputer ini (alamat: %s); "
+            "API mendengar di semua antarmuka. Perbarui di Layanan Anjungan.",
+            tersimpan,
+            ", ".join(alamat_lokal) or "-",
+        )
+    return ["0.0.0.0"]
+
+
+def _alamat_ipv4_komputer() -> list[str]:
+    try:
+        return sorted(
+            {
+                info[4][0]
+                for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
+            }
+        )
+    except OSError:
+        return []
+
+
+def _jalankan_uvicorn(app: FastAPI, alamat: list[str], port: int) -> None:
+    if len(alamat) == 1:
+        uvicorn.run(app, host=alamat[0], port=port, log_config=None)
+        return
+    # Beberapa alamat sekaligus: soket disiapkan sendiri, lalu diserahkan
+    # ke satu server uvicorn.
+    soket = []
+    try:
+        for host in alamat:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.bind((host, port))
+            soket.append(s)
+        server = uvicorn.Server(uvicorn.Config(app, log_config=None))
+        server.run(sockets=soket)
+    finally:
+        for s in soket:
+            s.close()
+
+
 def serve() -> int:
     """Serve the authenticated LAN kiosk API using an initialized database."""
     # Task Scheduler menjalankan proses ini tanpa environment petugas, jadi
@@ -1302,8 +1363,19 @@ def serve() -> int:
     try:
         services = KioskServices()
         app = create_app(token, services)
-        host = os.environ.get("ANTRIAN_KIOS_API_HOST", "0.0.0.0")
         port = int(os.environ.get("ANTRIAN_KIOS_API_PORT", "8765"))
+        try:
+            from app.services.device_service import alamat_api_tersimpan
+
+            tersimpan = alamat_api_tersimpan()
+        except Exception:  # noqa: BLE001 - tanpa pilihan admin: perilaku lama
+            logger.warning("Alamat API pilihan admin tidak terbaca", exc_info=True)
+            tersimpan = ""
+        alamat = pilih_alamat_dengar(
+            os.environ.get("ANTRIAN_KIOS_API_HOST", "").strip() or None,
+            tersimpan,
+            _alamat_ipv4_komputer(),
+        )
         discovery_port = int(
             os.environ.get("ANTRIAN_KIOS_DISCOVERY_PORT", str(DISCOVERY_PORT))
         )
@@ -1325,14 +1397,14 @@ def serve() -> int:
             daemon=True,
         ).start()
         logger.info(
-            "API anjungan dimulai pada %s:%s; pencarian LAN UDP %s "
+            "API anjungan dimulai pada %s port %s; pencarian LAN UDP %s "
             "(revisi database %s)",
-            host,
+            ", ".join(alamat),
             port,
             discovery_port,
             current_revision(),
         )
-        uvicorn.run(app, host=host, port=port, log_config=None)
+        _jalankan_uvicorn(app, alamat, port)
         return 0
     except Exception:
         logger.exception("API anjungan berhenti karena kesalahan")

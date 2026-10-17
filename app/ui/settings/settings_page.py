@@ -329,6 +329,7 @@ class _DaftarPutar(QWidget):
             self,
             self._butir(nama),
             gambar=Path(nama).suffix.lower() not in EKSTENSI_VIDEO,
+            berkas=folder_media_kios() / nama,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return

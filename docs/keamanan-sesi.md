@@ -201,10 +201,42 @@ Administrator. ACL tambahan sengaja tidak dipasang: berisiko memutus tugas
 SYSTEM yang membaca token. Pengecualian: menjalankan dari kode di drive lain
 (mis. `D:\SistemAntrian\data`) mengikuti izin drive tersebut.
 
+## Enkripsi salinan backup kedua
+
+Keputusan pemilik (17 Oktober 2026): **backup di server tetap polos**
+(pemulihan cepat); yang dienkripsi hanya **salinan kedua** (folder lain atau
+flashdisk, `backup.salinan_folder`), karena salinan itulah yang dibawa pergi.
+
+- **Backup › Atur Sandi Salinan…** (minimal 12 karakter). Kata sandi **tidak
+  disimpan**: dari sandi diturunkan pasangan kunci X25519 (scrypt N=2^15);
+  database hanya menyimpan kunci publik + garam (`backup.salinan_kunci_enkripsi`).
+  Backup otomatis cukup memakai kunci publik.
+- Salinan menjadi `<nama>.dump.antrianenc` (AES-256-GCM per potongan 1 MiB,
+  urutan dan akhir berkas dilindungi). Tidak ada salinan polos maupun
+  `.sha256` di folder kedua selama sandi diatur; sidik SHA-256 ada di kepala
+  berkas. Retensi ikut menghapus salinan terenkripsi yang kedaluwarsa.
+- **Buka Salinan Terenkripsi…**: berkas dibuka ke folder backup sebagai backup
+  biasa (beserta `.sha256`), lalu **Uji Backup** dan **Pulihkan** seperti biasa.
+- **Sandi hilang = salinan terenkripsi tidak dapat dibuka.** Backup di server
+  tidak terpengaruh. Mengganti sandi tidak mengubah salinan lama (tetap
+  terbuka dengan sandi lamanya). Kode: `app/services/sandi_backup.py`.
+
+## Alamat API anjungan
+
+- **Layanan Anjungan › Dengarkan di**: *Semua antarmuka (bawaan)* atau satu
+  IPv4 LAN komputer ini (`kiosk.api_alamat`). Berlaku setelah **Pasang ulang
+  & nyalakan ulang**.
+- Dengan IP terpilih, API mendengar di IP itu **dan 127.0.0.1** (pemeriksa
+  kesehatan dan status bar di server mengetuk 127.0.0.1).
+- Bila IP terpilih tidak lagi dimiliki komputer (DHCP), API **kembali ke semua
+  antarmuka** dan mencatat peringatan di log, supaya tablet tidak putus.
+  Beri IP tetap pada server sebelum memakai pilihan ini.
+- `ANTRIAN_KIOS_API_HOST` tetap menang (pengembangan). Pencarian UDP 8766
+  tetap di semua antarmuka (siaran LAN). Firewall tetap `LocalSubnet`.
+
 ## Yang sengaja belum dikerjakan
 
 - Parameter scrypt tidak dinaikkan (menambah waktu hash pada seluruh login
   dan suite tes); perlu pengukuran lebih dulu.
-- Matikan token bersama API kiosk dan ikat API ke IP LAN: langkah operasional
-  di Layanan Anjungan dan pada lingkungan server (peringatannya sudah ada di
-  Kesehatan Sistem).
+- Mematikan token bersama: langkah operasional di Layanan Anjungan setelah
+  semua tablet dipasangkan (peringatannya ada di Kesehatan Sistem).

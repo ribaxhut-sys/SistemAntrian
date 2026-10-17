@@ -284,6 +284,46 @@ def _median_terbaru(sampel: list[tuple[date, float]], hari_ini: date) -> float |
     return None
 
 
+#: Jendela pengamatan laju kedatangan nomor prioritas untuk perkiraan tunggu.
+JENDELA_LAJU_PRIORITAS = timedelta(minutes=60)
+
+
+def sisipan_prioritas(
+    dasar_detik: float,
+    *,
+    laju_per_detik: float,
+    lama_per_orang: float,
+    loket: int,
+    rasio: int,
+    biasa_di_depan: int,
+) -> float:
+    """
+    Tambahan tunggu nomor BIASA karena nomor prioritas yang datang nanti.
+
+    Urutan saat tiket dicetak sudah memperhitungkan prioritas yang SEDANG
+    menunggu. Prioritas yang datang selama pemegang tiket menunggu juga
+    menyalip (3 prioritas : 1 biasa), sehingga perkiraan polos terlalu
+    rendah bila banyak lansia/disabilitas datang. Banyaknya penyalip
+    diperkirakan dari laju kedatangan prioritas satu jam terakhir dikali
+    lama menunggu, dan dibatasi rasio: sebelum giliran tiket ini paling
+    banyak `rasio` prioritas per nomor biasa di depannya (ditambah satu
+    giliran untuk tiket ini sendiri). Dua putaran cukup: tunggu yang
+    bertambah mendatangkan sedikit penyalip lagi, bukan deret tak berujung.
+    """
+    if laju_per_detik <= 0 or lama_per_orang <= 0 or loket <= 0:
+        return 0.0
+    batas = rasio * (biasa_di_depan + 1) if rasio > 0 else None
+    tunggu = dasar_detik
+    tambahan = 0.0
+    for _ in range(2):
+        penyalip = laju_per_detik * tunggu
+        if batas is not None:
+            penyalip = min(penyalip, float(batas))
+        tambahan = penyalip * lama_per_orang / loket
+        tunggu = dasar_detik + tambahan
+    return tambahan
+
+
 def _lama_layanan_tipikal(
     sampel: list[tuple[int, date, float]], hari_ini: date
 ) -> tuple[dict[int, float], float | None]:
@@ -870,16 +910,20 @@ class QueueService:
                     break
                 jangkauan.update(c.id for c in counter.categories)
 
+            rasio = self.rasio_prioritas()
             di_depan: list[int] = []
+            biasa_di_depan = 0
             for antre in repo.list_menunggu_berurutan(
                 sesi.branch_id,
                 antrian.queue_date,
-                rasio=self.rasio_prioritas(),
+                rasio=rasio,
                 category_ids=jangkauan,
             ):
                 if antre.id == antrian.id:
                     break
                 di_depan.append(antre.category_id)
+                if not antre.prioritas:
+                    biasa_di_depan += 1
             else:
                 # Tidak lagi menunggu — cetak ulang tiket yang sudah
                 # dipanggil. Tanpa ini SEMUA yang menunggu terhitung di depan.
@@ -891,6 +935,16 @@ class QueueService:
                 repo.sampel_lama_layanan(sesi.branch_id, antrian.queue_date),
                 antrian.queue_date,
             )
+            # Nomor prioritas mengikuti urutan datang di kelompoknya sendiri;
+            # yang datang belakangan tidak menyalipnya.
+            prioritas_baru = 0
+            if not antrian.prioritas and gabungan is not None:
+                prioritas_baru = repo.jumlah_prioritas_terbit_sejak(
+                    sesi.branch_id,
+                    antrian.queue_date,
+                    clock.now() - JENDELA_LAJU_PRIORITAS,
+                    category_ids=jangkauan,
+                )
 
         total = 0.0
         for kategori in di_depan:
@@ -898,7 +952,17 @@ class QueueService:
             if lama is None:
                 return None
             total += lama
-        return total / len(melayani)
+        dasar = total / len(melayani)
+        if not prioritas_baru:
+            return dasar
+        return dasar + sisipan_prioritas(
+            dasar,
+            laju_per_detik=prioritas_baru / JENDELA_LAJU_PRIORITAS.total_seconds(),
+            lama_per_orang=gabungan,
+            loket=len(melayani),
+            rasio=rasio,
+            biasa_di_depan=biasa_di_depan,
+        )
 
     def display_state(
         self,

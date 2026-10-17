@@ -312,6 +312,7 @@ def test_api_membagikan_installer_windows(monkeypatch, tmp_path):
         "size": len(isi),
         "sha256": hashlib.sha256(isi).hexdigest(),
         "signature": "dGFuZGE=",
+        "release_notes": "",
     }
     assert unduhan.status_code == 200
     assert unduhan.content == isi

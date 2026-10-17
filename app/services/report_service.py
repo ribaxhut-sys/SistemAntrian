@@ -212,6 +212,32 @@ class ReportService:
             nama_petugas=sesi.full_name,
         )
 
+    def catat_unduhan(self, laporan: Laporan, format_berkas: str) -> None:
+        """
+        Catat bahwa laporan ini baru saja disimpan ke berkas.
+
+        Hak yang diminta sama dengan hak menyusunnya: laporan pribadi oleh
+        CRO, laporan cabang oleh pemegang REPORT_VIEW. Nama/letak berkas
+        tidak dicatat; folder pribadi petugas bukan urusan audit.
+        """
+        from app.core.database import session_scope
+        from app.models import AuditAction
+        from app.services import audit_service
+
+        hak = Permission.QUEUE_CALL if laporan.nama_petugas else Permission.REPORT_VIEW
+        sesi = self.auth.require_permission(hak)
+        with session_scope() as session:
+            audit_service.record(
+                session,
+                AuditAction.EXPORT_REPORT,
+                user_id=sesi.user_id,
+                entity_type="laporan",
+                format=format_berkas,
+                cakupan="pribadi" if laporan.nama_petugas else "cabang",
+                dari=laporan.dari.isoformat(),
+                sampai=laporan.sampai.isoformat(),
+            )
+
     def _susun(
         self,
         dari: date,

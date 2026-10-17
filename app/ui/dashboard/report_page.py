@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core import clock
+from app.core.logger import get_logger
 from app.services.report_export import ekspor_excel, ekspor_pdf, nama_berkas_bawaan
 from app.services.report_service import (
     JUDUL_TABEL,
@@ -42,6 +43,8 @@ from app.services.report_service import (
 from app.ui.common import judul, keterangan, pesan_untuk_user, tampilkan_peringatan, tombol
 from app.ui.dashboard.dashboard_page import KartuAngka
 from app.ui.style import DANGER, SUCCESS, TEXT, WARNING
+
+logger = get_logger("laporan")
 
 WARNA_ANGKA = (TEXT, SUCCESS, DANGER, TEXT, TEXT, WARNING)
 
@@ -289,6 +292,10 @@ class LaporanPage(QWidget):
             QApplication.restoreOverrideCursor()
             self.ekspor_pdf.setEnabled(self.laporan is not None)
             self.ekspor_excel.setEnabled(self.laporan is not None)
+        try:
+            self.layanan.catat_unduhan(self.laporan, akhiran)
+        except Exception:  # noqa: BLE001 - berkas sudah tersimpan; audit pelengkap
+            logger.warning("Unduhan laporan gagal dicatat di audit", exc_info=True)
         jenis = "PDF" if akhiran == "pdf" else "Excel"
         self.status_ekspor.setText(f"{jenis} tersimpan: {tujuan.name}")
         self.status_ekspor.setToolTip(str(tujuan))

@@ -294,3 +294,58 @@ def test_menu_laporan_saya_hanya_untuk_cro(qtbot, auth, antrian_siap):
 
     assert "Laporan Saya" in menu
     assert "Laporan" not in menu
+
+
+def _audit_unduhan():
+    import json
+
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import AuditAction, AuditLog
+
+    with session_scope() as s:
+        return [
+            (user_id, json.loads(meta))
+            for user_id, meta in s.execute(
+                sa.select(AuditLog.user_id, AuditLog.meta)
+                .where(AuditLog.action == AuditAction.EXPORT_REPORT.value)
+                .order_by(AuditLog.id)
+            )
+        ]
+
+
+def test_unduhan_laporan_tercatat_siapa_dan_cakupannya(auth, users, antrian_siap):
+    from app.services.report_service import ReportService
+
+    hari = clock.today()
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    layanan = ReportService(auth)
+    layanan.catat_unduhan(layanan.laporan(hari, hari), "pdf")
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    layanan = ReportService(auth)
+    layanan.catat_unduhan(layanan.laporan_petugas(hari, hari), "xlsx")
+
+    (admin, cro) = _audit_unduhan()
+    assert admin[0] == users["ADMIN"]
+    assert admin[1]["cakupan"] == "cabang" and admin[1]["format"] == "pdf"
+    assert cro[0] == users["CRO"]
+    assert cro[1]["cakupan"] == "pribadi" and cro[1]["format"] == "xlsx"
+    assert cro[1]["dari"] == hari.isoformat()
+
+
+def test_cro_tidak_dapat_mencatat_unduhan_laporan_cabang(auth, antrian_siap):
+    from app.services.report_service import ReportService
+
+    hari = clock.today()
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    cabang = ReportService(auth).laporan(hari, hari)
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    with pytest.raises(AuthorizationError):
+        ReportService(auth).catat_unduhan(cabang, "pdf")

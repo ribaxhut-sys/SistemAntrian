@@ -612,6 +612,7 @@ class JadwalIklanDialog(_DialogIsian):
         butir: daftar_putar.Butir,
         *,
         gambar: bool,
+        berkas: Path | None = None,
     ) -> None:
         super().__init__(
             parent,
@@ -649,6 +650,22 @@ class JadwalIklanDialog(_DialogIsian):
         )
         self.form.addRow("Tampil di", self.tampil)
 
+        # Bentuk berkas terhadap tempat tampilnya: dibaca sekali dari kepala
+        # berkas, peringatannya mengikuti pilihan "Tampil di".
+        from app.services.ukuran_media import ukuran_media
+
+        self._ukuran = ukuran_media(berkas) if berkas is not None else None
+        self.label_ukuran = QLabel()
+        self.label_ukuran.setWordWrap(True)
+        self.peringatan_rasio = QLabel()
+        self.peringatan_rasio.setWordWrap(True)
+        self.peringatan_rasio.setStyleSheet("color: #92400e;")
+        if berkas is not None:
+            self.form.addRow("Ukuran", self.label_ukuran)
+            self.form.addRow("", self.peringatan_rasio)
+        self.tampil.currentIndexChanged.connect(self._perbarui_rasio)
+        self._perbarui_rasio()
+
         self.detik = QSpinBox()
         # Satu di bawah batas bawah berarti "ikut pengaturan umum".
         self.detik.setRange(daftar_putar.DETIK_MIN - 1, daftar_putar.DETIK_MAKS)
@@ -660,6 +677,16 @@ class JadwalIklanDialog(_DialogIsian):
         else:
             # Video selalu diputar sampai selesai.
             self.detik.setVisible(False)
+
+    def _perbarui_rasio(self) -> None:
+        from app.services.ukuran_media import keterangan_rasio
+
+        keterangan, peringatan = keterangan_rasio(
+            self._ukuran, self.tampil.currentData() or daftar_putar.TAMPIL_KEDUANYA
+        )
+        self.label_ukuran.setText(keterangan)
+        self.peringatan_rasio.setText(f"⚠ {peringatan}" if peringatan else "")
+        self.peringatan_rasio.setVisible(bool(peringatan))
 
     @staticmethod
     def _kotak_tanggal(nilai, cadangan: QDate) -> QDateEdit:

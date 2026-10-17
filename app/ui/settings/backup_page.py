@@ -9,11 +9,15 @@ dan menyebut secara terbuka apa yang akan hilang.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
+    QLineEdit,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -22,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services import audit_service
+from app.services import sandi_backup
 from app.services.backup_service import BackupInfo, BackupService
 from app.ui.common import (
     jalankan_aman,
@@ -111,6 +116,25 @@ class BackupPage(QWidget):
         baris.addStretch()
         susunan.addLayout(baris)
 
+        # Salinan kedua (folder lain/flashdisk) dibawa keluar server; backup
+        # di server sendiri tetap polos supaya pemulihan cepat.
+        baris_salinan = QHBoxLayout()
+        baris_salinan.setSpacing(8)
+        self.label_enkripsi = keterangan("")
+        self.label_enkripsi.setWordWrap(True)
+        baris_salinan.addWidget(self.label_enkripsi, stretch=1)
+        self.tombol_sandi = tombol("Atur Sandi Salinan…")
+        self.tombol_sandi.clicked.connect(self.atur_sandi_salinan)
+        baris_salinan.addWidget(self.tombol_sandi)
+        self.tombol_buka = tombol("Buka Salinan Terenkripsi…")
+        self.tombol_buka.setToolTip(
+            "Buka berkas .antrianenc ke folder backup, lalu uji atau pulihkan "
+            "seperti backup lain."
+        )
+        self.tombol_buka.clicked.connect(self.buka_salinan)
+        baris_salinan.addWidget(self.tombol_buka)
+        susunan.addLayout(baris_salinan)
+
         self.tabel_backup = QTableWidget(0, 4)
         self.tabel_backup.setHorizontalHeaderLabels(
             ["Berkas", "Dibuat", "Ukuran", "Checksum"]
@@ -167,6 +191,7 @@ class BackupPage(QWidget):
     def muat_ulang(self) -> None:
         self.label_folder.setText(f"Folder backup: {self.backup.folder}")
         self._muat_status()
+        self._muat_enkripsi()
         self._muat_backup()
         self._muat_audit()
 
@@ -191,6 +216,29 @@ class BackupPage(QWidget):
             warna = DANGER
         self.label_status.setText(teks)
         self.label_status.setStyleSheet(f"color: {warna};")
+
+    def _muat_enkripsi(self) -> None:
+        berhasil, aktif = jalankan_aman(
+            self, self.backup.salinan_terenkripsi, "Gagal membaca pengaturan enkripsi"
+        )
+        if not berhasil:
+            return
+        folder = self.backup.folder_salinan
+        if folder is None:
+            teks = "Salinan kedua belum diatur (Pengaturan › Backup)."
+        elif aktif:
+            teks = f"Salinan kedua di {folder} DIENKRIPSI dengan kata sandi salinan."
+        else:
+            teks = f"Salinan kedua di {folder} belum dienkripsi."
+        self.label_enkripsi.setText(teks)
+        self.tombol_sandi.setText("Ganti Sandi Salinan…" if aktif else "Atur Sandi Salinan…")
+
+    def _minta_sandi(self, judul_dialog: str, label: str) -> str | None:
+        """Satu isian kata sandi tersamar; None bila dibatalkan."""
+        teks, ok = QInputDialog.getText(
+            self, judul_dialog, label, QLineEdit.EchoMode.Password
+        )
+        return teks if ok else None
 
     def _muat_backup(self) -> None:
         berhasil, data = jalankan_aman(
@@ -292,6 +340,63 @@ class BackupPage(QWidget):
             "Tidak ada backup yang kedaluwarsa."
             if jumlah == 0
             else f"{jumlah} backup kedaluwarsa dihapus.",
+        )
+        self.muat_ulang()
+
+    def atur_sandi_salinan(self) -> None:
+        if not konfirmasi(
+            self,
+            "Salinan backup berikutnya di folder kedua akan dienkripsi.\n\n"
+            "Kata sandi ini TIDAK disimpan di mana pun. Bila hilang, salinan "
+            "terenkripsi tidak dapat dibuka lagi (backup di server tidak "
+            "terpengaruh). Catat dan simpan di tempat aman.",
+            "Sandi Salinan Backup",
+        ):
+            return
+        sandi = self._minta_sandi(
+            "Sandi Salinan Backup",
+            f"Kata sandi baru (minimal {sandi_backup.MIN_PANJANG_SANDI} karakter):",
+        )
+        if not sandi:
+            return
+        ulang = self._minta_sandi("Sandi Salinan Backup", "Ulangi kata sandi:")
+        if ulang is None:
+            return
+        if ulang != sandi:
+            tampilkan_peringatan(self, "Ulangan kata sandi tidak sama.", "Sandi Salinan Backup")
+            return
+        berhasil, _ = jalankan_aman(
+            self,
+            lambda: self.backup.atur_sandi_salinan(sandi),
+            "Gagal mengatur sandi salinan",
+        )
+        if berhasil:
+            tampilkan_info(self, "Salinan backup berikutnya akan dienkripsi.")
+            self._muat_enkripsi()
+
+    def buka_salinan(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Buka salinan backup terenkripsi",
+            str(self.backup.folder_salinan or Path.home()),
+            f"Salinan terenkripsi (*{sandi_backup.AKHIRAN})",
+        )
+        if not path:
+            return
+        sandi = self._minta_sandi("Buka Salinan Backup", "Kata sandi salinan:")
+        if not sandi:
+            return
+        berhasil, info = jalankan_aman(
+            self,
+            lambda: self.backup.buka_salinan_terenkripsi(path, sandi),
+            "Gagal membuka salinan",
+        )
+        if not berhasil or info is None:
+            return
+        tampilkan_info(
+            self,
+            f"Salinan dibuka sebagai {info.nama}. Pilih di daftar lalu tekan Uji "
+            "Backup sebelum memulihkan.",
         )
         self.muat_ulang()
 

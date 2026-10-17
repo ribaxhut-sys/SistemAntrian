@@ -323,9 +323,7 @@ dengan `error: closed`):
 
 **Pekerjaan yang sudah disepakati tetapi belum dibuat:**
 
-- Pratinjau/peringatan rasio video terhadap tempat tampilnya.
-- Perkiraan tunggu di tiket masih menghitung urutan datang (bisa sedikit
-  terlalu rendah untuk nomor biasa yang disisipi prioritas).
+- Ekspor laporan di latar belakang (data besar).
 - Merge/PR cabang ke `main`.
 
 **Hal yang perlu tindakan manusia:**
@@ -363,8 +361,10 @@ sudah ditutup:
 - Juga: Kesehatan Sistem › **Kata sandi bawaan** dan **Pembaruan Windows di
   server**; job CI **Audit dependency** (`pip-audit==2.9.0 --no-deps`);
   `backup/*.bundle` di `.gitignore`.
-- **Menunggu keputusan pemilik:** enkripsi berkas backup; mematikan token
-  bersama dan mengikat API ke IP LAN (langkah operasional).
+- Keputusan pemilik 17 Okt: enkripsi **hanya salinan kedua**; alamat API
+  **dipilih admin** di Layanan Anjungan (bawaan semua antarmuka). Keduanya
+  sudah dibuat (lihat di bawah dan keamanan-sesi.md). Mematikan token bersama
+  tetap langkah operasional.
 
 **Pekerjaan 17 Oktober 2026 (Codex, dilanjutkan Claude)** — terhenti di tengah
 karena batas pemakaian Codex habis pukul 17:37; Claude menambah tes tahap
@@ -391,9 +391,27 @@ terakhir dan meng-commit-nya.
 - **Android (APK debug saja, belum diuji di perangkat, `apk/` tidak disentuh)**:
   tata letak tiga kolom bila lebar ÷ tinggi > 2,5; pilihan video **Pas/Isi** per
   tablet (`skala_video`); executor `pembuatThumbnail` dimatikan di `onDestroy`.
-- **Belum dikerjakan dari rencana Codex**: perkiraan tunggu yang memperhitungkan
-  prioritas, pratinjau rasio video, catatan rilis, ekspor laporan di latar,
-  riwayat pengunduh laporan, enkripsi backup, bind API ke IP LAN.
+- **Belum dikerjakan dari rencana Codex**: ekspor laporan di latar belakang.
+
+**Sisa pekerjaan 17 Oktober 2026 (Claude)**:
+
+- **Perkiraan tunggu** nomor biasa ditambah perkiraan penyalip prioritas:
+  laju prioritas terbit 60 menit terakhir × lama tunggu, dibatasi rasio
+  (`sisipan_prioritas`, `QueueRepository.jumlah_prioritas_terbit_sejak`).
+  Nomor prioritas tidak berubah.
+- **Ukuran media di Atur jadwal…**: lebar × tinggi dan rasio (gambar via
+  Pillow, MP4/MOV/3GP/M4V dari kotak `tkhd`, termasuk rotasi ponsel);
+  peringatan bila berkas tegak dipakai di panel atas
+  (`app/services/ukuran_media.py`). MKV/WebM/AVI: "tidak terbaca".
+- **Audit unduhan laporan** `EXPORT_REPORT` (format, cakupan cabang/pribadi,
+  rentang tanggal; tanpa nama/letak berkas) lewat `ReportService.catat_unduhan`.
+- **Catatan rilis**: `Pembaruan-AntrianCRO.catatan.txt` (opsional, `--catatan`
+  di alat tanda tangan) → `release_notes` di API → tombol **Apa yang baru?**
+  di pita pembaruan (teks biasa, tidak ditandatangani).
+- **Enkripsi salinan backup kedua** dan **alamat API pilihan admin**:
+  rinci di keamanan-sesi.md.
+- Tes backup PostgreSQL di komputer ini butuh `C:\Program Files\PostgreSQL\17\bin`
+  di PATH; tanpa itu tes backup **dilewati** (bukan lulus).
 
 **Temuan audit Codex 16 Oktober 2026 (sisa yang belum diperbaiki):**
 
@@ -567,6 +585,7 @@ menyeret APK ke jendela BlueStacks. Tangkapan layar:
 | 2026-10-17 | Codex | Audit pengalaman pembaruan Windows untuk admin dan petugas; saran pembedaan alur peran dicatat di bagian 6. |
 | 2026-10-17 | Codex | Alur pembaruan admin/petugas dibuat dua tahap dengan progres, pemeriksaan ruang disk, dan pengunci pelayanan aktif. |
 | 2026-10-17 | Codex | Laporan Saya PDF/Excel ditambahkan untuk CRO; ekspor admin/petugas memakai status sebaris dan penyimpanan atomik. |
+| 2026-10-17 | Claude | Sisa pekerjaan: perkiraan tunggu + prioritas, ukuran media, audit unduhan laporan, catatan rilis, enkripsi salinan backup, alamat API (bagian 6). |
 | 2026-10-17 | Codex → Claude | Tanpa SQLite, polling anjungan, pembaruan lanjut/tunda/audit, versi PC, laporan prioritas, Android memanjang; Codex terhenti (batas pemakaian), Claude menambah tes versi PC + meta login dan meng-commit (bagian 6). |
 
 Saat menutup sesi: perbarui bagian 3 (keadaan, commit, versi), 6 (belum
