@@ -16,7 +16,8 @@ jebakan; bagian riwayat commit-nya sudah lama), [istilah.md](istilah.md),
 [layar-antrian.md](layar-antrian.md), [prioritas-antrian.md](prioritas-antrian.md),
 [keamanan-sesi.md](keamanan-sesi.md).
 
-Terakhir diperbarui: **17 Oktober 2026**, oleh Codex.
+Terakhir diperbarui: **17 Oktober 2026**, oleh Claude (melanjutkan sesi Codex
+yang terhenti karena batas pemakaian).
 
 ---
 
@@ -128,6 +129,8 @@ commit berikut di atas `main`:
 | `eea7ab2` | Dokumentasi serah terima untuk Codex dan Claude |
 | `338783c` | PIN pengaturan anjungan di server (hash, verifikasi, dialog admin) |
 | (berikutnya) | Android: papan PIN, mode putar saja, tempat tampil folder tablet |
+| `2f03a22` | Keamanan (pembaruan bertanda tangan, PIN, kode pasang), alur pembaruan admin/petugas, Laporan Saya |
+| (commit 17 Okt) | Tanpa SQLite, polling anjungan ≤ 10 SQL, pembaruan lanjut-unduh/tunda/audit hasil, versi PC di Kesehatan, laporan prioritas, mode memanjang + Pas/Isi (Android) |
 
 **Versi.**
 
@@ -320,12 +323,7 @@ dengan `error: closed`):
 
 **Pekerjaan yang sudah disepakati tetapi belum dibuat:**
 
-- **Mode "memanjang" untuk anjungan** (panel ±4,4 : 1): tiga bagian
-  (judul+loket, layanan, hasil nomor) saat ini **bertumpuk vertikal**;
-  usul: berdampingan bila lebar ÷ tinggi > 2,5.
-- Opsi `kiosk.video_skala` = pas/isi (saat ini hanya *pas*).
 - Pratinjau/peringatan rasio video terhadap tempat tampilnya.
-- Laporan: jumlah dan rata-rata tunggu nomor prioritas, jumlah dicabut.
 - Perkiraan tunggu di tiket masih menghitung urutan datang (bisa sedikit
   terlalu rendah untuk nomor biasa yang disisipi prioritas).
 - Merge/PR cabang ke `main`.
@@ -368,22 +366,41 @@ sudah ditutup:
 - **Menunggu keputusan pemilik:** enkripsi berkas backup; mematikan token
   bersama dan mengikat API ke IP LAN (langkah operasional).
 
+**Pekerjaan 17 Oktober 2026 (Codex, dilanjutkan Claude)** — terhenti di tengah
+karena batas pemakaian Codex habis pukul 17:37; Claude menambah tes tahap
+terakhir dan meng-commit-nya.
+
+- **SQLite dihapus dari aplikasi**, bukan hanya dari tes: `AppConfig` menolak
+  URL kosong atau selain PostgreSQL; pilihan "satu komputer" hilang dari dialog
+  mesin. Pemasangan lama bermode satu komputer **diarahkan ke dialog koneksi**
+  saat dibuka. Penjaga di `tests/conftest.py` membaca `~/.antrian-uji-db` dan
+  menolak apa pun selain PostgreSQL bernama tepat `antrian_uji`;
+  `test-postgres.ps1` diperbaiki (sebelumnya `antrian_test`).
+- **Polling `/v1/kiosk/display` ≤ 10 pernyataan SQL** (dari 41): satu cuplikan
+  pengaturan, daftar menunggu/prioritas dibaca sekali
+  (`tests/test_tiket_anjungan.py::test_polling_layar_anjungan_tidak_mengulang_query_yang_sama`).
+- **Pembaruan Windows**: lanjut-unduh berkas `.exe.tmp`, **Tunda sampai besok**
+  per versi (`pembaruan-lokal.json` di folder data), dan audit
+  `WINDOWS_UPDATE_RESULT` sekali setelah aplikasi hidup kembali.
+- **Versi PC di Kesehatan Sistem**: audit `LOGIN` kini menyimpan `komputer`
+  (hostname) dan `versi_aplikasi`; `_periksa_komputer_windows` menampilkan satu
+  baris per PC dari login terbaru 30 hari terakhir (versi lama = PERINGATAN).
+  PC yang belum login dengan versi ini belum terlihat.
+- **Laporan**: jumlah prioritas, prioritas dicabut, rata-rata tunggu prioritas,
+  penanda per nomor di Excel/PDF.
+- **Android (APK debug saja, belum diuji di perangkat, `apk/` tidak disentuh)**:
+  tata letak tiga kolom bila lebar ÷ tinggi > 2,5; pilihan video **Pas/Isi** per
+  tablet (`skala_video`); executor `pembuatThumbnail` dimatikan di `onDestroy`.
+- **Belum dikerjakan dari rencana Codex**: perkiraan tunggu yang memperhitungkan
+  prioritas, pratinjau rasio video, catatan rilis, ekspor laporan di latar,
+  riwayat pengunduh laporan, enkripsi backup, bind API ke IP LAN.
+
 **Temuan audit Codex 16 Oktober 2026 (sisa yang belum diperbaiki):**
 
-- `GET /v1/kiosk/display` terukur menjalankan **41 pernyataan SQL** per polling
-  pada PostgreSQL uji. Android memanggilnya tiap 5 detik, atau tiap 1 detik saat
-  iklan penuh dan interupsi panggilan aktif. Pengaturan perlu dibaca sekali,
-  hasil antrian prioritas dipakai ulang, dan respons statis layak di-cache.
 - Dua tes layout stabil gagal pada 1366 x 768: kelompok **Iklan Anjungan**
   membutuhkan gulir vertikal 287 px pada mode loket maupun server. Dua tes
   Pelayanan lain sempat gagal saat suite gabungan tetapi lulus saat diulang
   terarah, menunjukkan state global tema/layout masih bergantung urutan tes.
-- `MainActivity` anjungan membuat executor `pembuatThumbnail`, tetapi tidak
-  mematikannya di `onDestroy`; executor lain sudah dimatikan.
-- Infrastruktur tes masih berbawaan SQLite (`tests/conftest.py` dan
-  `test-postgres.ps1` bahkan menyebut tes harian SQLite), bertentangan dengan
-  aturan proyek. Audit pertama sempat jatuh ke SQLite sebelum dikoreksi. Tambah
-  penjaga fail-fast agar pytest menolak selain PostgreSQL `antrian_uji`.
 
 Verifikasi audit: `ruff check app tests alembic` dan compile Python lulus;
 299 tes keamanan/API terarah lulus di PostgreSQL (2 dilewati); 513 tes
@@ -550,6 +567,7 @@ menyeret APK ke jendela BlueStacks. Tangkapan layar:
 | 2026-10-17 | Codex | Audit pengalaman pembaruan Windows untuk admin dan petugas; saran pembedaan alur peran dicatat di bagian 6. |
 | 2026-10-17 | Codex | Alur pembaruan admin/petugas dibuat dua tahap dengan progres, pemeriksaan ruang disk, dan pengunci pelayanan aktif. |
 | 2026-10-17 | Codex | Laporan Saya PDF/Excel ditambahkan untuk CRO; ekspor admin/petugas memakai status sebaris dan penyimpanan atomik. |
+| 2026-10-17 | Codex → Claude | Tanpa SQLite, polling anjungan, pembaruan lanjut/tunda/audit, versi PC, laporan prioritas, Android memanjang; Codex terhenti (batas pemakaian), Claude menambah tes versi PC + meta login dan meng-commit (bagian 6). |
 
 Saat menutup sesi: perbarui bagian 3 (keadaan, commit, versi), 6 (belum
 selesai), dan tabel di atas.

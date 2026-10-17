@@ -13,9 +13,16 @@ from app.ui.style import PRIMARY, PRIMARY_SOFT
 
 
 class PitaPembaruan(QFrame):
-    def __init__(self, tindakan: Callable[[], None], *, untuk_admin: bool = False) -> None:
+    def __init__(
+        self,
+        tindakan: Callable[[], None],
+        *,
+        untuk_admin: bool = False,
+        tunda: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__()
         self.untuk_admin = untuk_admin
+        self._boleh_tunda = tunda is not None
         self.setObjectName("pitaPembaruan")
         self.setStyleSheet(
             f"QFrame#pitaPembaruan {{ background: {PRIMARY_SOFT}; "
@@ -38,6 +45,14 @@ class PitaPembaruan(QFrame):
         self.tombol = tombol(self._teks_unduh(), variant="primary")
         self.tombol.clicked.connect(tindakan)
         susunan.addWidget(self.tombol, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self.tombol_tunda = tombol("Ingatkan besok")
+        if tunda is not None:
+            self.tombol_tunda.clicked.connect(tunda)
+            susunan.addWidget(
+                self.tombol_tunda, alignment=Qt.AlignmentFlag.AlignVCenter
+            )
+        else:
+            self.tombol_tunda.hide()
         self.info: InfoPembaruan | None = None
         self.hide()
 
@@ -60,6 +75,7 @@ class PitaPembaruan(QFrame):
         self.progres.hide()
         self.tombol.setEnabled(True)
         self.tombol.setText(self._teks_unduh())
+        self.tombol_tunda.setVisible(self._boleh_tunda)
         self.show()
 
     def sedang_mengunduh(self) -> None:
@@ -70,6 +86,7 @@ class PitaPembaruan(QFrame):
         self.pesan.setText(f"Mengunduh pembaruan versi {self.info.versi}…")
         self.tombol.setEnabled(False)
         self.tombol.setText("Mengunduh…")
+        self.tombol_tunda.hide()
 
     def perbarui_kemajuan(self, jumlah: int, total: int) -> None:
         """Tampilkan byte nyata supaya petugas tahu unduhan tidak macet."""
@@ -93,6 +110,7 @@ class PitaPembaruan(QFrame):
         self.tombol.setText(
             "Pasang sekarang" if self.untuk_admin else "Pasang setelah pelayanan"
         )
+        self.tombol_tunda.hide()
 
     def pemasang_dibuka(self) -> None:
         if self.info is None:

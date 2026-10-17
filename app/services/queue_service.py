@@ -358,6 +358,10 @@ class DisplayState:
     #: Antrian menunggu dikelompokkan per jenis layanan, satu butir per
     #: kolom di layar. Kosong bila layar tidak memintanya (papan kios).
     layanan: list[DisplayServiceQueue] = field(default_factory=list)
+    #: Daftar lengkap nomor publik dibawa bersama keadaan loket supaya anjungan
+    #: tidak mengulang query antrian yang sama dua kali pada setiap polling.
+    nomor_menunggu: list[str] = field(default_factory=list)
+    nomor_prioritas: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -587,7 +591,7 @@ class QueueService:
                 )
             return _as_info(repo.get_by_id(baris.queue_id))
 
-    def pendaftaran_dibuka(self) -> bool:
+    def pendaftaran_dibuka(self, pengaturan=None) -> bool:
         """
         Apakah loket dan kios sedang menerima pengambilan nomor baru.
 
@@ -600,9 +604,10 @@ class QueueService:
         Pembacaan tidak menuntut hak akses — kios berjalan tanpa login dan
         tetap harus tahu kapan tombolnya wajib nonaktif.
         """
-        if self.settings.get_bool("queue.registration_open", True):
+        sumber = pengaturan or self.settings
+        if sumber.get_bool("queue.registration_open", True):
             return True
-        tanggal_tutup = self.settings.get("queue.registration_closed_date", "")
+        tanggal_tutup = sumber.get("queue.registration_closed_date", "")
         return tanggal_tutup != str(clock.today())
 
     def tutup_pendaftaran(self) -> None:
@@ -641,11 +646,11 @@ class QueueService:
         )
         logger.info("Pendaftaran antrian dibuka oleh %s", sesi.username)
 
-    def jeda_kios_detik(self) -> int:
+    def jeda_kios_detik(self, pengaturan=None) -> int:
         """Jeda wajib antar-pengambilan nomor di mesin kios."""
-        return self.settings.get_int("kiosk.cooldown_seconds", 10)
+        return (pengaturan or self.settings).get_int("kiosk.cooldown_seconds", 10)
 
-    def sisa_jeda_kios(self, perangkat: str = "") -> float:
+    def sisa_jeda_kios(self, perangkat: str = "", pengaturan=None) -> float:
         """
         Detik yang masih harus ditunggu perangkat ini sebelum nomor berikutnya.
 
@@ -656,7 +661,7 @@ class QueueService:
         if terakhir is None:
             return 0.0
         berlalu = (clock.now() - terakhir).total_seconds()
-        return max(0.0, self.jeda_kios_detik() - berlalu)
+        return max(0.0, self.jeda_kios_detik(pengaturan) - berlalu)
 
     def _catat_jeda_kios(self, perangkat: str) -> None:
         sekarang = clock.now()
@@ -896,7 +901,13 @@ class QueueService:
         return total / len(melayani)
 
     def display_state(
-        self, jumlah_berikutnya: int = 3, jumlah_per_layanan: int = 0
+        self,
+        jumlah_berikutnya: int = 3,
+        jumlah_per_layanan: int = 0,
+        *,
+        rasio_prioritas: int | None = None,
+        loket_tampil: str | None = None,
+        sertakan_terkini: bool = True,
     ) -> DisplayState:
         """
         Keadaan layar antrian untuk pengunjung.
@@ -916,7 +927,11 @@ class QueueService:
         with session_scope() as session:
             repo = QueueRepository(session)
 
-            terakhir = repo.terakhir_dipanggil(sesi.branch_id, hari, batas=1)
+            terakhir = (
+                repo.terakhir_dipanggil(sesi.branch_id, hari, batas=1)
+                if sertakan_terkini
+                else []
+            )
             # Jumlah pemanggilan wajib ikut. Layar memakainya untuk
             # membedakan panggilan ULANG dari penyegaran biasa; tanpa itu
             # nada tidak akan berbunyi lagi saat nomor dipanggil ulang.
@@ -926,9 +941,8 @@ class QueueService:
                 else None
             )
 
-            menunggu = repo.list_menunggu_berurutan(
-                sesi.branch_id, hari, rasio=self.rasio_prioritas()
-            )
+            rasio = self.rasio_prioritas() if rasio_prioritas is None else rasio_prioritas
+            menunggu = repo.list_menunggu_berurutan(sesi.branch_id, hari, rasio=rasio)
             berikutnya = [_as_info(q) for q in menunggu[:jumlah_berikutnya]]
             layanan = (
                 self._kelompokkan_per_layanan(
@@ -946,10 +960,12 @@ class QueueService:
                 if antrian.counter_id is not None and antrian.counter_id not in per_loket:
                     per_loket[antrian.counter_id] = antrian
 
-            hanya_berpetugas = (
-                self.settings.get(KUNCI_LOKET_TAMPIL, LOKET_TAMPIL_PETUGAS)
-                != LOKET_TAMPIL_SEMUA
-            )
+            nilai_loket = loket_tampil
+            if nilai_loket is None:
+                nilai_loket = self.settings.get(
+                    KUNCI_LOKET_TAMPIL, LOKET_TAMPIL_PETUGAS
+                )
+            hanya_berpetugas = nilai_loket != LOKET_TAMPIL_SEMUA
             batas_hadir = clock.now() - timedelta(seconds=BATAS_HADIR_PETUGAS_DETIK)
 
             loket = []
@@ -986,6 +1002,8 @@ class QueueService:
             loket=loket,
             total_menunggu=len(menunggu),
             layanan=layanan,
+            nomor_menunggu=[q.queue_number for q in menunggu],
+            nomor_prioritas=[q.queue_number for q in menunggu if q.prioritas],
         )
 
     def panggilan_sejak(self, setelah_id: int | None, batas: int = 20) -> tuple[int, list[Panggilan]]:

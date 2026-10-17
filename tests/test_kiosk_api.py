@@ -83,10 +83,19 @@ class _Queue:
             completed_at=None,
         )
 
-    def display_state(self, *, jumlah_berikutnya: int):
+    def display_state(
+        self,
+        *,
+        jumlah_berikutnya: int,
+        rasio_prioritas=None,
+        loket_tampil=None,
+        sertakan_terkini=True,
+    ):
         assert jumlah_berikutnya == 0
         return SimpleNamespace(
             total_menunggu=2,
+            nomor_menunggu=["A-002", "A-003"],
+            nomor_prioritas=["A-003"],
             loket=[
                 SimpleNamespace(
                     counter_name="Loket 1",
@@ -104,10 +113,10 @@ class _Queue:
             ],
         )
 
-    def pendaftaran_dibuka(self):
+    def pendaftaran_dibuka(self, pengaturan=None):
         return True
 
-    def sisa_jeda_kios(self, perangkat=""):
+    def sisa_jeda_kios(self, perangkat="", pengaturan=None):
         return 0
 
     def nomor_menunggu_untuk_layar(self):
@@ -123,6 +132,9 @@ class _Queue:
 class _Settings:
     welcome_kind = "teks"
     suara_video = False
+
+    def cuplikan(self):
+        return self
 
     def get_bool(self, key, default):
         return {

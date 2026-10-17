@@ -188,7 +188,10 @@ def _laporkan_kegagalan_database(config, *, berjendela: bool) -> bool:
     True bila petugas memilih mengubah koneksi, supaya percobaan berikutnya
     memakai alamat baru tanpa menutup proses.
     """
-    tujuan = config.url_database.render_as_string(hide_password=True)
+    try:
+        tujuan = config.url_database.render_as_string(hide_password=True)
+    except ValueError:
+        tujuan = "PostgreSQL belum diatur"
     pesan = (
         "Aplikasi tidak dapat menghubungi database.\n\n"
         f"Database  : {tujuan}\n"
@@ -372,7 +375,7 @@ def perlu_setup_awal(
     """
     import os
 
-    from app.core.mesin import path_berkas_mesin
+    from app.core.mesin import PERAN_SAH, baca_berkas_mesin, path_berkas_mesin
 
     if sedang_uji is None:
         sedang_uji = bool(os.environ.get("PYTEST_CURRENT_TEST"))
@@ -389,7 +392,8 @@ def perlu_setup_awal(
         return False
     if lewati_login_pengembang():
         return False
-    return not path_berkas_mesin(db_path).is_file()
+    tersimpan = baca_berkas_mesin(path_berkas_mesin(db_path))
+    return tersimpan is None or tersimpan.peran not in PERAN_SAH
 
 
 def _harus_mulai_api_anjungan_otomatis(config, argv: list[str]) -> bool:
@@ -420,8 +424,7 @@ def _jalankan_dialog_mesin() -> bool:
     Tampilkan dialog peran komputer ini. True bila disimpan.
 
     Memuat ulang konfigurasi setelah disimpan supaya percobaan koneksi
-    berikutnya memakai alamat baru. Engine lama dilepas dulu — Windows
-    menahan berkas SQLite yang masih terbuka.
+    berikutnya memakai alamat baru. Engine lama dilepas lebih dahulu.
     """
     from PySide6.QtWidgets import QApplication, QDialog
 
@@ -460,6 +463,9 @@ def main(argv: list[str] | None = None) -> int:
     while True:
         try:
             dibuat = siapkan_database()
+            from app.services.pembaruan_windows import audit_hasil_pembaruan
+
+            audit_hasil_pembaruan(config=config)
             backup_harian()
             # SESUDAH backup: bila sapuan ini ternyata keliru, keadaan sebelum
             # disapu masih tersimpan pada backup pagi ini.

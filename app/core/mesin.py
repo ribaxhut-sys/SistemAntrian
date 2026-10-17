@@ -37,10 +37,9 @@ logger = logging.getLogger("antrian.mesin")
 
 NAMA_BERKAS = "mesin.json"
 
-SENDIRI = "sendiri"
 SERVER = "server"
 KLIEN = "klien"
-PERAN_SAH = frozenset({SENDIRI, SERVER, KLIEN})
+PERAN_SAH = frozenset({SERVER, KLIEN})
 
 PORT_BAWAAN = 5432
 DATABASE_BAWAAN = "antrian"
@@ -53,7 +52,7 @@ _HOST_LOKAL_LAIN = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})
 class PengaturanMesin:
     """Pilihan peran dan isian PostgreSQL pada satu komputer."""
 
-    peran: str = SENDIRI
+    peran: str = SERVER
     host: str = ""
     port: int = PORT_BAWAAN
     nama_database: str = DATABASE_BAWAAN
@@ -62,14 +61,12 @@ class PengaturanMesin:
 
     def ke_url(self) -> str:
         """
-        URL SQLAlchemy, atau kosong bila mesin ini memakai SQLite.
+        URL SQLAlchemy PostgreSQL untuk server lokal atau klien.
 
         Komputer server selalu menyambung ke 127.0.0.1, bukan ke IP
         jaringannya sendiri: firewall dan pg_hba sering menolak mesin
         yang memutar balik lewat alamat LAN.
         """
-        if self.peran == SENDIRI:
-            return ""
         host = HOST_LOKAL if self.peran == SERVER else self.host.strip()
         # str(URL) menyembunyikan kata sandi sebagai "***". Itu aman untuk
         # ditampilkan, tetapi memutus koneksi: PostgreSQL akan menolak sandi
@@ -85,8 +82,6 @@ class PengaturanMesin:
 
     def ringkasan(self) -> str:
         """Satu baris untuk log dan layar, tanpa kata sandi."""
-        if self.peran == SENDIRI:
-            return "satu komputer (SQLite)"
         if self.peran == SERVER:
             return (
                 f"server PostgreSQL @ {HOST_LOKAL}:{self.port}/"
@@ -179,7 +174,7 @@ def tulis_berkas_mesin(path: Path, pengaturan: PengaturanMesin) -> None:
 
 
 def url_dari_berkas_mesin(path: Path) -> str:
-    """URL dari berkas, atau kosong bila SQLite / berkas tidak dipakai."""
+    """URL PostgreSQL dari berkas, atau kosong bila berkas tidak sah."""
     pengaturan = baca_berkas_mesin(path)
     if pengaturan is None:
         return ""
@@ -192,8 +187,8 @@ def url_dari_berkas_mesin(path: Path) -> str:
 def pengaturan_dari_url(url: str) -> PengaturanMesin:
     """Uraikan URL aktif menjadi isian dialog, tanpa kata sandi tersembunyi."""
     terurai = make_url(url)
-    if terurai.get_backend_name() == "sqlite":
-        return PengaturanMesin()
+    if terurai.get_backend_name() != "postgresql":
+        raise ValueError("Sistem Antrian hanya mendukung PostgreSQL.")
     host = (terurai.host or "").strip()
     peran = SERVER if host.lower() in _HOST_LOKAL_LAIN else KLIEN
     return PengaturanMesin(
@@ -211,7 +206,7 @@ def muat_pengaturan(db_path: Path) -> PengaturanMesin:
     Isian yang ditampilkan di dialog.
 
     Berkas mesin menang. Bila belum ada, URL environment diuraikan supaya
-    pemasangan lama lewat setx terlihat apa adanya. Selain itu: satu komputer.
+    pemasangan lama lewat setx terlihat apa adanya. Selain itu: server lokal.
     """
     dari_berkas = baca_berkas_mesin(path_berkas_mesin(db_path))
     if dari_berkas is not None:
@@ -231,8 +226,6 @@ def kesalahan_isian(pengaturan: PengaturanMesin) -> str | None:
     """Pesan untuk petugas, atau None bila isian siap disimpan."""
     if pengaturan.peran not in PERAN_SAH:
         return "Pilih bagaimana komputer ini dipakai."
-    if pengaturan.peran == SENDIRI:
-        return None
     if not (1 <= pengaturan.port <= 65535):
         return "Port harus berupa angka 1 sampai 65535."
     if not pengaturan.nama_database.strip():
@@ -335,11 +328,15 @@ def uji_koneksi(url: str) -> str | None:
     """
     if not url:
         return "Alamat database masih kosong."
+    try:
+        if make_url(url).get_backend_name() != "postgresql":
+            return "Sistem Antrian hanya mendukung database PostgreSQL."
+    except (TypeError, ValueError):
+        return "Alamat database tidak sah."
 
     import sqlalchemy as sa
 
-    argumen = {"connect_timeout": 3} if "postgresql" in url else {}
-    mesin = sa.create_engine(url, future=True, connect_args=argumen)
+    mesin = sa.create_engine(url, future=True, connect_args={"connect_timeout": 3})
     try:
         with mesin.connect() as conn:
             conn.execute(sa.text("SELECT 1"))

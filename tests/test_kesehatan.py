@@ -392,6 +392,83 @@ def test_periksa_sandi_bawaan_menemukan_akun(auth, users):
     assert "cro" in hasil.ringkasan
 
 
+def _login_tercatat(komputer, versi, umur):
+    import json
+
+    from app.core import clock
+    from app.core.database import session_scope
+    from app.models import AuditAction, AuditLog
+
+    meta = {"role": "CRO"}
+    if komputer is not None:
+        meta["komputer"] = komputer
+    if versi is not None:
+        meta["versi_aplikasi"] = versi
+    with session_scope() as s:
+        s.add(
+            AuditLog(
+                action=AuditAction.LOGIN.value,
+                entity_type="app_user",
+                meta=json.dumps(meta),
+                created_at=clock.now() - umur,
+            )
+        )
+
+
+def _kosongkan_login():
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import AuditAction, AuditLog
+
+    with session_scope() as s:
+        s.execute(sa.delete(AuditLog).where(AuditLog.action == AuditAction.LOGIN.value))
+
+
+def test_periksa_komputer_windows_tanpa_catatan(auth):
+    _kosongkan_login()
+
+    (hasil,) = ks._periksa_komputer_windows()
+
+    assert hasil.tingkat == ks.INFO
+    assert "30 hari" in hasil.ringkasan
+
+
+def test_periksa_komputer_windows_memakai_login_terbaru_per_pc(auth):
+    from app import __version__
+
+    _kosongkan_login()
+    # PC-LOKET-1: login terbaru sudah versi sekarang; yang lama diabaikan.
+    _login_tercatat("PC-LOKET-1", "1.0.9", timedelta(days=2))
+    _login_tercatat("PC-LOKET-1", __version__, timedelta(hours=1))
+    # PC-LOKET-2 masih versi lama.
+    _login_tercatat("PC-LOKET-2", "1.0.9", timedelta(days=1))
+    # Di luar jendela 30 hari dan login lama tanpa nama komputer: tidak dihitung.
+    _login_tercatat("PC-GUDANG", "1.0.1", timedelta(days=31))
+    _login_tercatat(None, None, timedelta(hours=2))
+
+    hasil = {p.nama: p for p in ks._periksa_komputer_windows()}
+
+    assert set(hasil) == {"PC Windows: PC-LOKET-1", "PC Windows: PC-LOKET-2"}
+    terkini = hasil["PC Windows: PC-LOKET-1"]
+    assert terkini.tingkat == NORMAL
+    assert __version__ in terkini.ringkasan and not terkini.saran
+    tertinggal = hasil["PC Windows: PC-LOKET-2"]
+    assert tertinggal.tingkat == PERINGATAN
+    assert "1.0.9" in tertinggal.ringkasan
+    assert tertinggal.saran
+
+
+def test_periksa_komputer_windows_versi_tidak_diketahui(auth):
+    _kosongkan_login()
+    _login_tercatat("PC-LAMA", None, timedelta(hours=3))
+
+    (hasil,) = ks._periksa_komputer_windows()
+
+    assert hasil.tingkat == PERINGATAN
+    assert "tidak diketahui" in hasil.ringkasan
+
+
 def test_nilai_tanda_pembaruan():
     assert ks.nilai_tanda_pembaruan(False).tingkat == ks.INFO
     assert ks.nilai_tanda_pembaruan(True, "1.0.12", True).tingkat == NORMAL

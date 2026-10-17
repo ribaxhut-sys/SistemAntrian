@@ -30,6 +30,29 @@ def test_login_dengan_kredensial_benar(auth, users):
     assert auth.is_authenticated
 
 
+def test_login_mencatat_komputer_dan_versi_aplikasi(auth, users):
+    """Kesehatan Sistem menyimpulkan versi tiap PC dari catatan login ini."""
+    import json
+    import socket
+
+    from app import __version__
+    from app.models import AuditAction
+
+    auth.login("cro", TEST_PASSWORD)
+
+    with session_scope() as s:
+        mentah = s.scalar(
+            sa.select(AuditLog.meta)
+            .where(AuditLog.action == AuditAction.LOGIN.value, AuditLog.user_id == users["CRO"])
+            .order_by(AuditLog.id.desc())
+            .limit(1)
+        )
+    meta = json.loads(mentah)
+    assert meta["komputer"] == socket.gethostname()[:80]
+    assert meta["versi_aplikasi"] == __version__
+    assert TEST_PASSWORD not in mentah
+
+
 def test_login_tidak_membedakan_huruf_besar_kecil(auth):
     """Petugas yang mengetik "CRO" atau "Cro" tetap harus bisa masuk."""
     assert auth.login("CRO", TEST_PASSWORD).username == "cro"

@@ -41,6 +41,32 @@ def test_angka_total(laporan_hari_ini):
     assert total.rata_layanan_detik is not None
 
 
+def test_laporan_mencatat_prioritas_dan_yang_dicabut(auth, antrian_siap):
+    from app.services.queue_service import QueueService
+    from app.services.report_service import ReportService
+
+    auth.logout()
+    auth.mulai_sesi_kios()
+    nomor = QueueService(auth).create_queue(
+        antrian_siap["kategori"]["A"],
+        perangkat="tablet-laporan",
+        prioritas_mandiri=True,
+    )
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    QueueService(auth).cabut_prioritas(nomor.id)
+    auth.logout()
+    auth.login("supervisor", TEST_PASSWORD)
+
+    laporan = ReportService(auth).laporan(clock.today(), clock.today())
+
+    assert laporan.total.prioritas == 1
+    assert laporan.total.prioritas_dicabut == 1
+    assert laporan.per_hari[0].prioritas == 1
+    assert laporan.riwayat[0].prioritas
+    assert laporan.riwayat[0].prioritas_dicabut
+
+
 def test_pembagian_per_loket_petugas_dan_hari(laporan_hari_ini):
     (loket,) = laporan_hari_ini.per_loket
     assert loket.selesai == 2

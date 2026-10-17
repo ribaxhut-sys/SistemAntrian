@@ -11,7 +11,7 @@ Environment variable yang dikenali:
                          Mengalahkan berkas data/mesin.json.
     ANTRIAN_MESIN_PATH   lokasi berkas peran komputer ini (server/klien).
                          Kosong berarti data/mesin.json di folder database.
-    ANTRIAN_DB_PATH      lokasi file database SQLite, dipakai bila DB_URL kosong
+    ANTRIAN_DB_PATH      folder data lokal untuk berkas konfigurasi mesin
     ANTRIAN_BACKUP_DIR   folder hasil backup
     ANTRIAN_LOG_DIR      folder file log
     ANTRIAN_LOG_LEVEL    DEBUG | INFO | WARNING | ERROR
@@ -41,10 +41,9 @@ teratas: pemasangan yang sudah memakai `setx ANTRIAN_PRINTER` hari ini
 berperilaku sama persis besok. Berkas peran hanya mengisi yang tidak
 disebut environment, dan pengaturan bersama di database mengisi sisanya.
 
-Beberapa loket yang melayani bersamaan WAJIB memakai PostgreSQL lewat
-ANTRIAN_DB_URL. SQLite hanya sanggup melayani satu komputer: mode WAL
-memakai shared memory yang tidak berfungsi di filesystem jaringan, dan
-akibatnya bukan sekadar lambat melainkan nomor antrian kembar.
+Seluruh pemasangan wajib memakai PostgreSQL. Tidak ada jalur cadangan ke
+database berkas lokal: kegagalan server harus terlihat dan diperbaiki, bukan
+membuat data antrian baru yang terpisah di tiap komputer.
 """
 
 from __future__ import annotations
@@ -153,7 +152,7 @@ class AppConfig:
     backup_dir: Path
     log_dir: Path
     log_level: str
-    #: URL SQLAlchemy lengkap. Kosong berarti memakai SQLite pada db_path.
+    #: URL PostgreSQL lengkap. Kosong hanya sah sebelum pemasangan selesai.
     db_url: str = ""
     #: Pencetak tiket mesin ini. Kosong berarti mengikuti `ticket.printer`
     #: yang berlaku untuk seluruh sistem.
@@ -172,11 +171,15 @@ class AppConfig:
         URL SQLAlchemy untuk database aktif.
 
         Bila ANTRIAN_DB_URL tidak diisi, berkas mesin.json yang menentukan
-        PostgreSQL di komputer server/klien. Keduanya kosong berarti SQLite
-        pada db_path — bentuk yang dipakai pemasangan satu komputer dan
-        seluruh test.
+        PostgreSQL di komputer server/klien. Nilai kosong atau dialect lain
+        ditolak agar aplikasi tidak membuat basis data kedua tanpa sengaja.
         """
-        return self.db_url or f"sqlite:///{self.db_path}"
+        if not self.db_url:
+            raise ValueError("Koneksi PostgreSQL belum diatur.")
+        url = make_url(self.db_url)
+        if url.get_backend_name() != "postgresql":
+            raise ValueError("Sistem Antrian hanya mendukung PostgreSQL.")
+        return self.db_url
 
     @property
     def url_database(self):
@@ -201,7 +204,7 @@ class AppConfig:
 
     @property
     def memakai_sqlite(self) -> bool:
-        return self.dialect == "sqlite"
+        return False
 
     @property
     def teks_lokasi(self) -> str:
@@ -212,8 +215,6 @@ class AppConfig:
         berdiri di dekat meja loket. Untuk PostgreSQL yang ditunjuk adalah
         host server, bukan berkas SQLite lokal yang memang tidak dipakai.
         """
-        if self.memakai_sqlite:
-            return str(self.db_path)
         url = self.url_database
         host = url.host or "localhost"
         port = url.port or 5432
@@ -294,8 +295,6 @@ def teks_status_database(terhubung: bool, config: AppConfig | None = None) -> st
     cfg = config or get_config()
     if terhubung:
         return f"Database: {cfg.teks_lokasi}"
-    if cfg.memakai_sqlite:
-        return f"Database tidak terjangkau ({cfg.teks_lokasi})"
     return (
         f"Database tidak terjangkau ({cfg.teks_lokasi}) — cek komputer server"
     )

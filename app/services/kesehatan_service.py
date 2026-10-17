@@ -19,6 +19,7 @@ memuat URL koneksi lengkap.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import time
@@ -599,6 +600,65 @@ def _periksa_perangkat(auth: AuthService) -> list[Pemeriksaan]:
     return hasil
 
 
+def _periksa_komputer_windows() -> list[Pemeriksaan]:
+    """Versi PC disimpulkan dari login terakhir tanpa menambah tabel baru."""
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import AuditAction, AuditLog
+
+    sejak = clock.now() - timedelta(days=30)
+    with session_scope() as session:
+        baris = session.execute(
+            sa.select(AuditLog.created_at, AuditLog.meta)
+            .where(
+                AuditLog.action == AuditAction.LOGIN.value,
+                AuditLog.created_at >= sejak,
+            )
+            .order_by(AuditLog.created_at.desc())
+        ).all()
+
+    terbaru: dict[str, tuple[datetime, str]] = {}
+    for waktu, mentah in baris:
+        try:
+            meta = json.loads(mentah or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        komputer = str(meta.get("komputer") or "").strip()
+        versi = str(meta.get("versi_aplikasi") or "").strip()
+        if komputer and komputer not in terbaru:
+            terbaru[komputer] = (waktu, versi)
+
+    if not terbaru:
+        return [
+            Pemeriksaan(
+                "Komputer Windows",
+                INFO,
+                "Belum ada login yang melaporkan versi aplikasi dalam 30 hari terakhir.",
+            )
+        ]
+
+    hasil = []
+    sekarang = clock.now()
+    for komputer, (waktu, versi) in sorted(terbaru.items()):
+        tingkat = NORMAL if versi == __version__ else PERINGATAN
+        saran = ()
+        if versi != __version__:
+            saran = (
+                "Buka aplikasi pada komputer tersebut dan pasang pembaruan Windows.",
+            )
+        hasil.append(
+            Pemeriksaan(
+                f"PC Windows: {komputer}",
+                tingkat,
+                f"Versi {versi or 'tidak diketahui'} · login terakhir "
+                f"{_waktu(waktu, sekarang)}",
+                saran,
+            )
+        )
+    return hasil
+
+
 def _periksa_printer(settings) -> Pemeriksaan:
     from app.services.ticket_service import mode_pencetak
 
@@ -714,6 +774,7 @@ class KesehatanService:
         jalankan("API anjungan", _periksa_api)
         jalankan("Pembaruan Windows di server", _periksa_tanda_pembaruan)
         jalankan("Perangkat Android", lambda: _periksa_perangkat(self.auth))
+        jalankan("Komputer Windows", _periksa_komputer_windows)
         jalankan("Printer tiket (komputer ini)", lambda: _periksa_printer(self.backup.settings))
         jalankan("Backup terakhir", lambda: _periksa_backup(self.backup))
         jalankan("Kapasitas disk", _periksa_disk)

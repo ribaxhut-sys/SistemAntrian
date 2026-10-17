@@ -16,9 +16,11 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 import json
+import socket
 
 import sqlalchemy as sa
 
+from app import __version__
 from app.core import clock
 from app.core.database import session_scope
 from app.core.errors import (
@@ -206,6 +208,8 @@ class AuthService:
                     entity_type="app_user",
                     entity_id=user.id,
                     role=user.role.value,
+                    komputer=socket.gethostname()[:80],
+                    versi_aplikasi=__version__,
                 )
 
                 self._session = AuthSession(

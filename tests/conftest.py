@@ -1,9 +1,9 @@
-"""
-Fixture bersama untuk test.
+"""Fixture bersama yang hanya boleh memakai PostgreSQL ``antrian_uji``.
 
-Setiap test mendapat database SQLite sendiri di folder temporary, dibangun
-lewat migration Alembic yang sama dengan yang dipakai aplikasi. Dengan begitu
-yang diuji adalah skema sungguhan, bukan skema tiruan hasil create_all().
+Penjaga dijalankan sebelum fixture apa pun agar salah konfigurasi tidak sempat
+menjalankan ``DROP SCHEMA`` terhadap database kerja atau diam-diam memakai
+SQLite. URL uji boleh diberikan lewat environment atau berkas lokal yang tidak
+masuk Git, sehingga perintah pytest tetap aman dan ringkas.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from sqlalchemy.engine import make_url
 
 # Widget Qt harus dapat dibuat tanpa layar fisik agar test dapat berjalan
 # di terminal maupun pada mesin build. Harus diset sebelum Qt diimpor.
@@ -29,24 +30,39 @@ from app.core import config as config_module
 from app.core import database as database_module
 
 
-def _pakai_sqlite() -> bool:
-    """Benar bila test dijalankan di atas SQLite (bawaan)."""
-    from app.core.config import get_config
+def _pasang_url_database_uji() -> str:
+    """Pastikan pytest mustahil berjalan selain pada database uji khusus."""
+    url = os.environ.get("ANTRIAN_DB_URL", "").strip()
+    if not url:
+        berkas = Path.home() / ".antrian-uji-db"
+        if berkas.is_file():
+            url = berkas.read_text(encoding="utf-8").strip()
 
-    return get_config().memakai_sqlite
+    if not url:
+        raise pytest.UsageError(
+            "ANTRIAN_DB_URL belum diisi dan ~/.antrian-uji-db tidak ditemukan. "
+            "Pytest hanya boleh memakai PostgreSQL antrian_uji."
+        )
+
+    try:
+        terurai = make_url(url)
+    except (TypeError, ValueError) as exc:
+        raise pytest.UsageError("URL database uji tidak sah.") from exc
+
+    if terurai.get_backend_name() != "postgresql" or terurai.database != "antrian_uji":
+        raise pytest.UsageError(
+            "Pytest ditolak: database wajib PostgreSQL dengan nama tepat "
+            "antrian_uji."
+        )
+
+    os.environ["ANTRIAN_DB_URL"] = url
+    return url
 
 
 @pytest.fixture
-def sqlite_saja(app_config):
-    """
-    Lewati test yang memang hanya bermakna pada SQLite.
-
-    PRAGMA, integrity_check, dan penguncian berkas tidak punya padanan di
-    PostgreSQL. Yang diuji test semacam itu adalah cara SQLite dipasang,
-    bukan perilaku aplikasi.
-    """
-    if not _pakai_sqlite():
-        pytest.skip("khusus SQLite")
+def sqlite_saja():
+    """Tes warisan dialect lama dilewati tanpa pernah membuka SQLite."""
+    pytest.skip("SQLite tidak lagi didukung")
 
 
 @pytest.fixture
@@ -61,8 +77,6 @@ def mesin_backup_tersedia(app_config):
     """
     import shutil
 
-    if app_config.memakai_sqlite:
-        return
     if not (shutil.which("pg_dump") and shutil.which("pg_restore")):
         pytest.skip(
             "pg_dump/pg_restore tidak terpasang; backup PostgreSQL TIDAK teruji"
@@ -123,10 +137,9 @@ def _kosongkan_schema() -> None:
     """
     Kembalikan database PostgreSQL ke keadaan benar-benar kosong.
 
-    SQLite mendapat berkas baru di folder temporary untuk setiap test,
-    sedangkan PostgreSQL dipakai bersama seluruh test. Tanpa pengosongan
-    ini, data satu test bocor ke test berikutnya dan kegagalannya bergantung
-    pada urutan — jenis kegagalan yang paling sulit ditelusuri.
+    PostgreSQL dipakai bersama seluruh test. Tanpa pengosongan ini, data satu
+    test bocor ke test berikutnya dan kegagalannya bergantung pada urutan —
+    jenis kegagalan yang paling sulit ditelusuri.
     """
 
     from app.core.database import get_engine
@@ -142,14 +155,13 @@ def database(app_config):
     """Database kosong yang skemanya sudah dinaikkan ke revisi terbaru."""
     from app.core.database import init_database
 
-    if not app_config.memakai_sqlite:
-        _kosongkan_schema()
-
+    _kosongkan_schema()
     init_database()
     return app_config
 
 
 def pytest_configure(config):
+    _pasang_url_database_uji()
     config.addinivalue_line(
         "markers",
         "layanan_bertingkat: jangan ratakan pohon jenis layanan bawaan "

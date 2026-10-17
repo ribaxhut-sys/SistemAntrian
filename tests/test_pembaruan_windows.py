@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 from types import SimpleNamespace
+import urllib.error
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,11 +15,15 @@ from app.services.pembaruan_windows import (
     NAMA_VERSI,
     PembaruanError,
     PembaruanWindowsService,
+    audit_hasil_pembaruan,
+    catat_pemasangan_dimulai,
     info_pembaruan,
     lebih_baru,
     periksa_pembaruan,
+    pembaruan_ditunda,
     pesan_tanda_tangan,
     tanda_sah,
+    tunda_pembaruan,
     unduh_pembaruan,
 )
 
@@ -46,6 +51,8 @@ def _server(monkeypatch, isi):
 
 
 class _Jawaban(io.BytesIO):
+    status = 200
+
     def __enter__(self):
         return self
 
@@ -58,6 +65,47 @@ def test_perbandingan_versi_angka():
     assert lebih_baru("1.1", "1.0.99")
     assert not lebih_baru("1.0.8.0", "1.0.8")
     assert not lebih_baru("1.0.7", "1.0.8")
+
+
+def test_tunda_pembaruan_hanya_berlaku_untuk_versi_dan_hari_yang_disimpan(
+    app_config,
+):
+    from datetime import date
+
+    tunda_pembaruan("1.2.3", sampai=date(2026, 10, 18), config=app_config)
+
+    assert pembaruan_ditunda(
+        "1.2.3", hari=date(2026, 10, 17), config=app_config
+    )
+    assert not pembaruan_ditunda(
+        "1.2.4", hari=date(2026, 10, 17), config=app_config
+    )
+    assert not pembaruan_ditunda(
+        "1.2.3", hari=date(2026, 10, 18), config=app_config
+    )
+
+
+def test_hasil_pemasangan_dicatat_sekali(app_config, database):
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import AuditAction, AuditLog
+
+    catat_pemasangan_dimulai("9.8.7", config=app_config)
+
+    assert audit_hasil_pembaruan(
+        versi_terpasang="9.8.7", config=app_config
+    ) is True
+    assert audit_hasil_pembaruan(
+        versi_terpasang="9.8.7", config=app_config
+    ) is None
+    with session_scope() as session:
+        jumlah = session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLog)
+            .where(AuditLog.action == AuditAction.WINDOWS_UPDATE_RESULT.value)
+        )
+    assert jumlah == 1
 
 
 def test_info_pembaruan_membaca_installer_dan_checksum(tmp_path):
@@ -184,6 +232,51 @@ def test_unduhan_melaporkan_kemajuan(monkeypatch, tmp_path):
     assert hasil.read_bytes() == isi
     assert kemajuan[0] == (0, len(isi))
     assert kemajuan[-1] == (len(isi), len(isi))
+
+
+def test_unduhan_melanjutkan_berkas_sementara(monkeypatch, tmp_path):
+    isi = b"installer-yang-dapat-dilanjutkan"
+    awal = isi[:12]
+    folder = tmp_path / "AntrianCRO" / "pembaruan"
+    folder.mkdir(parents=True)
+    (folder / "AntrianCRO-Setup-1.0.9.exe.tmp").write_bytes(awal)
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    permintaan = []
+
+    class JawabanSebagian(_Jawaban):
+        status = 206
+
+    def buka(request, **_):
+        permintaan.append(request)
+        return JawabanSebagian(isi[len(awal) :])
+
+    monkeypatch.setattr("urllib.request.urlopen", buka)
+    info = InfoPembaruan(
+        "1.0.9", tmp_path / NAMA_INSTALLER, len(isi), hashlib.sha256(isi).hexdigest()
+    )
+
+    hasil = unduh_pembaruan(info, "http://server:8765")
+
+    assert hasil.read_bytes() == isi
+    assert permintaan[0].get_header("Range") == f"bytes={len(awal)}-"
+
+
+def test_unduhan_gagal_mempertahankan_bagian_yang_sudah_ada(monkeypatch, tmp_path):
+    folder = tmp_path / "AntrianCRO" / "pembaruan"
+    folder.mkdir(parents=True)
+    sementara = folder / "AntrianCRO-Setup-1.0.9.exe.tmp"
+    sementara.write_bytes(b"sebagian")
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_, **__: (_ for _ in ()).throw(urllib.error.URLError("putus")),
+    )
+    info = InfoPembaruan("1.0.9", tmp_path / NAMA_INSTALLER, 100, "0" * 64)
+
+    with pytest.raises(PembaruanError):
+        unduh_pembaruan(info, "http://server:8765")
+
+    assert sementara.read_bytes() == b"sebagian"
 
 
 def test_unduhan_ditolak_bila_ruang_tidak_cukup(monkeypatch, tmp_path):

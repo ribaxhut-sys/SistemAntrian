@@ -568,7 +568,9 @@ class MainWindow(QMainWindow):
             )
             susunan_utama.addWidget(self.pita_database)
             self.pita_pembaruan = PitaPembaruan(
-                self._tindakan_pembaruan, untuk_admin=self._info_teknis
+                self._tindakan_pembaruan,
+                untuk_admin=self._info_teknis,
+                tunda=self._tunda_pembaruan,
             )
             susunan_utama.addWidget(self.pita_pembaruan)
 
@@ -1131,6 +1133,16 @@ class MainWindow(QMainWindow):
         self._pengunduh_pembaruan = pengunduh
         pengunduh.start()
 
+    def _tunda_pembaruan(self) -> None:
+        """Sembunyikan versi ini sampai besok pada komputer petugas ini."""
+        info = self.pita_pembaruan.info
+        if info is None:
+            return
+        from app.services.pembaruan_windows import tunda_pembaruan
+
+        tunda_pembaruan(info.versi)
+        self.pita_pembaruan.tampilkan(None)
+
     def _pembaruan_selesai_diunduh(self, path, exc) -> None:
         if exc is not None:
             self.pita_pembaruan.tampilkan(self.pita_pembaruan.info)
@@ -1172,6 +1184,9 @@ class MainWindow(QMainWindow):
                 "Pembaruan Gagal",
             )
             return
+        from app.services.pembaruan_windows import catat_pemasangan_dimulai
+
+        catat_pemasangan_dimulai(info.versi)
         self.pita_pembaruan.pemasang_dibuka()
 
     def _selesai_mengunduh_pembaruan(self) -> None:

@@ -21,21 +21,20 @@ def test_default_paths_berada_di_bawah_base_dir(monkeypatch: pytest.MonkeyPatch)
     assert cfg.log_dir == cfg.base_dir / "logs"
 
 
-def test_path_database_dapat_diubah_tanpa_mengubah_source(
+def test_tanpa_url_postgresql_tidak_jatuh_ke_database_berkas(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Syarat operasional: lokasi database diatur lewat environment variable."""
+    """Folder data tetap lokal, tetapi tidak pernah menjadi database cadangan."""
     target = tmp_path / "lokasi-lain" / "antrian.db"
     monkeypatch.setenv("ANTRIAN_DB_PATH", str(target))
-    # Yang diuji di sini adalah jalur cadangan ke SQLite, sehingga URL penuh
-    # harus dikosongkan — bila diisi, ia memang seharusnya menang.
     monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
     config_module.reset_config()
 
     cfg = load_config()
     assert cfg.db_path == target.resolve()
-    assert cfg.database_url == f"sqlite:///{target.resolve()}"
-    assert cfg.memakai_sqlite
+    with pytest.raises(ValueError, match="PostgreSQL"):
+        _ = cfg.database_url
+    assert not cfg.memakai_sqlite
 
 
 def test_url_database_menang_atas_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -89,20 +88,17 @@ def test_teks_status_postgres_mati_tetap_menunjuk_server(
     assert "queue.db" not in teks
 
 
-def test_teks_lokasi_sqlite_adalah_path_berkas(
+def test_url_sqlite_ditolak(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     target = tmp_path / "lokasi-lain" / "antrian.db"
     monkeypatch.setenv("ANTRIAN_DB_PATH", str(target))
-    monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
+    monkeypatch.setenv("ANTRIAN_DB_URL", f"sqlite:///{target}")
     config_module.reset_config()
 
     cfg = load_config()
-    assert cfg.teks_lokasi == str(target.resolve())
-    assert teks_status_database(True, cfg) == f"Database: {cfg.teks_lokasi}"
-    assert teks_status_database(False, cfg) == (
-        f"Database tidak terjangkau ({cfg.teks_lokasi})"
-    )
+    with pytest.raises(ValueError, match="PostgreSQL"):
+        _ = cfg.database_url
 
 
 def test_ensure_directories_membuat_folder_yang_belum_ada(

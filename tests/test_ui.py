@@ -1799,6 +1799,8 @@ def test_menu_petugas_cro_dan_pendaftaran_tidak_tumpang_tindih(qtbot, auth, antr
         "Ringkasan Saya",
         "Survey Kepuasan",
         "Pengaduan",
+        # Riwayat milik CRO sendiri; disaring lagi oleh ReportService.
+        "Laporan Saya",
         "Tampilan",
     ]
 

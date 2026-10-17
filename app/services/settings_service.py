@@ -8,6 +8,7 @@ dari dalam aplikasi.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import sqlalchemy as sa
@@ -808,6 +809,34 @@ def _validasi(kunci: str, nilai: str) -> str:
     return nilai
 
 
+@dataclass(frozen=True)
+class CuplikanPengaturan:
+    """Satu hasil baca konsisten agar endpoint cepat tidak membuat query per kunci."""
+
+    nilai: Mapping[str, str]
+
+    def get(self, key: str, default: str | None = None) -> str:
+        if key in self.nilai:
+            return self.nilai[key]
+        if default is not None:
+            return default
+        raise NotFoundError(f"Pengaturan {key!r} tidak dikenal.")
+
+    def get_int(self, key: str, default: int | None = None) -> int:
+        try:
+            return int(self.get(key, None if default is None else str(default)))
+        except (ValueError, NotFoundError):
+            if default is not None:
+                return default
+            return int(BAWAAN.get(key, "0"))
+
+    def get_bool(self, key: str, default: bool = False) -> bool:
+        try:
+            return self.get(key).strip().lower() in _BENAR
+        except NotFoundError:
+            return default
+
+
 class SettingsService:
     """Pembacaan dan perubahan pengaturan aplikasi."""
 
@@ -856,6 +885,10 @@ class SettingsService:
                 r.key: r.value for r in session.scalars(sa.select(ApplicationSetting))
             }
         return {**BAWAAN, **tersimpan}
+
+    def cuplikan(self) -> CuplikanPengaturan:
+        """Baca semua kunci sekali agar satu respons memakai keadaan yang sama."""
+        return CuplikanPengaturan(self.all())
 
     # -----------------------------------------------------------------
     # Perubahan

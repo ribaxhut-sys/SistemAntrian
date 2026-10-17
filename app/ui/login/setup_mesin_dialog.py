@@ -2,7 +2,7 @@
 Dialog menetapkan peran komputer ini: terhadap database, dan terhadap
 pengunjung.
 
-Orang yang memasang memilih: satu komputer, server, atau klien.
+Orang yang memasang memilih: server PostgreSQL atau klien.
 Pilihan itu disimpan di mesin.json pada komputer ini saja. Komputer
 klien mencari PostgreSQL di jaringan yang sama; bila lebih dari satu
 yang menjawab, orang itu yang memilih, bukan aplikasi.
@@ -47,7 +47,6 @@ from app.core.mesin import (
     KLIEN,
     PENGGUNA_BAWAAN,
     PORT_BAWAAN,
-    SENDIRI,
     SERVER,
     alamat_ipv4_lokal,
     cari_server_jaringan,
@@ -171,7 +170,7 @@ class SetupMesinDialog(QDialog):
         cfg = get_config()
         self._db_path = cfg.db_path
         self._base_dir = cfg.base_dir
-        self._url_semula = cfg.database_url
+        self._url_semula = cfg.db_url
         self.pengaturan_tersimpan: PengaturanMesin | None = None
         self.peran_tersimpan: PeranKomputer | None = None
         self._sandi_tersimpan = ""
@@ -203,7 +202,7 @@ class SetupMesinDialog(QDialog):
             return False
         if env_url_mengalahkan():
             return False
-        url_baru = self.pengaturan_tersimpan.ke_url() or f"sqlite:///{self._db_path}"
+        url_baru = self.pengaturan_tersimpan.ke_url()
         return url_baru != self._url_semula
 
     def _bangun_tampilan(self) -> None:
@@ -233,10 +232,6 @@ class SetupMesinDialog(QDialog):
         susunan.addWidget(self._peringatan_env)
 
         self._grup = QButtonGroup(self)
-        self.radio_sendiri = self._radio(
-            "Satu komputer saja",
-            "Database berkas lokal di mesin ini. Tanpa jaringan, tanpa PostgreSQL.",
-        )
         self.radio_server = self._radio(
             "Komputer ini adalah SERVER",
             "PostgreSQL dipasang di mesin ini. Yang diisi hanya kata sandi "
@@ -247,7 +242,6 @@ class SetupMesinDialog(QDialog):
             "Cari server di jaringan yang sama. Kata sandinya sama dengan "
             "yang dibuat di komputer server. Port dan pengguna sudah tetap.",
         )
-        self._grup.addButton(self.radio_sendiri)
         self._grup.addButton(self.radio_server)
         self._grup.addButton(self.radio_klien)
         self._grup.buttonClicked.connect(self._perbarui_tampilan)
@@ -263,7 +257,6 @@ class SetupMesinDialog(QDialog):
         susunan_kiri = QVBoxLayout(kiri)
         susunan_kiri.setContentsMargins(0, 0, 0, 0)
         susunan_kiri.setSpacing(2)
-        susunan_kiri.addWidget(self._baris_peran(self.radio_sendiri))
         susunan_kiri.addWidget(self._baris_peran(self.radio_server))
         susunan_kiri.addWidget(self._baris_peran(self.radio_klien))
         susunan_kiri.addWidget(self._panel_server)
@@ -599,7 +592,7 @@ class SetupMesinDialog(QDialog):
             return SERVER
         if self.radio_klien.isChecked():
             return KLIEN
-        return SENDIRI
+        return SERVER
 
     def _pengaturan_dari_form(self) -> PengaturanMesin:
         pengguna = self.isian_pengguna.text().strip()
@@ -619,8 +612,7 @@ class SetupMesinDialog(QDialog):
         )
 
     def _muat(self, pengaturan: PengaturanMesin) -> None:
-        self.radio_sendiri.setChecked(pengaturan.peran == SENDIRI)
-        self.radio_server.setChecked(pengaturan.peran == SERVER)
+        self.radio_server.setChecked(pengaturan.peran != KLIEN)
         self.radio_klien.setChecked(pengaturan.peran == KLIEN)
         self._sandi_tersimpan = pengaturan.sandi
         self._wajib_ulang = False
@@ -653,7 +645,7 @@ class SetupMesinDialog(QDialog):
         koneksi gagal: nomor itu milik seluruh kantor, bukan milik admin.
         """
         admin = self.pilih_peran.currentData() == PERAN_ADMIN
-        self._tombol_ubah_port.setVisible(admin and self._peran_terpilih() != SENDIRI)
+        self._tombol_ubah_port.setVisible(admin)
 
     def _buka_ubah_port(self) -> None:
         if self.pilih_peran.currentData() != PERAN_ADMIN:
@@ -689,7 +681,7 @@ class SetupMesinDialog(QDialog):
             self.isian_ulang.clear()
 
     def _salah_ketik_ulang(self) -> str | None:
-        if self._peran_terpilih() == SENDIRI or self._baris_ulang.isHidden():
+        if self._baris_ulang.isHidden():
             return None
         if not self._pengaturan_dari_form().sandi:
             return "Kata sandi database belum diisi. Ketik ulang di kedua kotak."
@@ -738,7 +730,7 @@ class SetupMesinDialog(QDialog):
     def _perbarui_tampilan(self) -> None:
         peran = self._peran_terpilih()
         self._panel_server.setVisible(peran == SERVER)
-        self._panel_postgres.setVisible(peran != SENDIRI)
+        self._panel_postgres.setVisible(True)
         # Pembungkusnya yang dilipat, supaya baris tidak menyisakan
         # tinggi kosong. Isiannya ikut disembunyikan: isHidden() pada
         # anak tidak menjadi benar hanya karena induknya tertutup.
@@ -901,11 +893,6 @@ class SetupMesinDialog(QDialog):
 
     def _uji(self) -> None:
         pengaturan = self._pengaturan_dari_form()
-        if pengaturan.peran == SENDIRI:
-            self._tampilkan_error(
-                "Satu komputer tidak perlu diuji: databasenya berkas lokal."
-            )
-            return
         salah = kesalahan_isian(pengaturan)
         if salah:
             self._tampilkan_error(salah)

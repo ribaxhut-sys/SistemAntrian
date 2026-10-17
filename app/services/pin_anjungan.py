@@ -80,6 +80,11 @@ def baca() -> DataPin | None:
         nilai = session.scalar(
             sa.select(ApplicationSetting.value).where(ApplicationSetting.key == KUNCI)
         )
+    return dari_nilai(nilai)
+
+
+def dari_nilai(nilai: str | None) -> DataPin | None:
+    """Urai hasil baca bersama agar endpoint polling tidak mengulang query."""
     if not nilai:
         return None
     try:

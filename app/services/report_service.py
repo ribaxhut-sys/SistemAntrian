@@ -5,11 +5,9 @@ Melengkapi Ringkasan Harian, yang hanya menjawab "bagaimana hari ini".
 Laporan menjawab pertanyaan sesudahnya: bagaimana sebulan kemarin, loket
 mana yang paling lama melayani, petugas mana yang paling dinilai baik.
 
-Angka dihitung di Python dari baris-baris rentang itu, bukan dengan
-agregasi SQL per dialect. Satu kantor menerbitkan ratusan nomor sehari;
-setahun penuh masih puluhan ribu baris bertiga-empat kolom waktu, dan
-hasilnya dijamin sama persis di SQLite maupun PostgreSQL. Rentang dibatasi
-satu tahun supaya tidak ada yang tidak sengaja memuat seluruh sejarah.
+Angka dihitung di Python dari baris-baris rentang itu. Satu kantor menerbitkan
+ratusan nomor sehari; setahun penuh masih puluhan ribu baris dan rentang
+dibatasi satu tahun supaya tidak ada yang memuat seluruh sejarah tanpa sengaja.
 
 Definisi waktu sama dengan Ringkasan Harian (QueueRepository.rata_rata_durasi):
 menunggu = terbit → pertama dipanggil, pelayanan = mulai dilayani → selesai.
@@ -25,6 +23,8 @@ import sqlalchemy as sa
 from app.core.database import session_scope
 from app.core.errors import ValidationError
 from app.models import (
+    AuditAction,
+    AuditLog,
     Counter,
     Queue,
     QueueCall,
@@ -51,11 +51,14 @@ class BarisLaporan:
     selesai: int = 0
     tidak_hadir: int = 0
     batal: int = 0
+    prioritas: int = 0
+    prioritas_dicabut: int = 0
     #: Nama kelompok baris, misalnya petugas pada tabel petugas per layanan.
     kelompok: str = ""
     _menunggu: list[float] = field(default_factory=list, repr=False)
     _layanan: list[float] = field(default_factory=list, repr=False)
     _rating: list[int] = field(default_factory=list, repr=False)
+    _menunggu_prioritas: list[float] = field(default_factory=list, repr=False)
 
     @property
     def rata_menunggu_detik(self) -> float | None:
@@ -64,6 +67,14 @@ class BarisLaporan:
     @property
     def rata_layanan_detik(self) -> float | None:
         return sum(self._layanan) / len(self._layanan) if self._layanan else None
+
+    @property
+    def rata_menunggu_prioritas_detik(self) -> float | None:
+        return (
+            sum(self._menunggu_prioritas) / len(self._menunggu_prioritas)
+            if self._menunggu_prioritas
+            else None
+        )
 
     @property
     def jumlah_survey(self) -> int:
@@ -80,6 +91,10 @@ class BarisLaporan:
     @property
     def label_layanan(self) -> str:
         return durasi_singkat(self.rata_layanan_detik)
+
+    @property
+    def label_menunggu_prioritas(self) -> str:
+        return durasi_singkat(self.rata_menunggu_prioritas_detik)
 
     @property
     def label_kepuasan(self) -> str:
@@ -102,6 +117,8 @@ class TiketRiwayat:
     mulai: datetime | None
     selesai: datetime | None
     nilai: int | None
+    prioritas: bool = False
+    prioritas_dicabut: bool = False
 
     @property
     def menunggu_detik(self) -> float | None:
@@ -141,7 +158,16 @@ def _detik(awal: datetime | None, akhir: datetime | None) -> float | None:
     return nilai if nilai >= 0 else None
 
 
-def _catat(baris: BarisLaporan, status, created, called, serving, completed) -> None:
+def _catat(
+    baris: BarisLaporan,
+    status,
+    created,
+    called,
+    serving,
+    completed,
+    prioritas=False,
+    prioritas_dicabut=False,
+) -> None:
     baris.terbit += 1
     if called is not None:
         baris.dipanggil += 1
@@ -154,6 +180,12 @@ def _catat(baris: BarisLaporan, status, created, called, serving, completed) -> 
     tunggu = _detik(created, called)
     if tunggu is not None:
         baris._menunggu.append(tunggu)
+        if prioritas:
+            baris._menunggu_prioritas.append(tunggu)
+    if prioritas:
+        baris.prioritas += 1
+    if prioritas_dicabut:
+        baris.prioritas_dicabut += 1
     layanan = _detik(serving, completed)
     if layanan is not None:
         baris._layanan.append(layanan)
@@ -228,10 +260,22 @@ class ReportService:
                     Queue.called_at,
                     Queue.serving_at,
                     Queue.completed_at,
+                    Queue.prioritas,
                 )
                 .where(*dalam_rentang)
                 .order_by(Queue.created_at, Queue.id)
             ).all()
+            prioritas_dicabut = set(
+                session.scalars(
+                    sa.select(AuditLog.entity_id)
+                    .join(Queue, Queue.id == AuditLog.entity_id)
+                    .where(
+                        *dalam_rentang,
+                        AuditLog.action == AuditAction.CLEAR_PRIORITY.value,
+                        AuditLog.entity_type == "queue",
+                    )
+                )
+            )
             syarat_survey = [
                 SatisfactionSurvey.branch_id == branch_id,
                 SatisfactionSurvey.submitted_at
@@ -276,13 +320,34 @@ class ReportService:
                 )
             return per_petugas_layanan[kunci]
 
-        for (queue_id, tanggal, nomor, status, kategori, loket, petugas, created, called,
-             serving, completed) in antrian:
+        for (
+            queue_id,
+            tanggal,
+            nomor,
+            status,
+            kategori,
+            loket,
+            petugas,
+            created,
+            called,
+            serving,
+            completed,
+            alasan_prioritas,
+        ) in antrian:
             petugas = petugas if petugas is not None else pemanggil.get(queue_id)
             if petugas_id is not None and petugas != petugas_id:
                 continue
             id_termasuk.add(queue_id)
-            waktu = (status, created, called, serving, completed)
+            dicabut = queue_id in prioritas_dicabut
+            waktu = (
+                status,
+                created,
+                called,
+                serving,
+                completed,
+                bool(alasan_prioritas) or dicabut,
+                dicabut,
+            )
             _catat(total, *waktu)
             _catat(ambil(per_hari, tanggal, tanggal.isoformat()), *waktu)
             _catat(ambil(per_layanan, kategori, nama_layanan.get(kategori, "—")), *waktu)
@@ -315,6 +380,8 @@ class ReportService:
                     mulai=serving,
                     selesai=completed,
                     nilai=nilai_tiket.get(queue_id),
+                    prioritas=bool(alasan_prioritas) or dicabut,
+                    prioritas_dicabut=dicabut,
                 )
             )
 
@@ -391,7 +458,10 @@ KOLOM_TABEL: dict[str, list[Kolom]] = {
         _k("Selesai", lambda b: str(b.selesai), lambda b: b.selesai),
         _k("Tidak hadir", lambda b: str(b.tidak_hadir), lambda b: b.tidak_hadir),
         _k("Batal", lambda b: str(b.batal), lambda b: b.batal),
+        _k("Prioritas", lambda b: str(b.prioritas), lambda b: b.prioritas),
+        _k("Dicabut", lambda b: str(b.prioritas_dicabut), lambda b: b.prioritas_dicabut),
         _k("Rata-rata menunggu", lambda b: b.label_menunggu, lambda b: _menit(b.rata_menunggu_detik)),
+        _k("Tunggu prioritas", lambda b: b.label_menunggu_prioritas, lambda b: _menit(b.rata_menunggu_prioritas_detik)),
         _k("Rata-rata pelayanan", lambda b: b.label_layanan, lambda b: _menit(b.rata_layanan_detik)),
         _k("Survey", lambda b: str(b.jumlah_survey), lambda b: b.jumlah_survey),
         _k("Kepuasan", lambda b: b.label_kepuasan, lambda b: b.rata_kepuasan),
@@ -402,7 +472,10 @@ KOLOM_TABEL: dict[str, list[Kolom]] = {
         _k("Selesai", lambda b: str(b.selesai), lambda b: b.selesai),
         _k("Tidak hadir", lambda b: str(b.tidak_hadir), lambda b: b.tidak_hadir),
         _k("Batal", lambda b: str(b.batal), lambda b: b.batal),
+        _k("Prioritas", lambda b: str(b.prioritas), lambda b: b.prioritas),
+        _k("Dicabut", lambda b: str(b.prioritas_dicabut), lambda b: b.prioritas_dicabut),
         _k("Rata-rata menunggu", lambda b: b.label_menunggu, lambda b: _menit(b.rata_menunggu_detik)),
+        _k("Tunggu prioritas", lambda b: b.label_menunggu_prioritas, lambda b: _menit(b.rata_menunggu_prioritas_detik)),
         _k("Rata-rata pelayanan", lambda b: b.label_layanan, lambda b: _menit(b.rata_layanan_detik)),
     ],
     "per_loket": [
@@ -460,7 +533,19 @@ KOLOM_RIWAYAT: list[Kolom] = [
     _k("Lama menunggu", lambda t: durasi_singkat(t.menunggu_detik), lambda t: _menit(t.menunggu_detik)),
     _k("Lama pelayanan", lambda t: durasi_singkat(t.layanan_detik), lambda t: _menit(t.layanan_detik)),
     _k("Nilai survey", lambda t: "" if t.nilai is None else str(t.nilai), lambda t: t.nilai),
+    _k("Prioritas", lambda t: "Ya" if t.prioritas else "Tidak", kanan=False),
+    _k("Prioritas dicabut", lambda t: "Ya" if t.prioritas_dicabut else "Tidak", kanan=False),
 ]
+
+
+def angka_prioritas(laporan: Laporan) -> list[tuple[str, str]]:
+    """Angka operasional prioritas dipisah agar enam kartu utama tetap terbaca."""
+    total = laporan.total
+    return [
+        ("Nomor prioritas", f"{total.prioritas:,}".replace(",", ".")),
+        ("Prioritas dicabut", f"{total.prioritas_dicabut:,}".replace(",", ".")),
+        ("Rata-rata tunggu prioritas", total.label_menunggu_prioritas),
+    ]
 
 JUDUL_TABEL = {
     "per_hari": "Per hari",

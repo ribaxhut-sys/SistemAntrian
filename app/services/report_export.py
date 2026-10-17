@@ -24,6 +24,7 @@ from app.services.report_service import (
     KOLOM_RIWAYAT,
     KOLOM_TABEL,
     Laporan,
+    angka_prioritas,
     angka_ringkasan,
 )
 from app.utils.formatting import tanggal_panjang
@@ -101,6 +102,9 @@ def ekspor_pdf(laporan: Laporan, tujuan: Path, kantor: str = "") -> Path:
         )
     )
     isi.append(tabel_ringkas)
+    prioritas = " · ".join(f"{nama}: {nilai}" for nama, nilai in angka_prioritas(laporan))
+    isi.append(Spacer(1, 3 * mm))
+    isi.append(Paragraph(prioritas, gaya["Normal"]))
 
     for kunci, judul in JUDUL_TABEL.items():
         if laporan.nama_petugas and kunci == "per_petugas":
@@ -192,6 +196,9 @@ def ekspor_excel(laporan: Laporan, tujuan: Path) -> Path:
         ringkas.append([laporan.nama_petugas])
     ringkas.append([])
     for nama, nilai in angka_ringkasan(laporan):
+        ringkas.append([nama, nilai])
+    ringkas.append([])
+    for nama, nilai in angka_prioritas(laporan):
         ringkas.append([nama, nilai])
     ringkas.column_dimensions["A"].width = 32
     ringkas.column_dimensions["B"].width = 16

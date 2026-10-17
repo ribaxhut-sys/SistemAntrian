@@ -121,6 +121,13 @@ public final class MainActivity extends Activity {
     private static final String WARNA_KILAU = "warna_kilau";
     /** Warna latar iklan penuh `#RRGGBB`, disimpan per tablet. */
     private static final String LATAR_IKLAN_KUNCI = "latar_iklan_penuh";
+    private static final String SKALA_VIDEO = "skala_video";
+    private static final String VIDEO_PAS = "pas";
+    private static final String VIDEO_ISI = "isi";
+    private static final String[][] PILIHAN_SKALA_VIDEO = {
+            {VIDEO_PAS, "Pas — video utuh, mungkin ada ruang di sisi"},
+            {VIDEO_ISI, "Isi — memenuhi bingkai, tepi video dapat terpotong"},
+    };
     private static final String[][] PILIHAN_LATAR_IKLAN = {{"Navy", "#0F172A"},
             {"Hitam", "#000000"}, {"Hijau tua", "#064E3B"},
             {"Merah marun", "#4C0519"}, {"Ungu tua", "#3B0764"}};
@@ -1125,6 +1132,7 @@ public final class MainActivity extends Activity {
         float density = getResources().getDisplayMetrics().density;
         float widthDp = getResources().getDisplayMetrics().widthPixels / density;
         float heightDp = getResources().getDisplayMetrics().heightPixels / density;
+        boolean modeMemanjang = widthDp / Math.max(1f, heightDp) > 2.5f;
         temaAktif = temaBerlaku();
         terapkanPalet(tema(temaAktif));
         kertasTerbangun = kertasAktif(temaWarna, temaAktif);
@@ -1133,7 +1141,11 @@ public final class MainActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         rootLayout = root;
-        root.setOrientation(LinearLayout.VERTICAL);
+        // Panel papan ±4,4:1 kehilangan hampir seluruh tinggi bila tiga bagian
+        // ditumpuk. Pada bentuk ini judul, layanan, dan hasil berdampingan;
+        // tablet biasa tetap memakai susunan tegak yang mudah dijangkau.
+        root.setOrientation(modeMemanjang
+                ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
         if (kertasTerbangun) root.setBackground(latarKertas(LATAR));
         else root.setBackgroundColor(LATAR);
         root.setPadding(dp(10), dp(8), dp(10), dp(8));
@@ -1217,7 +1229,7 @@ public final class MainActivity extends Activity {
         bingkaiMedia.addView(ajakanIklanPenuh, new FrameLayout.LayoutParams(-1, dp(56),
                 Gravity.TOP));
         infoPanel.addView(bingkaiMedia, new LinearLayout.LayoutParams(-1, 0, 1));
-        root.addView(infoPanel, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(infoPanel, parameterPanel(modeMemanjang, 1f));
 
         LinearLayout kioskPanel = panel();
         panelLayanan = kioskPanel;
@@ -1241,7 +1253,7 @@ public final class MainActivity extends Activity {
 
         contentSlot = new FrameLayout(this);
         kioskPanel.addView(contentSlot, new LinearLayout.LayoutParams(-1, 0, 1));
-        root.addView(kioskPanel, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(kioskPanel, parameterPanel(modeMemanjang, 1.35f));
 
         // Tiga bagian yang setara membuat pilihan layanan berada tepat di
         // tengah layar, sehingga mudah dijangkau pada tablet yang dipasang
@@ -1257,7 +1269,7 @@ public final class MainActivity extends Activity {
         resultPanel.addView(loketBawah, new LinearLayout.LayoutParams(-1, -2));
         resultSlot = new FrameLayout(this);
         resultPanel.addView(resultSlot, new LinearLayout.LayoutParams(-1, 0, 1));
-        root.addView(resultPanel, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(resultPanel, parameterPanel(modeMemanjang, 1f));
 
         setContentView(root);
         showCategories();
@@ -1280,6 +1292,15 @@ public final class MainActivity extends Activity {
         layout.setBackground(roundedOutline(KARTU, GARIS, dp(24), dp(1)));
         layout.setElevation(dp(kertasTerbangun ? 3 : 1));
         return layout;
+    }
+
+    private LinearLayout.LayoutParams parameterPanel(boolean memanjang, float bobot) {
+        LinearLayout.LayoutParams parameter = memanjang
+                ? new LinearLayout.LayoutParams(0, -1, bobot)
+                : new LinearLayout.LayoutParams(-1, 0, bobot);
+        int sela = dp(4);
+        parameter.setMargins(sela, sela, sela, sela);
+        return parameter;
     }
 
     private void loadCategories() {
@@ -1748,12 +1769,16 @@ public final class MainActivity extends Activity {
             }
         }
 
-        /** Rasio dijaga: video utuh di tengah, sisanya hitam. */
+        /** Rasio dijaga; teknisi memilih utuh (pas) atau penuh (isi). */
         private void pasKanKeBingkai() {
             int lebar = getWidth();
             int tinggi = getHeight();
             if (lebarVideo <= 0 || tinggiVideo <= 0 || lebar <= 0 || tinggi <= 0) return;
-            float skala = Math.min(lebar / (float) lebarVideo, tinggi / (float) tinggiVideo);
+            boolean isi = VIDEO_ISI.equals(
+                    preferences.getString(SKALA_VIDEO, VIDEO_PAS));
+            float skala = isi
+                    ? Math.max(lebar / (float) lebarVideo, tinggi / (float) tinggiVideo)
+                    : Math.min(lebar / (float) lebarVideo, tinggi / (float) tinggiVideo);
             FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
                     Math.round(lebarVideo * skala), Math.round(tinggiVideo * skala),
                     Gravity.CENTER);
@@ -1847,7 +1872,9 @@ public final class MainActivity extends Activity {
                 if (lama instanceof VideoTekstur) ((VideoTekstur) lama).stopPlayback();
             }
             ImageView image = new ImageView(this);
-            image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            image.setScaleType(VIDEO_ISI.equals(
+                    preferences.getString(SKALA_VIDEO, VIDEO_PAS))
+                    ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
             image.setBackgroundColor(iklanPenuh ? latarIklanPenuh : KARTU);
             image.setAlpha(0f);
             mediaSlot.addView(image, new FrameLayout.LayoutParams(-1, -1));
@@ -5791,6 +5818,12 @@ public final class MainActivity extends Activity {
         TextView mediaStatus = text(ringkasanMedia(), 12, MUTED, false);
         mediaStatus.setPadding(dp(2), dp(2), 0, 0);
         tampilan.addView(mediaStatus);
+        tampilan.addView(labelPengaturan("Cara gambar dan video memenuhi bingkai"));
+        tampilan.addView(pilihanTarik(PILIHAN_SKALA_VIDEO,
+                preferences.getString(SKALA_VIDEO, VIDEO_PAS), nilai -> {
+                    preferences.edit().putString(SKALA_VIDEO, nilai).apply();
+                    if (!welcomeMedia.isEmpty()) showWelcomeMedia(mediaIndex);
+                }), new LinearLayout.LayoutParams(-1, -2));
         Button kelolaMedia = smallButton("Kelola media tablet");
         kelolaMedia.setOnClickListener(v -> showMediaTablet());
         tampilan.addView(kelolaMedia, tombolPengaturan());
@@ -7382,6 +7415,7 @@ public final class MainActivity extends Activity {
         penerbit.shutdownNow();
         pengunduh.shutdownNow();
         pemanggil.shutdownNow();
+        pembuatThumbnail.shutdownNow();
         super.onDestroy();
     }
 }

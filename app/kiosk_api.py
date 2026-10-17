@@ -45,13 +45,14 @@ from app.services.apk_anjungan import (
     folder_apk,
     info_apk,
 )
+from app.services.device_service import KUNCI_ANJUNGAN_BERSUARA
 from app.services.pembaruan_windows import folder_pembaruan, info_pembaruan
 from app.services import daftar_putar, pin_anjungan
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
 from app.services.paket_suara import folder_paket, info_paket, token_pengumuman
 from app.services.queue_service import QueueService
-from app.services.settings_service import SettingsService
+from app.services.settings_service import CuplikanPengaturan, SettingsService
 from app.services.ticket_service import (
     NullTicketPrinter,
     TicketService,
@@ -366,9 +367,11 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             return device_id
         return ""
 
-    def anjungan_ini_bersuara(device_id: str) -> bool:
+    def anjungan_ini_bersuara(device_id: str, pengaturan=None) -> bool:
         if not device_id or perangkat is None:
             return False
+        if pengaturan is not None:
+            return pengaturan.get(KUNCI_ANJUNGAN_BERSUARA, "") == device_id
         try:
             return perangkat.anjungan_bersuara() == device_id
         except Exception:
@@ -376,18 +379,21 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             logger.warning("Pengaturan anjungan bersuara tidak terbaca", exc_info=True)
             return False
 
-    def posisi_loket() -> str:
-        nilai = services.settings.get("kiosk.posisi_loket", "otomatis")
+    def posisi_loket(pengaturan=None) -> str:
+        nilai = (pengaturan or services.settings).get(
+            "kiosk.posisi_loket", "otomatis"
+        )
         return nilai if nilai in POSISI_LOKET else "otomatis"
 
-    def tema_anjungan() -> str:
+    def tema_anjungan(pengaturan=None) -> str:
         """Tema yang berlaku hari ini; Agustus boleh otomatis merah putih."""
+        sumber = pengaturan or services.settings
         if (
-            services.settings.get_bool("kiosk.tema_agustus", True)
+            sumber.get_bool("kiosk.tema_agustus", True)
             and clock.today().month == 8
         ):
             return "merah_putih"
-        nilai = services.settings.get("kiosk.tema", "biru")
+        nilai = sumber.get("kiosk.tema", "biru")
         return nilai if nilai in TEMA_ANJUNGAN else "biru"
 
     def isi_loket(state) -> list[dict]:
@@ -411,9 +417,13 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             for loket in state.loket
         ]
 
-    def isi_pin() -> dict:
+    def isi_pin(pengaturan=None) -> dict:
         try:
-            data = pin_anjungan.baca()
+            data = (
+                pin_anjungan.dari_nilai(pengaturan.get(pin_anjungan.KUNCI, ""))
+                if isinstance(pengaturan, CuplikanPengaturan)
+                else pin_anjungan.baca()
+            )
         except Exception:
             logger.warning("PIN anjungan gagal dibaca", exc_info=True)
             data = None
@@ -452,8 +462,9 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             hasil.append(item.resolve())
         return hasil
 
-    def welcome_media_paths() -> list[Path]:
-        kind = services.settings.get("kiosk.welcome_kind", "teks")
+    def welcome_media_paths(pengaturan=None) -> list[Path]:
+        sumber = pengaturan or services.settings
+        kind = sumber.get("kiosk.welcome_kind", "teks")
         if kind not in _MEDIA_KINDS:
             return []
         folder = (base_dir() / "media" / "kiosk").resolve()
@@ -470,7 +481,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 except ValueError:
                     continue
                 files.append(resolved)
-        nilai_daftar = services.settings.get(daftar_putar.KUNCI, "")
+        nilai_daftar = sumber.get(daftar_putar.KUNCI, "")
         if daftar_putar.baca(nilai_daftar) is not None:
             # Daftar putar yang sudah diatur berlaku apa adanya, juga bila
             # semua berkas sengaja dimatikan: tidak ada media, bukan cadangan.
@@ -478,7 +489,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             return daftar_putar.terapkan(files, nilai_daftar, clock.today())
         if files:
             return files
-        fallback_value = services.settings.get("kiosk.welcome_file", "").strip()
+        fallback_value = sumber.get("kiosk.welcome_file", "").strip()
         fallback = Path(fallback_value) if fallback_value else None
         if fallback is not None and not fallback.is_absolute():
             fallback = (folder / fallback).resolve()
@@ -913,28 +924,35 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         urusan layar antrian. Panggilan bersuara juga, kecuali admin memilih
         anjungan ini sebagai pengganti sementara (`call_sound`).
         """
-        media = welcome_media_paths()
+        pengaturan = services.settings.cuplikan()
+        media = welcome_media_paths(pengaturan)
         detik_khusus = daftar_putar.detik_per_berkas(
-            services.settings.get(daftar_putar.KUNCI, "")
+            pengaturan.get(daftar_putar.KUNCI, "")
         )
         tampil_berkas = daftar_putar.tampil_per_berkas(
-            services.settings.get(daftar_putar.KUNCI, "")
+            pengaturan.get(daftar_putar.KUNCI, "")
         )
         apk = info_apk(folder_apk(base_dir()))
         paket = info_paket(folder_paket(base_dir()))
-        judul = (services.settings.get("kiosk.judul", "") or "").strip()
+        judul = (pengaturan.get("kiosk.judul", "") or "").strip()
+        keadaan = services.queue.display_state(
+            jumlah_berikutnya=0,
+            rasio_prioritas=max(0, pengaturan.get_int("queue.rasio_prioritas", 3)),
+            loket_tampil=pengaturan.get("display.loket_tampil", "berpetugas"),
+            sertakan_terkini=False,
+        )
         return {
             # Judul anjungan sendiri; kosong berarti ikut judul layar antrian.
             "title": judul
-            or services.settings.get("display.title", "ANTRIAN PELAYANAN CRO"),
-            "subtitle": (services.settings.get("kiosk.subjudul", "") or "").strip(),
-            "welcome_text": services.settings.get(
+            or pengaturan.get("display.title", "ANTRIAN PELAYANAN CRO"),
+            "subtitle": (pengaturan.get("kiosk.subjudul", "") or "").strip(),
+            "welcome_text": pengaturan.get(
                 "kiosk.welcome_text",
                 "Sentuh salah satu layanan di bawah untuk mengambil nomor.",
             )
             or "Sentuh salah satu layanan di bawah untuk mengambil nomor.",
-            "welcome_kind": services.settings.get("kiosk.welcome_kind", "teks"),
-            "welcome_slide_seconds": services.settings.get_int(
+            "welcome_kind": pengaturan.get("kiosk.welcome_kind", "teks"),
+            "welcome_slide_seconds": pengaturan.get_int(
                 "kiosk.welcome_slide_seconds", 10
             ),
             "welcome_media": [item.name for item in media],
@@ -958,73 +976,71 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             ],
             # Setelah sekian detik tanpa sentuhan iklan memenuhi layar;
             # 0 = tidak pernah.
-            "fullscreen_ad_idle_seconds": services.settings.get_int(
+            "fullscreen_ad_idle_seconds": pengaturan.get_int(
                 "kiosk.iklan_layar_penuh_detik", 60
             ),
             # Berapa putaran iklan layar penuh sebelum kembali ke tampilan
             # antrian; 0 = berputar terus sampai disentuh.
-            "fullscreen_ad_loops": services.settings.get_int(
+            "fullscreen_ad_loops": pengaturan.get_int(
                 "kiosk.iklan_putaran", 2
             ),
             # Animasi tiga panel masuk dari arah acak saat kembali ke antrian.
-            "return_animation": services.settings.get_bool(
+            "return_animation": pengaturan.get_bool(
                 "kiosk.animasi_kembali", True
             ),
             # Tiga panel keluar sebelum iklan layar penuh muncul.
-            "ad_entry_animation": services.settings.get_bool(
+            "ad_entry_animation": pengaturan.get_bool(
                 "kiosk.animasi_iklan_muncul", True
             ),
             # Panggilan petugas mengalahkan iklan layar penuh.
-            "call_interrupts_ad": services.settings.get_bool(
+            "call_interrupts_ad": pengaturan.get_bool(
                 "kiosk.panggilan_hentikan_iklan", True
             ),
             # Nomor menunggu muncul berurutan dengan gaya acak.
-            "waiting_animation": services.settings.get_bool(
+            "waiting_animation": pengaturan.get_bool(
                 "kiosk.animasi_nomor_menunggu", True
             ),
             # Detik sebelum iklan terakhir berakhir saat animasi mulai; 0 =
             # sesudah iklan selesai.
-            "return_animation_lead_seconds": services.settings.get_int(
+            "return_animation_lead_seconds": pengaturan.get_int(
                 "kiosk.animasi_mulai_detik", 2
             ),
-            "registration_open": services.queue.pendaftaran_dibuka(),
+            "registration_open": services.queue.pendaftaran_dibuka(pengaturan),
             # PIN pengaturan anjungan. Hash (bukan PIN) ikut dikirim supaya
             # tablet yang terputus tetap dapat memeriksa PIN untuk jalan pulih.
             # Hash PIN 6 angka dapat ditebak habis di luar server, jadi hanya
             # tablet TERPASANG yang menerimanya; pemegang token bersama tidak.
             # Tanpa kunci ini tablet memakai salinan yang sudah ia simpan.
-            **({"settings_pin": isi_pin()} if device_id else {}),
+            **({"settings_pin": isi_pin(pengaturan)} if device_id else {}),
             # Berubah bila admin menekan "Segarkan media" untuk tablet ini;
             # tablet menyegarkan salinannya segera bila nilainya baru.
             "media_refresh": permintaan_segarkan(device_id),
             # Tablet menampilkan kotak prioritas hanya bila true.
-            "priority_enabled": services.settings.get_bool(
+            "priority_enabled": pengaturan.get_bool(
                 "kiosk.prioritas_aktif", True
             ),
             # Tablet hanya memuat /categories saat menyala. Tanpa sidik ini
             # layanan yang ditambah, diganti nama, atau dinonaktifkan di
             # Data Master baru terlihat sesudah tablet dibuka ulang.
             "categories_version": versi_layanan(isi_layanan()),
-            "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(device_id),
-            "waiting_queue_numbers": services.queue.nomor_menunggu_untuk_layar(),
-            # Nomor yang diberi tanda bintang; tanpa alasan prioritasnya.
-            "waiting_priority_numbers": (
-                services.queue.nomor_prioritas_menunggu_untuk_layar()
+            "cooldown_remaining_seconds": services.queue.sisa_jeda_kios(
+                device_id, pengaturan
             ),
+            "waiting_queue_numbers": keadaan.nomor_menunggu,
+            # Nomor yang diberi tanda bintang; tanpa alasan prioritasnya.
+            "waiting_priority_numbers": keadaan.nomor_prioritas,
             # Baris "NOMOR DI LOKET". Posisinya (otomatis/atas/bawah) dipilih
             # di server supaya semua tablet seragam; tablet sendiri yang
             # memutuskan "otomatis", karena hanya tablet yang tahu apakah
             # media iklannya benar-benar dapat diputar.
-            "counters": isi_loket(
-                services.queue.display_state(jumlah_berikutnya=0)
-            ),
-            "counter_position": posisi_loket(),
-            "theme": tema_anjungan(),
-            "video_sound": services.settings.get_bool("kiosk.suara_video", False),
+            "counters": isi_loket(keadaan),
+            "counter_position": posisi_loket(pengaturan),
+            "theme": tema_anjungan(pengaturan),
+            "video_sound": pengaturan.get_bool("kiosk.suara_video", False),
             # Hanya anjungan pilihan admin yang membunyikan panggilan, dan
             # hanya yang dipasangkan: device_id token bersama tidak dapat
             # dipercaya (lihat perangkat_terpercaya).
-            "call_sound": anjungan_ini_bersuara(device_id),
+            "call_sound": anjungan_ini_bersuara(device_id, pengaturan),
             # Tablet mengunduh ulang paket suara bila versinya berubah.
             "sound_pack_version": paket.versi if paket else None,
             # Jam di layar anjungan memakai jam dan zona waktu SERVER, bukan

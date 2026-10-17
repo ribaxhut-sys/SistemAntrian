@@ -17,6 +17,7 @@ import base64
 import binascii
 import hashlib
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -26,6 +27,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from datetime import date, timedelta
 
 from app import __version__
 from app.core.config import AppConfig, get_config
@@ -47,6 +49,7 @@ DOMAIN_PEMBARUAN = b"antrian-pembaruan-windows-v1\x00"
 BATAS_MANIFEST_BYTE = 64 * 1024
 BATAS_INSTALLER_BYTE = 750 * 1024 * 1024
 CADANGAN_RUANG_BYTE = 64 * 1024 * 1024
+NAMA_STATUS_LOKAL = "pembaruan-lokal.json"
 
 
 class PembaruanError(AppError):
@@ -61,6 +64,108 @@ class InfoPembaruan:
     sha256: str
     #: Tanda tangan Ed25519 (base64) atas `pesan_tanda_tangan`; "" bila tidak ada.
     tanda: str = ""
+
+
+def _path_status_lokal(config: AppConfig | None = None) -> Path:
+    return (config or get_config()).db_path.parent / NAMA_STATUS_LOKAL
+
+
+def _baca_status_lokal(config: AppConfig | None = None) -> dict:
+    try:
+        isi = json.loads(_path_status_lokal(config).read_text(encoding="utf-8"))
+        return isi if isinstance(isi, dict) else {}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {}
+
+
+def _tulis_status_lokal(isi: dict, config: AppConfig | None = None) -> None:
+    tujuan = _path_status_lokal(config)
+    tujuan.parent.mkdir(parents=True, exist_ok=True)
+    sementara = tujuan.with_suffix(".json.tmp")
+    sementara.write_text(json.dumps(isi, ensure_ascii=False), encoding="utf-8")
+    sementara.replace(tujuan)
+
+
+def tunda_pembaruan(
+    versi: str,
+    *,
+    sampai: date | None = None,
+    config: AppConfig | None = None,
+) -> None:
+    """Tunda satu versi sampai besok tanpa memengaruhi komputer lain."""
+    bagian_versi(versi)
+    isi = _baca_status_lokal(config)
+    isi["tunda"] = {
+        "versi": versi,
+        "sampai": (sampai or (date.today() + timedelta(days=1))).isoformat(),
+    }
+    _tulis_status_lokal(isi, config)
+
+
+def pembaruan_ditunda(
+    versi: str, *, hari: date | None = None, config: AppConfig | None = None
+) -> bool:
+    """Berkas lokal rusak dianggap tidak menunda agar pembaruan tetap terlihat."""
+    try:
+        isi = _baca_status_lokal(config)["tunda"]
+        batas = date.fromisoformat(str(isi["sampai"]))
+        return str(isi["versi"]) == versi and (hari or date.today()) < batas
+    except (ValueError, KeyError, TypeError):
+        return False
+
+
+def catat_pemasangan_dimulai(
+    versi: str, *, config: AppConfig | None = None
+) -> None:
+    """Simpan target agar pembukaan aplikasi berikutnya dapat diaudit."""
+    try:
+        bagian_versi(versi)
+        isi = _baca_status_lokal(config)
+        isi["pemasangan"] = {"dari": __version__, "tujuan": versi}
+        _tulis_status_lokal(isi, config)
+    except (OSError, ValueError):
+        logger.warning("Penanda hasil pembaruan tidak dapat disimpan", exc_info=True)
+
+
+def audit_hasil_pembaruan(
+    *, versi_terpasang: str = __version__, config: AppConfig | None = None
+) -> bool | None:
+    """Catat berhasil/gagal sekali sesudah aplikasi hidup kembali."""
+    isi = _baca_status_lokal(config)
+    pemasangan = isi.get("pemasangan")
+    if not isinstance(pemasangan, dict) or not pemasangan.get("tujuan"):
+        return None
+    tujuan = str(pemasangan["tujuan"])
+    berhasil = versi_terpasang == tujuan
+
+    from app.core.database import session_scope
+    from app.models import AuditAction
+    from app.services import audit_service
+
+    with session_scope() as session:
+        audit_service.record(
+            session,
+            AuditAction.WINDOWS_UPDATE_RESULT,
+            user_id=None,
+            entity_type="windows_update",
+            versi_dari=str(pemasangan.get("dari") or ""),
+            versi_tujuan=tujuan,
+            versi_terpasang=versi_terpasang,
+            berhasil=berhasil,
+        )
+    isi.pop("pemasangan", None)
+    try:
+        _tulis_status_lokal(isi, config)
+    except OSError:
+        logger.warning("Penanda hasil pembaruan tidak dapat dibersihkan", exc_info=True)
+    logger.log(
+        logging.INFO if berhasil else logging.WARNING,
+        "Hasil pembaruan ke %s: %s (terpasang %s)",
+        tujuan,
+        "berhasil" if berhasil else "gagal",
+        versi_terpasang,
+    )
+    return berhasil
 
 
 def pesan_tanda_tangan(versi: str, ukuran_byte: int, sha256: str) -> bytes:
@@ -202,6 +307,8 @@ def periksa_pembaruan(
             "tidak ada" if not tanda else "tidak sah",
         )
         return None
+    if pembaruan_ditunda(versi):
+        return None
     return info
 
 
@@ -211,45 +318,74 @@ def unduh_pembaruan(
     *,
     kemajuan: Callable[[int, int], None] | None = None,
 ) -> Path:
-    """Unduh atomik sambil melaporkan progres, lalu verifikasi sebelum dipakai."""
+    """Lanjutkan unduhan terputus, lalu verifikasi penuh sebelum dipakai."""
     alamat_api = alamat_api or alamat_api_pembaruan()
     if not alamat_api:
         raise PembaruanError("Alamat komputer server belum tersedia.")
     tujuan_dir = Path(tempfile.gettempdir()) / "AntrianCRO" / "pembaruan"
     tujuan_dir.mkdir(parents=True, exist_ok=True)
+    tujuan = tujuan_dir / f"AntrianCRO-Setup-{info.versi}.exe"
+    sementara = tujuan.with_suffix(".exe.tmp")
+    ringkasan = hashlib.sha256()
+    try:
+        jumlah = sementara.stat().st_size
+    except OSError:
+        jumlah = 0
+    if jumlah < 0 or jumlah >= info.ukuran_byte:
+        sementara.unlink(missing_ok=True)
+        jumlah = 0
+    if jumlah:
+        with sementara.open("rb") as bagian_lama:
+            for blok in iter(lambda: bagian_lama.read(1024 * 1024), b""):
+                ringkasan.update(blok)
+
     ruang_bebas = shutil.disk_usage(tujuan_dir).free
-    if ruang_bebas < info.ukuran_byte + CADANGAN_RUANG_BYTE:
+    if ruang_bebas < (info.ukuran_byte - jumlah) + CADANGAN_RUANG_BYTE:
         raise PembaruanError(
             "Ruang penyimpanan tidak cukup untuk mengunduh pembaruan. "
             "Kosongkan sedikit ruang lalu coba lagi."
         )
-    tujuan = tujuan_dir / f"AntrianCRO-Setup-{info.versi}.exe"
-    sementara = tujuan.with_suffix(".exe.tmp")
-    ringkasan = hashlib.sha256()
-    jumlah = 0
     if kemajuan is not None:
-        kemajuan(0, info.ukuran_byte)
+        kemajuan(jumlah, info.ukuran_byte)
     try:
+        alamat = f"{alamat_api.rstrip('/')}/v1/windows/update/download"
+        header = {"Range": f"bytes={jumlah}-"} if jumlah else {}
+        permintaan = urllib.request.Request(alamat, headers=header)
         with urllib.request.urlopen(  # noqa: S310 - host dari konfigurasi lokal
-            f"{alamat_api.rstrip('/')}/v1/windows/update/download", timeout=30
-        ) as sumber, sementara.open("wb") as keluaran:
-            while blok := sumber.read(1024 * 1024):
-                jumlah += len(blok)
-                if jumlah > BATAS_INSTALLER_BYTE or jumlah > info.ukuran_byte:
-                    raise PembaruanError("Ukuran berkas pembaruan tidak sesuai.")
-                ringkasan.update(blok)
-                keluaran.write(blok)
+            permintaan, timeout=30
+        ) as sumber:
+            melanjutkan = jumlah > 0 and getattr(sumber, "status", None) == 206
+            if jumlah and not melanjutkan:
+                # Server lama boleh mengabaikan Range. Mulai ulang dari byte
+                # pertama agar dua salinan installer tidak tergabung.
+                jumlah = 0
+                ringkasan = hashlib.sha256()
                 if kemajuan is not None:
-                    kemajuan(jumlah, info.ukuran_byte)
+                    kemajuan(0, info.ukuran_byte)
+            mode = "ab" if melanjutkan else "wb"
+            keluaran = sementara.open(mode)
+            try:
+                while blok := sumber.read(1024 * 1024):
+                    jumlah += len(blok)
+                    if jumlah > BATAS_INSTALLER_BYTE or jumlah > info.ukuran_byte:
+                        raise PembaruanError("Ukuran berkas pembaruan tidak sesuai.")
+                    ringkasan.update(blok)
+                    keluaran.write(blok)
+                    if kemajuan is not None:
+                        kemajuan(jumlah, info.ukuran_byte)
+            finally:
+                keluaran.close()
         if jumlah != info.ukuran_byte or ringkasan.hexdigest() != info.sha256:
+            sementara.unlink(missing_ok=True)
             raise PembaruanError("Berkas pembaruan tidak lolos pemeriksaan keamanan.")
         sementara.replace(tujuan)
         return tujuan
     except PembaruanError:
-        sementara.unlink(missing_ok=True)
         raise
     except (OSError, urllib.error.URLError) as exc:
-        sementara.unlink(missing_ok=True)
+        # Bagian yang selesai ditulis sengaja dipertahankan. Percobaan
+        # berikutnya meminta sisa byte dan checksum penuh tetap menjadi
+        # penjaga sebelum installer boleh dijalankan.
         raise PembaruanError(detail=type(exc).__name__) from exc
 
 
