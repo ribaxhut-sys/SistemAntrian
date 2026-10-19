@@ -419,8 +419,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             prioritas = nilai;
             if (nilai) {
                 GradientDrawable latar = new GradientDrawable();
-                latar.setColor(Color.argb(60, 245, 158, 11));
-                latar.setCornerRadius(12 * getResources().getDisplayMetrics().density);
+                // Latar tipis dan sudut kecil: nomor menunggu tidak boleh
+                // terbaca seperti tombol timbul.
+                latar.setColor(Color.argb(32, 245, 158, 11));
+                latar.setCornerRadius(8 * getResources().getDisplayMetrics().density);
                 setBackground(latar);
             } else {
                 setBackground(null);
@@ -432,7 +434,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         protected void onDraw(android.graphics.Canvas canvas) {
             super.onDraw(canvas);
             if (!prioritas) return;
-            float besar = Math.max(getTextSize() * 0.4f,
+            float besar = Math.max(getTextSize() * 0.32f,
                     10 * getResources().getDisplayMetrics().density);
             bintang.setTextSize(besar);
             canvas.drawText("★", 4 * getResources().getDisplayMetrics().density,
@@ -774,7 +776,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             // Hanya saat jumlah BARIS berubah kartu ikut bergerak, dan geraknya halus.
             if (nextRowsShown >= 0) {
                 AutoTransition transition = new AutoTransition();
-                transition.setDuration(400);
+                transition.setDuration(200);
                 TransitionManager.beginDelayedTransition(body, transition);
             }
             nextRowsShown = rows;
@@ -787,7 +789,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                     cell.setText("");
                     cell.setTextSize(NEXT_SP);
                     cell.setTextColor(Color.WHITE);
-                    cell.setTypeface(Typeface.DEFAULT_BOLD);
+                    // Medium, bukan tebal penuh: huruf tebal putih di atas latar
+                    // gelap terbaca timbul seperti ukiran.
+                    cell.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
                     cell.setPadding(0, dp(5), dp(4), dp(5));
                     row.addView(cell, new LinearLayout.LayoutParams(0, -2, 1));
                 }
