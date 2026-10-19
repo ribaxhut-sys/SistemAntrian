@@ -1585,7 +1585,12 @@ class QueueService:
         mengambil alih. Sebaliknya, nomor yang baru dipanggil aman
         dikembalikan ke antrean agar dapat dipanggil petugas lain.
         """
-        sesi = self.auth.require_permission(Permission.QUEUE_CALL)
+        sesi = self.auth.require_session()
+        if not self.auth.has_permission(Permission.QUEUE_CALL):
+            # Admin, supervisor, dan pendaftaran tidak memegang nomor; tidak
+            # ada yang perlu dikembalikan, dan keluar tidak boleh tertahan
+            # hanya karena perannya tidak memanggil.
+            return []
         with session_scope() as session:
             repo = QueueRepository(session)
             aktif = [
@@ -1709,8 +1714,18 @@ class QueueService:
     # -----------------------------------------------------------------
 
     def list_pelayanan_aktif(self) -> list[QueueInfo]:
-        """Daftar pelayanan aktif yang dapat dilihat petugas pelayanan."""
-        sesi = self.auth.require_permission(Permission.QUEUE_CALL)
+        """
+        Daftar pelayanan aktif di cabang sesi.
+
+        Dilihat petugas pelayanan (untuk mengambil alih nomor yang ditinggal)
+        dan admin (untuk mengalihkan, membatalkan, atau menyelesaikan paksa).
+        Admin tidak memegang QUEUE_CALL, jadi salah satu hak sudah cukup.
+        """
+        sesi = (
+            self.auth.require_permission(Permission.QUEUE_CALL)
+            if self.auth.has_permission(Permission.QUEUE_CALL)
+            else self.auth.require_permission(Permission.QUEUE_REASSIGN)
+        )
         with session_scope() as session:
             repo = QueueRepository(session)
             return [
@@ -1763,6 +1778,25 @@ class QueueService:
                     or antrian.queue_date != clock.today()
                     or antrian.status not in (QueueStatus.SERVING, QueueStatus.PAUSED)):
                 raise BusinessRuleError("Nomor itu tidak lagi dapat diambil alih.")
+            # Pengambilalihan untuk nomor yang ditinggal, bukan untuk merebut
+            # dari rekan yang sedang melayani. Pemilik dianggap pergi bila ia
+            # sudah keluar (tanda hadir loket dilepas) atau komputernya mati
+            # sehingga tanda hadirnya basi.
+            if antrian.served_by_user_id not in (None, sesi.user_id):
+                batas_hadir = clock.now() - timedelta(seconds=BATAS_HADIR_PETUGAS_DETIK)
+                masih_hadir = session.scalar(
+                    sa.select(Counter.id).where(
+                        Counter.petugas_user_id == antrian.served_by_user_id,
+                        Counter.petugas_terlihat_pada.is_not(None),
+                        Counter.petugas_terlihat_pada >= batas_hadir,
+                    )
+                )
+                if masih_hadir is not None:
+                    nama = antrian.served_by.full_name if antrian.served_by else "Petugas"
+                    raise BusinessRuleError(
+                        f"{nama} masih hadir dan melayani nomor ini. "
+                        "Minta admin mengalihkannya bila perlu."
+                    )
             loket = self._pastikan_loket_aktif(
                 session, petugas.default_counter_id, sesi.branch_id, kunci=True
             )

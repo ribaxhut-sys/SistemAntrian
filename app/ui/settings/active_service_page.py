@@ -109,6 +109,13 @@ class ActiveServicePage(QWidget):
         self.tombol_ambil_alih.clicked.connect(self.ambil_alih)
         aksi.addWidget(self.tombol_ambil_alih)
         susunan.addLayout(aksi)
+        # Service tetap menegakkan hak; ini hanya menyembunyikan tombol yang
+        # pasti ditolak: CRO mengambil alih, admin mengalihkan/menutup paksa.
+        auth = self.queue.auth
+        admin = auth.has_permission(Permission.QUEUE_REASSIGN)
+        self.tombol_ambil_alih.setVisible(auth.has_permission(Permission.QUEUE_CALL))
+        for tombol_admin in (self.tombol_selesai, self.tombol_batal, self.tombol_alihkan):
+            tombol_admin.setVisible(admin)
         self._perbarui_tombol()
 
     def muat_ulang(self) -> None:

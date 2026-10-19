@@ -220,6 +220,8 @@ class _Menu:
     hanya_server: bool = False
     #: Hanya untuk sesi yang mewakili akun (bukan sesi kios tanpa login).
     hanya_akun: bool = False
+    #: Hak lain yang juga membuka menu ini (selain `permission`).
+    atau: tuple[Permission, ...] = ()
     #: Menu pelengkap: tampil hanya bila sesi punya menu kerja lain, supaya
     #: akun tanpa kewenangan apa pun tetap melihat pesan "tidak ada menu".
     pelengkap: bool = False
@@ -753,10 +755,13 @@ class MainWindow(QMainWindow):
                 Permission.CONFIG_MANAGE,
                 lambda: KesehatanPage(KesehatanService(self.auth, self.backup_service)),
             ),
+            # CRO melihatnya untuk mengambil alih nomor yang ditinggal; admin
+            # untuk mengalihkan, membatalkan, atau menyelesaikan paksa.
             _Menu(
                 "Pelayanan Aktif",
                 Permission.QUEUE_CALL,
                 lambda: ActiveServicePage(self.queue_service),
+                atau=(Permission.QUEUE_REASSIGN,),
             ),
             _Menu(
                 "Tutup Hari",
@@ -839,8 +844,10 @@ class MainWindow(QMainWindow):
                 return False
             if butir.hanya_akun and sesi_menu.user_id is None:
                 return False
-            return butir.permission is None or self.auth.has_permission(
-                butir.permission
+            return (
+                butir.permission is None
+                or self.auth.has_permission(butir.permission)
+                or any(self.auth.has_permission(p) for p in butir.atau)
             )
 
         # Menu pelengkap (Tampilan) hanya menemani menu kerja yang benar-benar
