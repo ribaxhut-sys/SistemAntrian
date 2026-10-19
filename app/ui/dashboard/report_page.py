@@ -40,7 +40,15 @@ from app.services.report_service import (
     ReportService,
     angka_ringkasan,
 )
-from app.ui.common import judul, keterangan, pesan_untuk_user, tampilkan_peringatan, tombol
+from app.ui.common import (
+    PekerjaLatar,
+    judul,
+    keterangan,
+    lepaskan_pekerja,
+    pesan_untuk_user,
+    tampilkan_peringatan,
+    tombol,
+)
 from app.ui.dashboard.dashboard_page import KartuAngka
 from app.ui.style import DANGER, SUCCESS, TEXT, WARNING
 
@@ -86,6 +94,9 @@ class LaporanPage(QWidget):
         self.kantor = kantor
         self.pribadi = pribadi
         self.laporan: Laporan | None = None
+        self._pekerja_ekspor: PekerjaLatar | None = None
+        self._tujuan_ekspor: Path | None = None
+        self._sementara_ekspor: Path | None = None
         self._bangun()
         self._pakai_rentang("bulan_ini")
 
@@ -271,27 +282,40 @@ class LaporanPage(QWidget):
             f"Menyusun {'PDF' if akhiran == 'pdf' else 'Excel'}…"
         )
         self.status_ekspor.show()
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        QApplication.processEvents()
+        laporan = self.laporan
+        self._tujuan_ekspor = tujuan
+        self._sementara_ekspor = sementara
+        self._pekerja_ekspor = PekerjaLatar(
+            lambda: (
+                ekspor_pdf(laporan, sementara, self.kantor)
+                if akhiran == "pdf"
+                else ekspor_excel(laporan, sementara)
+            ),
+            self,
+        )
+        self._pekerja_ekspor.berhasil.connect(
+            lambda _hasil: self._ekspor_selesai(akhiran)
+        )
+        self._pekerja_ekspor.gagal.connect(self._ekspor_gagal)
+        self._pekerja_ekspor.finished.connect(self._bersihkan_pekerja_ekspor)
+        self._pekerja_ekspor.start()
+
+    def _bersihkan_pekerja_ekspor(self) -> None:
+        pekerja = self._pekerja_ekspor
+        self._pekerja_ekspor = None
+        if pekerja is not None:
+            pekerja.deleteLater()
+
+    def _ekspor_selesai(self, akhiran: str) -> None:
+        tujuan = self._tujuan_ekspor
+        sementara = self._sementara_ekspor
+        if tujuan is None or sementara is None:
+            return
         try:
-            if akhiran == "pdf":
-                ekspor_pdf(self.laporan, sementara, self.kantor)
-            else:
-                ekspor_excel(self.laporan, sementara)
             sementara.replace(tujuan)
         except Exception as exc:  # noqa: BLE001
-            sementara.unlink(missing_ok=True)
-            self.status_ekspor.setText("Laporan belum berhasil disimpan.")
-            tampilkan_peringatan(
-                self,
-                f"Laporan gagal disimpan: {pesan_untuk_user(exc)}",
-                "Laporan",
-            )
+            self._ekspor_gagal(exc)
             return
-        finally:
-            QApplication.restoreOverrideCursor()
-            self.ekspor_pdf.setEnabled(self.laporan is not None)
-            self.ekspor_excel.setEnabled(self.laporan is not None)
         try:
             self.layanan.catat_unduhan(self.laporan, akhiran)
         except Exception:  # noqa: BLE001 - berkas sudah tersimpan; audit pelengkap
@@ -299,6 +323,31 @@ class LaporanPage(QWidget):
         jenis = "PDF" if akhiran == "pdf" else "Excel"
         self.status_ekspor.setText(f"{jenis} tersimpan: {tujuan.name}")
         self.status_ekspor.setToolTip(str(tujuan))
+        self._akhir_ekspor()
+
+    def _ekspor_gagal(self, exc: Exception) -> None:
+        if self._sementara_ekspor is not None:
+            self._sementara_ekspor.unlink(missing_ok=True)
+        self.status_ekspor.setText("Laporan belum berhasil disimpan.")
+        tampilkan_peringatan(
+            self,
+            f"Laporan gagal disimpan: {pesan_untuk_user(exc)}",
+            "Laporan",
+        )
+        self._akhir_ekspor()
+
+    def _akhir_ekspor(self) -> None:
+        self.ekspor_pdf.setEnabled(self.laporan is not None)
+        self.ekspor_excel.setEnabled(self.laporan is not None)
+        self._tujuan_ekspor = None
+        self._sementara_ekspor = None
+
+    def closeEvent(self, kejadian) -> None:  # noqa: N802
+        if self._pekerja_ekspor is not None and self._pekerja_ekspor.isRunning():
+            self._pekerja_ekspor.wait(3_500)
+        if self._pekerja_ekspor is not None and self._pekerja_ekspor.isRunning():
+            lepaskan_pekerja(self._pekerja_ekspor)
+        kejadian.accept()
 
 
 def angka_ringkasan_kosong() -> list[tuple[str, str]]:

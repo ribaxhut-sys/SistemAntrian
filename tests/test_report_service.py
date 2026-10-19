@@ -265,6 +265,7 @@ def test_halaman_laporan_pribadi_menyimpan_excel_secara_atomik(
     halaman._ekspor("xlsx")
 
     tujuan = tujuan_tanpa_akhiran.with_suffix(".xlsx")
+    qtbot.waitUntil(lambda: tujuan.is_file(), timeout=10_000)
     assert tujuan.is_file()
     assert not tujuan.with_name(f".{tujuan.name}.sementara").exists()
     assert tujuan.name in halaman.status_ekspor.text()
