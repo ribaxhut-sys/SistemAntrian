@@ -1098,7 +1098,9 @@ class ServicePage(QWidget):
         pekerja = PekerjaLatar(lambda: self._ambil_snapshot(loket_id), self)
         pekerja.berhasil.connect(self._selesai_muat_latar)
         pekerja.gagal.connect(self._gagal_muat_latar)
-        pekerja.finished.connect(self._bersihkan_pekerja_data)
+        pekerja.finished.connect(
+            lambda p=pekerja: self._bersihkan_pekerja_data(p)
+        )
         self._pekerja_data = pekerja
         pekerja.start()
 
@@ -1113,9 +1115,19 @@ class ServicePage(QWidget):
         get_logger("ui.service").warning("Penyegaran pelayanan gagal: %s", exc)
         self._tandai_gagal_sinkron()
 
-    def _bersihkan_pekerja_data(self) -> None:
-        pekerja = self._pekerja_data
-        self._pekerja_data = None
+    def _bersihkan_pekerja_data(self, pekerja: PekerjaLatar | None = None) -> None:
+        """
+        Bersihkan pekerja yang BARU SELESAI, bukan pekerja yang kini dipegang.
+
+        Sinyal `finished` pekerja lama dapat tiba sesudah penyegaran
+        berikutnya dimulai; membuang `self._pekerja_data` di sini berarti
+        menghapus pekerja baru yang masih berjalan, dan Qt menghentikan
+        proses dengan "QThread: Destroyed while thread is still running".
+        """
+        if pekerja is None:
+            pekerja = self._pekerja_data
+        if pekerja is self._pekerja_data:
+            self._pekerja_data = None
         if pekerja is not None:
             pekerja.deleteLater()
         if self._data_ditunda and self.isVisible():
@@ -1827,7 +1839,9 @@ class ServicePage(QWidget):
             lambda hasil: self._selesai_aksi(hasil, setelah)
         )
         pekerja.gagal.connect(lambda exc: self._gagal_aksi(exc, judul_gagal))
-        pekerja.finished.connect(self._bersihkan_pekerja_aksi)
+        pekerja.finished.connect(
+            lambda p=pekerja: self._bersihkan_pekerja_aksi(p)
+        )
         self._pekerja_aksi = pekerja
         pekerja.start()
 
@@ -1840,9 +1854,12 @@ class ServicePage(QWidget):
     def _gagal_aksi(self, exc: Exception, judul: str) -> None:
         tampilkan_error(self, exc, judul)
 
-    def _bersihkan_pekerja_aksi(self) -> None:
-        pekerja = self._pekerja_aksi
-        self._pekerja_aksi = None
+    def _bersihkan_pekerja_aksi(self, pekerja: PekerjaLatar | None = None) -> None:
+        """Seperti `_bersihkan_pekerja_data`: hanya yang baru selesai yang dibuang."""
+        if pekerja is None:
+            pekerja = self._pekerja_aksi
+        if pekerja is self._pekerja_aksi:
+            self._pekerja_aksi = None
         if pekerja is not None:
             pekerja.deleteLater()
         self._set_sibuk(

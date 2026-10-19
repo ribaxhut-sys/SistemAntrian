@@ -930,3 +930,51 @@ def test_detak_simpan_otomatis_diam_bila_jendela_tidak_tampil(
     panel._saat_pewaktu_otomatis()
 
     assert NoteService(auth).ambil(antrian_id) is None
+
+
+# ---------------------------------------------------------------------
+# Pekerja latar layar pelayanan
+# ---------------------------------------------------------------------
+
+
+def test_pekerja_lama_selesai_tidak_membuang_pekerja_baru(halaman_kerja):
+    """
+    `finished` pekerja lama bisa tiba sesudah penyegaran berikutnya mulai.
+    Dulu handlernya menghapus `_pekerja_data` yang kini dipegang, sehingga
+    Qt mematikan proses: "QThread: Destroyed while thread is still running".
+    """
+    from app.ui.common import PekerjaLatar
+
+    lama = PekerjaLatar(lambda: None, halaman_kerja)
+    baru = PekerjaLatar(lambda: None, halaman_kerja)
+    halaman_kerja._pekerja_data = baru
+    halaman_kerja._bersihkan_pekerja_data(lama)
+    assert halaman_kerja._pekerja_data is baru
+
+    halaman_kerja._bersihkan_pekerja_data(baru)
+    assert halaman_kerja._pekerja_data is None
+
+    lama_aksi = PekerjaLatar(lambda: None, halaman_kerja)
+    baru_aksi = PekerjaLatar(lambda: None, halaman_kerja)
+    halaman_kerja._pekerja_aksi = baru_aksi
+    halaman_kerja._bersihkan_pekerja_aksi(lama_aksi)
+    assert halaman_kerja._pekerja_aksi is baru_aksi
+
+    halaman_kerja._bersihkan_pekerja_aksi(baru_aksi)
+    assert halaman_kerja._pekerja_aksi is None
+
+
+def test_layar_pelayanan_tampil_lalu_memanggil_nomor_tanpa_mematikan_proses(
+    qtbot, halaman_kerja, terbitkan
+):
+    """Regresi: tampil + panggil nomor + beberapa detak event loop mematikan Qt."""
+    from PySide6.QtWidgets import QApplication
+
+    halaman_kerja.resize(1100, 800)
+    halaman_kerja.show()
+    QApplication.processEvents()
+    _panggil(halaman_kerja, terbitkan)
+    for _ in range(20):
+        qtbot.wait(10)
+
+    assert halaman_kerja.antrian is not None
