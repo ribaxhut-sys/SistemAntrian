@@ -58,6 +58,11 @@ class ServiceCategory(TimestampMixin, Base):
     #: Ditampilkan di panel informasi anjungan begitu pengunjung menyentuh
     #: layanan ini. Kosong berarti anjungan memakai teks sambutan bawaan.
     info_text: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
+    #: Kalimat cepat untuk catatan petugas, satu per baris. Kosong berarti
+    #: layar pelayanan memakai daftar bawaan (lihat `note_service`).
+    frasa_catatan: Mapped[str] = mapped_column(
+        sa.Text, nullable=False, default="", server_default=""
+    )
     status: Mapped[RecordStatus] = mapped_column(
         sa.Enum(RecordStatus, native_enum=False, length=10),
         nullable=False,

@@ -39,6 +39,7 @@ from app.repositories.queue_repository import (
     QueueRepository,
     terbitkan_nomor,
 )
+from app.repositories.queue_note_repository import QueueNoteRepository
 from app.repositories.user_repository import UserRepository
 from app.models.enums import (
     ASAL_MANDIRI,
@@ -49,6 +50,7 @@ from app.models.enums import (
 from app.services import audit_service
 from app.services.urutan_prioritas import MODE_OTOMATIS, MODE_SAH, susun
 from app.services.auth_service import AuthService
+from app.services.note_service import PESAN_CATATAN_KURANG, catatan_memadai
 from app.services.permissions import Permission
 from app.services.settings_service import SettingsService
 
@@ -1602,14 +1604,27 @@ class QueueService:
             "dilanjutkan",
         )
 
-    def complete(self, queue_id: int) -> QueueInfo:
-        """Selesaikan pelayanan."""
+    def complete(self, queue_id: int, *, wajib_catatan: bool = False) -> QueueInfo:
+        """
+        Selesaikan pelayanan.
+
+        Layar pelayanan petugas memanggilnya dengan `wajib_catatan=True`:
+        pelayanan hanya boleh ditutup bila lembarnya sudah memuat catatan
+        petugas yang memadai (lihat `catatan_memadai`). Diperiksa di sini,
+        dari lembar yang TERSIMPAN, bukan dari isi layar, sehingga tidak
+        ada jalan menyelesaikan nomor tanpa jejak lewat kode UI yang lain.
+        """
         sesi = self.auth.require_permission(Permission.QUEUE_COMPLETE)
 
         with session_scope() as session:
             repo = QueueRepository(session)
             antrian = self._ambil(repo, queue_id)
             self._pastikan_penanggung_jawab(antrian, sesi.user_id)
+
+            if wajib_catatan:
+                lembar = QueueNoteRepository(session).get_by_queue(antrian.id)
+                if lembar is None or not catatan_memadai(lembar.catatan):
+                    raise BusinessRuleError(PESAN_CATATAN_KURANG)
 
             self._pindah_status(antrian, QueueStatus.COMPLETED)
             antrian.completed_at = clock.now()
@@ -1845,6 +1860,54 @@ class QueueService:
                 petugas_id=antrian.served_by_user_id,
             )
             logger.info("Antrian %s dibatalkan paksa admin", antrian.queue_number)
+            return _as_info(
+                antrian, repo.jumlah_pemanggilan(antrian.id), self.batas_panggilan()
+            )
+
+    def selesaikan_paksa(self, queue_id: int, alasan: str) -> QueueInfo:
+        """
+        Selesaikan nomor yang tertinggal di loket, oleh admin.
+
+        Untuk pelayanan yang sebenarnya sudah rampung tetapi petugasnya
+        pergi tanpa menutupnya. Tidak menuntut catatan petugas, tetapi
+        alasannya wajib dan tercatat di audit bersama petugas aslinya.
+        Hanya nomor yang sedang dilayani atau ditunda yang dapat ditutup
+        begini; nomor yang baru dipanggil belum pernah dilayani.
+        """
+        sesi = self.auth.require_permission(Permission.QUEUE_REASSIGN)
+        alasan_bersih = self._alasan_admin(alasan)
+
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            antrian = repo.get_by_id(queue_id, for_update=True)
+            if (
+                antrian is None
+                or antrian.branch_id != sesi.branch_id
+                or antrian.queue_date != clock.today()
+                or antrian.status not in (QueueStatus.SERVING, QueueStatus.PAUSED)
+            ):
+                raise BusinessRuleError(
+                    "Hanya nomor yang sedang dilayani atau ditunda hari ini "
+                    "yang dapat diselesaikan. Muat ulang daftar."
+                )
+
+            status_lama = antrian.status
+            antrian.status = QueueStatus.COMPLETED
+            antrian.completed_at = clock.now()
+            audit_service.record(
+                session,
+                AuditAction.COMPLETE_QUEUE,
+                user_id=sesi.user_id,
+                entity_type="queue",
+                entity_id=antrian.id,
+                nomor=antrian.queue_number,
+                paksa=True,
+                alasan=alasan_bersih,
+                status_lama=status_lama.value,
+                loket_id=antrian.counter_id,
+                petugas_id=antrian.served_by_user_id,
+            )
+            logger.info("Antrian %s diselesaikan paksa admin", antrian.queue_number)
             return _as_info(
                 antrian, repo.jumlah_pemanggilan(antrian.id), self.batas_panggilan()
             )

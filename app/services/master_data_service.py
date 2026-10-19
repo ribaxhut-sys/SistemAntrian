@@ -39,6 +39,7 @@ from app.repositories.master_repository import (
 from app.repositories.queue_repository import QueueRepository
 from app.services import audit_service
 from app.services.auth_service import AuthService
+from app.services.note_service import daftar_frasa, periksa_frasa
 from app.services.permissions import Permission
 
 logger = get_logger("master")
@@ -115,6 +116,8 @@ class CategoryInfo:
     info_text: str = ""
     #: Kelompok induknya; None berarti berdiri di tingkat teratas anjungan.
     parent_id: int | None = None
+    #: Kalimat cepat catatan petugas, satu per baris; kosong = bawaan.
+    frasa_catatan: str = ""
     #: True bila ada jenis layanan lain di bawahnya. Yang punya anak
     #: menjadi KELOMPOK: di anjungan ia membuka daftar anaknya dan tidak
     #: menerbitkan nomor sendiri.
@@ -166,6 +169,7 @@ def _as_category(
         row.status,
         row.info_text,
         row.parent_id,
+        row.frasa_catatan,
         punya_anak,
         level,
     )
@@ -648,12 +652,14 @@ class MasterDataService:
         branch_id: int | None = None,
         info_text: str = "",
         parent_id: int | None = None,
+        frasa_catatan: str = "",
     ) -> int:
         sesi = self.auth.require_permission(Permission.MASTER_MANAGE)
         kode = _kode(code, "Kode jenis layanan")
         nama = _wajib(name, "Nama jenis layanan")
         awalan = _wajib(prefix, "Prefix").upper()
         cabang = branch_id or sesi.branch_id
+        periksa_frasa(frasa_catatan)
 
         if not _POLA_PREFIX.match(awalan):
             raise ValidationError(
@@ -689,6 +695,7 @@ class MasterDataService:
                     display_order=repo.next_display_order_dalam(cabang, parent_id),
                     status=RecordStatus.ACTIVE,
                     info_text=_bersihkan(info_text),
+                    frasa_catatan="\n".join(daftar_frasa(frasa_catatan)),
                 )
             )
             audit_service.record(
@@ -712,6 +719,7 @@ class MasterDataService:
         prefix: str | None = None,
         info_text: str = "",
         parent_id: int | None | _TakDiubah = TAK_DIUBAH,
+        frasa_catatan: str | _TakDiubah = TAK_DIUBAH,
     ) -> CategoryInfo:
         """
         Ubah jenis layanan.
@@ -728,6 +736,8 @@ class MasterDataService:
         """
         sesi = self.auth.require_permission(Permission.MASTER_MANAGE)
         nama = _wajib(name, "Nama jenis layanan")
+        if frasa_catatan is not TAK_DIUBAH:
+            periksa_frasa(frasa_catatan)
 
         with session_scope() as session:
             repo = ServiceCategoryRepository(session)
@@ -737,6 +747,8 @@ class MasterDataService:
 
             category.name = nama
             category.info_text = _bersihkan(info_text)
+            if frasa_catatan is not TAK_DIUBAH:
+                category.frasa_catatan = "\n".join(daftar_frasa(frasa_catatan))
 
             if parent_id is not TAK_DIUBAH and parent_id != category.parent_id:
                 _periksa_induk(

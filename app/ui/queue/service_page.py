@@ -511,12 +511,18 @@ class ServicePage(QWidget):
         # Panggil Berikutnya dan Panggil Ulang ada di kartu loket di atas.
         baris_utama = QHBoxLayout()
         baris_utama.setSpacing(8)
+        # Dengan panel catatan, "selesai" bukan tombol di baris ini: ia
+        # menjadi Simpan & Selesai di kaki panel catatan (dipasang di
+        # `_bangun_panel_kanan`), karena menyelesaikan pelayanan tanpa
+        # menulis catatan tidak boleh terjadi.
         for kunci, teks, handler in (
             ("mulai_layani", "Mulai Melayani  ·  F4", self.mulai_melayani),
             ("selesai", "Selesai  ·  F8", self.selesaikan),
             ("tunda", "Tunda", self.tunda),
             ("lanjutkan", "Lanjutkan", self.lanjutkan),
         ):
+            if kunci == "selesai" and self.note is not None:
+                continue
             baris_utama.addWidget(buat_aksi(kunci, teks, handler), stretch=1)
         kotak.addLayout(baris_utama)
 
@@ -593,6 +599,8 @@ class ServicePage(QWidget):
         if self.note is not None and self.pelapor is not None:
             self.panel_pengaduan = NotePanel(self.note, self.pelapor)
             self.tab_kanan.addTab(self.panel_pengaduan, JUDUL_TAB_PENGADUAN)
+            self.panel_pengaduan.tombol_selesai.clicked.connect(self.selesaikan)
+            self.aksi["selesai"] = self.panel_pengaduan.tombol_selesai
             # Penanda isian yang belum disimpan, supaya tidak terlewat
             # ketika petugas berpindah ke tab lain.
             self.panel_pengaduan.isian_deskripsi.textChanged.connect(
@@ -1413,6 +1421,12 @@ class ServicePage(QWidget):
             return
         if self.aksi["selesai"].isEnabled():
             setel_variant(self.aksi["selesai"], "success")
+        panel = self.panel_pengaduan
+        if panel is not None and not panel.catatan_memadai:
+            self.label_petunjuk_aksi.setText(
+                "Isi catatan petugas untuk menyelesaikan pelayanan"
+            )
+            return
         self.label_petunjuk_aksi.setText("Pelayanan sedang berjalan")
 
     def _dialihkan_ke_petugas_lain(self) -> bool:
@@ -1890,17 +1904,26 @@ class ServicePage(QWidget):
         tersimpan pada detik itu hilang tanpa dapat diketik ulang, karena
         yang menceritakannya sudah berdiri meninggalkan meja.
         """
-        if self.antrian is None or not self.aksi["selesai"].isEnabled():
+        if self.antrian is None:
             return
+        panel = self.panel_pengaduan
         if (
-            self.panel_pengaduan is not None
-            and self.panel_pengaduan.ada_isian
-            and not self.panel_pengaduan.simpan()
+            panel is not None
+            and self.antrian.status is QueueStatus.SERVING
+            and not panel.catatan_memadai
         ):
+            # F8 tanpa catatan: bawa petugas ke kotaknya, jangan diam saja.
+            self.tab_kanan.setCurrentWidget(panel)
+            panel.fokus_catatan()
+            return
+        if not self.aksi["selesai"].isEnabled():
+            return
+        if panel is not None and not panel.simpan():
             return
         antrian_id = self.antrian.id
+        wajib_catatan = panel is not None
         self._jalankan(
-            lambda: self.queue.complete(antrian_id),
+            lambda: self.queue.complete(antrian_id, wajib_catatan=wajib_catatan),
             "Gagal menyelesaikan pelayanan",
             self._simpan_antrian_baru_selesai,
         )

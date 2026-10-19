@@ -25,11 +25,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+import sqlalchemy as sa
+
 from app.core import clock
 from app.core.database import session_scope
 from app.core.errors import BusinessRuleError, NotFoundError, ValidationError
 from app.core.logger import get_logger
-from app.models import AuditAction, QueueNote
+from app.models import AuditAction, Queue, QueueNote, ServiceCategory
 from app.repositories.queue_note_repository import (
     BATAS_PENCARIAN,
     QueueNoteRepository,
@@ -60,6 +62,85 @@ DIGIT_TELEPON_MINIMUM = 6
 
 #: Pengaturan masa simpan identitas pelapor, dalam bulan. 0 = selamanya.
 KUNCI_RETENSI = "privasi.retensi_pengaduan_bulan"
+
+#: Catatan petugas wajib untuk menyelesaikan pelayanan. "-" atau "ok" tidak
+#: menceritakan apa pun, jadi dituntut sekurangnya sepuluh huruf yang
+#: beragam; deretan huruf yang sama berulang ("aaaaaaaaaa") tidak dihitung.
+MIN_HURUF_CATATAN = 10
+MIN_HURUF_BERBEDA = 3
+
+
+def jumlah_huruf_catatan(catatan: str | None) -> int:
+    """Banyaknya huruf pada catatan, tanpa angka, spasi, dan tanda baca."""
+    return sum(1 for ch in (catatan or "") if ch.isalpha())
+
+
+def catatan_memadai(catatan: str | None) -> bool:
+    """Benar bila catatan cukup panjang dan beragam untuk menyelesaikan pelayanan."""
+    huruf = [ch.lower() for ch in (catatan or "") if ch.isalpha()]
+    return len(huruf) >= MIN_HURUF_CATATAN and len(set(huruf)) >= MIN_HURUF_BERBEDA
+
+
+#: Kalimat cepat bawaan bila jenis layanan belum punya daftar sendiri.
+FRASA_BAWAAN = (
+    "Pelanggan menanyakan informasi layanan.",
+    "Pelanggan menanyakan persyaratan.",
+    "Pelanggan menanyakan status permohonan.",
+    "Pelanggan diarahkan ke layanan lain.",
+    "Permohonan pelanggan sudah diproses.",
+)
+FRASA_MAKS = 8
+#: Kalimat cepat harus muat utuh pada tombol di panel yang sempit.
+PANJANG_FRASA = 80
+#: Banyaknya catatan terakhir petugas yang dibandingkan dengan catatan baru.
+BANDING_CATATAN_SEBELUMNYA = 5
+
+
+def samakan_catatan(teks: str | None) -> str:
+    """Bentuk pembanding catatan: spasi dirapikan, huruf besar-kecil diabaikan."""
+    return " ".join((teks or "").split()).casefold()
+
+
+def catatan_sama_dengan(catatan: str | None, pembanding: list[str]) -> bool:
+    """Benar bila catatan persis sama dengan salah satu catatan pembanding."""
+    bentuk = samakan_catatan(catatan)
+    return bool(bentuk) and bentuk in {samakan_catatan(p) for p in pembanding}
+
+
+def periksa_frasa(teks: str | None) -> None:
+    """
+    Tolak kalimat cepat yang terlalu panjang atau terlalu banyak.
+
+    Dipakai saat admin menyimpan, supaya tombolnya tidak pernah perlu
+    dipotong di layar petugas. `daftar_frasa` tetap memotong diam-diam
+    untuk data lama yang tersimpan sebelum batas ini ada.
+    """
+    baris = [" ".join(b.split()) for b in (teks or "").splitlines()]
+    baris = [b for b in baris if b]
+    if len(set(baris)) > FRASA_MAKS:
+        raise ValidationError(f"Kalimat cepat paling banyak {FRASA_MAKS} baris.")
+    for kalimat in baris:
+        if len(kalimat) > PANJANG_FRASA:
+            raise ValidationError(
+                f"Kalimat cepat maksimal {PANJANG_FRASA} karakter "
+                f"(ini {len(kalimat)}): {kalimat[:30]}…"
+            )
+
+
+def daftar_frasa(teks: str | None) -> list[str]:
+    """Pecah teks satu-per-baris menjadi daftar kalimat cepat yang rapi."""
+    hasil: list[str] = []
+    for baris in (teks or "").splitlines():
+        kalimat = " ".join(baris.split())[:PANJANG_FRASA]
+        if kalimat and kalimat not in hasil:
+            hasil.append(kalimat)
+    return hasil[:FRASA_MAKS]
+
+
+PESAN_CATATAN_KURANG = (
+    f"Isi catatan petugas lebih dahulu (sekurangnya {MIN_HURUF_CATATAN} huruf) "
+    "sebelum menyelesaikan pelayanan."
+)
 
 
 def batas_retensi(hari_ini: date, bulan: int) -> date:
@@ -293,6 +374,47 @@ class NoteService:
                 sesi.username,
             )
             return _as_note_info(repo.get_by_queue(queue_id))
+
+    def frasa_cepat(self, category_id: int | None) -> list[str]:
+        """
+        Kalimat cepat untuk catatan petugas pada satu jenis layanan.
+
+        Memakai daftar milik jenis layanan itu bila ada, dan daftar bawaan
+        bila belum diisi admin (atau jenis layanannya sudah tidak ada).
+        """
+        self.auth.require_permission(Permission.NOTE_WRITE)
+        if category_id is not None:
+            with session_scope() as session:
+                kategori = session.get(ServiceCategory, category_id)
+                frasa = daftar_frasa(kategori.frasa_catatan) if kategori else []
+            if frasa:
+                return frasa
+        return list(FRASA_BAWAAN)
+
+    def catatan_terakhir_saya(self, kecuali_queue_id: int | None = None) -> list[str]:
+        """
+        Catatan petugas ini pada nomor lain HARI INI, yang terbaru lebih dulu.
+
+        Bahan peringatan "catatan sama dengan nomor sebelumnya". Hanya milik
+        petugas yang sedang masuk: catatan rekannya bukan urusannya, dan
+        hari kemarin tidak relevan untuk menilai salin-tempel asal-asalan.
+        """
+        sesi = self.auth.require_permission(Permission.NOTE_WRITE)
+        with session_scope() as session:
+            kueri = (
+                sa.select(QueueNote.catatan)
+                .join(Queue, Queue.id == QueueNote.queue_id)
+                .where(
+                    QueueNote.officer_id == sesi.user_id,
+                    Queue.queue_date == clock.today(),
+                    QueueNote.catatan.is_not(None),
+                )
+                .order_by(QueueNote.updated_at.desc())
+                .limit(BANDING_CATATAN_SEBELUMNYA)
+            )
+            if kecuali_queue_id is not None:
+                kueri = kueri.where(QueueNote.queue_id != kecuali_queue_id)
+            return [c for c in session.scalars(kueri).all() if c and c.strip()]
 
     def hapus(self, note_id: int) -> None:
         """

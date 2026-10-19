@@ -95,6 +95,9 @@ class ActiveServicePage(QWidget):
 
         aksi = QHBoxLayout()
         aksi.addStretch()
+        self.tombol_selesai = tombol("Selesaikan Paksa", variant="success")
+        self.tombol_selesai.clicked.connect(self.selesaikan_paksa)
+        aksi.addWidget(self.tombol_selesai)
         self.tombol_batal = tombol("Batalkan Paksa", variant="danger")
         self.tombol_batal.clicked.connect(self.batalkan_paksa)
         aksi.addWidget(self.tombol_batal)
@@ -217,6 +220,12 @@ class ActiveServicePage(QWidget):
         ada_antrian = self._antrian_terpilih() is not None
         ada_alasan = bool(self.input_alasan.text().strip())
         self.tombol_batal.setEnabled(ada_antrian and ada_alasan)
+        antrian = self._antrian_terpilih()
+        self.tombol_selesai.setEnabled(
+            ada_alasan
+            and antrian is not None
+            and antrian.status.value in ("SERVING", "PAUSED")
+        )
         self.tombol_alihkan.setEnabled(
             ada_antrian
             and ada_alasan
@@ -250,6 +259,29 @@ class ActiveServicePage(QWidget):
         )
         if berhasil:
             tampilkan_info(self, f"{antrian.queue_number} berhasil dialihkan.")
+            self.input_alasan.clear()
+            self.muat_ulang()
+
+    def selesaikan_paksa(self) -> None:
+        antrian = self._antrian_terpilih()
+        alasan = self.input_alasan.text().strip()
+        if antrian is None or not alasan:
+            return
+        if not konfirmasi(
+            self,
+            f"Selesaikan {antrian.queue_number} sekarang?\n\n"
+            "Untuk pelayanan yang sudah rampung tetapi belum ditutup petugasnya. "
+            "Tindakan ini tidak menuntut catatan petugas dan tercatat di audit.",
+            "Selesaikan Paksa",
+        ):
+            return
+        berhasil, _ = jalankan_aman(
+            self,
+            lambda: self.queue.selesaikan_paksa(antrian.id, alasan),
+            "Gagal menyelesaikan pelayanan",
+        )
+        if berhasil:
+            tampilkan_info(self, f"{antrian.queue_number} diselesaikan.")
             self.input_alasan.clear()
             self.muat_ulang()
 

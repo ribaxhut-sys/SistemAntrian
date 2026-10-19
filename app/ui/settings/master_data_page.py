@@ -445,6 +445,7 @@ class CategoryTab(_TabelTab):
                 prefix=dialog.prefix,
                 info_text=dialog.info_text,
                 parent_id=dialog.induk_id,
+                frasa_catatan=dialog.frasa_catatan,
             ),
         )
         if berhasil:
@@ -467,6 +468,7 @@ class CategoryTab(_TabelTab):
                 prefix=dialog.prefix,
                 info_text=dialog.info_text,
                 parent_id=dialog.induk_id,
+                frasa_catatan=dialog.frasa_catatan,
             )
 
         try:
@@ -482,6 +484,7 @@ class CategoryTab(_TabelTab):
                     name=dialog.nama,
                     info_text=dialog.info_text,
                     parent_id=dialog.induk_id,
+                    frasa_catatan=dialog.frasa_catatan,
                 ),
             )
             if berhasil:
