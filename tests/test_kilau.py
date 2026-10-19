@@ -1,6 +1,9 @@
 """Kilau tombol di halaman Pelayanan menunjuk satu langkah berikutnya."""
 
-from tests.test_ui import halaman_layanan  # noqa: F401 - fixture bersama
+from tests import test_ui as _test_ui
+
+# Fixture bersama; ditetapkan sebagai nama modul supaya pytest menemukannya.
+halaman_layanan = _test_ui.halaman_layanan
 
 
 def _siap(qtbot, halaman) -> None:
