@@ -78,7 +78,8 @@ try {
         else {
             Write-Host "==> Menjalankan test" -ForegroundColor Cyan
             & $python -m pytest tests -q
-            if ($LASTEXITCODE -ne 0) { throw "Test gagal. Installer tidak dibuat." }
+            $kodePytest = $LASTEXITCODE
+            if ($kodePytest -ne 0) { throw "Test gagal (kode keluar pytest $kodePytest). Installer tidak dibuat." }
         }
 
         Write-Host "==> Membangun bundel aplikasi sementara" -ForegroundColor Cyan
