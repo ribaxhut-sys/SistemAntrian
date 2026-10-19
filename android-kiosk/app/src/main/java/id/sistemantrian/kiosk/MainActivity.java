@@ -1186,7 +1186,7 @@ public final class MainActivity extends Activity {
                     String nama = row.optString("name", "");
                     if (nama.isEmpty()) continue;
                     kunciSalinan.put(nama, row.optLong("size", 0L) + "-"
-                            + row.optLong("modified_ms", 0L) + "-" + namaAman(nama));
+                            + row.optLong("modified_ms", 0L) + "-" + BerkasMedia.namaAman(nama));
                     tampilBerkas.put(nama, row.optString("show", "keduanya"));
                     int detik = row.isNull("seconds") ? 0 : row.optInt("seconds", 0);
                     if (detik > 0) detikPerBerkas.put(nama, detik);
@@ -1460,7 +1460,7 @@ public final class MainActivity extends Activity {
         // Folder tablet: selalu berkas lokal. Server: salinan bila sudah
         // lengkap, bila belum diputar langsung lewat jaringan.
         File lokal = berkasMedia(filename);
-        if (isVideo(filename)) {
+        if (BerkasMedia.isVideo(filename)) {
             // Video digambar di permukaan tersendiri yang tidak dapat
             // dipudarkan; yang lama langsung diganti.
             mediaSlot.removeAllViews();
@@ -1509,7 +1509,7 @@ public final class MainActivity extends Activity {
             mediaSlot.addView(image, new FrameLayout.LayoutParams(-1, -1));
             worker.execute(() -> {
                 try {
-                    byte[] bytes = lokal != null ? bacaBerkas(lokal) : downloadMedia(url);
+                    byte[] bytes = lokal != null ? BerkasMedia.bacaBerkas(lokal) : downloadMedia(url);
                     Bitmap bitmap = decodeImage(bytes, mediaSlot.getWidth(), mediaSlot.getHeight());
                     if (bitmap == null) {
                         throw new IllegalStateException("Gambar sambutan tidak dapat dibaca.");
@@ -2371,28 +2371,6 @@ public final class MainActivity extends Activity {
         return UnduhServer.keMemori(mediaUrl, this::applyHeaders);
     }
 
-    private static final String[] EKSTENSI_VIDEO = {".mp4", ".mkv", ".webm", ".avi"};
-    private static final String[] EKSTENSI_MEDIA = {
-            ".mp4", ".mkv", ".webm", ".avi",
-            ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif"};
-
-    private static boolean berakhiran(String filename, String[] ekstensi) {
-        String lower = filename.toLowerCase(Locale.ROOT);
-        for (String item : ekstensi) {
-            if (lower.endsWith(item)) return true;
-        }
-        return false;
-    }
-
-    private static boolean isVideo(String filename) {
-        return berakhiran(filename, EKSTENSI_VIDEO);
-    }
-
-    /** Nama berkas tanpa pemisah folder, untuk dipakai di folder tablet. */
-    private static String namaAman(String filename) {
-        String nama = filename.replaceAll("[\\\\/:*?\"<>|\\x00-\\x1f]", "_").trim();
-        return nama.isEmpty() || nama.startsWith(".") ? "_" + nama : nama;
-    }
 
     private boolean sumberTablet() {
         return preferences != null
@@ -2426,7 +2404,7 @@ public final class MainActivity extends Activity {
         if (isi == null) return hasil;
         for (File item : isi) {
             String nama = item.getName();
-            if (item.isFile() && !nama.startsWith(".") && berakhiran(nama, EKSTENSI_MEDIA)) {
+            if (item.isFile() && !nama.startsWith(".") && BerkasMedia.berakhiran(nama, BerkasMedia.EKSTENSI_MEDIA)) {
                 hasil.add(item);
             }
         }
@@ -2633,19 +2611,6 @@ public final class MainActivity extends Activity {
                         mediaSignature + "|" + nama, nama)) {
             showWelcomeMedia(mediaIndex);
         }
-    }
-
-    private static byte[] bacaBerkas(File berkas) throws Exception {
-        if (berkas.length() > 32L * 1024 * 1024) {
-            throw new IllegalStateException("Ukuran media melebihi 32 MB.");
-        }
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[8192];
-        int length;
-        try (InputStream input = new FileInputStream(berkas)) {
-            while ((length = input.read(buffer)) != -1) output.write(buffer, 0, length);
-        }
-        return output.toByteArray();
     }
 
     private Bitmap decodeImage(byte[] bytes, int width, int height) {
@@ -4396,13 +4361,6 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private static void hapusPohon(File berkas) {
-        File[] anak = berkas.listFiles();
-        if (anak != null) for (File item : anak) hapusPohon(item);
-        //noinspection ResultOfMethodCallIgnored
-        berkas.delete();
-    }
-
     /**
      * Unduh paket suara bila anjungan ini bersuara, tablet tidak punya TTS
      * Bahasa Indonesia, dan versinya di server berubah. Paket baru diunduh
@@ -4421,7 +4379,7 @@ public final class MainActivity extends Activity {
             try {
                 JSONObject indeks = new JSONObject(new String(
                         unduhBytes(base + "/v1/kiosk/sound"), StandardCharsets.UTF_8));
-                hapusPohon(sementara);
+                BerkasMedia.hapusPohon(sementara);
                 if (!sementara.mkdirs()) throw new IllegalStateException("folder paket");
                 JSONObject clips = indeks.getJSONObject("clips");
                 Iterator<String> keys = clips.keys();
@@ -4440,11 +4398,11 @@ public final class MainActivity extends Activity {
                     output.write(indeks.toString().getBytes(StandardCharsets.UTF_8));
                 }
                 File tujuan = folderPaketSuara();
-                hapusPohon(tujuan);
+                BerkasMedia.hapusPohon(tujuan);
                 if (!sementara.renameTo(tujuan)) throw new IllegalStateException("pasang paket");
                 terpasang = indeks.optString("version");
             } catch (Exception e) {
-                hapusPohon(sementara);
+                BerkasMedia.hapusPohon(sementara);
             }
             final String selesai = terpasang;
             handler.post(() -> {
@@ -5077,7 +5035,7 @@ public final class MainActivity extends Activity {
                     String berkas = row.optString("name", "");
                     if (berkas.isEmpty()) continue;
                     kunciSalinan.put(berkas, row.optLong("size", 0L) + "-"
-                            + row.optLong("modified_ms", 0L) + "-" + namaAman(berkas));
+                            + row.optLong("modified_ms", 0L) + "-" + BerkasMedia.namaAman(berkas));
                     tampilBerkas.put(berkas, row.optString("show", "keduanya"));
                     int detik = row.isNull("seconds") ? 0 : row.optInt("seconds", 0);
                     if (detik > 0) detikPerBerkas.put(berkas, detik);
@@ -5851,7 +5809,7 @@ public final class MainActivity extends Activity {
         long total = 0L;
         for (File item : berkas) {
             total += item.length();
-            (isVideo(item.getName()) ? daftarVideo : daftarGambar).add(item);
+            (BerkasMedia.isVideo(item.getName()) ? daftarVideo : daftarGambar).add(item);
         }
         AlertDialog[] dialog = new AlertDialog[1];
         LinearLayout isi = new LinearLayout(this);
@@ -5863,11 +5821,11 @@ public final class MainActivity extends Activity {
         LinearLayout teksKepala = new LinearLayout(this);
         teksKepala.setOrientation(LinearLayout.VERTICAL);
         teksKepala.addView(text(berkas.isEmpty() ? "Belum ada berkas"
-                : berkas.size() + " berkas · " + formatUkuran(total), 14, INK, true));
+                : berkas.size() + " berkas · " + BerkasMedia.formatUkuran(total), 14, INK, true));
         TextView sumber = text("Sumber aktif: "
                 + (sumberTablet() ? "folder tablet, diputar tanpa jaringan"
                 : "server (berkas di sini dipakai bila sumber diganti ke folder tablet)")
-                + " · sisa ruang " + formatUkuran(sisaRuangTablet()), 12, MUTED, false);
+                + " · sisa ruang " + BerkasMedia.formatUkuran(sisaRuangTablet()), 12, MUTED, false);
         teksKepala.addView(sumber);
         TextView belumSalin = text("", 12, UTAMA, true);
         belumSalin.setVisibility(View.GONE);
@@ -5936,7 +5894,7 @@ public final class MainActivity extends Activity {
     }
 
     private void tambahBarisMedia(LinearLayout isi, File item, AlertDialog[] dialog) {
-        boolean video = isVideo(item.getName());
+        boolean video = BerkasMedia.isVideo(item.getName());
         LinearLayout baris = new LinearLayout(this);
         baris.setGravity(Gravity.CENTER_VERTICAL);
         baris.setPadding(0, dp(6), 0, dp(6));
@@ -5962,7 +5920,7 @@ public final class MainActivity extends Activity {
         nama.setSingleLine(true);
         nama.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
         kolom.addView(nama);
-        String dasarInfo = (video ? "video" : "gambar") + " · " + formatUkuran(item.length());
+        String dasarInfo = (video ? "video" : "gambar") + " · " + BerkasMedia.formatUkuran(item.length());
         TextView info = text(dasarInfo, 12, MUTED, false);
         kolom.addView(info);
         String tempat = tampilLokal(item.getName());
@@ -6042,7 +6000,7 @@ public final class MainActivity extends Activity {
         Bitmap ada = cacheThumbnail.get(kunci);
         Long durasiAda = cacheDurasi.get(kunci);
         if (ada != null) gambar.setImageBitmap(ada);
-        if (durasiAda != null) info.setText(dasarInfo + " · " + formatDurasi(durasiAda));
+        if (durasiAda != null) info.setText(dasarInfo + " · " + BerkasMedia.formatDurasi(durasiAda));
         if (ada != null && (!video || durasiAda != null)) return;
         pembuatThumbnail.execute(() -> {
             Bitmap hasil = null;
@@ -6058,7 +6016,7 @@ public final class MainActivity extends Activity {
                         if (teks != null) durasi = Long.parseLong(teks);
                         Bitmap bingkaiPertama = pembaca.getFrameAtTime(0L,
                                 android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
-                        if (bingkaiPertama != null) hasil = perkecilThumbnail(bingkaiPertama);
+                        if (bingkaiPertama != null) hasil = BerkasMedia.perkecilThumbnail(bingkaiPertama);
                     } finally {
                         pembaca.release();
                     }
@@ -6071,7 +6029,7 @@ public final class MainActivity extends Activity {
                     BitmapFactory.Options opsi = new BitmapFactory.Options();
                     opsi.inSampleSize = sampel;
                     Bitmap besar = BitmapFactory.decodeFile(item.getPath(), opsi);
-                    if (besar != null) hasil = perkecilThumbnail(besar);
+                    if (besar != null) hasil = BerkasMedia.perkecilThumbnail(besar);
                 }
             } catch (Exception | OutOfMemoryError ignored) {
                 // Berkas rusak atau tidak terbaca: baris tetap tampil tanpa gambar mini.
@@ -6082,18 +6040,9 @@ public final class MainActivity extends Activity {
             if (lama > 0L) cacheDurasi.put(kunci, lama);
             handler.post(() -> {
                 if (akhir != null) gambar.setImageBitmap(akhir);
-                if (lama > 0L) info.setText(dasarInfo + " · " + formatDurasi(lama));
+                if (lama > 0L) info.setText(dasarInfo + " · " + BerkasMedia.formatDurasi(lama));
             });
         });
-    }
-
-    private static Bitmap perkecilThumbnail(Bitmap asli) {
-        if (asli.getWidth() <= 0) return asli;
-        int lebar = 144;
-        int tinggi = Math.max(1, Math.round(asli.getHeight() * (lebar / (float) asli.getWidth())));
-        Bitmap kecil = Bitmap.createScaledBitmap(asli, lebar, tinggi, true);
-        if (kecil != asli) asli.recycle();
-        return kecil;
     }
 
     /** Beri tahu bila ada berkas di server yang belum ada di folder tablet. */
@@ -6105,7 +6054,7 @@ public final class MainActivity extends Activity {
             for (File item : daftarMediaTablet()) ada.add(item.getName());
             int belum = 0;
             for (int i = 0; i < baris.length(); i++) {
-                if (!ada.contains(namaAman(baris.getJSONObject(i).getString("name")))) belum++;
+                if (!ada.contains(BerkasMedia.namaAman(baris.getJSONObject(i).getString("name")))) belum++;
             }
             if (belum > 0 && dialog.isShowing()) {
                 penanda.setText(belum + " berkas di server belum ada di tablet. Ketuk untuk menyalin.");
@@ -6122,18 +6071,6 @@ public final class MainActivity extends Activity {
         } catch (Exception e) {
             return 0L;
         }
-    }
-
-    private static String formatUkuran(long byteJumlah) {
-        if (byteJumlah >= 1073741824L) {
-            return String.format(Locale.ROOT, "%.1f GB", byteJumlah / 1073741824.0);
-        }
-        return String.format(Locale.ROOT, "%.1f MB", byteJumlah / 1048576.0);
-    }
-
-    private static String formatDurasi(long milidetik) {
-        long detik = Math.max(0L, Math.round(milidetik / 1000.0));
-        return String.format(Locale.ROOT, "%d:%02d", detik / 60, detik % 60);
     }
 
     /**
@@ -6194,7 +6131,7 @@ public final class MainActivity extends Activity {
                 try {
                     UnduhServer.keBerkasGanti(
                             basis + "/v1/kiosk/media-library/" + Uri.encode(nama),
-                            folder, namaAman(nama), CADANGAN_RUANG_BYTES, this::applyHeaders);
+                            folder, BerkasMedia.namaAman(nama), CADANGAN_RUANG_BYTES, this::applyHeaders);
                     berhasil++;
                 } catch (Exception e) {
                     gagal.add(nama);
@@ -6247,11 +6184,11 @@ public final class MainActivity extends Activity {
             List<String> ditolak = new ArrayList<>();
             for (Uri uri : pilihan) {
                 String nama = namaDariUri(uri);
-                if (nama == null || !berakhiran(nama, EKSTENSI_MEDIA)) {
+                if (nama == null || !BerkasMedia.berakhiran(nama, BerkasMedia.EKSTENSI_MEDIA)) {
                     ditolak.add(nama == null ? uri.getLastPathSegment() : nama);
                     continue;
                 }
-                File tujuan = new File(folder, namaAman(nama));
+                File tujuan = new File(folder, BerkasMedia.namaAman(nama));
                 File sementara = new File(folder, "." + tujuan.getName() + ".part");
                 try (InputStream input = getContentResolver().openInputStream(uri);
                      OutputStream output = new FileOutputStream(sementara)) {
