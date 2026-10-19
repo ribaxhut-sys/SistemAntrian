@@ -19,8 +19,9 @@ jebakan; bagian riwayat commit-nya sudah lama), [istilah.md](istilah.md),
 Terakhir diperbarui: **19 Oktober 2026**, oleh Codex.
 
 **Aturan keluar petugas 19 Oktober 2026:** nomor berstatus `CALLED` yang
-ditinggalkan petugas dikembalikan ke `WAITING`; status `SERVING` atau `PAUSED`
-memblokir logout dan tombol silang sampai nomor diselesaikan atau dialihkan.
+ditinggalkan petugas dikembalikan ke `WAITING`. Nomor `SERVING` atau `PAUSED`
+tetap aktif agar petugas lain dapat mengambil alih tanpa menghilangkan waktu
+mulai pelayanan.
 
 **Pembaruan audit 19 Oktober 2026:** worker ekspor laporan kini dihentikan
 secara aman saat halaman ditutup; timer jeda penerbitan dan penyegaran

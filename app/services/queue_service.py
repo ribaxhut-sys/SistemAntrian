@@ -1581,10 +1581,9 @@ class QueueService:
     def siapkan_logout_petugas(self) -> None:
         """Kembalikan panggilan yang belum dimulai sebelum sesi petugas berakhir.
 
-        Nomor yang sudah mulai dilayani tidak boleh dilepas diam-diam karena
-        pengunjung dapat tertinggal tanpa penanggung jawab. Sebaliknya,
-        nomor yang baru dipanggil aman dikembalikan ke antrean agar dapat
-        dipanggil petugas lain.
+        Nomor yang sudah mulai dilayani tetap aktif agar petugas lain dapat
+        mengambil alih. Sebaliknya, nomor yang baru dipanggil aman
+        dikembalikan ke antrean agar dapat dipanggil petugas lain.
         """
         sesi = self.auth.require_permission(Permission.QUEUE_CALL)
         with session_scope() as session:
@@ -1596,17 +1595,6 @@ class QueueService:
                 )
                 if row.served_by_user_id == sesi.user_id
             ]
-            sedang_dilayani = [
-                row
-                for row in aktif
-                if row.status in (QueueStatus.SERVING, QueueStatus.PAUSED)
-            ]
-            if sedang_dilayani:
-                nomor = ", ".join(row.queue_number for row in sedang_dilayani)
-                raise BusinessRuleError(
-                    f"Selesaikan atau alihkan nomor {nomor} sebelum keluar."
-                )
-
             for antrian in aktif:
                 if antrian.status is not QueueStatus.CALLED:
                     continue
