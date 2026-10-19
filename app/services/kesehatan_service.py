@@ -661,6 +661,49 @@ def _periksa_komputer_windows() -> list[Pemeriksaan]:
     return hasil
 
 
+def nilai_porsi_prioritas(prioritas: int, total: int) -> Pemeriksaan:
+    """
+    Porsi nomor prioritas 7 hari terakhir.
+
+    Kotak prioritas di anjungan tidak memverifikasi kebenaran (pengawasnya
+    petugas), jadi porsi yang terlalu tinggi menjadi satu-satunya petunjuk
+    penyalahgunaan. Di bawah 20 nomor datanya terlalu sedikit untuk dinilai.
+    """
+    nama = "Porsi nomor prioritas (7 hari)"
+    if total < 20:
+        return Pemeriksaan(nama, INFO, f"Baru {total} nomor; belum cukup untuk dinilai.")
+    persen = prioritas * 100 / total
+    ringkas = f"{prioritas} dari {total} nomor ({persen:.0f}%) bertanda prioritas."
+    if persen > 40:
+        return Pemeriksaan(
+            nama,
+            PERINGATAN,
+            ringkas,
+            (
+                "Porsi setinggi ini tidak wajar. Minta petugas berjaga memeriksa "
+                "kotak prioritas di anjungan, dan cabut prioritas yang tidak sesuai.",
+            ),
+        )
+    return Pemeriksaan(nama, NORMAL, ringkas)
+
+
+def _periksa_porsi_prioritas() -> Pemeriksaan:
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import Queue
+
+    sejak = clock.now().date() - timedelta(days=7)
+    with session_scope() as session:
+        total, prioritas = session.execute(
+            sa.select(
+                sa.func.count(Queue.id),
+                sa.func.count(Queue.prioritas),
+            ).where(Queue.queue_date >= sejak)
+        ).one()
+    return nilai_porsi_prioritas(int(prioritas), int(total))
+
+
 def _periksa_printer(settings) -> Pemeriksaan:
     from app.services.ticket_service import mode_pencetak
 
@@ -777,6 +820,7 @@ class KesehatanService:
         jalankan("Pembaruan Windows di server", _periksa_tanda_pembaruan)
         jalankan("Perangkat Android", lambda: _periksa_perangkat(self.auth))
         jalankan("Komputer Windows", _periksa_komputer_windows)
+        jalankan("Porsi nomor prioritas", _periksa_porsi_prioritas)
         jalankan("Printer tiket (komputer ini)", lambda: _periksa_printer(self.backup.settings))
         jalankan("Backup terakhir", lambda: _periksa_backup(self.backup))
         jalankan("Kapasitas disk", _periksa_disk)

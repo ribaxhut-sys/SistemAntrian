@@ -524,3 +524,20 @@ def test_denyut_pc_tanpa_login_ikut_terlihat_di_kesehatan(auth):
     assert hasil.nama == "PC Windows: PC-BELUM-LOGIN"
     assert hasil.tingkat == PERINGATAN
     assert "1.0.9" in hasil.ringkasan
+
+
+def test_porsi_prioritas_dinilai_menurut_ambang():
+    sedikit = ks.nilai_porsi_prioritas(5, 10)
+    assert sedikit.tingkat == ks.INFO
+
+    wajar = ks.nilai_porsi_prioritas(6, 40)
+    assert wajar.tingkat == NORMAL and "15%" in wajar.ringkasan
+
+    tinggi = ks.nilai_porsi_prioritas(25, 40)
+    assert tinggi.tingkat == PERINGATAN and tinggi.saran
+
+
+def test_periksa_porsi_prioritas_membaca_database(auth):
+    hasil = ks._periksa_porsi_prioritas()
+
+    assert hasil.nama.startswith("Porsi nomor prioritas")
