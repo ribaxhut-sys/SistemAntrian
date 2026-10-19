@@ -1715,8 +1715,8 @@ class QueueService:
     # -----------------------------------------------------------------
 
     def list_pelayanan_aktif(self) -> list[QueueInfo]:
-        """Daftar nomor yang sedang dipegang loket pada cabang admin."""
-        sesi = self.auth.require_permission(Permission.QUEUE_REASSIGN)
+        """Daftar pelayanan aktif yang dapat dilihat petugas pelayanan."""
+        sesi = self.auth.require_permission(Permission.QUEUE_CALL)
         with session_scope() as session:
             repo = QueueRepository(session)
             return [
