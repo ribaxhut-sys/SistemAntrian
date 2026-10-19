@@ -45,7 +45,14 @@ from app.services.note_service import NoteService
 from app.services.survey_service import SurveyService
 from app.services.ticket_service import TicketService, buat_printer, mode_pencetak
 from app.services.user_service import UserService
-from app.ui.common import judul, keterangan, konfirmasi, tampilkan_error, tombol
+from app.ui.common import (
+    judul,
+    keterangan,
+    konfirmasi,
+    tampilkan_error,
+    tampilkan_peringatan,
+    tombol,
+)
 from app.ui.dashboard.dashboard_page import DashboardPage
 from app.ui.dashboard.petugas_page import (
     DashboardPendaftaranPage,
@@ -748,7 +755,7 @@ class MainWindow(QMainWindow):
             ),
             _Menu(
                 "Pelayanan Aktif",
-                Permission.QUEUE_REASSIGN,
+                Permission.QUEUE_CALL,
                 lambda: ActiveServicePage(self.queue_service),
             ),
             _Menu(
@@ -1362,9 +1369,22 @@ class MainWindow(QMainWindow):
         if self._pengamat_aktivitas is not None:
             self._pengamat_aktivitas.catat()
         if keluar:
+            if not self._siapkan_logout_petugas():
+                return
             self._hentikan_tanda_hadir()
             self.auth.logout()
             self.close()
+
+    def _siapkan_logout_petugas(self) -> bool:
+        """Jalankan aturan antrean sebelum sesi petugas ditutup."""
+        if self.mode_kios or not self.auth.is_authenticated:
+            return True
+        try:
+            self.queue_service.siapkan_logout_petugas()
+        except AppError as exc:
+            tampilkan_peringatan(self, exc.user_message, "Belum dapat keluar")
+            return False
+        return True
 
     def _hentikan_tanda_hadir(self) -> None:
         """
@@ -1540,12 +1560,17 @@ class MainWindow(QMainWindow):
         )
         if not konfirmasi(self, pertanyaan):
             return
+        if not self._siapkan_logout_petugas():
+            return
         self._hentikan_tanda_hadir()
         self.auth.logout()
         self.close()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - nama dari Qt
         """Pastikan sesi berakhir walau jendela ditutup lewat tombol silang."""
+        if not self._siapkan_logout_petugas():
+            event.ignore()
+            return
         self._ditutup = True
         pewaktu_kunci = getattr(self, "_pewaktu_kunci", None)
         if pewaktu_kunci is not None:
