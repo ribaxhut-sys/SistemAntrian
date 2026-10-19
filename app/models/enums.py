@@ -135,6 +135,9 @@ class AuditAction(str, Enum):
     ARCHIVE_USER = "ARCHIVE_USER"
     CLEAR_PRIORITY = "CLEAR_PRIORITY"
     WINDOWS_UPDATE_RESULT = "WINDOWS_UPDATE_RESULT"
+    #: PC Windows yang membuka aplikasi dan menanyakan pembaruan; dipakai
+    #: Kesehatan Sistem untuk melihat PC yang belum login dengan versi baru.
+    WINDOWS_PC_PING = "WINDOWS_PC_PING"
     #: Laporan PDF/Excel diunduh: memuat data pelayanan seluruh cabang atau
     #: satu petugas, jadi siapa yang membawanya keluar perlu terlacak.
     EXPORT_REPORT = "EXPORT_REPORT"

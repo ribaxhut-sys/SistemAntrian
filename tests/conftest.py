@@ -65,22 +65,41 @@ def sqlite_saja():
     pytest.skip("SQLite tidak lagi didukung")
 
 
-@pytest.fixture
-def mesin_backup_tersedia(app_config):
-    """
-    Lewati test backup bila perkakas dialect ini tidak terpasang.
+def _cari_bin_postgres() -> str | None:
+    """Folder bin PostgreSQL terpasang tertinggi di Program Files (Windows)."""
+    akar = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "PostgreSQL"
+    if not akar.is_dir():
+        return None
+    versi = sorted(
+        (d for d in akar.iterdir() if (d / "bin" / "pg_dump.exe").is_file()),
+        key=lambda d: [int(x) if x.isdigit() else 0 for x in d.name.split(".")],
+        reverse=True,
+    )
+    return str(versi[0] / "bin") if versi else None
 
-    Backup PostgreSQL membutuhkan pg_dump dan pg_restore, yang ikut dalam
-    pemasangan PostgreSQL. Komputer pengembang boleh saja tidak memilikinya
-    — tetapi komputer server WAJIB, dan bila test ini terlewat berarti
-    backup PostgreSQL belum terbukti sama sekali.
+
+@pytest.fixture
+def mesin_backup_tersedia(app_config, monkeypatch: pytest.MonkeyPatch):
+    """
+    Pastikan pg_dump/pg_restore tersedia untuk test backup.
+
+    Folder bin PostgreSQL di Program Files dipasang ke PATH otomatis, jadi
+    komputer pengembang tidak perlu mengatur PATH. Bila tetap tidak ada:
+    di CI (variabel CI) test GAGAL, karena backup yang tidak teruji tidak
+    boleh lolos diam-diam; di komputer lain test dilewati dengan pesan jelas.
     """
     import shutil
 
     if not (shutil.which("pg_dump") and shutil.which("pg_restore")):
-        pytest.skip(
-            "pg_dump/pg_restore tidak terpasang; backup PostgreSQL TIDAK teruji"
-        )
+        bin_pg = _cari_bin_postgres()
+        if bin_pg:
+            monkeypatch.setenv("PATH", bin_pg + os.pathsep + os.environ.get("PATH", ""))
+    if shutil.which("pg_dump") and shutil.which("pg_restore"):
+        return
+    pesan = "pg_dump/pg_restore tidak terpasang; backup PostgreSQL TIDAK teruji"
+    if os.environ.get("CI"):
+        pytest.fail(pesan)
+    pytest.skip(pesan)
 
 
 @pytest.fixture
@@ -540,3 +559,34 @@ def efek_grafis_menyala():
 
     yield
     setel_efek_grafis(True)
+
+
+@pytest.fixture(autouse=True)
+def tema_dan_gaya_pulih():
+    """
+    Pulihkan tema, stylesheet, dan palet aplikasi sesudah setiap test.
+
+    Tema petugas mengubah QApplication dan monkeypatch global; test yang
+    menerapkannya tanpa memulihkan membuat test tata letak sesudahnya gagal
+    bergantung urutan. Hanya bekerja bila QApplication sudah ada.
+    """
+    import sys
+
+    qt = sys.modules.get("PySide6.QtWidgets")
+    app = qt.QApplication.instance() if qt else None
+    awal = None
+    if app is not None:
+        from PySide6.QtGui import QPalette
+
+        awal = (app.styleSheet(), QPalette(app.palette()))
+    yield
+    tp = sys.modules.get("app.ui.tema_petugas")
+    app = qt.QApplication.instance() if qt else None
+    if app is None:
+        return
+    if tp is not None and getattr(tp, "_aktif", None) is not None:
+        if tp._aktif.kunci != tp.TEMA_BAWAAN:
+            tp.terapkan_tema(app, tp.TEMA_BAWAAN)
+            if awal is not None:
+                app.setStyleSheet(awal[0])
+                app.setPalette(awal[1])

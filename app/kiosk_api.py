@@ -46,7 +46,11 @@ from app.services.apk_anjungan import (
     info_apk,
 )
 from app.services.device_service import KUNCI_ANJUNGAN_BERSUARA
-from app.services.pembaruan_windows import folder_pembaruan, info_pembaruan
+from app.services.pembaruan_windows import (
+    catat_denyut_pc,
+    folder_pembaruan,
+    info_pembaruan,
+)
 from app.services import daftar_putar, pin_anjungan
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
@@ -545,8 +549,13 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         )
 
     @app.get("/v1/windows/update")
-    def windows_update_info():
+    def windows_update_info(request: Request):
         """Metadata installer Windows terbaru untuk PC jaringan kantor."""
+        catat_denyut_pc(
+            request.headers.get("X-Komputer", ""),
+            request.headers.get("X-Versi-App", ""),
+            request.client.host if request.client else "",
+        )
         info = info_pembaruan(folder_pembaruan(base_dir()))
         if info is None:
             raise HTTPException(

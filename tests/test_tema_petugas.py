@@ -211,3 +211,35 @@ def test_simpan_tema_atomik_tidak_meninggalkan_berkas_sementara(tmp_path):
     assert simpan_tema("zamrud", berkas) is True
     assert baca_tema(berkas) == "zamrud"
     assert [p.name for p in tmp_path.iterdir()] == ["tampilan.json"]
+
+
+def test_penjaga_monkeypatch_qt_masih_bekerja(qtbot):
+    """
+    Tema bergantung pada empat metode Qt yang ditimpa. Bila pembaruan PySide6
+    mengubah perilakunya, tes ini gagal lebih dulu daripada tampilan rusak.
+    """
+    from PySide6.QtGui import QBrush, QColor
+    from PySide6.QtWidgets import QLabel, QTableWidget, QTableWidgetItem, QWidget
+
+    from app.ui.tema_petugas import terapkan_tema
+    from PySide6.QtWidgets import QApplication
+
+    terapkan_tema(QApplication.instance(), "malam")
+    widget = QWidget()
+    qtbot.addWidget(widget)
+    widget.setStyleSheet("QWidget { color: #172033; }")
+    assert widget.styleSheet() != "QWidget { color: #172033; }"
+    assert widget.property(tp._ASLI_QSS) == "QWidget { color: #172033; }"
+
+    label = QLabel()
+    qtbot.addWidget(label)
+    label.setText('<span style="color:#172033">x</span>')
+    assert "#172033" not in label.text().upper()
+
+    tabel = QTableWidget(1, 1)
+    qtbot.addWidget(tabel)
+    sel = QTableWidgetItem("a")
+    tabel.setItem(0, 0, sel)
+    sel.setForeground(QBrush(QColor("#172033")))
+    assert sel.foreground().color().name().upper() != "#172033"
+    assert sel.data(tp._PERAN_FG) is not None

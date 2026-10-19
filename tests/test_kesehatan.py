@@ -422,7 +422,13 @@ def _kosongkan_login():
     from app.models import AuditAction, AuditLog
 
     with session_scope() as s:
-        s.execute(sa.delete(AuditLog).where(AuditLog.action == AuditAction.LOGIN.value))
+        s.execute(
+            sa.delete(AuditLog).where(
+                AuditLog.action.in_(
+                    [AuditAction.LOGIN.value, AuditAction.WINDOWS_PC_PING.value]
+                )
+            )
+        )
 
 
 def test_periksa_komputer_windows_tanpa_catatan(auth):
@@ -493,3 +499,28 @@ def test_periksa_kata_sandi_mendeteksi_nilai_tanpa_hash(auth, users):
 
     hasil = ks._periksa_kata_sandi()
     assert hasil.tingkat == ks.PERINGATAN
+
+
+def test_denyut_pc_tanpa_login_ikut_terlihat_di_kesehatan(auth):
+    import json
+
+    from app.core import clock
+    from app.core.database import session_scope
+    from app.models import AuditAction, AuditLog
+
+    _kosongkan_login()
+    with session_scope() as s:
+        s.add(
+            AuditLog(
+                action=AuditAction.WINDOWS_PC_PING.value,
+                entity_type="windows_pc",
+                meta=json.dumps({"komputer": "PC-BELUM-LOGIN", "versi_aplikasi": "1.0.9"}),
+                created_at=clock.now() - timedelta(hours=1),
+            )
+        )
+
+    (hasil,) = ks._periksa_komputer_windows()
+
+    assert hasil.nama == "PC Windows: PC-BELUM-LOGIN"
+    assert hasil.tingkat == PERINGATAN
+    assert "1.0.9" in hasil.ringkasan

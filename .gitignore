@@ -83,3 +83,4 @@ desktop.ini
 Desktop.ini
 data/tampilan.json
 backup/apk-sebelum-*/
+backup/*.patch

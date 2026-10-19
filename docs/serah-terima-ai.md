@@ -587,6 +587,7 @@ menyeret APK ke jendela BlueStacks. Tangkapan layar:
 | 2026-10-17 | Codex | Laporan Saya PDF/Excel ditambahkan untuk CRO; ekspor admin/petugas memakai status sebaris dan penyimpanan atomik. |
 | 2026-10-17 | Claude | Sisa pekerjaan: perkiraan tunggu + prioritas, ukuran media, audit unduhan laporan, catatan rilis, enkripsi salinan backup, alamat API (bagian 6). |
 | 2026-10-17 | Codex → Claude | Tanpa SQLite, polling anjungan, pembaruan lanjut/tunda/audit, versi PC, laporan prioritas, Android memanjang; Codex terhenti (batas pemakaian), Claude menambah tes versi PC + meta login dan meng-commit (bagian 6). |
+| 2026-10-19 | Claude | Kebersihan tes: fixture `tema_dan_gaya_pulih` (autouse) di conftest, `mesin_backup_tersedia` mencari pg_dump di Program Files sendiri dan GAGAL di CI bila tak ada, tes penjaga monkeypatch tema, `backup/*.patch` di `.gitignore`. Ekspor laporan latar belakang sedang dikerjakan sesi lain (report_page.py), jangan diulang. Denyut versi PC: klien mengirim `X-Komputer`/`X-Versi-App` saat memeriksa pembaruan, server mencatat `WINDOWS_PC_PING` (satu per PC per 6 jam, maks 120/jam), Kesehatan Sistem menggabungkannya dengan login; PC yang masih 1.0.10 ke bawah tetap tak terlihat sampai dipasang 1.0.11. |
 
 Saat menutup sesi: perbarui bagian 3 (keadaan, commit, versi), 6 (belum
 selesai), dan tabel di atas.

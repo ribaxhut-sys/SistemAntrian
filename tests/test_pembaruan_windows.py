@@ -380,3 +380,35 @@ def test_admin_boleh_memasang_walau_cabang_masih_melayani(
     auth.login("admin", TEST_PASSWORD)
 
     PembaruanWindowsService(auth).pastikan_pemasangan_diizinkan()
+
+
+def test_denyut_pc_dicatat_sekali_dan_dibatasi(auth):
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import AuditAction, AuditLog
+    from app.services import pembaruan_windows as pw
+
+    pw._denyut_terakhir.clear()
+    pw._denyut_jam.clear()
+    with session_scope() as s:
+        s.execute(
+            sa.delete(AuditLog).where(
+                AuditLog.action == AuditAction.WINDOWS_PC_PING.value
+            )
+        )
+
+    assert pw.catat_denyut_pc("PC-LOKET-9", "1.0.10", "10.0.0.9") is True
+    assert pw.catat_denyut_pc("PC-LOKET-9", "1.0.10", "10.0.0.9") is False
+    assert pw.catat_denyut_pc("", "1.0.10") is False
+    assert pw.catat_denyut_pc("PC<script>", "abc") is False
+
+    with session_scope() as s:
+        jumlah = s.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLog)
+            .where(AuditLog.action == AuditAction.WINDOWS_PC_PING.value)
+        )
+    assert jumlah == 1
+    pw._denyut_terakhir.clear()
+    pw._denyut_jam.clear()

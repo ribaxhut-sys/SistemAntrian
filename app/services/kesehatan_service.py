@@ -601,7 +601,7 @@ def _periksa_perangkat(auth: AuthService) -> list[Pemeriksaan]:
 
 
 def _periksa_komputer_windows() -> list[Pemeriksaan]:
-    """Versi PC disimpulkan dari login terakhir tanpa menambah tabel baru."""
+    """Versi PC dari login dan denyut pembaruan terakhir, tanpa tabel baru."""
     import sqlalchemy as sa
 
     from app.core.database import session_scope
@@ -612,7 +612,9 @@ def _periksa_komputer_windows() -> list[Pemeriksaan]:
         baris = session.execute(
             sa.select(AuditLog.created_at, AuditLog.meta)
             .where(
-                AuditLog.action == AuditAction.LOGIN.value,
+                AuditLog.action.in_(
+                    [AuditAction.LOGIN.value, AuditAction.WINDOWS_PC_PING.value]
+                ),
                 AuditLog.created_at >= sejak,
             )
             .order_by(AuditLog.created_at.desc())
@@ -634,7 +636,7 @@ def _periksa_komputer_windows() -> list[Pemeriksaan]:
             Pemeriksaan(
                 "Komputer Windows",
                 INFO,
-                "Belum ada login yang melaporkan versi aplikasi dalam 30 hari terakhir.",
+                "Belum ada PC yang melaporkan versi aplikasi dalam 30 hari terakhir.",
             )
         ]
 
@@ -651,7 +653,7 @@ def _periksa_komputer_windows() -> list[Pemeriksaan]:
             Pemeriksaan(
                 f"PC Windows: {komputer}",
                 tingkat,
-                f"Versi {versi or 'tidak diketahui'} · login terakhir "
+                f"Versi {versi or 'tidak diketahui'} · terakhir terlihat "
                 f"{_waktu(waktu, sekarang)}",
                 saran,
             )

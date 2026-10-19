@@ -20,6 +20,9 @@ import json
 import logging
 import os
 import shutil
+import socket
+import threading
+import time
 import tempfile
 import urllib.error
 import urllib.request
@@ -305,9 +308,14 @@ def periksa_pembaruan(
     if not alamat_api:
         return None
     try:
-        with urllib.request.urlopen(  # noqa: S310 - host dari konfigurasi lokal
-            f"{alamat_api.rstrip('/')}/v1/windows/update", timeout=4
-        ) as jawaban:
+        permintaan = urllib.request.Request(  # noqa: S310 - host dari konfigurasi lokal
+            f"{alamat_api.rstrip('/')}/v1/windows/update",
+            headers={
+                "X-Komputer": bersihkan_nama_pc(socket.gethostname()),
+                "X-Versi-App": versi_terpasang,
+            },
+        )
+        with urllib.request.urlopen(permintaan, timeout=4) as jawaban:  # noqa: S310
             mentah = jawaban.read(BATAS_MANIFEST_BYTE + 1)
         if len(mentah) > BATAS_MANIFEST_BYTE:
             return None
@@ -451,3 +459,58 @@ class PembaruanWindowsService:
                 f"Selesaikan atau alihkan nomor {milik_petugas.queue_number} "
                 "sebelum memasang pembaruan."
             )
+
+
+# --- Denyut PC: PC yang membuka aplikasi melapor versinya ke server --------
+
+JEDA_DENYUT_DETIK = 6 * 3600
+BATAS_DENYUT_PER_JAM = 120
+_kunci_denyut = threading.Lock()
+_denyut_terakhir: dict[str, float] = {}
+_denyut_jam: list[float] = []
+
+
+def bersihkan_nama_pc(nama: str) -> str:
+    """Nama komputer dari header: huruf/angka/-/_/. saja, maksimal 80."""
+    bersih = "".join(c for c in str(nama) if c.isalnum() or c in "-_.")
+    return bersih[:80]
+
+
+def catat_denyut_pc(komputer: str, versi: str, alamat_ip: str = "") -> bool:
+    """
+    Catat satu PC Windows terlihat hidup. Endpoint pembaruan tidak berotentikasi,
+    jadi penulisan dibatasi: satu catatan per PC per 6 jam dan paling banyak
+    120 catatan per jam seluruhnya, supaya audit tidak dibanjiri.
+    """
+    komputer = bersihkan_nama_pc(komputer)
+    versi = "".join(c for c in str(versi) if c.isdigit() or c == ".")[:20]
+    if not komputer or not versi:
+        return False
+    sekarang = time.monotonic()
+    with _kunci_denyut:
+        if sekarang - _denyut_terakhir.get(komputer, -1e12) < JEDA_DENYUT_DETIK:
+            return False
+        _denyut_jam[:] = [t for t in _denyut_jam if sekarang - t < 3600]
+        if len(_denyut_jam) >= BATAS_DENYUT_PER_JAM:
+            return False
+        _denyut_jam.append(sekarang)
+        _denyut_terakhir[komputer] = sekarang
+    try:
+        from app.core.database import session_scope
+        from app.models import AuditAction
+        from app.services import audit_service
+
+        with session_scope() as session:
+            audit_service.record(
+                session,
+                AuditAction.WINDOWS_PC_PING,
+                user_id=None,
+                entity_type="windows_pc",
+                komputer=komputer,
+                versi_aplikasi=versi,
+                alamat_ip=str(alamat_ip)[:45],
+            )
+    except Exception:  # noqa: BLE001 - denyut tidak boleh mengganggu pembaruan
+        logger.warning("Denyut PC tidak dapat dicatat", exc_info=True)
+        return False
+    return True
