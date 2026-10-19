@@ -3128,6 +3128,8 @@ public final class MainActivity extends Activity {
         wadah.addView(page, new LinearLayout.LayoutParams(-1, 0, 1));
 
         boolean sorot = sorotAktif();
+        // Jarak kamera tetap dipasang: animasi masuk gaya acak masih memutar
+        // ubin, dan tanpa ini perspektifnya terlalu kuat.
         float kamera = 8000f * getResources().getDisplayMetrics().density;
         int awal = waitingPage * nomorPerHalaman();
         int akhir = Math.min(awal + nomorPerHalaman(), waitingQueueNumbers.size());
@@ -3150,10 +3152,10 @@ public final class MainActivity extends Activity {
             nomor.setTypeface(huruf(800));
             nomor.setFontFeatureSettings("tnum");
             nomor.setGravity(Gravity.CENTER);
-            // Timbul seperti kartu layanan: muka berlereng cahaya + tebing
-            // lebih gelap di dasar. Padding bawah menambah tebal tebing agar
-            // angka tetap di tengah muka, bukan di tengah seluruh ubin.
-            nomor.setPadding(dp(4), dp(4), dp(4), dp(4) + dp(3));
+            // Hampir datar: tebing tipis di dasar. Padding bawah menambah
+            // tebal tebing agar angka tetap di tengah muka, bukan di tengah
+            // seluruh ubin.
+            nomor.setPadding(dp(4), dp(4), dp(4), dp(4) + dp(1));
             nomor.setBackground(ubinTimbul(milikSaya ? UTAMA
                     : prioritasIni ? Color.rgb(254, 243, 199) : LEMBUT, dp(16)));
             nomor.setCameraDistance(kamera);
@@ -3169,11 +3171,11 @@ public final class MainActivity extends Activity {
                 animasiMasukNomor(nomor, urutan / KOLOM_NOMOR_MENUNGGU,
                         urutan % KOLOM_NOMOR_MENUNGGU, jumlahBarisHalaman);
             } else if (halamanBerganti && menungguPernahTampil) {
-                // Papan balik: ubin berbalik satu per satu.
-                nomor.setRotationX(90f);
-                nomor.setAlpha(0.3f);
-                nomor.animate().rotationX(0f).alpha(1f).setStartDelay(45L * urutan)
-                        .setDuration(360)
+                // Halaman berganti: ubin muncul memudar satu per satu, tanpa
+                // putaran 3D.
+                nomor.setAlpha(0f);
+                nomor.animate().alpha(1f).setStartDelay(35L * urutan)
+                        .setDuration(240)
                         .setInterpolator(new android.view.animation.DecelerateInterpolator())
                         .start();
             } else if (menungguPernahTampil && !nomorMenungguTerakhir.contains(isi)) {
@@ -6508,20 +6510,21 @@ public final class MainActivity extends Activity {
     }
 
     /**
-     * Ubin bergaya 3D: muka (terang di atas, warna dasar di bawah, garis tepi
-     * halus) di atas "tebing" lebih gelap setebal 3 dp. Tanpa elevation,
-     * sehingga bayangan tidak terpotong baris induk dan animasi putar/pop
-     * ubin tetap mulus.
+     * Ubin nomor menunggu yang hampir datar: muka dengan gradasi tipis di
+     * atas "tebing" setebal 1 dp. Dulu tebingnya 3 dp dengan muka sangat
+     * terang, sehingga nomor menunggu terbaca seperti tombol timbul yang
+     * bersaing dengan kartu layanan. Tanpa elevation, sehingga bayangan tidak
+     * terpotong baris induk dan animasi pop ubin tetap mulus.
      */
     private android.graphics.drawable.Drawable ubinTimbul(int warna, int radius) {
-        int tebing = campur(warna, Color.BLACK, 0.22f);
-        int atas = campur(warna, Color.WHITE, 0.45f);
+        int tebing = campur(warna, Color.BLACK, 0.10f);
+        int atas = campur(warna, Color.WHITE, 0.12f);
         GradientDrawable muka = roundedGradient(atas, warna, radius,
-                campur(warna, Color.BLACK, 0.08f), dp(1));
+                campur(warna, Color.BLACK, 0.05f), dp(1));
         android.graphics.drawable.LayerDrawable lapis =
                 new android.graphics.drawable.LayerDrawable(
                         new android.graphics.drawable.Drawable[]{rounded(tebing, radius), muka});
-        lapis.setLayerInset(1, 0, 0, 0, dp(3));
+        lapis.setLayerInset(1, 0, 0, 0, dp(1));
         return lapis;
     }
 
