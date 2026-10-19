@@ -733,15 +733,6 @@ public final class MainActivity extends Activity {
         void accept(int kode, String detail);
     }
 
-    private static final class PenolakanServer extends IllegalStateException {
-        final int kode;
-
-        PenolakanServer(int kode, String detail) {
-            super(detail);
-            this.kode = kode;
-        }
-    }
-
     // Jam selalu waktu Indonesia dari server, bukan setelan tablet: tablet
     // tanpa internet sering salah jam, dan zonanya bisa di luar Indonesia.
     private static final String DEFAULT_TIMEZONE = "Asia/Jakarta";
@@ -4568,53 +4559,10 @@ public final class MainActivity extends Activity {
             ExecutorService pelaksana, String method, String path, org.json.JSONObject body,
             Success success, Failure failure, Ditolak ditolak) {
         pelaksana.execute(() -> {
-            HttpURLConnection connection = null;
             try {
                 String base = preferences.getString(SERVER, "").trim().replaceAll("/+$", "");
-                if (!AlamatServer.aman(base)) {
-                    throw new IllegalStateException(AlamatServer.PESAN_DITOLAK);
-                }
-                connection = (HttpURLConnection) new URL(base + path).openConnection();
-                connection.setRequestMethod(method);
-                connection.setConnectTimeout(5000);
-                connection.setReadTimeout(8000);
-                applyHeaders(connection);
-                connection.setRequestProperty("Accept", "application/json");
-                if (body != null) {
-                    connection.setDoOutput(true);
-                    connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                    connection.getOutputStream().write(
-                            body.toString().getBytes(StandardCharsets.UTF_8));
-                }
-                int code = connection.getResponseCode();
-                InputStream stream = code < 400
-                        ? connection.getInputStream() : connection.getErrorStream();
-                // Jawaban galat tanpa isi membuat getErrorStream() null.
-                ByteArrayOutputStream output = new ByteArrayOutputStream();
-                if (stream != null) {
-                    byte[] buffer = new byte[4096];
-                    int length;
-                    while ((length = stream.read(buffer)) != -1) output.write(buffer, 0, length);
-                    stream.close();
-                }
-                String teks = new String(output.toByteArray(), StandardCharsets.UTF_8).trim();
-                Object response = null;
-                try {
-                    response = teks.isEmpty() ? null : new JSONTokener(teks).nextValue();
-                } catch (org.json.JSONException e) {
-                    if (code < 400) throw e;
-                }
-                if (code >= 400) {
-                    String detail = response instanceof JSONObject
-                            ? ((JSONObject) response).optString("detail", "")
-                            : "";
-                    if (detail.trim().isEmpty()) {
-                        detail = "Server menolak permintaan (HTTP " + code + ").";
-                    }
-                    if (code < 500) throw new PenolakanServer(code, detail);
-                    throw new IllegalStateException(detail);
-                }
-                JSONObject wrapped = new JSONObject().put("data", response);
+                JSONObject wrapped = KlienServer.panggil(
+                        base, method, path, body, this::applyHeaders);
                 handler.post(() -> {
                     try {
                         success.accept(wrapped);
@@ -4631,8 +4579,6 @@ public final class MainActivity extends Activity {
                 } else {
                     handler.post(() -> failure.accept(message));
                 }
-            } finally {
-                if (connection != null) connection.disconnect();
             }
         });
     }
@@ -6846,23 +6792,6 @@ public final class MainActivity extends Activity {
                 Math.max(0, (int) (Color.red(color) * 0.82)),
                 Math.max(0, (int) (Color.green(color) * 0.82)),
                 Math.max(0, (int) (Color.blue(color) * 0.82)));
-    }
-
-    private static final class JSONObjectBuilder {
-        private final org.json.JSONObject json = new org.json.JSONObject();
-
-        JSONObjectBuilder put(String key, Object value) {
-            try {
-                json.put(key, value);
-                return this;
-            } catch (org.json.JSONException e) {
-                throw new IllegalStateException(e);
-            }
-        }
-
-        org.json.JSONObject build() {
-            return json;
-        }
     }
 
     @Override
