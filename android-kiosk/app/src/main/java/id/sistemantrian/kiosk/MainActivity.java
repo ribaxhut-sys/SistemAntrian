@@ -2368,29 +2368,7 @@ public final class MainActivity extends Activity {
     }
 
     private byte[] downloadMedia(String mediaUrl) throws Exception {
-        HttpURLConnection connection = null;
-        try {
-            connection = (HttpURLConnection) new URL(mediaUrl).openConnection();
-            connection.setConnectTimeout(8000);
-            connection.setReadTimeout(20000);
-            applyHeaders(connection);
-            int code = connection.getResponseCode();
-            if (code >= 400) throw new IllegalStateException("Media tidak dapat dimuat.");
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            byte[] buffer = new byte[8192];
-            int length;
-            try (InputStream input = connection.getInputStream()) {
-                while ((length = input.read(buffer)) != -1) {
-                    if (output.size() + length > 32 * 1024 * 1024) {
-                        throw new IllegalStateException("Ukuran media melebihi 32 MB.");
-                    }
-                    output.write(buffer, 0, length);
-                }
-            }
-            return output.toByteArray();
-        } finally {
-            if (connection != null) connection.disconnect();
-        }
+        return UnduhServer.keMemori(mediaUrl, this::applyHeaders);
     }
 
     private static final String[] EKSTENSI_VIDEO = {".mp4", ".mkv", ".webm", ".avi"};
@@ -2636,43 +2614,8 @@ public final class MainActivity extends Activity {
 
     /** Berjalan di thread pengunduh. */
     private void unduhSalinan(String url, String kunci) throws Exception {
-        File folder = folderSalinan();
-        File tujuan = new File(folder, kunci);
-        File sementara = new File(folder, kunci + ".part");
-        HttpURLConnection connection = null;
-        try {
-            connection = (HttpURLConnection) new URL(url).openConnection();
-            connection.setConnectTimeout(8000);
-            connection.setReadTimeout(30000);
-            applyHeaders(connection);
-            if (connection.getResponseCode() >= 400) {
-                throw new IllegalStateException("Media tidak dapat diunduh.");
-            }
-            long panjang = connection.getContentLengthLong();
-            if (panjang > 0 && folder.getUsableSpace() < panjang + CADANGAN_RUANG_BYTES) {
-                throw new IllegalStateException("Ruang penyimpanan tablet tidak cukup.");
-            }
-            try (InputStream input = connection.getInputStream();
-                 OutputStream output = new FileOutputStream(sementara)) {
-                byte[] buffer = new byte[64 * 1024];
-                int length;
-                while ((length = input.read(buffer)) != -1) {
-                    output.write(buffer, 0, length);
-                }
-            }
-            if (panjang > 0 && sementara.length() != panjang) {
-                throw new IllegalStateException("Unduhan media terputus.");
-            }
-            if (!sementara.renameTo(tujuan)) {
-                throw new IllegalStateException("Salinan media tidak dapat disimpan.");
-            }
-        } finally {
-            if (connection != null) connection.disconnect();
-            if (sementara.exists()) {
-                //noinspection ResultOfMethodCallIgnored
-                sementara.delete();
-            }
-        }
+        UnduhServer.keBerkas(url, folderSalinan(), kunci, CADANGAN_RUANG_BYTES,
+                this::applyHeaders);
     }
 
     private void salinanSelesai(String nama, String kunci, boolean berhasil) {
@@ -4518,28 +4461,7 @@ public final class MainActivity extends Activity {
 
     /** Berjalan di thread pengunduh. Klip paket suara kecil, cukup di memori. */
     private byte[] unduhBytes(String url) throws Exception {
-        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-        try {
-            connection.setConnectTimeout(8000);
-            connection.setReadTimeout(15000);
-            applyHeaders(connection);
-            if (connection.getResponseCode() != 200) {
-                throw new IllegalStateException("Paket suara tidak dapat diunduh.");
-            }
-            long panjang = connection.getContentLengthLong();
-            ByteArrayOutputStream isi = new ByteArrayOutputStream();
-            try (InputStream input = connection.getInputStream()) {
-                byte[] buffer = new byte[16 * 1024];
-                int length;
-                while ((length = input.read(buffer)) != -1) isi.write(buffer, 0, length);
-            }
-            if (panjang >= 0 && isi.size() != panjang) {
-                throw new IllegalStateException("Unduhan paket suara terputus.");
-            }
-            return isi.toByteArray();
-        } finally {
-            connection.disconnect();
-        }
+        return UnduhServer.byteKecil(url, this::applyHeaders);
     }
 
     private void request(
