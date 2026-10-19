@@ -52,7 +52,17 @@ try {
         $previousAntrianEnv[$_.Name] = $_.Value
         Remove-Item "Env:\$($_.Name)"
     }
-    $env:ANTRIAN_DB_PATH = Join-Path $stageRoot "test-data\queue.db"
+    # Aplikasi hanya mendukung PostgreSQL. Pemeriksaan hasil build memakai
+    # database uji khusus (antrian_uji), TIDAK PERNAH database kerja.
+    $urlUji = $previousAntrianEnv["ANTRIAN_DB_URL"]
+    if (-not $urlUji) {
+        $berkasUji = Join-Path $HOME ".antrian-uji-db"
+        if (Test-Path $berkasUji) { $urlUji = (Get-Content $berkasUji -Raw).Trim() }
+    }
+    if (-not $urlUji -or $urlUji -notmatch '/antrian_uji(\?|$)') {
+        throw "Build installer butuh PostgreSQL antrian_uji: isi ANTRIAN_DB_URL atau ~/.antrian-uji-db (nama database harus antrian_uji)."
+    }
+    $env:ANTRIAN_DB_URL = $urlUji
     $env:ANTRIAN_BACKUP_DIR = Join-Path $stageRoot "test-backup"
     $env:ANTRIAN_LOG_DIR = Join-Path $stageRoot "test-logs"
 
