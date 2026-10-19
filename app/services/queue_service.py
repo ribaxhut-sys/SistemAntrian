@@ -1578,7 +1578,7 @@ class QueueService:
             logger.info("Pelayanan %s dimulai", antrian.queue_number)
             return _as_info(antrian, repo.jumlah_pemanggilan(antrian.id))
 
-    def siapkan_logout_petugas(self) -> None:
+    def siapkan_logout_petugas(self) -> list[str]:
         """Kembalikan panggilan yang belum dimulai sebelum sesi petugas berakhir.
 
         Nomor yang sudah mulai dilayani tetap aktif agar petugas lain dapat
@@ -1594,6 +1594,11 @@ class QueueService:
                     sesi.branch_id, clock.today(), for_update=True
                 )
                 if row.served_by_user_id == sesi.user_id
+            ]
+            masih_dilayani = [
+                row.queue_number
+                for row in aktif
+                if row.status in (QueueStatus.SERVING, QueueStatus.PAUSED)
             ]
             for antrian in aktif:
                 if antrian.status is not QueueStatus.CALLED:
@@ -1613,6 +1618,7 @@ class QueueService:
                     tindakan="dikembalikan ke antrean saat petugas keluar",
                 )
                 logger.info("Antrian %s dikembalikan saat petugas keluar", nomor)
+            return masih_dilayani
 
     def pause(self, queue_id: int) -> QueueInfo:
         """Tunda pelayanan sementara, misalnya menunggu berkas."""

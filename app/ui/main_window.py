@@ -1383,11 +1383,19 @@ class MainWindow(QMainWindow):
             self._logout_disiapkan = True
             return True
         try:
-            self.queue_service.siapkan_logout_petugas()
+            masih_dilayani = self.queue_service.siapkan_logout_petugas()
         except AppError as exc:
             tampilkan_peringatan(self, exc.user_message, "Belum dapat keluar")
             return False
         self._logout_disiapkan = True
+        if masih_dilayani:
+            tampilkan_peringatan(
+                self,
+                "Nomor berikut masih dalam pelayanan: "
+                + ", ".join(masih_dilayani)
+                + ". Nomor tetap aktif dan dapat diambil alih petugas lain.",
+                "Pelayanan Masih Aktif",
+            )
         return True
 
     def _hentikan_tanda_hadir(self) -> None:
