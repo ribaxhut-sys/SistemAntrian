@@ -644,7 +644,7 @@ def test_hanya_pengaduan_menyembunyikan_catatan_petugas(qtbot, auth, lembar_teri
 
     halaman.centang_pengaduan.setChecked(True)
 
-    assert halaman.tabel.rowCount() == 1
+    qtbot.waitUntil(lambda: halaman.tabel.rowCount() == 1, timeout=5000)
     assert halaman.terpilih.queue_number == lembar_terisi["pengaduan"].queue_number
 
 
@@ -910,3 +910,23 @@ def test_peringatan_tidak_berlaku_untuk_kalimat_cepat(halaman_kerja, terbitkan):
 
     assert panel.isian_catatan.toPlainText() == panel._tombol_frasa[0].kalimat
     assert not panel.catatan_sama_dengan_sebelumnya
+
+
+def test_detak_simpan_otomatis_diam_bila_jendela_tidak_tampil(
+    halaman_kerja, terbitkan, auth
+):
+    """
+    Panel yang sudah ditutup tidak boleh menulis ke database sesudahnya:
+    detak 15 detiknya dulu menulis catatan basi ke data tes berikutnya.
+    """
+    from app.services.note_service import NoteService
+
+    _panggil(halaman_kerja, terbitkan)
+    antrian_id = halaman_kerja.antrian.id
+    panel = halaman_kerja.panel_pengaduan
+    panel.isian_catatan.setPlainText("Catatan yang belum tersimpan sama sekali")
+    assert not panel.window().isVisible()
+
+    panel._saat_pewaktu_otomatis()
+
+    assert NoteService(auth).ambil(antrian_id) is None

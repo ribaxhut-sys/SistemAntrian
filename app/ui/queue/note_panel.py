@@ -164,7 +164,7 @@ class NotePanel(QWidget):
 
         self._pewaktu_otomatis = QTimer(self)
         self._pewaktu_otomatis.setInterval(JEDA_SIMPAN_OTOMATIS)
-        self._pewaktu_otomatis.timeout.connect(self.simpan_otomatis)
+        self._pewaktu_otomatis.timeout.connect(self._saat_pewaktu_otomatis)
         self._pewaktu_otomatis.start()
 
     # =================================================================
@@ -527,6 +527,18 @@ class NotePanel(QWidget):
     # =================================================================
     # Simpan draf otomatis
     # =================================================================
+
+    def _saat_pewaktu_otomatis(self) -> None:
+        """
+        Detak simpan otomatis: hanya bila jendelanya sungguh tampil.
+
+        Panel yang sudah ditutup tetapi belum dihancurkan (jendela ditutup,
+        atau widget uji yang menunggu dibersihkan) tidak boleh menulis ke
+        database lama-lama sesudahnya, atas nama sesi siapa pun yang kini
+        masuk. Tab lain pada layar yang sama tetap dihitung tampil.
+        """
+        if self.window().isVisible():
+            self.simpan_otomatis()
 
     def simpan_otomatis(self) -> None:
         """
