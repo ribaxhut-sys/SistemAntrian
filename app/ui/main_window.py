@@ -1377,13 +1377,17 @@ class MainWindow(QMainWindow):
 
     def _siapkan_logout_petugas(self) -> bool:
         """Jalankan aturan antrean sebelum sesi petugas ditutup."""
+        if getattr(self, "_logout_disiapkan", False):
+            return True
         if self.mode_kios or not self.auth.is_authenticated:
+            self._logout_disiapkan = True
             return True
         try:
             self.queue_service.siapkan_logout_petugas()
         except AppError as exc:
             tampilkan_peringatan(self, exc.user_message, "Belum dapat keluar")
             return False
+        self._logout_disiapkan = True
         return True
 
     def _hentikan_tanda_hadir(self) -> None:
