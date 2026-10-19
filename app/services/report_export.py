@@ -1,7 +1,7 @@
 """
 Ekspor laporan ke PDF (dicetak, ditandatangani) dan Excel (diolah lagi).
 
-Keduanya memakai KOLOM_TABEL yang sama dengan layar, sehingga angka di
+Keduanya memakai kolom_tabel yang sama dengan layar, sehingga angka di
 kertas tidak pernah berbeda dengan angka yang dilihat supervisor. Excel
 menyimpan angka sebagai angka (menit, desimal), bukan teks "9 menit",
 supaya dapat langsung dijumlah dan dibuat grafik.
@@ -21,11 +21,11 @@ from app.services.report_service import (
     JUDUL_TABEL_PETUGAS_LAYANAN,
     JUDUL_TABEL_RIWAYAT,
     KOLOM_PETUGAS_LAYANAN,
-    KOLOM_RIWAYAT,
-    KOLOM_TABEL,
     Laporan,
     angka_prioritas,
     angka_ringkasan,
+    kolom_riwayat,
+    kolom_tabel,
 )
 from app.utils.formatting import tanggal_panjang
 
@@ -103,8 +103,9 @@ def ekspor_pdf(laporan: Laporan, tujuan: Path, kantor: str = "") -> Path:
     )
     isi.append(tabel_ringkas)
     prioritas = " · ".join(f"{nama}: {nilai}" for nama, nilai in angka_prioritas(laporan))
-    isi.append(Spacer(1, 3 * mm))
-    isi.append(Paragraph(prioritas, gaya["Normal"]))
+    if prioritas:
+        isi.append(Spacer(1, 3 * mm))
+        isi.append(Paragraph(prioritas, gaya["Normal"]))
 
     for kunci, judul in JUDUL_TABEL.items():
         if laporan.nama_petugas and kunci == "per_petugas":
@@ -112,7 +113,7 @@ def ekspor_pdf(laporan: Laporan, tujuan: Path, kantor: str = "") -> Path:
         baris = getattr(laporan, kunci)
         if not baris:
             continue
-        kolom = KOLOM_TABEL[kunci]
+        kolom = kolom_tabel(kunci, pribadi=bool(laporan.nama_petugas))
         isi.append(Spacer(1, 6 * mm))
         isi.append(Paragraph(judul, gaya["Heading3"]))
         data = [[k[0] for k in kolom]] + [[k[1](b) for k in kolom] for b in baris]
@@ -170,10 +171,14 @@ def ekspor_pdf(laporan: Laporan, tujuan: Path, kantor: str = "") -> Path:
         isi.append(tabel)
 
     isi.append(Spacer(1, 6 * mm))
+    definisi = "pelayanan = mulai dilayani sampai selesai."
+    if not laporan.nama_petugas:
+        definisi = f"Menunggu = terbit sampai dipanggil; {definisi}"
+    else:
+        definisi = definisi.capitalize()
     isi.append(
         Paragraph(
-            f"Dicetak {clock.now():%d-%m-%Y %H:%M} WIB. Menunggu = terbit sampai "
-            "dipanggil; pelayanan = mulai dilayani sampai selesai.",
+            f"Dicetak {clock.now():%d-%m-%Y %H:%M} WIB. {definisi}",
             gaya["Italic"],
         )
     )
@@ -197,8 +202,10 @@ def ekspor_excel(laporan: Laporan, tujuan: Path) -> Path:
     ringkas.append([])
     for nama, nilai in angka_ringkasan(laporan):
         ringkas.append([nama, nilai])
-    ringkas.append([])
-    for nama, nilai in angka_prioritas(laporan):
+    prioritas = angka_prioritas(laporan)
+    if prioritas:
+        ringkas.append([])
+    for nama, nilai in prioritas:
         ringkas.append([nama, nilai])
     ringkas.column_dimensions["A"].width = 32
     ringkas.column_dimensions["B"].width = 16
@@ -239,7 +246,11 @@ def ekspor_excel(laporan: Laporan, tujuan: Path) -> Path:
     for kunci, judul in JUDUL_TABEL.items():
         if laporan.nama_petugas and kunci == "per_petugas":
             continue
-        isi_lembar(judul, KOLOM_TABEL[kunci], getattr(laporan, kunci))
+        isi_lembar(
+            judul,
+            kolom_tabel(kunci, pribadi=bool(laporan.nama_petugas)),
+            getattr(laporan, kunci),
+        )
     if not laporan.nama_petugas:
         isi_lembar(
             JUDUL_TABEL_PETUGAS_LAYANAN,
@@ -247,7 +258,12 @@ def ekspor_excel(laporan: Laporan, tujuan: Path) -> Path:
             [baris for _, rincian in laporan.petugas_layanan for baris in rincian],
             saring=True,
         )
-    isi_lembar(JUDUL_TABEL_RIWAYAT, KOLOM_RIWAYAT, laporan.riwayat, saring=True)
+    isi_lembar(
+        JUDUL_TABEL_RIWAYAT,
+        kolom_riwayat(pribadi=bool(laporan.nama_petugas)),
+        laporan.riwayat,
+        saring=True,
+    )
 
     tujuan = Path(tujuan)
     buku.save(tujuan)

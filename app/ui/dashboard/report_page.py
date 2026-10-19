@@ -35,10 +35,14 @@ from app.core.logger import get_logger
 from app.services.report_export import ekspor_excel, ekspor_pdf, nama_berkas_bawaan
 from app.services.report_service import (
     JUDUL_TABEL,
-    KOLOM_TABEL,
+    KartuRingkasan,
     Laporan,
     ReportService,
-    angka_ringkasan,
+    deret_tren,
+    kartu_ringkasan,
+    kolom_riwayat,
+    kolom_tabel,
+    sorotan,
 )
 from app.ui.common import (
     PekerjaLatar,
@@ -50,11 +54,40 @@ from app.ui.common import (
     tombol,
 )
 from app.ui.dashboard.dashboard_page import KartuAngka
-from app.ui.style import DANGER, SUCCESS, TEXT, WARNING
+from app.ui.dashboard.grafik_tren import GrafikTren
+from app.ui.style import (
+    DANGER,
+    FONT_SIZE_HUGE,
+    PRIMARY_SOFT,
+    SUCCESS,
+    TEXT,
+    TEXT_MUTED,
+    WARNING,
+)
+from app.utils.formatting import tanggal_pendek
 
 logger = get_logger("laporan")
 
-WARNA_ANGKA = (TEXT, SUCCESS, DANGER, TEXT, TEXT, WARNING)
+WARNA_NADA = {"netral": TEXT, "baik": SUCCESS, "waspada": WARNING, "buruk": DANGER}
+WARNA_PERUBAHAN = {"netral": TEXT_MUTED, "baik": SUCCESS, "buruk": DANGER}
+
+#: Persen catatan identik (dari catatan yang ditulis sendiri) yang diberi warna
+#: peringatan pada tabel Per petugas.
+AMBANG_CATATAN_IDENTIK = 30
+
+PESAN_KOSONG = "Belum ada antrian pada rentang ini. Coba pilih rentang tanggal lain."
+
+#: Kolom riwayat per nomor di layar (Excel memuat semuanya).
+KOLOM_RIWAYAT_LAYAR = (
+    "Tanggal",
+    "Nomor",
+    "Jenis layanan",
+    "Status",
+    "Jam mulai dilayani",
+    "Jam selesai",
+    "Lama pelayanan",
+    "Nilai survey",
+)
 
 
 def _ke_qdate(nilai: date) -> QDate:
@@ -71,11 +104,166 @@ def rentang_cepat(nama: str, hari_ini: date) -> tuple[date, date]:
         return hari_ini, hari_ini
     if nama == "7_hari":
         return hari_ini - timedelta(days=6), hari_ini
+    if nama == "tahun_ini":
+        return hari_ini.replace(month=1, day=1), hari_ini
     awal_bulan = hari_ini.replace(day=1)
     if nama == "bulan_ini":
         return awal_bulan, hari_ini
     akhir_lalu = awal_bulan - timedelta(days=1)
     return akhir_lalu.replace(day=1), akhir_lalu
+
+
+def label_rentang(dari: date, sampai: date) -> str:
+    """'1 Okt – 19 Okt 2026 (19 hari)'; tahun ditulis di kedua ujung bila berbeda."""
+    hari = (sampai - dari).days + 1
+    if dari == sampai:
+        awal = f"{tanggal_pendek(dari)} {dari.year}"
+    elif dari.year == sampai.year:
+        awal = f"{tanggal_pendek(dari)} – {tanggal_pendek(sampai)} {sampai.year}"
+    else:
+        awal = (
+            f"{tanggal_pendek(dari)} {dari.year} – "
+            f"{tanggal_pendek(sampai)} {sampai.year}"
+        )
+    return f"{awal} ({hari} hari)"
+
+
+def _warna_kepuasan(nilai: float) -> str:
+    return SUCCESS if nilai >= 4 else WARNING if nilai >= 3 else DANGER
+
+
+class ItemUrut(QTableWidgetItem):
+    """Sel yang diurutkan menurut nilainya (angka, tanggal, jam), bukan teksnya."""
+
+    def __init__(self, teks: str, nilai) -> None:
+        super().__init__(teks)
+        if nilai is None:
+            self._kunci = (0, 0)
+        elif isinstance(nilai, str):
+            self._kunci = (1, nilai.lower())
+        else:
+            self._kunci = (1, nilai)
+
+    def __lt__(self, lain) -> bool:
+        if isinstance(lain, ItemUrut):
+            try:
+                return self._kunci < lain._kunci
+            except TypeError:
+                return str(self._kunci) < str(lain._kunci)
+        return super().__lt__(lain)
+
+
+#: Judul kolom di layar yang dipecah dua baris agar kolom tidak melebar;
+#: PDF dan Excel tetap memakai judul aslinya.
+JUDUL_LAYAR = {
+    "Rata-rata menunggu": "Rata-rata\nmenunggu",
+    "Rata-rata pelayanan": "Rata-rata\npelayanan",
+    "Lama pelayanan": "Lama\npelayanan",
+    "Jam mulai dilayani": "Jam mulai\ndilayani",
+}
+
+#: Ruang di luar teks judul: bantalan sel dan panah urutan.
+RUANG_JUDUL = 16 + 14
+
+
+class TabelLaporan(QTableWidget):
+    """
+    Tabel tanpa gulir mendatar: lebar kolom mengikuti lebar tabel.
+
+    Tiap kolom minimal selebar judulnya (baris terpanjang); sisanya dibagi
+    menurut lebar alami isi, dan isi yang terlalu panjang dipotong dengan
+    elipsis. Gulir tegak tetap ada untuk riwayat yang panjang.
+    """
+
+    def __init__(self, judul: list[str], parent: QWidget | None = None) -> None:
+        super().__init__(0, len(judul), parent)
+        self.setHorizontalHeaderLabels(judul)
+        self.verticalHeader().setVisible(False)
+        self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.setAlternatingRowColors(True)
+        self.setWordWrap(False)
+        self.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        kepala = self.horizontalHeader()
+        kepala.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        kepala.setStretchLastSection(False)
+        kepala.setSectionsClickable(True)
+        self._alami: list[int] = [0] * len(judul)
+
+    def lebar_judul(self, kolom: int) -> int:
+        """Lebar minimal kolom: baris judul terpanjang beserta ruangnya."""
+        metrik = self.horizontalHeader().fontMetrics()
+        teks = self.horizontalHeaderItem(kolom).text()
+        return max(metrik.horizontalAdvance(b) for b in teks.split("\n")) + RUANG_JUDUL
+
+    def ukur_isi(self) -> None:
+        """Ukur lebar alami tiap kolom dari isinya; panggil setelah tabel diisi."""
+        self.resizeColumnsToContents()
+        self._alami = [self.columnWidth(c) for c in range(self.columnCount())]
+        self.sesuaikan()
+
+    def sesuaikan(self) -> None:
+        jumlah = self.columnCount()
+        lebar_tersedia = self.viewport().width()
+        if jumlah == 0 or lebar_tersedia <= 0:
+            return
+        minimum = [self.lebar_judul(c) for c in range(jumlah)]
+        alami = [max(a, m) for a, m in zip(self._alami, minimum, strict=True)]
+        if sum(alami) <= lebar_tersedia:
+            sisa = lebar_tersedia - sum(alami)
+            lebar = [a + sisa * a / sum(alami) for a in alami]
+        elif sum(minimum) <= lebar_tersedia:
+            sisa = lebar_tersedia - sum(minimum)
+            lebihan = [a - m for a, m in zip(alami, minimum, strict=True)]
+            lebar = [m + sisa * x / sum(lebihan) for m, x in zip(minimum, lebihan, strict=True)]
+        else:
+            lebar = [lebar_tersedia * m / sum(minimum) for m in minimum]
+        bulat = [int(x) for x in lebar]
+        bulat[-1] += lebar_tersedia - sum(bulat)
+        for kolom, nilai in enumerate(bulat):
+            self.setColumnWidth(kolom, nilai)
+
+    def resizeEvent(self, kejadian) -> None:  # noqa: N802 - nama Qt
+        super().resizeEvent(kejadian)
+        self.sesuaikan()
+
+
+class KartuRingkas(KartuAngka):
+    """Kartu angka dengan warna menurut makna, keterangan, dan perubahan periode."""
+
+    def __init__(self, nama: str, parent: QWidget | None = None) -> None:
+        super().__init__(nama, TEXT, parent)
+        self.label_nama = self.findChildren(QLabel)[-1]
+        self.catatan = self._label_kecil()
+        self.perubahan = self._label_kecil()
+        self.layout().addWidget(self.catatan)
+        self.layout().addWidget(self.perubahan)
+
+    @staticmethod
+    def _label_kecil() -> QLabel:
+        label = QLabel("")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setWordWrap(True)
+        label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
+        label.hide()
+        return label
+
+    def isi(self, kartu: KartuRingkasan) -> None:
+        self.label_nama.setText(kartu.nama)
+        self.nilai.setText(kartu.nilai)
+        self.nilai.setStyleSheet(
+            f"font-size: {FONT_SIZE_HUGE}px; font-weight: 700;"
+            f" color: {WARNA_NADA.get(kartu.nada, TEXT)};"
+        )
+        self.catatan.setText(kartu.catatan)
+        self.catatan.setVisible(bool(kartu.catatan))
+        self.perubahan.setText(kartu.perubahan)
+        self.perubahan.setStyleSheet(
+            f"color: {WARNA_PERUBAHAN.get(kartu.nada_perubahan, TEXT_MUTED)};"
+            " font-size: 12px;"
+        )
+        self.perubahan.setVisible(bool(kartu.perubahan))
 
 
 class LaporanPage(QWidget):
@@ -129,6 +317,7 @@ class LaporanPage(QWidget):
             ("7_hari", "7 hari"),
             ("bulan_ini", "Bulan ini"),
             ("bulan_lalu", "Bulan lalu"),
+            ("tahun_ini", "Tahun ini"),
         ):
             btn = tombol(label)
             btn.setCheckable(True)
@@ -147,44 +336,100 @@ class LaporanPage(QWidget):
         bar.addWidget(self.ekspor_pdf)
         bar.addWidget(self.ekspor_excel)
         susunan.addLayout(bar)
+        self.label_rentang = keterangan("")
+        susunan.addWidget(self.label_rentang)
         self.status_ekspor = keterangan("")
         self.status_ekspor.hide()
         susunan.addWidget(self.status_ekspor)
 
         kisi = QGridLayout()
         kisi.setSpacing(10)
-        self.kartu: list[KartuAngka] = []
-        for i, (nama, _) in enumerate(angka_ringkasan_kosong()):
-            kartu = KartuAngka(nama, WARNA_ANGKA[i])
+        self.kartu: list[KartuRingkas] = []
+        for i, (nama, _) in enumerate(angka_ringkasan_kosong(self.pribadi)):
+            kartu = KartuRingkas(nama)
             self.kartu.append(kartu)
             kisi.addWidget(kartu, 0, i)
         susunan.addLayout(kisi)
 
+        self.sorotan = QLabel("")
+        self.sorotan.setWordWrap(True)
+        self.sorotan.setTextFormat(Qt.TextFormat.RichText)
+        self.sorotan.setStyleSheet(
+            f"background: {PRIMARY_SOFT}; color: {TEXT}; border-radius: 6px;"
+            " padding: 8px 12px;"
+        )
+        self.sorotan.hide()
+        susunan.addWidget(self.sorotan)
+
+        self.judul_tren = keterangan("")
+        self.judul_tren.hide()
+        susunan.addWidget(self.judul_tren)
+        self.grafik = GrafikTren()
+        self.grafik.hide()
+        susunan.addWidget(self.grafik)
+
         self.tab = QTabWidget()
         self.tabel: dict[str, QTableWidget] = {}
-        for kunci, label in JUDUL_TABEL.items():
-            if self.pribadi and kunci == "per_petugas":
-                continue
-            kolom = KOLOM_TABEL[kunci]
-            tabel = QTableWidget(0, len(kolom))
-            tabel.setHorizontalHeaderLabels([k[0] for k in kolom])
-            tabel.verticalHeader().setVisible(False)
-            tabel.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-            tabel.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-            tabel.setAlternatingRowColors(True)
+        self.kolom: dict[str, list] = {}
+        for kunci, label in self._daftar_tab():
+            if kunci == "riwayat":
+                kolom = [
+                    k
+                    for k in kolom_riwayat(pribadi=True)
+                    if k[0] in KOLOM_RIWAYAT_LAYAR
+                ]
+            else:
+                kolom = kolom_tabel(kunci, pribadi=self.pribadi, layar=True)
+            tabel = TabelLaporan([JUDUL_LAYAR.get(k[0], k[0]) for k in kolom])
             kepala = tabel.horizontalHeader()
-            kepala.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            kepala.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            kepala.sectionClicked.connect(
+                lambda kol, t=tabel: self._urutkan(t, kol)
+            )
             self.tabel[kunci] = tabel
+            self.kolom[kunci] = kolom
             self.tab.addTab(tabel, label)
         susunan.addWidget(self.tab, stretch=1)
+        self.tab.currentChanged.connect(lambda _=0: self._perbarui_total())
 
-        self.kosong = keterangan("Belum ada antrian pada rentang ini.")
+        self.total_periode = QLabel("")
+        self.total_periode.setWordWrap(True)
+        self.total_periode.setStyleSheet(f"color: {TEXT}; font-weight: 600;")
+        self.total_periode.hide()
+        susunan.addWidget(self.total_periode)
+
+        self.kosong = QLabel(PESAN_KOSONG)
+        self.kosong.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.kosong.setWordWrap(True)
+        self.kosong.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 16px; padding: 40px;")
         self.kosong.hide()
-        susunan.addWidget(self.kosong)
+        susunan.addWidget(self.kosong, stretch=1)
 
         self.dari.dateChanged.connect(self._rentang_diubah)
         self.sampai.dateChanged.connect(self._rentang_diubah)
+
+    def _daftar_tab(self) -> list[tuple[str, str]]:
+        """Tab yang tampil: laporan pribadi tanpa Per petugas, dengan Riwayat saya."""
+        tab = []
+        for kunci, label in JUDUL_TABEL.items():
+            if self.pribadi and kunci == "per_petugas":
+                continue
+            tab.append((kunci, label))
+            if self.pribadi and kunci == "per_hari":
+                tab.append(("riwayat", "Riwayat saya"))
+        return tab
+
+    def _urutkan(self, tabel: QTableWidget, kolom: int) -> None:
+        """Klik judul kolom: urut naik, klik lagi: urut turun."""
+        kepala = tabel.horizontalHeader()
+        naik = not (
+            kepala.isSortIndicatorShown()
+            and kepala.sortIndicatorSection() == kolom
+            and kepala.sortIndicatorOrder() == Qt.SortOrder.AscendingOrder
+        )
+        urutan = Qt.SortOrder.AscendingOrder if naik else Qt.SortOrder.DescendingOrder
+        tabel.sortItems(kolom, urutan)
+        kepala.setSortIndicator(kolom, urutan)
+        kepala.setSortIndicatorShown(True)
 
     def _kotak_tanggal(self) -> QDateEdit:
         kotak = QDateEdit()
@@ -220,6 +465,7 @@ class LaporanPage(QWidget):
     def muat_ulang(self) -> None:
         dari = _dari_qdate(self.dari.date())
         sampai = _dari_qdate(self.sampai.date())
+        self.label_rentang.setText(self._teks_rentang(dari, sampai))
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             self.laporan = (
@@ -234,31 +480,95 @@ class LaporanPage(QWidget):
             QApplication.restoreOverrideCursor()
         self._tampilkan()
 
+    @staticmethod
+    def _teks_rentang(dari: date, sampai: date) -> str:
+        if sampai < dari:
+            return ""
+        akhir_lalu = dari - timedelta(days=1)
+        awal_lalu = akhir_lalu - timedelta(days=(sampai - dari).days)
+        return (
+            f"{label_rentang(dari, sampai)} · "
+            f"dibandingkan dengan {label_rentang(awal_lalu, akhir_lalu)}"
+        )
+
+    def _perbarui_total(self) -> None:
+        laporan = self.laporan
+        indeks = self.tab.currentIndex()
+        if laporan is None or indeks < 0 or laporan.total.terbit == 0:
+            self.total_periode.hide()
+            return
+        kunci = list(self.tabel)[indeks]
+        if kunci == "riwayat":
+            teks = f"Total periode — {len(laporan.riwayat)} nomor"
+        else:
+            bagian = [
+                f"{k[0]}: {k[1](laporan.total)}" for k in self.kolom[kunci][1:]
+            ]
+            teks = "Total periode — " + " · ".join(bagian)
+        self.total_periode.setText(teks)
+        self.total_periode.show()
+
     def _tampilkan(self) -> None:
         laporan = self.laporan
         ada = laporan is not None and laporan.total.terbit > 0
         self.ekspor_pdf.setEnabled(laporan is not None)
         self.ekspor_excel.setEnabled(laporan is not None)
         self.kosong.setVisible(not ada)
-        angka = angka_ringkasan(laporan) if laporan else angka_ringkasan_kosong()
-        for kartu, (nama, nilai) in zip(self.kartu, angka, strict=True):
-            kartu.setel(nilai)
-            label = kartu.findChildren(QLabel)[-1]
-            label.setText(nama)
+        self.tab.setVisible(ada)
+        if laporan is not None and ada:
+            for kartu, data in zip(self.kartu, kartu_ringkasan(laporan), strict=True):
+                kartu.isi(data)
+        else:
+            for kartu, (nama, nilai) in zip(
+                self.kartu, angka_ringkasan_kosong(self.pribadi), strict=True
+            ):
+                kartu.isi(KartuRingkasan(nama, nilai))
+
+        temuan = sorotan(laporan) if laporan is not None and ada else []
+        self.sorotan.setText(
+            " &nbsp;·&nbsp; ".join(f"{nama}: <b>{nilai}</b>" for nama, nilai in temuan)
+        )
+        self.sorotan.setVisible(bool(temuan))
+
+        tampil_grafik = False
+        if laporan is not None and ada and laporan.jumlah_hari > 1:
+            judul_tren, deret = deret_tren(laporan)
+            self.judul_tren.setText(judul_tren)
+            self.grafik.setel(deret)
+            tampil_grafik = not self.grafik.kosong
+        self.judul_tren.setVisible(tampil_grafik)
+        self.grafik.setVisible(tampil_grafik)
+
         for kunci, tabel in self.tabel.items():
-            baris = getattr(laporan, kunci) if laporan else []
-            kolom = KOLOM_TABEL[kunci]
-            tabel.setRowCount(len(baris))
-            for r, b in enumerate(baris):
-                for c, k in enumerate(kolom):
-                    item = QTableWidgetItem(k[1](b))
-                    if k[3]:
-                        item.setTextAlignment(
-                            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-                        )
-                    if k[0] == "Kepuasan" and b.rata_kepuasan is not None:
+            if kunci == "riwayat":
+                baris = laporan.riwayat if laporan else []
+            else:
+                baris = getattr(laporan, kunci) if laporan else []
+            self._isi_tabel(tabel, self.kolom[kunci], baris)
+        self._perbarui_total()
+
+    @staticmethod
+    def _isi_tabel(tabel: TabelLaporan, kolom: list, baris: list) -> None:
+        kepala = tabel.horizontalHeader()
+        kepala.setSortIndicatorShown(False)
+        tabel.setRowCount(len(baris))
+        for r, b in enumerate(baris):
+            for c, k in enumerate(kolom):
+                item = ItemUrut(k[1](b), k[2](b))
+                if k[3]:
+                    item.setTextAlignment(
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                    )
+                if k[0] == "Catatan identik":
+                    persen = b.persen_catatan_identik
+                    if persen is not None and persen >= AMBANG_CATATAN_IDENTIK:
                         item.setForeground(QColor(WARNING))
-                    tabel.setItem(r, c, item)
+                if k[0] in ("Kepuasan", "Nilai survey"):
+                    nilai = k[2](b)
+                    if isinstance(nilai, (int, float)):
+                        item.setForeground(QColor(_warna_kepuasan(nilai)))
+                tabel.setItem(r, c, item)
+        tabel.ukur_isi()
 
     def _ekspor(self, akhiran: str) -> None:
         if self.laporan is None:
@@ -343,20 +653,23 @@ class LaporanPage(QWidget):
         self._sementara_ekspor = None
 
     def closeEvent(self, kejadian) -> None:  # noqa: N802
+        self.hentikan()
+        kejadian.accept()
+
+    def hentikan(self) -> None:
+        """Hentikan ekspor sebelum halaman induk menghancurkan worker."""
         if self._pekerja_ekspor is not None and self._pekerja_ekspor.isRunning():
             self._pekerja_ekspor.wait(3_500)
         if self._pekerja_ekspor is not None and self._pekerja_ekspor.isRunning():
             lepaskan_pekerja(self._pekerja_ekspor)
-        kejadian.accept()
 
 
-def angka_ringkasan_kosong() -> list[tuple[str, str]]:
+def angka_ringkasan_kosong(pribadi: bool = False) -> list[tuple[str, str]]:
     return [
-        ("Nomor terbit", "0"),
+        ("Nomor ditangani" if pribadi else "Nomor terbit", "0"),
         ("Selesai dilayani", "0"),
         ("Tidak hadir", "0"),
-        ("Rata-rata menunggu", "—"),
+        ("Nomor dipanggil" if pribadi else "Rata-rata menunggu", "0" if pribadi else "—"),
         ("Rata-rata pelayanan", "—"),
-        ("Kepuasan (0 survey)", "—"),
+        ("Kepuasan", "—"),
     ]
-

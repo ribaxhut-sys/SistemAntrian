@@ -115,7 +115,7 @@ def test_hanya_supervisor(auth, antrian_siap):
 def test_laporan_petugas_hanya_memuat_nomor_miliknya(
     auth, laporan_hari_ini
 ):
-    from app.services.report_service import ReportService
+    from app.services.report_service import ReportService, angka_ringkasan
 
     auth.logout()
     auth.login("cro", TEST_PASSWORD)
@@ -128,6 +128,9 @@ def test_laporan_petugas_hanya_memuat_nomor_miliknya(
     assert len(laporan.riwayat) == 3
     assert {baris.petugas for baris in laporan.riwayat} == {"Petugas Cro"}
     assert "Menunggu" not in {baris.status for baris in laporan.riwayat}
+    kartu = [nama for nama, _ in angka_ringkasan(laporan)]
+    assert "Rata-rata menunggu" not in kartu
+    assert "Nomor dipanggil" in kartu
 
 
 def test_admin_tidak_dapat_memakai_jalur_laporan_pribadi(auth, antrian_siap):
@@ -350,3 +353,331 @@ def test_cro_tidak_dapat_mencatat_unduhan_laporan_cabang(auth, antrian_siap):
     auth.login("cro", TEST_PASSWORD)
     with pytest.raises(AuthorizationError):
         ReportService(auth).catat_unduhan(cabang, "pdf")
+
+
+# ---------------------------------------------------------------------
+# Kartu, sorotan, tren, dan laporan pribadi
+# ---------------------------------------------------------------------
+
+
+def _baris(nama, **isi):
+    from app.services.report_service import BarisLaporan
+
+    daftar = {k: isi.pop(k) for k in ("_menunggu", "_layanan", "_rating") if k in isi}
+    return BarisLaporan(nama, **isi, **daftar)
+
+
+def _laporan_buatan(**ganti):
+    from datetime import date
+
+    from app.services.report_service import Laporan
+
+    nilai = dict(
+        dari=date(2026, 10, 1),
+        sampai=date(2026, 10, 3),
+        total=_baris("Total", terbit=10, dipanggil=10, selesai=8, tidak_hadir=2),
+        per_hari=[],
+        per_layanan=[],
+        per_loket=[],
+        per_petugas=[],
+    )
+    nilai.update(ganti)
+    return Laporan(**nilai)
+
+
+def test_laporan_pribadi_tanpa_kolom_menunggu_dan_prioritas(auth, laporan_hari_ini):
+    from app.services.report_service import (
+        ReportService,
+        angka_prioritas,
+        kolom_riwayat,
+        kolom_tabel,
+    )
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    hari = clock.today()
+    pribadi = ReportService(auth).laporan_petugas(hari, hari)
+
+    assert angka_prioritas(pribadi) == []
+    for kunci in ("per_hari", "per_layanan", "per_loket"):
+        nama = {k[0] for k in kolom_tabel(kunci, pribadi=True)}
+        assert not nama & {"Rata-rata menunggu", "Tunggu prioritas", "Prioritas", "Dicabut"}
+        assert "Rata-rata pelayanan" in nama
+    assert "Lama menunggu" not in {k[0] for k in kolom_riwayat(pribadi=True)}
+    # Laporan cabang tidak berubah.
+    assert "Rata-rata menunggu" in {k[0] for k in kolom_tabel("per_hari")}
+    assert angka_prioritas(laporan_hari_ini)
+
+
+def test_total_sebelumnya_terisi(laporan_hari_ini):
+    sebelum = laporan_hari_ini.total_sebelumnya
+    assert sebelum is not None
+    assert sebelum.terbit == 0
+
+
+def test_kartu_ringkasan_nada_dan_perubahan():
+    from app.services.report_service import kartu_ringkasan
+
+    laporan = _laporan_buatan(
+        total=_baris(
+            "Total",
+            terbit=12,
+            dipanggil=10,
+            selesai=8,
+            tidak_hadir=2,
+            _rating=[5, 5, 4],
+            _menunggu=[300.0],
+            _layanan=[120.0],
+        ),
+        total_sebelumnya=_baris(
+            "Total",
+            terbit=10,
+            dipanggil=10,
+            selesai=10,
+            tidak_hadir=1,
+            _rating=[3, 3],
+            _menunggu=[600.0],
+        ),
+    )
+    kartu = {k.nama: k for k in kartu_ringkasan(laporan)}
+
+    assert len(kartu) == 6
+    assert kartu["Nomor terbit"].perubahan.startswith("▲ 20%")
+    assert kartu["Nomor terbit"].nada_perubahan == "netral"
+    assert kartu["Selesai dilayani"].perubahan.startswith("▼ 20%")
+    assert kartu["Selesai dilayani"].nada_perubahan == "buruk"
+    assert kartu["Tidak hadir"].nada == "buruk"  # 20% dari yang dipanggil
+    assert kartu["Tidak hadir"].catatan == "20% dari yang dipanggil"
+    assert kartu["Rata-rata menunggu"].nada_perubahan == "baik"  # 10 mnt -> 5 mnt
+    assert kartu["Kepuasan"].nilai == "4,7 / 5"
+    assert kartu["Kepuasan"].nada == "baik"
+    assert kartu["Kepuasan"].nada_perubahan == "baik"
+
+
+def test_kartu_ringkasan_tanpa_pembanding_dan_pribadi():
+    from app.services.report_service import kartu_ringkasan
+
+    kartu = kartu_ringkasan(_laporan_buatan(nama_petugas="Cro"))
+    nama = [k.nama for k in kartu]
+    assert nama[0] == "Nomor ditangani"
+    assert "Nomor dipanggil" in nama and "Rata-rata menunggu" not in nama
+    assert all(k.perubahan == "" for k in kartu)
+    assert kartu[-1].nilai == "—" and kartu[-1].nada == "netral"
+
+
+def test_sorotan_butuh_pembanding():
+    from app.services.report_service import sorotan
+
+    sepi = _laporan_buatan(per_hari=[_baris("2026-10-01", terbit=3)])
+    assert sorotan(sepi) == []
+
+    ramai = _laporan_buatan(
+        per_hari=[_baris("2026-10-01", terbit=3), _baris("2026-10-02", terbit=9)],
+        per_layanan=[_baris("Umum", terbit=9), _baris("Khusus", terbit=3)],
+        per_loket=[
+            _baris("Loket 1", selesai=3, _layanan=[600.0]),
+            _baris("Loket 2", selesai=3, _layanan=[300.0]),
+        ],
+        per_petugas=[
+            _baris("Ani", _rating=[5, 5, 4]),
+            _baris("Budi", _rating=[3, 3, 3]),
+            _baris("Cici", _rating=[5]),  # survei terlalu sedikit
+        ],
+    )
+    temuan = dict(sorotan(ramai))
+    assert "9 nomor" in temuan["Hari tersibuk"]
+    assert temuan["Layanan terbanyak"].startswith("Umum")
+    assert temuan["Loket tercepat"].startswith("Loket 2")
+    assert temuan["Kepuasan tertinggi"].startswith("Ani")
+
+    pribadi = _laporan_buatan(
+        nama_petugas="Ani",
+        per_loket=ramai.per_loket,
+        per_petugas=ramai.per_petugas,
+        per_hari=ramai.per_hari,
+    )
+    assert "Loket tercepat" not in dict(sorotan(pribadi))
+
+
+def test_deret_tren_harian_dan_mingguan():
+    from datetime import date
+
+    from app.services.report_service import deret_tren
+
+    harian = _laporan_buatan(per_hari=[_baris("2026-10-02", selesai=4)])
+    judul, deret = deret_tren(harian)
+    assert judul == "Nomor selesai per hari"
+    assert deret == [("1", 0), ("2", 4), ("3", 0)]
+
+    panjang = _laporan_buatan(
+        dari=date(2026, 9, 1),
+        sampai=date(2026, 10, 15),
+        per_hari=[_baris("2026-09-02", selesai=2), _baris("2026-09-05", selesai=3)],
+    )
+    judul, deret = deret_tren(panjang)
+    assert judul == "Nomor selesai per minggu"
+    assert deret[0] == ("1/9", 5)
+    assert len(deret) == 7
+
+
+def test_survei_dihitung_pada_hari_nomor_terbit(laporan_hari_ini):
+    (hari,) = laporan_hari_ini.per_hari
+    assert hari.terbit == 4 and hari.jumlah_survey == 1
+
+
+def test_rentang_cepat_tahun_ini_dan_label():
+    from datetime import date
+
+    from app.ui.dashboard.report_page import label_rentang, rentang_cepat
+
+    hari = date(2026, 10, 7)
+    assert rentang_cepat("tahun_ini", hari) == (date(2026, 1, 1), hari)
+    assert label_rentang(date(2026, 10, 1), date(2026, 10, 19)) == "1 Okt – 19 Okt 2026 (19 hari)"
+    assert label_rentang(hari, hari) == "7 Okt 2026 (1 hari)"
+    assert "2025" in label_rentang(date(2025, 12, 30), date(2026, 1, 2))
+
+
+def test_halaman_kosong_menyembunyikan_tabel(qtbot, auth, antrian_siap):
+    from app.services.report_service import ReportService
+    from app.ui.dashboard.report_page import PESAN_KOSONG, LaporanPage
+
+    auth.logout()
+    auth.login("supervisor", TEST_PASSWORD)
+    halaman = LaporanPage(ReportService(auth), "KANTOR")
+    qtbot.addWidget(halaman)
+    halaman.show()
+    halaman._pakai_rentang("hari_ini")
+
+    assert not halaman.tab.isVisible()
+    assert not halaman.grafik.isVisible() and not halaman.sorotan.isVisible()
+    assert halaman.kosong.isVisible() and halaman.kosong.text() == PESAN_KOSONG
+    assert "dibandingkan dengan" in halaman.label_rentang.text()
+
+
+def test_halaman_tab_riwayat_saya_hanya_untuk_pribadi(qtbot, auth, laporan_hari_ini):
+    from app.services.report_service import ReportService
+    from app.ui.dashboard.report_page import LaporanPage
+
+    def judul_kolom(tabel):
+        return [
+            tabel.horizontalHeaderItem(i).text().replace("\n", " ")
+            for i in range(tabel.columnCount())
+        ]
+
+    cabang = LaporanPage(ReportService(auth), "KANTOR")
+    qtbot.addWidget(cabang)
+    assert "riwayat" not in cabang.tabel and "per_petugas" in cabang.tabel
+    assert "Rata-rata menunggu" in judul_kolom(cabang.tabel["per_hari"])
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    pribadi = LaporanPage(ReportService(auth), "KANTOR", pribadi=True)
+    qtbot.addWidget(pribadi)
+    pribadi._pakai_rentang("hari_ini")
+    assert list(pribadi.tabel)[:2] == ["per_hari", "riwayat"]
+    assert "per_petugas" not in pribadi.tabel
+    assert pribadi.tabel["riwayat"].rowCount() == 3
+    assert "Rata-rata menunggu" not in judul_kolom(pribadi.tabel["per_hari"])
+    assert pribadi.kartu[3].label_nama.text() == "Nomor dipanggil"
+
+
+def test_item_tabel_diurutkan_menurut_angka_bukan_teks(qtbot):
+    from app.ui.dashboard.report_page import ItemUrut
+
+    kecil, besar = ItemUrut("9", 9), ItemUrut("10", 10)
+    assert kecil < besar
+    assert ItemUrut("", None) < kecil
+
+
+def test_ekspor_pribadi_tanpa_kolom_menunggu(auth, laporan_hari_ini, tmp_path):
+    from openpyxl import load_workbook
+
+    from app.services.report_export import ekspor_excel
+    from app.services.report_service import ReportService
+
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    hari = clock.today()
+    pribadi = ReportService(auth).laporan_petugas(hari, hari)
+
+    buku = load_workbook(ekspor_excel(pribadi, tmp_path / "saya.xlsx"))
+    for lembar in buku.worksheets:
+        if lembar.title == "Ringkasan":
+            continue
+        judul = [sel.value for sel in lembar[1]]
+        assert not any("menunggu" in str(j).lower() for j in judul if j), lembar.title
+        assert "Prioritas dicabut" not in judul
+    ringkasan = [baris[0].value for baris in buku["Ringkasan"].iter_rows()]
+    assert "Rata-rata tunggu prioritas" not in ringkasan
+    assert "Rata-rata menunggu" not in ringkasan
+
+
+@pytest.mark.parametrize("lebar", [1024, 1280, 1366])
+@pytest.mark.parametrize("pribadi", [False, True])
+def test_tabel_tanpa_gulir_mendatar_dan_judul_muat(
+    qtbot, auth, laporan_hari_ini, lebar, pribadi
+):
+    from app.services.report_service import ReportService
+    from app.ui.dashboard.report_page import LaporanPage
+
+    if pribadi:
+        auth.logout()
+        auth.login("cro", TEST_PASSWORD)
+    halaman = LaporanPage(ReportService(auth), "KANTOR", pribadi=pribadi)
+    qtbot.addWidget(halaman)
+    halaman.resize(lebar, 700)
+    halaman.show()
+    halaman._pakai_rentang("hari_ini")
+
+    for kunci, tabel in halaman.tabel.items():
+        halaman.tab.setCurrentWidget(tabel)
+        qtbot.wait(20)
+        assert not tabel.horizontalScrollBar().isVisible(), (kunci, lebar)
+        kepala = tabel.horizontalHeader()
+        metrik = kepala.fontMetrics()
+        jumlah = sum(kepala.sectionSize(c) for c in range(tabel.columnCount()))
+        assert jumlah <= tabel.viewport().width()
+        for kolom in range(tabel.columnCount()):
+            judul = tabel.horizontalHeaderItem(kolom).text()
+            terpanjang = max(metrik.horizontalAdvance(b) for b in judul.split("\n"))
+            assert terpanjang + 16 <= kepala.sectionSize(kolom), (kunci, judul, lebar)
+
+
+def test_laporan_menghitung_catatan_identik_per_petugas(
+    auth, antrian_siap, cro_queue, terbitkan
+):
+    from app.services.note_service import FRASA_BAWAAN, NoteService
+    from app.services.report_service import ReportService, kolom_tabel
+
+    catatan = NoteService(auth)
+    for isi in (
+        "Berkas belum lengkap, kembali besok.",
+        "BERKAS belum  lengkap, kembali besok.",  # sama setelah dirapikan
+        "Menanyakan tagihan bulan ini.",
+        FRASA_BAWAAN[0],  # kalimat cepat: tidak dihitung
+        FRASA_BAWAAN[0],
+    ):
+        terbitkan("A")
+        antrian = cro_queue.call_next(antrian_siap["loket"][0])
+        cro_queue.start_service(antrian.id)
+        catatan.simpan(antrian.id, catatan=isi)
+        cro_queue.complete(antrian.id)
+
+    auth.logout()
+    auth.login("supervisor", TEST_PASSWORD)
+    hari = clock.today()
+    laporan = ReportService(auth).laporan(hari, hari)
+
+    (petugas,) = laporan.per_petugas
+    assert petugas.catatan_bebas == 3
+    assert petugas.catatan_identik == 1
+    assert petugas.label_catatan_identik == "1 dari 3 (33%)"
+    assert "Catatan identik" in [k[0] for k in kolom_tabel("per_petugas")]
+    kolom = {k[0]: k for k in kolom_tabel("per_petugas")}["Catatan identik"]
+    assert kolom[2](petugas) == 33.3
+
+
+def test_catatan_identik_kosong_bila_tidak_ada_catatan(laporan_hari_ini):
+    (petugas,) = laporan_hari_ini.per_petugas
+    assert petugas.catatan_bebas == 0
+    assert petugas.label_catatan_identik == "—"

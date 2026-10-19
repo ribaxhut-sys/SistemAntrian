@@ -28,12 +28,14 @@ from app.models import (
     Counter,
     Queue,
     QueueCall,
+    QueueNote,
     QueueStatus,
     SatisfactionSurvey,
     ServiceCategory,
     User,
 )
 from app.services.auth_service import AuthService
+from app.services.note_service import FRASA_BAWAAN, daftar_frasa, samakan_catatan
 from app.services.permissions import Permission
 from app.services.queue_service import LABEL_STATUS
 from app.utils.formatting import durasi_singkat
@@ -55,6 +57,10 @@ class BarisLaporan:
     prioritas_dicabut: int = 0
     #: Nama kelompok baris, misalnya petugas pada tabel petugas per layanan.
     kelompok: str = ""
+    #: Catatan petugas yang ditulis sendiri (bukan hanya kalimat cepat), dan
+    #: berapa di antaranya persis sama dengan catatan lain petugas yang sama.
+    catatan_bebas: int = 0
+    catatan_identik: int = 0
     _menunggu: list[float] = field(default_factory=list, repr=False)
     _layanan: list[float] = field(default_factory=list, repr=False)
     _rating: list[int] = field(default_factory=list, repr=False)
@@ -83,6 +89,22 @@ class BarisLaporan:
     @property
     def rata_kepuasan(self) -> float | None:
         return sum(self._rating) / len(self._rating) if self._rating else None
+
+    @property
+    def persen_catatan_identik(self) -> float | None:
+        return self.catatan_identik / self.catatan_bebas * 100 if self.catatan_bebas else None
+
+    @property
+    def label_catatan_identik(self) -> str:
+        persen = self.persen_catatan_identik
+        if persen is None:
+            return "—"
+        return f"{self.catatan_identik} dari {self.catatan_bebas} ({persen:.0f}%)"
+
+    @property
+    def persen_tidak_hadir(self) -> float | None:
+        """Bagian nomor yang sudah dipanggil tetapi tidak datang, dalam persen."""
+        return self.tidak_hadir / self.dipanggil * 100 if self.dipanggil else None
 
     @property
     def label_menunggu(self) -> str:
@@ -145,6 +167,9 @@ class Laporan:
     riwayat: list[TiketRiwayat] = field(default_factory=list)
     #: Terisi hanya untuk laporan pribadi CRO; kosong berarti seluruh cabang.
     nama_petugas: str = ""
+    #: Total periode sepanjang rentang yang sama persis tepat sebelum `dari`,
+    #: untuk membandingkan angka. None pada laporan pembanding itu sendiri.
+    total_sebelumnya: BarisLaporan | None = None
 
     @property
     def jumlah_hari(self) -> int:
@@ -246,6 +271,7 @@ class ReportService:
         *,
         petugas_id: int | None = None,
         nama_petugas: str = "",
+        pembanding: bool = True,
     ) -> Laporan:
         if sampai < dari:
             raise ValidationError("Tanggal akhir tidak boleh sebelum tanggal awal.")
@@ -311,6 +337,14 @@ class ReportService:
             ]
             if petugas_id is not None:
                 syarat_survey.append(SatisfactionSurvey.officer_id == petugas_id)
+            catatan_tiket = session.execute(
+                sa.select(QueueNote.queue_id, QueueNote.catatan)
+                .join(Queue, Queue.id == QueueNote.queue_id)
+                .where(*dalam_rentang, QueueNote.catatan.is_not(None))
+            ).all()
+            frasa_resmi = {samakan_catatan(f) for f in FRASA_BAWAAN}
+            for teks in session.scalars(sa.select(ServiceCategory.frasa_catatan)):
+                frasa_resmi.update(samakan_catatan(f) for f in daftar_frasa(teks))
             survey = session.execute(
                 sa.select(
                     SatisfactionSurvey.queue_id,
@@ -331,6 +365,7 @@ class ReportService:
         nilai_tiket = {queue_id: rating for queue_id, _, _, _, rating, _ in survey}
         riwayat: list[TiketRiwayat] = []
         id_termasuk: set[int] = set()
+        petugas_tiket: dict[int, int] = {}
 
         def ambil(kamus: dict, kunci, nama: str) -> BarisLaporan:
             if kunci not in kamus:
@@ -364,6 +399,8 @@ class ReportService:
             if petugas_id is not None and petugas != petugas_id:
                 continue
             id_termasuk.add(queue_id)
+            if petugas is not None:
+                petugas_tiket[queue_id] = petugas
             dicabut = queue_id in prioritas_dicabut
             waktu = (
                 status,
@@ -411,16 +448,37 @@ class ReportService:
                 )
             )
 
+        # Survei dihitung pada hari nomornya terbit, bukan hari diisi, supaya
+        # survei lewat tengah malam tidak membuat baris hari tanpa nomor.
+        hari_terbit = {baris[0]: baris[1] for baris in antrian}
         for queue_id, kategori, loket, petugas, rating, waktu in survey:
             if petugas_id is not None and queue_id not in id_termasuk:
                 continue
+            hari = hari_terbit.get(queue_id, waktu.date())
             total._rating.append(rating)
-            ambil(per_hari, waktu.date(), waktu.date().isoformat())._rating.append(rating)
+            ambil(per_hari, hari, hari.isoformat())._rating.append(rating)
             ambil(per_loket, loket, nama_loket.get(loket, "—"))._rating.append(rating)
             ambil(
                 per_petugas, petugas, nama_petugas_per_id.get(petugas, "—")
             )._rating.append(rating)
             ambil_rincian(petugas, kategori)._rating.append(rating)
+
+        # Catatan identik per petugas. Catatan yang seluruhnya kalimat cepat
+        # dilewati: memakai tombol yang sama untuk pelayanan yang sama wajar.
+        catatan_petugas: dict[int, list[str]] = {}
+        for queue_id, catatan in catatan_tiket:
+            pemilik = petugas_tiket.get(queue_id)
+            bentuk = samakan_catatan(catatan)
+            if pemilik is None or not bentuk:
+                continue
+            baris_catatan = {samakan_catatan(b) for b in catatan.splitlines() if b.strip()}
+            if baris_catatan <= frasa_resmi:
+                continue
+            catatan_petugas.setdefault(pemilik, []).append(bentuk)
+        for pemilik, daftar in catatan_petugas.items():
+            baris = ambil(per_petugas, pemilik, nama_petugas_per_id.get(pemilik, "—"))
+            baris.catatan_bebas = len(daftar)
+            baris.catatan_identik = len(daftar) - len(set(daftar))
 
         def urut_nama(kamus: dict) -> list[BarisLaporan]:
             return sorted(kamus.values(), key=lambda b: b.nama.lower())
@@ -437,6 +495,19 @@ class ReportService:
         ]
         petugas_layanan.sort(key=lambda p: p[0].nama.lower())
 
+        sebelumnya = None
+        if pembanding:
+            akhir_lalu = dari - timedelta(days=1)
+            awal_lalu = akhir_lalu - timedelta(days=(sampai - dari).days)
+            sebelumnya = self._susun(
+                awal_lalu,
+                akhir_lalu,
+                branch_id,
+                petugas_id=petugas_id,
+                nama_petugas=nama_petugas,
+                pembanding=False,
+            ).total
+
         return Laporan(
             dari=dari,
             sampai=sampai,
@@ -448,6 +519,7 @@ class ReportService:
             petugas_layanan=petugas_layanan,
             riwayat=riwayat,
             nama_petugas=nama_petugas,
+            total_sebelumnya=sebelumnya,
         )
 
 
@@ -521,6 +593,11 @@ KOLOM_TABEL: dict[str, list[Kolom]] = {
         _k("Rata-rata pelayanan", lambda b: b.label_layanan, lambda b: _menit(b.rata_layanan_detik)),
         _k("Survey", lambda b: str(b.jumlah_survey), lambda b: b.jumlah_survey),
         _k("Kepuasan", lambda b: b.label_kepuasan, lambda b: b.rata_kepuasan),
+        _k(
+            "Catatan identik",
+            lambda b: b.label_catatan_identik,
+            lambda b: None if b.persen_catatan_identik is None else round(b.persen_catatan_identik, 1),
+        ),
     ],
 }
 
@@ -537,6 +614,65 @@ KOLOM_PETUGAS_LAYANAN: list[Kolom] = [
     _k("Survey", lambda b: str(b.jumlah_survey), lambda b: b.jumlah_survey),
     _k("Kepuasan", lambda b: b.label_kepuasan, lambda b: b.rata_kepuasan),
 ]
+
+
+#: Kolom yang tidak menggambarkan kerja petugas, jadi tidak ikut laporan
+#: pribadi: lama menunggu dan prioritas ditentukan arus pengunjung dan
+#: pendaftaran, bukan petugas yang melayani.
+KOLOM_BUKAN_UNTUK_PETUGAS = frozenset(
+    {
+        "Rata-rata menunggu",
+        "Tunggu prioritas",
+        "Prioritas",
+        "Dicabut",
+        "Lama menunggu",
+        "Prioritas dicabut",
+        "Petugas",
+    }
+)
+
+#: Kolom tabel di layar. Lebih ringkas dari PDF/Excel supaya judul tidak
+#: terpotong; kolom lengkap tetap ada di berkas unduhan.
+KOLOM_LAYAR: dict[str, tuple[str, ...]] = {
+    "per_hari": (
+        "Tanggal",
+        "Terbit",
+        "Selesai",
+        "Tidak hadir",
+        "Rata-rata menunggu",
+        "Rata-rata pelayanan",
+        "Survey",
+        "Kepuasan",
+    ),
+    "per_layanan": (
+        "Jenis layanan",
+        "Terbit",
+        "Selesai",
+        "Tidak hadir",
+        "Rata-rata menunggu",
+        "Rata-rata pelayanan",
+    ),
+}
+
+
+def _tanpa_kolom_petugas(kolom: list[Kolom], pribadi: bool) -> list[Kolom]:
+    if not pribadi:
+        return kolom
+    return [k for k in kolom if k[0] not in KOLOM_BUKAN_UNTUK_PETUGAS]
+
+
+def kolom_tabel(kunci: str, *, pribadi: bool = False, layar: bool = False) -> list[Kolom]:
+    """Kolom tabel `kunci`; pribadi membuang kolom yang bukan urusan petugas."""
+    kolom = KOLOM_TABEL[kunci]
+    if layar and kunci in KOLOM_LAYAR:
+        kolom = [k for k in kolom if k[0] in KOLOM_LAYAR[kunci]]
+    # "Petugas" pada KOLOM_TABEL["per_petugas"] tidak dipakai laporan pribadi
+    # (tabelnya disembunyikan), jadi aman disaring seperti yang lain.
+    return _tanpa_kolom_petugas(kolom, pribadi and kunci != "per_petugas")
+
+
+def kolom_riwayat(*, pribadi: bool = False) -> list[Kolom]:
+    return _tanpa_kolom_petugas(KOLOM_RIWAYAT, pribadi)
 
 
 def _jam(waktu: datetime | None) -> str:
@@ -565,7 +701,14 @@ KOLOM_RIWAYAT: list[Kolom] = [
 
 
 def angka_prioritas(laporan: Laporan) -> list[tuple[str, str]]:
-    """Angka operasional prioritas dipisah agar enam kartu utama tetap terbaca."""
+    """
+    Angka operasional prioritas dipisah agar enam kartu utama tetap terbaca.
+
+    Kosong pada laporan pribadi: prioritas ditetapkan di pendaftaran dan
+    lama tunggunya ditentukan arus pengunjung, bukan petugas yang melayani.
+    """
+    if laporan.nama_petugas:
+        return []
     total = laporan.total
     return [
         ("Nomor prioritas", f"{total.prioritas:,}".replace(",", ".")),
@@ -594,7 +737,209 @@ def angka_ringkasan(laporan: Laporan) -> list[tuple[str, str]]:
         ),
         ("Selesai dilayani", f"{t.selesai:,}".replace(",", ".")),
         ("Tidak hadir", f"{t.tidak_hadir:,}".replace(",", ".")),
-        ("Rata-rata menunggu", t.label_menunggu),
+        # Lama menunggu ditentukan arus pengunjung dan jumlah loket, bukan
+        # petugas; laporan pribadi menampilkan jumlah panggilan sebagai gantinya.
+        (
+            ("Nomor dipanggil", f"{t.dipanggil:,}".replace(",", "."))
+            if laporan.nama_petugas
+            else ("Rata-rata menunggu", t.label_menunggu)
+        ),
         ("Rata-rata pelayanan", t.label_layanan),
         (f"Kepuasan ({t.jumlah_survey} survey)", kepuasan),
     ]
+
+
+# =====================================================================
+# Kartu ringkasan, sorotan, dan tren: bahan tampilan layar.
+# =====================================================================
+
+#: Survei minimal agar petugas ikut dibandingkan pada sorotan kepuasan;
+#: satu penilaian tidak cukup untuk menyebut siapa pun "tertinggi".
+MIN_SURVEY_SOROTAN = 3
+
+
+@dataclass(frozen=True)
+class KartuRingkasan:
+    """Satu kartu angka: nilai besar, keterangan, dan perubahan dari periode lalu."""
+
+    nama: str
+    nilai: str
+    #: Warna nilai: netral, baik, waspada, atau buruk.
+    nada: str = "netral"
+    catatan: str = ""
+    perubahan: str = ""
+    #: Warna perubahan: netral, baik, atau buruk.
+    nada_perubahan: str = "netral"
+
+
+def _angka_id(nilai: int) -> str:
+    return f"{nilai:,}".replace(",", ".")
+
+
+def _perubahan(
+    sekarang: float | None,
+    sebelum: float | None,
+    *,
+    kecil_lebih_baik: bool | None,
+    selisih_mutlak: bool = False,
+) -> tuple[str, str]:
+    """
+    Teks dan warna perubahan dibanding periode sebelumnya.
+
+    `kecil_lebih_baik` None berarti naik/turun tidak bisa dinilai baik atau
+    buruk (misalnya jumlah nomor terbit): panahnya tetap tampil, warnanya netral.
+    """
+    if sekarang is None or sebelum is None:
+        return "", "netral"
+    selisih = sekarang - sebelum
+    if selisih_mutlak:
+        besar = abs(selisih)
+        sama = round(besar, 1) == 0
+        angka = f"{besar:.1f}".replace(".", ",")
+    else:
+        if sebelum == 0:
+            return "", "netral"
+        persen = abs(selisih) / sebelum * 100
+        sama = round(persen) == 0
+        angka = f"{persen:.0f}%"
+    if sama:
+        return "Sama dengan periode sebelumnya", "netral"
+    panah = "▲" if selisih > 0 else "▼"
+    teks = f"{panah} {angka} dari periode sebelumnya"
+    if kecil_lebih_baik is None:
+        return teks, "netral"
+    return teks, "baik" if (selisih < 0) == kecil_lebih_baik else "buruk"
+
+
+def kartu_ringkasan(laporan: Laporan) -> list[KartuRingkasan]:
+    """Enam kartu layar: angka_ringkasan ditambah warna dan pembanding."""
+    t = laporan.total
+    s = laporan.total_sebelumnya
+    pribadi = bool(laporan.nama_petugas)
+
+    persen = t.persen_tidak_hadir
+    if persen is None:
+        nada_hadir, catatan_hadir = "netral", ""
+    else:
+        nada_hadir = "buruk" if persen > 10 else "waspada" if persen > 5 else "netral"
+        catatan_hadir = f"{persen:.0f}% dari yang dipanggil"
+
+    kepuasan = t.rata_kepuasan
+    if kepuasan is None:
+        nada_puas = "netral"
+    else:
+        nada_puas = "baik" if kepuasan >= 4 else "waspada" if kepuasan >= 3 else "buruk"
+
+    def banding(sekarang, sebelum, **opsi):
+        return _perubahan(sekarang, sebelum, **opsi) if s is not None else ("", "netral")
+
+    terbit = banding(t.terbit, s and s.terbit, kecil_lebih_baik=None)
+    selesai = banding(t.selesai, s and s.selesai, kecil_lebih_baik=False)
+    tidak_hadir = banding(t.tidak_hadir, s and s.tidak_hadir, kecil_lebih_baik=True)
+    pelayanan = banding(
+        t.rata_layanan_detik, s and s.rata_layanan_detik, kecil_lebih_baik=None
+    )
+    puas = banding(
+        kepuasan, s and s.rata_kepuasan, kecil_lebih_baik=False, selisih_mutlak=True
+    )
+
+    if pribadi:
+        keempat = KartuRingkasan(
+            "Nomor dipanggil",
+            _angka_id(t.dipanggil),
+            perubahan=banding(t.dipanggil, s and s.dipanggil, kecil_lebih_baik=None)[0],
+        )
+    else:
+        menunggu = banding(
+            t.rata_menunggu_detik, s and s.rata_menunggu_detik, kecil_lebih_baik=True
+        )
+        keempat = KartuRingkasan(
+            "Rata-rata menunggu", t.label_menunggu, "netral", "", *menunggu
+        )
+
+    return [
+        KartuRingkasan(
+            "Nomor ditangani" if pribadi else "Nomor terbit",
+            _angka_id(t.terbit),
+            "netral",
+            "",
+            *terbit,
+        ),
+        KartuRingkasan("Selesai dilayani", _angka_id(t.selesai), "baik", "", *selesai),
+        KartuRingkasan(
+            "Tidak hadir",
+            _angka_id(t.tidak_hadir),
+            nada_hadir,
+            catatan_hadir,
+            *tidak_hadir,
+        ),
+        keempat,
+        KartuRingkasan("Rata-rata pelayanan", t.label_layanan, "netral", "", *pelayanan),
+        KartuRingkasan(
+            "Kepuasan",
+            "—" if kepuasan is None else f"{t.label_kepuasan} / 5",
+            nada_puas,
+            f"{t.jumlah_survey} survey",
+            *puas,
+        ),
+    ]
+
+
+def sorotan(laporan: Laporan) -> list[tuple[str, str]]:
+    """
+    Temuan menonjol pada rentang, satu kalimat pendek tiap butir.
+
+    Butir hanya muncul bila ada pembandingnya; "tercepat" dari satu loket
+    atau "tertinggi" dari satu petugas tidak memberi informasi.
+    """
+    hasil: list[tuple[str, str]] = []
+    hari = [b for b in laporan.per_hari if b.terbit > 0]
+    if len(hari) >= 2:
+        teramai = max(hari, key=lambda b: b.terbit)
+        hasil.append(
+            ("Hari tersibuk", f"{_label_tanggal(teramai.nama)} · {teramai.terbit} nomor")
+        )
+    if len(laporan.per_layanan) >= 2:
+        utama = laporan.per_layanan[0]
+        hasil.append(("Layanan terbanyak", f"{utama.nama} · {utama.terbit} nomor"))
+    if laporan.nama_petugas:
+        return hasil
+    loket = [b for b in laporan.per_loket if b.selesai >= 1 and b.rata_layanan_detik is not None]
+    if len(loket) >= 2:
+        tercepat = min(loket, key=lambda b: b.rata_layanan_detik)
+        hasil.append(("Loket tercepat", f"{tercepat.nama} · {tercepat.label_layanan}"))
+    petugas = [b for b in laporan.per_petugas if b.jumlah_survey >= MIN_SURVEY_SOROTAN]
+    if len(petugas) >= 2:
+        terbaik = max(petugas, key=lambda b: b.rata_kepuasan)
+        hasil.append(
+            ("Kepuasan tertinggi", f"{terbaik.nama} · {terbaik.label_kepuasan} / 5")
+        )
+    return hasil
+
+
+#: Rentang sampai sepanjang ini digambar per hari; lebih panjang per minggu.
+TREN_HARIAN_MAKS = 31
+
+
+def deret_tren(laporan: Laporan) -> tuple[str, list[tuple[str, int]]]:
+    """
+    Judul dan deret (label, nomor selesai) untuk grafik tren.
+
+    Hari tanpa nomor tetap ada dengan nilai 0, supaya jarak antarbatang
+    mengikuti kalender dan hari sepi terlihat sepi.
+    """
+    selesai = {date.fromisoformat(b.nama): b.selesai for b in laporan.per_hari}
+    hari = [laporan.dari + timedelta(days=i) for i in range(laporan.jumlah_hari)]
+    if len(hari) <= TREN_HARIAN_MAKS:
+        beda_bulan = hari[0].month != hari[-1].month
+        return "Nomor selesai per hari", [
+            (f"{h.day}/{h.month}" if beda_bulan else str(h.day), selesai.get(h, 0))
+            for h in hari
+        ]
+    deret = []
+    for awal in range(0, len(hari), 7):
+        pekan = hari[awal : awal + 7]
+        deret.append(
+            (f"{pekan[0].day}/{pekan[0].month}", sum(selesai.get(h, 0) for h in pekan))
+        )
+    return "Nomor selesai per minggu", deret
