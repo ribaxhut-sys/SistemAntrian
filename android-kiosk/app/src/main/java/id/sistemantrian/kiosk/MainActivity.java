@@ -4643,64 +4643,21 @@ public final class MainActivity extends Activity {
         setHint("Jangan matikan tablet selama pembaruan", "tunggu");
 
         new Thread(() -> {
-            HttpURLConnection connection = null;
-            PackageInstaller.Session session = null;
             try {
                 String base = preferences.getString(SERVER, "").trim().replaceAll("/+$", "");
-                connection = (HttpURLConnection) new URL(base + "/v1/kiosk/app/apk").openConnection();
-                connection.setConnectTimeout(5000);
-                connection.setReadTimeout(30000);
-                applyHeaders(connection);
-                int code = connection.getResponseCode();
-                if (code != 200) throw new IllegalStateException(
-                        "server menjawab " + code);
-                long total = connection.getContentLengthLong();
-
-                PackageInstaller installer = getPackageManager().getPackageInstaller();
-                PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(
-                        PackageInstaller.SessionParams.MODE_FULL_INSTALL);
-                params.setAppPackageName(getPackageName());
-                if (total > 0) params.setSize(total);
-                int sessionId = installer.createSession(params);
-                session = installer.openSession(sessionId);
-                try (InputStream input = connection.getInputStream();
-                     OutputStream output = session.openWrite("anjungan.apk", 0, total)) {
-                    byte[] buffer = new byte[64 * 1024];
-                    long done = 0;
-                    long lastPost = 0;
-                    int length;
-                    while ((length = input.read(buffer)) != -1) {
-                        output.write(buffer, 0, length);
-                        done += length;
-                        long now = System.currentTimeMillis();
-                        if (now - lastPost > 200) {
-                            lastPost = now;
-                            final long current = done;
-                            handler.post(() -> {
-                                if (total > 0) bar.setProgress((int) (current * 1000 / total));
-                                progress.setText(String.format(new Locale("id", "ID"),
-                                        "%.1f MB%s", current / 1048576.0,
-                                        total > 0 ? String.format(new Locale("id", "ID"),
-                                                " dari %.1f MB", total / 1048576.0) : ""));
-                            });
-                        }
-                    }
-                    session.fsync(output);
-                }
-                Intent status = new Intent(ACTION_INSTALL_STATUS).setPackage(getPackageName());
-                int flags = PendingIntent.FLAG_UPDATE_CURRENT
-                        | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
-                PendingIntent pending = PendingIntent.getBroadcast(
-                        this, sessionId, status, flags);
-                session.commit(pending.getIntentSender());
-                session.close();
-                session = null;
+                PemasangPembaruan.unduhDanPasang(this, base, this::applyHeaders,
+                        ACTION_INSTALL_STATUS, (selesai, total) -> handler.post(() -> {
+                            if (total > 0) bar.setProgress((int) (selesai * 1000 / total));
+                            progress.setText(String.format(new Locale("id", "ID"),
+                                    "%.1f MB%s", selesai / 1048576.0,
+                                    total > 0 ? String.format(new Locale("id", "ID"),
+                                            " dari %.1f MB", total / 1048576.0) : ""));
+                        }));
                 handler.post(() -> {
                     bar.setProgress(1000);
                     progress.setText("Memasang… setujui di layar Android.");
                 });
             } catch (Exception e) {
-                if (session != null) session.abandon();
                 String message = e.getMessage() == null ? "server tidak dapat dihubungi" : e.getMessage();
                 handler.post(() -> {
                     updating = false;
@@ -4713,8 +4670,6 @@ public final class MainActivity extends Activity {
                         showCategories();
                     }
                 });
-            } finally {
-                if (connection != null) connection.disconnect();
             }
         }).start();
     }
@@ -6236,49 +6191,13 @@ public final class MainActivity extends Activity {
             int berhasil = 0;
             List<String> gagal = new ArrayList<>();
             for (String nama : terpilih) {
-                File tujuan = new File(folder, namaAman(nama));
-                File sementara = new File(folder, "." + tujuan.getName() + ".part");
-                HttpURLConnection connection = null;
                 try {
-                    connection = (HttpURLConnection) new URL(
-                            basis + "/v1/kiosk/media-library/" + Uri.encode(nama))
-                            .openConnection();
-                    connection.setConnectTimeout(8000);
-                    connection.setReadTimeout(30000);
-                    applyHeaders(connection);
-                    if (connection.getResponseCode() >= 400) {
-                        throw new IllegalStateException("Media tidak dapat diunduh.");
-                    }
-                    long panjang = connection.getContentLengthLong();
-                    if (panjang > 0
-                            && folder.getUsableSpace() < panjang + CADANGAN_RUANG_BYTES) {
-                        throw new IllegalStateException("Ruang penyimpanan tidak cukup.");
-                    }
-                    try (InputStream input = connection.getInputStream();
-                         OutputStream output = new FileOutputStream(sementara)) {
-                        byte[] buffer = new byte[64 * 1024];
-                        int length;
-                        while ((length = input.read(buffer)) != -1) {
-                            output.write(buffer, 0, length);
-                        }
-                    }
-                    if (panjang > 0 && sementara.length() != panjang) {
-                        throw new IllegalStateException("Unduhan terputus.");
-                    }
-                    //noinspection ResultOfMethodCallIgnored
-                    tujuan.delete();  // berkas bernama sama diganti
-                    if (!sementara.renameTo(tujuan)) {
-                        throw new IllegalStateException("Tidak dapat menyimpan berkas.");
-                    }
+                    UnduhServer.keBerkasGanti(
+                            basis + "/v1/kiosk/media-library/" + Uri.encode(nama),
+                            folder, namaAman(nama), CADANGAN_RUANG_BYTES, this::applyHeaders);
                     berhasil++;
                 } catch (Exception e) {
                     gagal.add(nama);
-                } finally {
-                    if (connection != null) connection.disconnect();
-                    if (sementara.exists()) {
-                        //noinspection ResultOfMethodCallIgnored
-                        sementara.delete();
-                    }
                 }
             }
             int jumlah = berhasil;

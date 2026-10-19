@@ -88,6 +88,52 @@ final class UnduhServer {
         }
     }
 
+    /**
+     * Seperti {@link #keBerkas}, tetapi berkas bernama sama diganti dan
+     * sementaranya bernama ".nama.part" (folder media pilihan teknisi).
+     */
+    static void keBerkasGanti(String url, File folder, String nama, long cadanganRuang,
+            KlienServer.PenyetelKepala kepala) throws Exception {
+        File tujuan = new File(folder, nama);
+        File sementara = new File(folder, "." + tujuan.getName() + ".part");
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(30000);
+            kepala.terapkan(connection);
+            if (connection.getResponseCode() >= 400) {
+                throw new IllegalStateException("Media tidak dapat diunduh.");
+            }
+            long panjang = connection.getContentLengthLong();
+            if (panjang > 0 && folder.getUsableSpace() < panjang + cadanganRuang) {
+                throw new IllegalStateException("Ruang penyimpanan tidak cukup.");
+            }
+            try (InputStream input = connection.getInputStream();
+                 OutputStream output = new FileOutputStream(sementara)) {
+                byte[] buffer = new byte[64 * 1024];
+                int length;
+                while ((length = input.read(buffer)) != -1) {
+                    output.write(buffer, 0, length);
+                }
+            }
+            if (panjang > 0 && sementara.length() != panjang) {
+                throw new IllegalStateException("Unduhan terputus.");
+            }
+            //noinspection ResultOfMethodCallIgnored
+            tujuan.delete();  // berkas bernama sama diganti
+            if (!sementara.renameTo(tujuan)) {
+                throw new IllegalStateException("Tidak dapat menyimpan berkas.");
+            }
+        } finally {
+            if (connection != null) connection.disconnect();
+            if (sementara.exists()) {
+                //noinspection ResultOfMethodCallIgnored
+                sementara.delete();
+            }
+        }
+    }
+
     /** Klip paket suara kecil, cukup di memori; panjang harus cocok. */
     static byte[] byteKecil(String url, KlienServer.PenyetelKepala kepala) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
