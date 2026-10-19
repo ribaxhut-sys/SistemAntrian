@@ -1,9 +1,9 @@
-"""
-Fixture bersama untuk test.
+"""Fixture bersama yang hanya boleh memakai PostgreSQL ``antrian_uji``.
 
-Setiap test mendapat database SQLite sendiri di folder temporary, dibangun
-lewat migration Alembic yang sama dengan yang dipakai aplikasi. Dengan begitu
-yang diuji adalah skema sungguhan, bukan skema tiruan hasil create_all().
+Penjaga dijalankan sebelum fixture apa pun agar salah konfigurasi tidak sempat
+menjalankan ``DROP SCHEMA`` terhadap database kerja atau diam-diam memakai
+SQLite. URL uji boleh diberikan lewat environment atau berkas lokal yang tidak
+masuk Git, sehingga perintah pytest tetap aman dan ringkas.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from sqlalchemy.engine import make_url
 
 # Widget Qt harus dapat dibuat tanpa layar fisik agar test dapat berjalan
 # di terminal maupun pada mesin build. Harus diset sebelum Qt diimpor.
@@ -29,44 +30,76 @@ from app.core import config as config_module
 from app.core import database as database_module
 
 
-def _pakai_sqlite() -> bool:
-    """Benar bila test dijalankan di atas SQLite (bawaan)."""
-    from app.core.config import get_config
+def _pasang_url_database_uji() -> str:
+    """Pastikan pytest mustahil berjalan selain pada database uji khusus."""
+    url = os.environ.get("ANTRIAN_DB_URL", "").strip()
+    if not url:
+        berkas = Path.home() / ".antrian-uji-db"
+        if berkas.is_file():
+            url = berkas.read_text(encoding="utf-8").strip()
 
-    return get_config().memakai_sqlite
+    if not url:
+        raise pytest.UsageError(
+            "ANTRIAN_DB_URL belum diisi dan ~/.antrian-uji-db tidak ditemukan. "
+            "Pytest hanya boleh memakai PostgreSQL antrian_uji."
+        )
+
+    try:
+        terurai = make_url(url)
+    except (TypeError, ValueError) as exc:
+        raise pytest.UsageError("URL database uji tidak sah.") from exc
+
+    if terurai.get_backend_name() != "postgresql" or terurai.database != "antrian_uji":
+        raise pytest.UsageError(
+            "Pytest ditolak: database wajib PostgreSQL dengan nama tepat "
+            "antrian_uji."
+        )
+
+    os.environ["ANTRIAN_DB_URL"] = url
+    return url
 
 
 @pytest.fixture
-def sqlite_saja(app_config):
-    """
-    Lewati test yang memang hanya bermakna pada SQLite.
+def sqlite_saja():
+    """Tes warisan dialect lama dilewati tanpa pernah membuka SQLite."""
+    pytest.skip("SQLite tidak lagi didukung")
 
-    PRAGMA, integrity_check, dan penguncian berkas tidak punya padanan di
-    PostgreSQL. Yang diuji test semacam itu adalah cara SQLite dipasang,
-    bukan perilaku aplikasi.
-    """
-    if not _pakai_sqlite():
-        pytest.skip("khusus SQLite")
+
+def _cari_bin_postgres() -> str | None:
+    """Folder bin PostgreSQL terpasang tertinggi di Program Files (Windows)."""
+    akar = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "PostgreSQL"
+    if not akar.is_dir():
+        return None
+    versi = sorted(
+        (d for d in akar.iterdir() if (d / "bin" / "pg_dump.exe").is_file()),
+        key=lambda d: [int(x) if x.isdigit() else 0 for x in d.name.split(".")],
+        reverse=True,
+    )
+    return str(versi[0] / "bin") if versi else None
 
 
 @pytest.fixture
-def mesin_backup_tersedia(app_config):
+def mesin_backup_tersedia(app_config, monkeypatch: pytest.MonkeyPatch):
     """
-    Lewati test backup bila perkakas dialect ini tidak terpasang.
+    Pastikan pg_dump/pg_restore tersedia untuk test backup.
 
-    Backup PostgreSQL membutuhkan pg_dump dan pg_restore, yang ikut dalam
-    pemasangan PostgreSQL. Komputer pengembang boleh saja tidak memilikinya
-    — tetapi komputer server WAJIB, dan bila test ini terlewat berarti
-    backup PostgreSQL belum terbukti sama sekali.
+    Folder bin PostgreSQL di Program Files dipasang ke PATH otomatis, jadi
+    komputer pengembang tidak perlu mengatur PATH. Bila tetap tidak ada:
+    di CI (variabel CI) test GAGAL, karena backup yang tidak teruji tidak
+    boleh lolos diam-diam; di komputer lain test dilewati dengan pesan jelas.
     """
     import shutil
 
-    if app_config.memakai_sqlite:
-        return
     if not (shutil.which("pg_dump") and shutil.which("pg_restore")):
-        pytest.skip(
-            "pg_dump/pg_restore tidak terpasang; backup PostgreSQL TIDAK teruji"
-        )
+        bin_pg = _cari_bin_postgres()
+        if bin_pg:
+            monkeypatch.setenv("PATH", bin_pg + os.pathsep + os.environ.get("PATH", ""))
+    if shutil.which("pg_dump") and shutil.which("pg_restore"):
+        return
+    pesan = "pg_dump/pg_restore tidak terpasang; backup PostgreSQL TIDAK teruji"
+    if os.environ.get("CI"):
+        pytest.fail(pesan)
+    pytest.skip(pesan)
 
 
 @pytest.fixture
@@ -75,6 +108,7 @@ def app_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ANTRIAN_DB_PATH", str(tmp_path / "queue.db"))
     monkeypatch.setenv("ANTRIAN_BACKUP_DIR", str(tmp_path / "backup"))
     monkeypatch.setenv("ANTRIAN_LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("ANTRIAN_TAMPILAN_PATH", str(tmp_path / "tampilan.json"))
 
     config_module.reset_config()
     database_module.dispose_engine()
@@ -103,6 +137,7 @@ def env_mesin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     mengharapkan "mesin tidak berpendapat" gagal hanya di komputer itu.
     """
     monkeypatch.setenv("ANTRIAN_PERAN_PATH", str(tmp_path / "peran.json"))
+    monkeypatch.setenv("ANTRIAN_TAMPILAN_PATH", str(tmp_path / "tampilan.json"))
 
     def setel(**nilai: str | None):
         for kunci, isi in nilai.items():
@@ -121,10 +156,9 @@ def _kosongkan_schema() -> None:
     """
     Kembalikan database PostgreSQL ke keadaan benar-benar kosong.
 
-    SQLite mendapat berkas baru di folder temporary untuk setiap test,
-    sedangkan PostgreSQL dipakai bersama seluruh test. Tanpa pengosongan
-    ini, data satu test bocor ke test berikutnya dan kegagalannya bergantung
-    pada urutan — jenis kegagalan yang paling sulit ditelusuri.
+    PostgreSQL dipakai bersama seluruh test. Tanpa pengosongan ini, data satu
+    test bocor ke test berikutnya dan kegagalannya bergantung pada urutan —
+    jenis kegagalan yang paling sulit ditelusuri.
     """
 
     from app.core.database import get_engine
@@ -140,14 +174,13 @@ def database(app_config):
     """Database kosong yang skemanya sudah dinaikkan ke revisi terbaru."""
     from app.core.database import init_database
 
-    if not app_config.memakai_sqlite:
-        _kosongkan_schema()
-
+    _kosongkan_schema()
     init_database()
     return app_config
 
 
 def pytest_configure(config):
+    _pasang_url_database_uji()
     config.addinivalue_line(
         "markers",
         "layanan_bertingkat: jangan ratakan pohon jenis layanan bawaan "
@@ -526,3 +559,34 @@ def efek_grafis_menyala():
 
     yield
     setel_efek_grafis(True)
+
+
+@pytest.fixture(autouse=True)
+def tema_dan_gaya_pulih():
+    """
+    Pulihkan tema, stylesheet, dan palet aplikasi sesudah setiap test.
+
+    Tema petugas mengubah QApplication dan monkeypatch global; test yang
+    menerapkannya tanpa memulihkan membuat test tata letak sesudahnya gagal
+    bergantung urutan. Hanya bekerja bila QApplication sudah ada.
+    """
+    import sys
+
+    qt = sys.modules.get("PySide6.QtWidgets")
+    app = qt.QApplication.instance() if qt else None
+    awal = None
+    if app is not None:
+        from PySide6.QtGui import QPalette
+
+        awal = (app.styleSheet(), QPalette(app.palette()))
+    yield
+    tp = sys.modules.get("app.ui.tema_petugas")
+    app = qt.QApplication.instance() if qt else None
+    if app is None:
+        return
+    if tp is not None and getattr(tp, "_aktif", None) is not None:
+        if tp._aktif.kunci != tp.TEMA_BAWAAN:
+            tp.terapkan_tema(app, tp.TEMA_BAWAAN)
+            if awal is not None:
+                app.setStyleSheet(awal[0])
+                app.setPalette(awal[1])

@@ -21,6 +21,33 @@ class UserRole(str, Enum):
     KIOSK = "KIOSK"
 
 
+class AlasanPrioritas(str, Enum):
+    """Alasan sebuah nomor didahulukan. Nomor biasa tidak menyimpan apa pun."""
+
+    LANSIA = "LANSIA"
+    DISABILITAS = "DISABILITAS"
+    IBU_HAMIL = "IBU_HAMIL"
+    #: Ditandai pengunjung di anjungan tanpa menyebut alasannya; petugas
+    #: pelayanan boleh memperincinya atau mencabutnya.
+    PRIORITAS = "PRIORITAS"
+
+
+LABEL_PRIORITAS: dict[str, str] = {
+    AlasanPrioritas.LANSIA.value: "Lansia",
+    AlasanPrioritas.DISABILITAS.value: "Disabilitas",
+    AlasanPrioritas.IBU_HAMIL.value: "Ibu hamil",
+    AlasanPrioritas.PRIORITAS.value: "Prioritas",
+}
+
+#: Siapa yang menandai sebuah nomor sebagai prioritas.
+ASAL_PENDAFTARAN = "PENDAFTARAN"
+ASAL_MANDIRI = "MANDIRI"
+LABEL_ASAL_PRIORITAS: dict[str, str] = {
+    ASAL_PENDAFTARAN: "ditandai petugas pendaftaran",
+    ASAL_MANDIRI: "dipilih pengunjung di anjungan",
+}
+
+
 class RecordStatus(str, Enum):
     """Status aktif/nonaktif untuk data master."""
 
@@ -106,3 +133,11 @@ class AuditAction(str, Enum):
     RESET_ADMIN_KEY = "RESET_ADMIN_KEY"
     DELETE_USER = "DELETE_USER"
     ARCHIVE_USER = "ARCHIVE_USER"
+    CLEAR_PRIORITY = "CLEAR_PRIORITY"
+    WINDOWS_UPDATE_RESULT = "WINDOWS_UPDATE_RESULT"
+    #: PC Windows yang membuka aplikasi dan menanyakan pembaruan; dipakai
+    #: Kesehatan Sistem untuk melihat PC yang belum login dengan versi baru.
+    WINDOWS_PC_PING = "WINDOWS_PC_PING"
+    #: Laporan PDF/Excel diunduh: memuat data pelayanan seluruh cabang atau
+    #: satu petugas, jadi siapa yang membawanya keluar perlu terlacak.
+    EXPORT_REPORT = "EXPORT_REPORT"

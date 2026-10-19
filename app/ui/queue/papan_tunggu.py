@@ -56,8 +56,10 @@ class _Kartu(QLabel):
     diklik = Signal()
 
     def __init__(self, html: str, parent: QWidget | None = None) -> None:
-        super().__init__(html, parent)
+        super().__init__(parent)
         self.setTextFormat(Qt.TextFormat.RichText)
+        # Lewat setText (bukan konstruktor) supaya warna HTML mengikuti tema.
+        self.setText(html)
         self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -143,6 +145,8 @@ class PapanTunggu(QFrame):
 
         #: Judul kartu yang tampil ("Layanan (jumlah)"), untuk test.
         self.judul_kolom: list[str] = []
+        self.kartu_semua: _Kartu | None = None
+        self.kartu_layanan: dict[int, _Kartu] = {}
         #: Teks tiap kartu, untuk test dan pembacaan layar.
         self.teks_kartu: list[str] = []
 
@@ -178,6 +182,15 @@ class PapanTunggu(QFrame):
         if self._data is not None:
             self._gambar()
 
+    def _tinggi_baris(self) -> int:
+        """Tinggi satu baris teks kartu; mengikuti font dan skala layar."""
+        return max(TINGGI_BARIS, self.fontMetrics().lineSpacing() + 2)
+
+    def _tinggi_kepala(self) -> int:
+        """Ruang di luar grid: margin, kepala papan, dan jarak."""
+        kepala = max(self.label_total.sizeHint().height(), self.fontMetrics().height())
+        return max(TINGGI_KEPALA, 20 + kepala + 6 + 6)
+
     def _susunan(self, jumlah: int) -> tuple[int, int]:
         """
         (baris, kolom) terbaik: sedikit baris dulu, supaya tiap kartu
@@ -185,9 +198,9 @@ class PapanTunggu(QFrame):
         kapasitas.
         """
         lebar = max(0, self.width() - 28)
-        tinggi = max(0, self.height() - TINGGI_KEPALA)
+        tinggi = max(0, self.height() - self._tinggi_kepala())
         maks_kolom = max(1, (lebar + JARAK) // (LEBAR_KARTU_MIN + JARAK))
-        tinggi_min = PADDING_KARTU + TINGGI_BARIS
+        tinggi_min = PADDING_KARTU + self._tinggi_baris()
         maks_baris = max(1, (tinggi + JARAK) // (tinggi_min + JARAK))
         for baris in range(1, maks_baris + 1):
             kolom = ceil(jumlah / baris)
@@ -204,21 +217,23 @@ class PapanTunggu(QFrame):
         isi = 2
         if jumlah:
             tinggi = (
-                TINGGI_KEPALA
-                + baris * (PADDING_KARTU + isi * TINGGI_BARIS)
+                self._tinggi_kepala()
+                + baris * (PADDING_KARTU + isi * self._tinggi_baris())
                 + (baris - 1) * JARAK
             )
         else:
-            tinggi = TINGGI_KEPALA
+            # Papan kosong masih memuat "Tidak ada yang menunggu."; tanpa
+            # ruangnya label itu terjepit dan teksnya terpotong.
+            tinggi = self._tinggi_kepala() + self.label_kosong.sizeHint().height() + 4
         if self.height() != tinggi:
             self.setFixedHeight(tinggi)
         return baris, kolom, isi
 
     def _baris_isi(self, baris: int) -> int:
         """Baris teks yang muat dalam satu kartu pada susunan ini."""
-        tinggi = max(0, self.height() - TINGGI_KEPALA)
+        tinggi = max(0, self.height() - self._tinggi_kepala())
         tinggi_kartu = (tinggi - JARAK * (baris - 1)) // max(1, baris)
-        return max(1, (tinggi_kartu - PADDING_KARTU) // TINGGI_BARIS)
+        return max(1, (tinggi_kartu - PADDING_KARTU) // self._tinggi_baris())
 
     def _gambar(self) -> None:
         menunggu, dilayani, sekarang = self._data

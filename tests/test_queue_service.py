@@ -1691,10 +1691,6 @@ def test_urutan_id_panggilan_sama_dengan_urutan_commit(antrian_siap, terbitkan, 
 
     from app.core.database import session_scope
     from app.repositories.queue_repository import QueueRepository
-    from tests.conftest import _pakai_sqlite
-
-    if _pakai_sqlite():
-        pytest.skip("SQLite menulis satu per satu; kuncinya khusus PostgreSQL")
 
     pertama, kedua = terbitkan("A", 2)
     loket_a, loket_b = antrian_siap["loket"][:2]

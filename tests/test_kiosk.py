@@ -494,20 +494,21 @@ def tanpa_url_database(monkeypatch):
     config_module.reset_config()
 
 
-def test_dialog_mesin_bawaan_satu_komputer(qtbot, app_config, tanpa_url_database):
+def test_dialog_mesin_bawaan_server_postgresql(qtbot, app_config, tanpa_url_database):
     from PySide6.QtWidgets import QDialog
 
     from app.ui.login.setup_mesin_dialog import SetupMesinDialog
 
     dialog = SetupMesinDialog()
     qtbot.addWidget(dialog)
-    assert dialog.radio_sendiri.isChecked()
-    assert dialog._panel_postgres.isHidden()
-    assert dialog._panel_server.isHidden()
+    assert dialog.radio_server.isChecked()
+    assert not dialog._panel_postgres.isHidden()
+    assert not dialog._panel_server.isHidden()
+    dialog.isian_sandi.setText("sandi-uji")
     dialog._simpan()
     assert dialog.result() == int(QDialog.DialogCode.Accepted)
     assert dialog.pengaturan_tersimpan is not None
-    assert dialog.pengaturan_tersimpan.peran == "sendiri"
+    assert dialog.pengaturan_tersimpan.peran == "server"
 
 
 def test_dialog_mesin_server_hanya_menampilkan_sandi(qtbot, app_config, tanpa_url_database):
@@ -967,6 +968,7 @@ def test_dialog_mesin_menyimpan_peran_ke_berkasnya_sendiri(qtbot, app_config, ta
 
     dialog = SetupMesinDialog()
     qtbot.addWidget(dialog)
+    dialog.isian_sandi.setText("sandi-uji")
     dialog._pilih_nilai(dialog.pilih_peran, "petugas")
     dialog._simpan()
 
@@ -1030,6 +1032,7 @@ def test_penimpaan_per_isian_tersimpan_sebagai_kehendak(qtbot, app_config, tanpa
 
     dialog = SetupMesinDialog()
     qtbot.addWidget(dialog)
+    dialog.isian_sandi.setText("sandi-uji")
     dialog._pilih_nilai(dialog.pilih_peran, "petugas")
     dialog._pilih_nilai(dialog.pilih_suara, False)
     dialog._simpan()
@@ -1049,6 +1052,7 @@ def test_peran_yang_berganti_menuntut_buka_ulang(qtbot, app_config, tanpa_url_da
 
     dialog = SetupMesinDialog()
     qtbot.addWidget(dialog)
+    dialog.isian_sandi.setText("sandi-uji")
     dialog._pilih_nilai(dialog.pilih_peran, "petugas")
     dialog._simpan()
 

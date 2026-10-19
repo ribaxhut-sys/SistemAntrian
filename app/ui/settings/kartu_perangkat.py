@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QInputDialog,
     QLabel,
+    QLineEdit,
+    QMenu,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -37,6 +39,7 @@ from app.ui.common import (
     keterangan,
     konfirmasi,
     pesan_untuk_user,
+    tampilkan_info,
     tampilkan_peringatan,
     tombol,
 )
@@ -46,7 +49,11 @@ from app.utils.formatting import tanggal_pendek
 SELANG_SEGARKAN_MS = 10_000
 TINGGI_BARIS = 40
 TINGGI_TOMBOL_BARIS = 32
-KOLOM = ("Nama", "Jenis", "Terakhir terlihat", "Alamat", "Versi", "Printer", "")
+KOLOM = (
+    "Nama", "Jenis", "Terakhir terlihat", "Alamat", "Versi", "Printer", "Media", "",
+)
+#: Kolom tombol aksi (terakhir).
+K_AKSI = len(KOLOM) - 1
 
 
 def teks_terakhir_terlihat(perangkat: PerangkatInfo, sekarang: datetime) -> tuple[str, str]:
@@ -67,6 +74,14 @@ def teks_terakhir_terlihat(perangkat: PerangkatInfo, sekarang: datetime) -> tupl
     if waktu.date() == sekarang.date():
         return f"pukul {waktu:%H:%M}", warna
     return tanggal_pendek(waktu.date()), warna
+
+
+def teks_media(perangkat: PerangkatInfo) -> tuple[str, str]:
+    """(teks, warna) kolom Media: berapa berkas daftar putar sudah tersalin."""
+    if perangkat.jenis == JENIS_LAYAR_ANTRIAN or not perangkat.teks_media:
+        return "—", TEXT_MUTED
+    warna = SUCCESS if perangkat.media_lengkap else WARNING
+    return perangkat.teks_media, warna
 
 
 def teks_printer(perangkat: PerangkatInfo) -> tuple[str, str]:
@@ -165,6 +180,18 @@ class KartuPerangkat(QFrame):
         self.token_bersama.toggled.connect(self._ubah_token_bersama)
         kepala.addWidget(self.token_bersama)
         kepala.addSpacing(12)
+        self.tombol_pin = tombol("PIN anjungan ▾")
+        self.tombol_pin.setToolTip(
+            "PIN 6 angka untuk tombol ⚙ di semua anjungan. Disimpan sebagai hash; "
+            "tablet yang terputus dari server masuk mode putar saja."
+        )
+        menu_pin = QMenu(self.tombol_pin)
+        menu_pin.addAction("Atur atau ganti PIN…").triggered.connect(self._atur_pin)
+        self.aksi_hapus_pin = menu_pin.addAction("Hapus PIN")
+        self.aksi_hapus_pin.triggered.connect(self._hapus_pin)
+        self.tombol_pin.setMenu(menu_pin)
+        kepala.addWidget(self.tombol_pin)
+        kepala.addSpacing(12)
         self.tambah = tombol("+ Tambah perangkat", variant="primary")
         self.tambah.clicked.connect(self._tambah)
         kepala.addWidget(self.tambah)
@@ -180,7 +207,7 @@ class KartuPerangkat(QFrame):
         kepala_tabel = self.tabel.horizontalHeader()
         kepala_tabel.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         kepala_tabel.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        kepala_tabel.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        kepala_tabel.setSectionResizeMode(K_AKSI, QHeaderView.ResizeMode.Fixed)
         self.tabel.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tabel.horizontalHeaderItem(2).setToolTip(
             "Hijau: menghubungi server dalam 1 menit terakhir · kuning: lebih "
@@ -199,6 +226,10 @@ class KartuPerangkat(QFrame):
         self.peringatan_suara.hide()
         isi.addWidget(self.peringatan_suara)
 
+        self._pewaktu_lebar = QTimer(self)
+        self._pewaktu_lebar.setSingleShot(True)
+        self._pewaktu_lebar.setInterval(0)
+        self._pewaktu_lebar.timeout.connect(self._atur_lebar_aksi)
         self._pewaktu = QTimer(self)
         self._pewaktu.setInterval(SELANG_SEGARKAN_MS)
         self._pewaktu.timeout.connect(self.muat_ulang)
@@ -315,21 +346,18 @@ class KartuPerangkat(QFrame):
             sel(4, p.versi_nama or "—")
             teks, warna = teks_printer(p)
             sel(5, teks, titik=None if teks == "—" else warna, tip=p.printer_pesan)
+            teks, warna = teks_media(p)
+            jam_media = f"Dilaporkan {p.media_waktu:%H:%M}" if p.media_waktu else ""
+            sel(6, teks, titik=None if teks == "—" else warna, tip=jam_media)
             if bangun_tombol:
-                self.tabel.setCellWidget(baris, 6, self._tombol_baris(p))
+                self.tabel.setCellWidget(baris, K_AKSI, self._tombol_baris(p))
 
         # Tombol aplikasi bertinggi minimum sendiri; baris dan kolom aksi
         # mengikuti ukuran tombol, bukan sebaliknya, supaya tidak terpotong.
         tinggi = TINGGI_BARIS
-        lebar_aksi = 0
-        for baris in range(self.tabel.rowCount()):
-            wadah = self.tabel.cellWidget(baris, 6)
-            if wadah is not None:
-                lebar_aksi = max(lebar_aksi, wadah.sizeHint().width())
         for baris in range(self.tabel.rowCount()):
             self.tabel.setRowHeight(baris, tinggi)
-        if lebar_aksi:
-            self.tabel.setColumnWidth(6, lebar_aksi + 8)
+        self._atur_lebar_aksi()
         # Halaman sudah digulir; tabel tidak perlu gulungan sendiri.
         self.tabel.setFixedHeight(
             self.tabel.horizontalHeader().height()
@@ -337,6 +365,34 @@ class KartuPerangkat(QFrame):
             + 2 * self.tabel.frameWidth()
             + 2
         )
+
+    def _atur_lebar_aksi(self) -> None:
+        """
+        Lebarkan kolom aksi sesuai tombol terlebar.
+
+        Dipanggil lagi saat kartu tampil: sebelum itu tombol baris belum
+        dipolish dengan huruf dan stylesheet aplikasi, sehingga sizeHint-nya
+        ±4 px terlalu kecil dan "Segarkan media" terpotong.
+        """
+        lebar_aksi = 0
+        for baris in range(self.tabel.rowCount()):
+            wadah = self.tabel.cellWidget(baris, K_AKSI)
+            if wadah is None:
+                continue
+            for btn in wadah.findChildren(QPushButton):
+                btn.ensurePolished()
+            wadah.ensurePolished()
+            wadah.layout().invalidate()
+            lebar_aksi = max(lebar_aksi, wadah.sizeHint().width())
+        if lebar_aksi:
+            # Widget sel menerima ±12 px lebih sempit daripada kolomnya
+            # (diukur: kolom 331 px, widget 319 px); +16 memberi sisa.
+            self.tabel.setColumnWidth(K_AKSI, lebar_aksi + 16)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - nama Qt
+        super().showEvent(event)
+        # Ditunda satu putaran: anak-anak baru dipolish setelah event ini.
+        self._pewaktu_lebar.start()
 
     def _tombol_baris(self, p: PerangkatInfo) -> QWidget:
         wadah = QWidget()
@@ -349,6 +405,16 @@ class KartuPerangkat(QFrame):
             hapus.clicked.connect(lambda _=False, pid=p.id: self._hapus(pid))
             baris.addWidget(hapus)
         else:
+            if p.jenis == JENIS_ANJUNGAN:
+                segarkan = tombol("Segarkan media")
+                segarkan.setToolTip(
+                    "Minta anjungan ini memeriksa dan menyalin ulang media "
+                    "dari server sekarang."
+                )
+                segarkan.clicked.connect(
+                    lambda _=False, info=p: self._segarkan_media(info)
+                )
+                baris.addWidget(segarkan)
             ganti = tombol("Ganti nama")
             ganti.clicked.connect(lambda _=False, info=p: self._ganti_nama(info))
             cabut = tombol("Cabut", variant="danger")
@@ -380,6 +446,50 @@ class KartuPerangkat(QFrame):
             return
         DialogKodePasang(kode.kode, kode.kedaluwarsa, self).exec()
         self.muat_ulang()
+
+    def _atur_pin(self) -> None:
+        """Pasang atau ganti PIN 6 angka untuk tombol ⚙ semua anjungan."""
+        pin, ok = QInputDialog.getText(
+            self, "PIN anjungan", "PIN baru (6 angka):", QLineEdit.EchoMode.Password
+        )
+        if not ok:
+            return
+        ulang, ok = QInputDialog.getText(
+            self, "PIN anjungan", "Ketik ulang PIN:", QLineEdit.EchoMode.Password
+        )
+        if not ok:
+            return
+        if pin != ulang:
+            tampilkan_peringatan(self, "Kedua PIN tidak sama. PIN tidak diubah.", "PIN anjungan")
+            return
+        if self._jalankan(lambda: self.layanan.atur_pin(pin)):
+            tampilkan_info(
+                self,
+                "PIN tersimpan. Tablet yang tersambung memakainya pada pengecekan "
+                "berikutnya.",
+                "PIN anjungan",
+            )
+
+    def _hapus_pin(self) -> None:
+        if not konfirmasi(
+            self,
+            "Hapus PIN pengaturan anjungan? Tombol ⚙ di semua anjungan akan terbuka "
+            "tanpa PIN.",
+            "Hapus PIN",
+        ):
+            return
+        self._jalankan(self.layanan.hapus_pin)
+
+    def _segarkan_media(self, p: PerangkatInfo) -> None:
+        """Anjungan menyalin ulang medianya pada kontak berikutnya (±beberapa detik)."""
+        if self._jalankan(lambda: self.layanan.segarkan_media(p.id)):
+            tampilkan_info(
+                self,
+                f"Permintaan dikirim ke {p.nama}. Anjungan memeriksa dan menyalin "
+                "ulang media dalam beberapa detik; kolom Media menunjukkan "
+                "kemajuannya.",
+                "Segarkan media",
+            )
 
     def _ganti_nama(self, p: PerangkatInfo) -> None:
         nama, ok = QInputDialog.getText(self, "Ganti nama", "Nama perangkat:", text=p.nama)

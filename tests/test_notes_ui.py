@@ -58,6 +58,10 @@ def bisu(monkeypatch):
     return dicatat
 
 
+#: Catatan yang cukup panjang dan beragam untuk menyelesaikan pelayanan.
+CATATAN_SAH = "Pelanggan menanyakan informasi layanan."
+
+
 def _panggil(halaman, terbitkan, prefix: str = "A"):
     """Terbitkan satu nomor lalu panggil ke loket halaman ini."""
     terbitkan(prefix)
@@ -83,6 +87,7 @@ def test_berpindah_ke_pengaduan_otomatis_saat_dipanggil(halaman_kerja, terbitkan
 def test_kembali_ke_menunggu_otomatis_saat_selesai(halaman_kerja, terbitkan):
     _panggil(halaman_kerja, terbitkan)
     halaman_kerja.mulai_melayani()
+    halaman_kerja.panel_pengaduan.isian_catatan.setPlainText(CATATAN_SAH)
     halaman_kerja.selesaikan()
 
     assert halaman_kerja.tab_kanan.currentWidget() is halaman_kerja.panel_menunggu
@@ -381,17 +386,124 @@ def test_data_pelapor_dimuat_kembali_dari_lembar_tersimpan(halaman_kerja, terbit
     assert halaman_kerja.pelapor.isian_nama.property("wajib") is None
 
 
-def test_tombol_simpan_mati_selama_belum_ada_isi(halaman_kerja, terbitkan):
+def test_tombol_selesai_menyala_hanya_bila_catatan_memadai(halaman_kerja, terbitkan):
     _panggil(halaman_kerja, terbitkan)
+    halaman_kerja.mulai_melayani()
     panel = halaman_kerja.panel_pengaduan
-    assert not panel.tombol_simpan.isEnabled()
+    assert halaman_kerja.aksi["selesai"] is panel.tombol_selesai
+    assert not panel.tombol_selesai.isEnabled()
 
     # Identitas saja bukan isi: tidak ada keluhan maupun catatan di sana.
     halaman_kerja.pelapor.isian_nama.setText("Budi")
-    assert not panel.tombol_simpan.isEnabled()
+    assert not panel.tombol_selesai.isEnabled()
+
+    # Pengaduan tanpa catatan petugas tetap belum cukup.
+    panel.isian_deskripsi.setPlainText("Air mati tiga hari.")
+    assert not panel.tombol_selesai.isEnabled()
+
+    for kurang in ("-", "ok", "Berkas.", "aaaaaaaaaaaaaaa", "1234567890 -- 12"):
+        panel.isian_catatan.setPlainText(kurang)
+        assert not panel.tombol_selesai.isEnabled(), kurang
 
     panel.isian_catatan.setPlainText("Berkas belum lengkap.")
-    assert panel.tombol_simpan.isEnabled()
+    assert panel.tombol_selesai.isEnabled()
+
+
+def test_tombol_selesai_mati_bila_belum_dilayani_walau_catatan_ada(
+    halaman_kerja, terbitkan
+):
+    """Dua syarat: nomor sedang dilayani DAN catatan memadai."""
+    _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    panel.isian_catatan.setPlainText(CATATAN_SAH)
+    assert not panel.tombol_selesai.isEnabled()  # baru dipanggil
+
+    halaman_kerja.mulai_melayani()
+    assert panel.tombol_selesai.isEnabled()
+
+    halaman_kerja.tunda()
+    assert not panel.tombol_selesai.isEnabled()
+
+
+def test_f8_tanpa_catatan_tidak_menyelesaikan_dan_memfokuskan_kotak(
+    halaman_kerja, terbitkan
+):
+    from app.models import QueueStatus
+
+    _panggil(halaman_kerja, terbitkan)
+    antrian_id = halaman_kerja.antrian.id
+    halaman_kerja.mulai_melayani()
+    halaman_kerja.tab_kanan.setCurrentWidget(halaman_kerja.panel_menunggu)
+
+    halaman_kerja.selesaikan()
+
+    assert halaman_kerja.queue.get_queue(antrian_id).status is QueueStatus.SERVING
+    assert halaman_kerja.tab_kanan.currentWidget() is halaman_kerja.panel_pengaduan
+    assert "catatan" in halaman_kerja.panel_pengaduan.label_keadaan.text().lower()
+
+
+def test_kalimat_cepat_menyisipkan_ke_catatan(halaman_kerja, terbitkan):
+    from app.services.note_service import FRASA_BAWAAN
+
+    _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    assert len(panel._tombol_frasa) == len(FRASA_BAWAAN)
+
+    panel._tombol_frasa[0].click()
+    assert panel.isian_catatan.toPlainText() == FRASA_BAWAAN[0]
+    panel._tombol_frasa[1].click()
+    assert panel.isian_catatan.toPlainText() == f"{FRASA_BAWAAN[0]}\n{FRASA_BAWAAN[1]}"
+
+    halaman_kerja.mulai_melayani()
+    assert panel.tombol_selesai.isEnabled()  # kalimat cepat dihitung sebagai catatan
+
+
+def test_kalimat_cepat_mengikuti_jenis_layanan(halaman_kerja, terbitkan, auth, antrian_siap):
+    from app.services.master_data_service import MasterDataService
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    MasterDataService(auth).update_category(
+        antrian_siap["kategori"]["A"],
+        name="Layanan A",
+        frasa_catatan="Berkas diterima.\nBerkas dikembalikan.\nBerkas diterima.",
+    )
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    auth.pindah_loket(antrian_siap["loket"][0])
+
+    _panggil(halaman_kerja, terbitkan)
+    teks = [btn.toolTip() for btn in halaman_kerja.panel_pengaduan._tombol_frasa]
+    assert teks == ["Berkas diterima.", "Berkas dikembalikan."]
+
+
+def test_simpan_otomatis_menyimpan_draf_tanpa_dialog(halaman_kerja, terbitkan, bisu, auth):
+    from app.services.note_service import NoteService
+
+    _panggil(halaman_kerja, terbitkan)
+    antrian_id = halaman_kerja.antrian.id
+    panel = halaman_kerja.panel_pengaduan
+    panel.isian_catatan.setPlainText("Draf catatan yang belum rampung")
+
+    panel.simpan_otomatis()
+
+    assert not bisu
+    assert NoteService(auth).ambil(antrian_id).catatan == "Draf catatan yang belum rampung"
+    assert not panel.berubah
+
+
+def test_simpan_otomatis_menunggu_identitas_pengaduan(halaman_kerja, terbitkan, bisu, auth):
+    from app.services.note_service import NoteService
+
+    _panggil(halaman_kerja, terbitkan)
+    antrian_id = halaman_kerja.antrian.id
+    panel = halaman_kerja.panel_pengaduan
+    panel.isian_deskripsi.setPlainText("Air mati tiga hari.")
+
+    panel.simpan_otomatis()  # nama dan nomor pelanggan belum ada
+
+    assert not bisu
+    assert NoteService(auth).ambil(antrian_id) is None
 
 
 def test_penghitung_huruf_memperingatkan_sebelum_batas(halaman_kerja, terbitkan):
@@ -405,10 +517,14 @@ def test_penghitung_huruf_memperingatkan_sebelum_batas(halaman_kerja, terbitkan)
     _panggil(halaman_kerja, terbitkan)
     panel = halaman_kerja.panel_pengaduan
     panel.isian_catatan.setPlainText("abc")
-    assert panel.hitung_catatan.text() == f"3 / {PANJANG_CATATAN}"
+    assert "Minimal 10 huruf (3/10)" in panel.hitung_catatan.text()
+    assert TEXT_MUTED not in panel.hitung_catatan.styleSheet()
+
+    panel.isian_catatan.setPlainText("Berkas belum lengkap.")
+    assert panel.hitung_catatan.text() == f"21 / {PANJANG_CATATAN}"
     assert TEXT_MUTED in panel.hitung_catatan.styleSheet()
 
-    panel.isian_catatan.setPlainText("a" * (PANJANG_CATATAN - 1))
+    panel.isian_catatan.setPlainText(("abc " * PANJANG_CATATAN)[: PANJANG_CATATAN - 1])
     assert TEXT_MUTED not in panel.hitung_catatan.styleSheet()
 
 
@@ -453,6 +569,7 @@ def test_pengaduan_tanpa_nama_membatalkan_penyelesaian(halaman_kerja, terbitkan,
     _panggil(halaman_kerja, terbitkan)
     antrian_id = halaman_kerja.antrian.id
     halaman_kerja.panel_pengaduan.isian_deskripsi.setPlainText("Air mati tiga hari.")
+    halaman_kerja.panel_pengaduan.isian_catatan.setPlainText(CATATAN_SAH)
 
     halaman_kerja.mulai_melayani()
     halaman_kerja.selesaikan()
@@ -527,7 +644,7 @@ def test_hanya_pengaduan_menyembunyikan_catatan_petugas(qtbot, auth, lembar_teri
 
     halaman.centang_pengaduan.setChecked(True)
 
-    assert halaman.tabel.rowCount() == 1
+    qtbot.waitUntil(lambda: halaman.tabel.rowCount() == 1, timeout=5000)
     assert halaman.terpilih.queue_number == lembar_terisi["pengaduan"].queue_number
 
 
@@ -690,3 +807,174 @@ def test_judul_pengaduan_bertanda_bila_ada_isian_belum_disimpan(
     panel.isian_catatan.setPlainText("ditulis tetapi belum disimpan")
 
     assert halaman_kerja.tab_kanan.tabText(0).endswith("●")
+
+
+# ---------------------------------------------------------------------
+# Kalimat cepat tidak terpotong, tidak diulang, dan catatan tidak disalin
+# ---------------------------------------------------------------------
+
+
+def test_kalimat_cepat_yang_sudah_dipakai_dimatikan(halaman_kerja, terbitkan):
+    from app.services.note_service import FRASA_BAWAAN
+
+    _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    pertama, kedua = panel._tombol_frasa[0], panel._tombol_frasa[1]
+
+    pertama.click()
+    assert not pertama.isEnabled() and pertama.terpakai
+    assert pertama.label.text().startswith("✓ ")
+    assert pertama.toolTip() == "Sudah ada di catatan"
+    assert kedua.isEnabled()
+
+    # Klik pada tombol mati tidak menambah apa pun.
+    pertama.click()
+    assert panel.isian_catatan.toPlainText() == FRASA_BAWAAN[0]
+
+    # Dihapus dari catatan: tombolnya hidup lagi.
+    panel.isian_catatan.setPlainText("")
+    assert pertama.isEnabled() and not pertama.terpakai
+    assert pertama.label.text() == FRASA_BAWAAN[0]
+
+
+def test_kalimat_cepat_panjang_tampil_utuh_membungkus(qtbot):
+    """
+    Tombol sendiri, bukan seluruh layar pelayanan: menampilkan ServicePage
+    di test menghentikan proses Qt tanpa pesan di mesin ini.
+    """
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+    from app.services.note_service import PANJANG_FRASA
+    from app.ui.tombol_frasa import TombolFrasa
+
+    panjang = "Pelanggan menanyakan persyaratan pengajuan sambungan baru beserta biayanya"
+    assert len(panjang) <= PANJANG_FRASA
+    wadah = QWidget()
+    tata = QVBoxLayout(wadah)
+    tombol = TombolFrasa(panjang)
+    tata.addWidget(tombol)
+    qtbot.addWidget(wadah)
+    wadah.resize(260, 300)
+    wadah.show()
+    qtbot.wait(30)
+
+    assert tombol.label.text() == panjang  # tanpa elipsis
+    assert tombol.label.wordWrap()
+    butuh = tombol.label.heightForWidth(tombol.label.width())
+    assert tombol.label.height() >= butuh, "tinggi label kurang: teks terpotong"
+    assert tombol.height() >= butuh
+    # Sempit memang lebih tinggi daripada lebar: teks membungkus, bukan terpotong.
+    assert butuh > tombol.label.fontMetrics().height() * 1.5
+
+
+def test_peringatan_catatan_sama_dengan_nomor_sebelumnya(
+    halaman_kerja, terbitkan, auth
+):
+    from app.ui.queue.note_panel import PESAN_CATATAN_SAMA
+
+    terbitkan("A", 2)
+    halaman_kerja.muat_ulang()
+    halaman_kerja.panggil_berikutnya()
+    halaman_kerja.mulai_melayani()
+    halaman_kerja.panel_pengaduan.isian_catatan.setPlainText(
+        "Berkas belum lengkap, diminta kembali besok."
+    )
+    halaman_kerja.selesaikan()
+
+    halaman_kerja.panggil_berikutnya()
+    panel = halaman_kerja.panel_pengaduan
+    assert not panel.catatan_sama_dengan_sebelumnya
+
+    # Persis sama (huruf besar-kecil dan spasi tidak dihitung): diperingatkan.
+    panel.isian_catatan.setPlainText("  berkas BELUM lengkap,  diminta kembali besok. ")
+    assert panel.catatan_sama_dengan_sebelumnya
+    assert PESAN_CATATAN_SAMA in panel.label_keadaan.text()
+
+    # Disesuaikan sedikit: tidak lagi diperingatkan.
+    panel.isian_catatan.setPlainText("Berkas belum lengkap, diminta kembali Senin.")
+    assert not panel.catatan_sama_dengan_sebelumnya
+    assert PESAN_CATATAN_SAMA not in panel.label_keadaan.text()
+
+
+def test_peringatan_tidak_berlaku_untuk_kalimat_cepat(halaman_kerja, terbitkan):
+    terbitkan("A", 2)
+    halaman_kerja.muat_ulang()
+    halaman_kerja.panggil_berikutnya()
+    halaman_kerja.mulai_melayani()
+    halaman_kerja.panel_pengaduan._tombol_frasa[0].click()
+    halaman_kerja.selesaikan()
+
+    halaman_kerja.panggil_berikutnya()
+    panel = halaman_kerja.panel_pengaduan
+    panel._tombol_frasa[0].click()  # kalimat cepat yang sama untuk pelayanan yang sama
+
+    assert panel.isian_catatan.toPlainText() == panel._tombol_frasa[0].kalimat
+    assert not panel.catatan_sama_dengan_sebelumnya
+
+
+def test_detak_simpan_otomatis_diam_bila_jendela_tidak_tampil(
+    halaman_kerja, terbitkan, auth
+):
+    """
+    Panel yang sudah ditutup tidak boleh menulis ke database sesudahnya:
+    detak 15 detiknya dulu menulis catatan basi ke data tes berikutnya.
+    """
+    from app.services.note_service import NoteService
+
+    _panggil(halaman_kerja, terbitkan)
+    antrian_id = halaman_kerja.antrian.id
+    panel = halaman_kerja.panel_pengaduan
+    panel.isian_catatan.setPlainText("Catatan yang belum tersimpan sama sekali")
+    assert not panel.window().isVisible()
+
+    panel._saat_pewaktu_otomatis()
+
+    assert NoteService(auth).ambil(antrian_id) is None
+
+
+# ---------------------------------------------------------------------
+# Pekerja latar layar pelayanan
+# ---------------------------------------------------------------------
+
+
+def test_pekerja_lama_selesai_tidak_membuang_pekerja_baru(halaman_kerja):
+    """
+    `finished` pekerja lama bisa tiba sesudah penyegaran berikutnya mulai.
+    Dulu handlernya menghapus `_pekerja_data` yang kini dipegang, sehingga
+    Qt mematikan proses: "QThread: Destroyed while thread is still running".
+    """
+    from app.ui.common import PekerjaLatar
+
+    lama = PekerjaLatar(lambda: None, halaman_kerja)
+    baru = PekerjaLatar(lambda: None, halaman_kerja)
+    halaman_kerja._pekerja_data = baru
+    halaman_kerja._bersihkan_pekerja_data(lama)
+    assert halaman_kerja._pekerja_data is baru
+
+    halaman_kerja._bersihkan_pekerja_data(baru)
+    assert halaman_kerja._pekerja_data is None
+
+    lama_aksi = PekerjaLatar(lambda: None, halaman_kerja)
+    baru_aksi = PekerjaLatar(lambda: None, halaman_kerja)
+    halaman_kerja._pekerja_aksi = baru_aksi
+    halaman_kerja._bersihkan_pekerja_aksi(lama_aksi)
+    assert halaman_kerja._pekerja_aksi is baru_aksi
+
+    halaman_kerja._bersihkan_pekerja_aksi(baru_aksi)
+    assert halaman_kerja._pekerja_aksi is None
+
+
+def test_layar_pelayanan_tampil_lalu_memanggil_nomor_tanpa_mematikan_proses(
+    qtbot, halaman_kerja, terbitkan
+):
+    """Regresi: tampil + panggil nomor + beberapa detak event loop mematikan Qt."""
+    from PySide6.QtWidgets import QApplication
+
+    halaman_kerja.resize(1100, 800)
+    halaman_kerja.show()
+    QApplication.processEvents()
+    _panggil(halaman_kerja, terbitkan)
+    for _ in range(20):
+        qtbot.wait(10)
+
+    assert halaman_kerja.antrian is not None

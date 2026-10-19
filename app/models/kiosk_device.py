@@ -51,6 +51,16 @@ class KioskDevice(TimestampMixin, Base):
     printer_pesan: Mapped[str] = mapped_column(sa.String(200), nullable=False, default="")
     printer_waktu: Mapped[datetime | None] = mapped_column(sa.DateTime)
 
+    # Status salinan media di tablet: berapa berkas dari daftar putar server
+    # yang sudah tersalin utuh, berapa byte, dan kapan dilaporkan.
+    media_total: Mapped[int | None] = mapped_column(sa.Integer)
+    media_tersalin: Mapped[int | None] = mapped_column(sa.Integer)
+    media_byte: Mapped[int | None] = mapped_column(sa.BigInteger)
+    media_waktu: Mapped[datetime | None] = mapped_column(sa.DateTime)
+    # Admin meminta tablet menyegarkan salinan media sekarang. Tablet
+    # membandingkan nilainya dengan yang terakhir ia tangani.
+    media_segarkan: Mapped[datetime | None] = mapped_column(sa.DateTime)
+
 
 class KioskPairingCode(TimestampMixin, Base):
     """

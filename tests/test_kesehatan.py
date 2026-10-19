@@ -357,6 +357,132 @@ def test_nilai_hash_kata_sandi_normal_dan_peringatan():
     assert "2 dari 5" in hasil.ringkasan
 
 
+def test_nilai_sandi_bawaan():
+    assert ks.nilai_sandi_bawaan([]).tingkat == NORMAL
+    hasil = ks.nilai_sandi_bawaan(["admin"])
+    assert hasil.tingkat == MASALAH
+    assert "admin" in hasil.ringkasan
+    assert "admin123" not in " ".join((hasil.ringkasan, *hasil.saran))
+
+
+def test_periksa_sandi_bawaan_menemukan_akun(auth, users):
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.core.security import hash_password
+    from app.core.seed import DEFAULT_ADMIN_PASSWORD
+    from app.models import User
+
+    with session_scope() as s:
+        s.execute(
+            sa.update(User).where(User.username != "cro").values(
+                password_hash=hash_password(TEST_PASSWORD)
+            )
+        )
+    assert ks._periksa_sandi_bawaan().tingkat == NORMAL
+
+    with session_scope() as s:
+        s.execute(
+            sa.update(User).where(User.username == "cro").values(
+                password_hash=hash_password(DEFAULT_ADMIN_PASSWORD)
+            )
+        )
+    hasil = ks._periksa_sandi_bawaan()
+    assert hasil.tingkat == MASALAH
+    assert "cro" in hasil.ringkasan
+
+
+def _login_tercatat(komputer, versi, umur):
+    import json
+
+    from app.core import clock
+    from app.core.database import session_scope
+    from app.models import AuditAction, AuditLog
+
+    meta = {"role": "CRO"}
+    if komputer is not None:
+        meta["komputer"] = komputer
+    if versi is not None:
+        meta["versi_aplikasi"] = versi
+    with session_scope() as s:
+        s.add(
+            AuditLog(
+                action=AuditAction.LOGIN.value,
+                entity_type="app_user",
+                meta=json.dumps(meta),
+                created_at=clock.now() - umur,
+            )
+        )
+
+
+def _kosongkan_login():
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import AuditAction, AuditLog
+
+    with session_scope() as s:
+        s.execute(
+            sa.delete(AuditLog).where(
+                AuditLog.action.in_(
+                    [AuditAction.LOGIN.value, AuditAction.WINDOWS_PC_PING.value]
+                )
+            )
+        )
+
+
+def test_periksa_komputer_windows_tanpa_catatan(auth):
+    _kosongkan_login()
+
+    (hasil,) = ks._periksa_komputer_windows()
+
+    assert hasil.tingkat == ks.INFO
+    assert "30 hari" in hasil.ringkasan
+
+
+def test_periksa_komputer_windows_memakai_login_terbaru_per_pc(auth):
+    from app import __version__
+
+    _kosongkan_login()
+    # PC-LOKET-1: login terbaru sudah versi sekarang; yang lama diabaikan.
+    _login_tercatat("PC-LOKET-1", "1.0.9", timedelta(days=2))
+    _login_tercatat("PC-LOKET-1", __version__, timedelta(hours=1))
+    # PC-LOKET-2 masih versi lama.
+    _login_tercatat("PC-LOKET-2", "1.0.9", timedelta(days=1))
+    # Di luar jendela 30 hari dan login lama tanpa nama komputer: tidak dihitung.
+    _login_tercatat("PC-GUDANG", "1.0.1", timedelta(days=31))
+    _login_tercatat(None, None, timedelta(hours=2))
+
+    hasil = {p.nama: p for p in ks._periksa_komputer_windows()}
+
+    assert set(hasil) == {"PC Windows: PC-LOKET-1", "PC Windows: PC-LOKET-2"}
+    terkini = hasil["PC Windows: PC-LOKET-1"]
+    assert terkini.tingkat == NORMAL
+    assert __version__ in terkini.ringkasan and not terkini.saran
+    tertinggal = hasil["PC Windows: PC-LOKET-2"]
+    assert tertinggal.tingkat == PERINGATAN
+    assert "1.0.9" in tertinggal.ringkasan
+    assert tertinggal.saran
+
+
+def test_periksa_komputer_windows_versi_tidak_diketahui(auth):
+    _kosongkan_login()
+    _login_tercatat("PC-LAMA", None, timedelta(hours=3))
+
+    (hasil,) = ks._periksa_komputer_windows()
+
+    assert hasil.tingkat == PERINGATAN
+    assert "tidak diketahui" in hasil.ringkasan
+
+
+def test_nilai_tanda_pembaruan():
+    assert ks.nilai_tanda_pembaruan(False).tingkat == ks.INFO
+    assert ks.nilai_tanda_pembaruan(True, "1.0.12", True).tingkat == NORMAL
+    tanpa = ks.nilai_tanda_pembaruan(True, "1.0.12", False)
+    assert tanpa.tingkat == PERINGATAN
+    assert "1.0.12" in tanpa.ringkasan
+
+
 def test_periksa_kata_sandi_mendeteksi_nilai_tanpa_hash(auth, users):
     import sqlalchemy as sa
 
@@ -373,3 +499,45 @@ def test_periksa_kata_sandi_mendeteksi_nilai_tanpa_hash(auth, users):
 
     hasil = ks._periksa_kata_sandi()
     assert hasil.tingkat == ks.PERINGATAN
+
+
+def test_denyut_pc_tanpa_login_ikut_terlihat_di_kesehatan(auth):
+    import json
+
+    from app.core import clock
+    from app.core.database import session_scope
+    from app.models import AuditAction, AuditLog
+
+    _kosongkan_login()
+    with session_scope() as s:
+        s.add(
+            AuditLog(
+                action=AuditAction.WINDOWS_PC_PING.value,
+                entity_type="windows_pc",
+                meta=json.dumps({"komputer": "PC-BELUM-LOGIN", "versi_aplikasi": "1.0.9"}),
+                created_at=clock.now() - timedelta(hours=1),
+            )
+        )
+
+    (hasil,) = ks._periksa_komputer_windows()
+
+    assert hasil.nama == "PC Windows: PC-BELUM-LOGIN"
+    assert hasil.tingkat == PERINGATAN
+    assert "1.0.9" in hasil.ringkasan
+
+
+def test_porsi_prioritas_dinilai_menurut_ambang():
+    sedikit = ks.nilai_porsi_prioritas(5, 10)
+    assert sedikit.tingkat == ks.INFO
+
+    wajar = ks.nilai_porsi_prioritas(6, 40)
+    assert wajar.tingkat == NORMAL and "15%" in wajar.ringkasan
+
+    tinggi = ks.nilai_porsi_prioritas(25, 40)
+    assert tinggi.tingkat == PERINGATAN and tinggi.saran
+
+
+def test_periksa_porsi_prioritas_membaca_database(auth):
+    hasil = ks._periksa_porsi_prioritas()
+
+    assert hasil.nama.startswith("Porsi nomor prioritas")

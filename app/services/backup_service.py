@@ -29,7 +29,7 @@ from app.core.database import dispose_engine, init_database, session_scope
 from app.core.errors import AppError, BusinessRuleError, NotFoundError, ValidationError
 from app.core.logger import get_logger
 from app.models import AuditAction
-from app.services import audit_service
+from app.services import audit_service, sandi_backup
 from app.services.auth_service import AuthService
 from app.services.backup_engines import MesinBackup, buat_mesin
 from app.services.permissions import Permission
@@ -357,6 +357,21 @@ class BackupService:
             reverse=True,
         )
 
+    def _daftar_terenkripsi(self, folder: Path) -> list[BackupInfo]:
+        """Salinan `.antrianenc`; waktunya dibaca dari nama backup di dalamnya."""
+        if not folder.exists():
+            return []
+        akhiran = self.mesin.akhiran + sandi_backup.AKHIRAN
+        hasil = []
+        for p in folder.glob(f"{AWALAN}*{akhiran}"):
+            if not p.is_file():
+                continue
+            try:
+                hasil.append(_sebagai_info(p, akhiran))
+            except ValueError:
+                continue
+        return hasil
+
     # =================================================================
     # Pembuatan
     # =================================================================
@@ -466,15 +481,96 @@ class BackupService:
         if folder is None:
             return
         try:
+            kunci = sandi_backup.baca()
+        except Exception:  # noqa: BLE001 - database bermasalah: jangan salin polos
+            logger.warning("Kunci enkripsi salinan backup tidak terbaca", exc_info=True)
+            return
+        try:
             folder.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(info.berkas, folder / info.nama)
-            samping = berkas_checksum(info.berkas)
-            if samping.is_file():
-                shutil.copy2(samping, folder / samping.name)
+            if kunci is not None:
+                # Salinan yang dibawa keluar server tidak pernah polos bila
+                # admin sudah mengatur kata sandinya; sidik SHA-256 isinya
+                # ada di kepala berkas terenkripsi.
+                tujuan = folder / (info.nama + sandi_backup.AKHIRAN)
+                sandi_backup.enkripsi(info.berkas, tujuan, kunci)
+            else:
+                tujuan = folder / info.nama
+                shutil.copy2(info.berkas, tujuan)
+                samping = berkas_checksum(info.berkas)
+                if samping.is_file():
+                    shutil.copy2(samping, folder / samping.name)
         except OSError as exc:
             logger.warning("Salinan kedua backup %s gagal ke %s: %s", info.nama, folder, exc)
             return
-        logger.info("Salinan kedua backup dibuat: %s", folder / info.nama)
+        logger.info("Salinan kedua backup dibuat: %s", tujuan)
+
+    # =================================================================
+    # Enkripsi salinan kedua
+    # =================================================================
+
+    def salinan_terenkripsi(self) -> bool:
+        """Benar bila salinan kedua dienkripsi (kata sandi sudah diatur)."""
+        self.auth.require_permission(Permission.BACKUP_MANAGE)
+        return sandi_backup.baca() is not None
+
+    def atur_sandi_salinan(self, sandi: str) -> None:
+        """
+        Atur (atau ganti) kata sandi salinan kedua.
+
+        Salinan lama tetap terbuka dengan kata sandi LAMA-nya; yang baru
+        memakai sandi ini. Hanya kunci publik dan garam yang disimpan.
+        """
+        sesi = self.auth.require_permission(Permission.BACKUP_MANAGE)
+        kunci = sandi_backup.buat_kunci(sandi)
+        sandi_backup.simpan(kunci)
+        with session_scope() as session:
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="setting",
+                key=sandi_backup.KUNCI,
+                value="diatur",
+            )
+
+    def hapus_sandi_salinan(self) -> None:
+        """Salinan kedua berikutnya kembali polos (bersama berkas .sha256)."""
+        sesi = self.auth.require_permission(Permission.BACKUP_MANAGE)
+        sandi_backup.simpan(None)
+        with session_scope() as session:
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="setting",
+                key=sandi_backup.KUNCI,
+                value="dihapus",
+            )
+
+    def buka_salinan_terenkripsi(self, berkas: Path | str, sandi: str) -> BackupInfo:
+        """
+        Buka salinan `.antrianenc` ke folder backup sebagai backup biasa.
+
+        Sesudahnya backup itu dapat diuji dan dipulihkan lewat jalur yang
+        sama dengan backup lain; tidak ada jalur pemulihan kedua.
+        """
+        self.auth.require_permission(Permission.BACKUP_MANAGE)
+        sumber = Path(berkas)
+        if not sumber.is_file():
+            raise NotFoundError("Berkas salinan backup tidak ditemukan.")
+        nama = sandi_backup.nama_asli(sumber)
+        if not nama.startswith(AWALAN) or not nama.endswith(self.mesin.akhiran):
+            raise ValidationError("Salinan ini bukan backup database antrian.")
+        self.folder.mkdir(parents=True, exist_ok=True)
+        tujuan = self.folder / nama
+        if tujuan.exists():
+            raise BusinessRuleError(
+                f"Backup {nama} sudah ada di folder backup; tidak perlu dibuka lagi."
+            )
+        sidik = sandi_backup.dekripsi(sumber, tujuan, sandi)
+        berkas_checksum(tujuan).write_text(f"{sidik}  {tujuan.name}\n", encoding="utf-8")
+        logger.info("Salinan terenkripsi %s dibuka ke %s", sumber.name, tujuan)
+        return _sebagai_info(tujuan, self.mesin.akhiran)
 
     # =================================================================
     # Retensi
@@ -502,6 +598,7 @@ class BackupService:
         if salinan is not None:
             try:
                 kedaluwarsa += self._daftar_berkas(salinan)
+                kedaluwarsa += self._daftar_terenkripsi(salinan)
             except OSError:
                 logger.warning("Folder salinan backup %s tidak terbaca", salinan)
         for info in kedaluwarsa:

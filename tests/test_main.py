@@ -25,7 +25,6 @@ def test_init_only_mencatat_fondasi_siap_ke_log(
     monkeypatch.setenv("ANTRIAN_DB_PATH", str(tmp_path / "queue.db"))
     monkeypatch.setenv("ANTRIAN_BACKUP_DIR", str(tmp_path / "backup"))
     monkeypatch.setenv("ANTRIAN_LOG_DIR", str(tmp_path / "logs"))
-    monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
 
     config_module.reset_config()
     database_module.dispose_engine()
@@ -35,7 +34,7 @@ def test_init_only_mencatat_fondasi_siap_ke_log(
 
     log = (tmp_path / "logs" / "app.log").read_text(encoding="utf-8")
     assert "Fondasi siap" in log
-    assert "Migrasi selesai" in log
+    assert "Database siap digunakan" in log
     assert "admin123" not in log.lower()
 
 
@@ -266,7 +265,7 @@ def test_setup_awal_dilewati_bila_berkas_mesin_sudah_ada(
     monkeypatch.delenv("ANTRIAN_DB_URL", raising=False)
     monkeypatch.delenv("ANTRIAN_MESIN_PATH", raising=False)
     db = tmp_path / "queue.db"
-    tulis_berkas_mesin(path_berkas_mesin(db), PengaturanMesin())
+    tulis_berkas_mesin(path_berkas_mesin(db), PengaturanMesin(sandi="sandi-uji"))
     assert perlu_setup_awal([], db, sedang_uji=False) is False
 
 

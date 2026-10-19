@@ -11,7 +11,6 @@ from app.core import config as config_module
 from app.core.mesin import (
     HOST_LOKAL,
     KLIEN,
-    SENDIRI,
     SERVER,
     alamat_ipv4_lokal,
     baca_berkas_mesin,
@@ -107,9 +106,10 @@ def test_klien_tanpa_alamat_di_berkas_diabaikan(tmp_path: Path):
     assert url_dari_berkas_mesin(path) == ""
 
 
-def test_sendiri_tidak_menghasilkan_url_postgres(tmp_path: Path):
+def test_peran_sendiri_lama_dianggap_belum_ditetapkan(tmp_path: Path):
     path = tmp_path / "mesin.json"
-    tulis_berkas_mesin(path, PengaturanMesin(peran=SENDIRI))
+    path.write_text(json.dumps({"peran": "sendiri"}), encoding="utf-8")
+    assert baca_berkas_mesin(path) is None
     assert url_dari_berkas_mesin(path) == ""
 
 
@@ -150,9 +150,9 @@ def test_url_localhost_dianggap_server():
     assert pengaturan.host == ""
 
 
-def test_url_sqlite_dianggap_sendiri(tmp_path: Path):
-    pengaturan = pengaturan_dari_url(f"sqlite:///{tmp_path / 'queue.db'}")
-    assert pengaturan.peran == SENDIRI
+def test_url_sqlite_ditolak(tmp_path: Path):
+    with pytest.raises(ValueError, match="PostgreSQL"):
+        pengaturan_dari_url(f"sqlite:///{tmp_path / 'queue.db'}")
 
 
 def test_alamat_lokal_tidak_memuat_loopback():
@@ -161,8 +161,8 @@ def test_alamat_lokal_tidak_memuat_loopback():
         assert not ip.startswith("169.254.")
 
 
-def test_uji_koneksi_sqlite_berhasil():
-    assert uji_koneksi("sqlite:///:memory:") is None
+def test_uji_koneksi_sqlite_ditolak():
+    assert "hanya mendukung" in uji_koneksi("sqlite:///:memory:")
 
 
 def test_uji_koneksi_yang_gagal_berbahasa_indonesia():

@@ -23,10 +23,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.errors import ValidationError
 from app.core.security import MIN_PASSWORD_LENGTH
 from app.models import UserRole
 from app.services import daftar_putar
+from app.services.note_service import FRASA_MAKS, PANJANG_FRASA, daftar_frasa, periksa_frasa
 from app.ui.common import judul, keterangan, label_error, tombol
+from app.ui.tombol_frasa import TombolFrasa
 from app.ui.kiosk.sambutan import (
     FILTER_BERKAS_ANJUNGAN,
     folder_media_layanan,
@@ -367,6 +370,27 @@ class CategoryDialog(_DialogIsian):
         self.input_info.setMaximumHeight(90)
         self.form.addRow("Info Anjungan", self.input_info)
 
+        self.input_frasa = QPlainTextEdit(category.frasa_catatan if ubah else "")
+        self.input_frasa.setPlaceholderText(
+            "Satu kalimat per baris (maksimal 8). Tampil sebagai tombol cepat "
+            "di catatan petugas. Kosongkan untuk memakai daftar bawaan."
+        )
+        self.input_frasa.setMaximumHeight(110)
+        self.form.addRow("Kalimat Cepat Catatan", self.input_frasa)
+
+        # Pratinjau: tombol persis seperti yang dilihat petugas, supaya
+        # admin tahu bila sebuah kalimat terlalu panjang sebelum menyimpan.
+        self.peringatan_frasa = keterangan("")
+        self.form.addRow("", self.peringatan_frasa)
+        self.pratinjau_frasa = QWidget()
+        self.pratinjau_frasa.setMaximumWidth(360)
+        self._tata_pratinjau = QVBoxLayout(self.pratinjau_frasa)
+        self._tata_pratinjau.setContentsMargins(0, 0, 0, 0)
+        self._tata_pratinjau.setSpacing(6)
+        self.form.addRow("Pratinjau", self.pratinjau_frasa)
+        self.input_frasa.textChanged.connect(self._perbarui_pratinjau_frasa)
+        self._perbarui_pratinjau_frasa()
+
         # Media mengalahkan Info Anjungan bila keduanya diisi: panel
         # anjungan kecil, dan nama layanan sudah tampil besar di panel
         # konfirmasi di bawahnya, jadi menumpuk gambar dan tulisan hanya
@@ -397,6 +421,27 @@ class CategoryDialog(_DialogIsian):
             )
 
         (self.input_nama if ubah else self.input_kode).setFocus()
+
+    def _perbarui_pratinjau_frasa(self) -> None:
+        while self._tata_pratinjau.count():
+            butir = self._tata_pratinjau.takeAt(0)
+            if butir.widget() is not None:
+                butir.widget().deleteLater()
+        teks = self.input_frasa.toPlainText()
+        daftar = daftar_frasa(teks)
+        for kalimat in daftar:
+            self._tata_pratinjau.addWidget(TombolFrasa(kalimat))
+        try:
+            periksa_frasa(teks)
+        except ValidationError as exc:
+            self.peringatan_frasa.setText(str(exc))
+            self.peringatan_frasa.setStyleSheet("color: #B45309; font-weight: 600;")
+            return
+        self.peringatan_frasa.setStyleSheet("")
+        self.peringatan_frasa.setText(
+            f"Maksimal {FRASA_MAKS} kalimat, masing-masing {PANJANG_FRASA} karakter. "
+            "Kosongkan untuk memakai daftar bawaan."
+        )
 
     def _perbarui_contoh(self, teks: str) -> None:
         bersih = teks.strip().upper()
@@ -450,6 +495,10 @@ class CategoryDialog(_DialogIsian):
     def info_text(self) -> str:
         return self.input_info.toPlainText().strip()
 
+    @property
+    def frasa_catatan(self) -> str:
+        return self.input_frasa.toPlainText().strip()
+
     def simpan(self) -> None:
         if self.category is None and not self.kode:
             self.tampilkan_kesalahan("Kode belum diisi.", self.input_kode)
@@ -459,6 +508,11 @@ class CategoryDialog(_DialogIsian):
             return
         if self.input_prefix.isEnabled() and not self.prefix:
             self.tampilkan_kesalahan("Prefix belum diisi.", self.input_prefix)
+            return
+        try:
+            periksa_frasa(self.frasa_catatan)
+        except ValidationError as exc:
+            self.tampilkan_kesalahan(str(exc), self.input_frasa)
             return
         self.accept()
 
@@ -612,6 +666,7 @@ class JadwalIklanDialog(_DialogIsian):
         butir: daftar_putar.Butir,
         *,
         gambar: bool,
+        berkas: Path | None = None,
     ) -> None:
         super().__init__(
             parent,
@@ -636,6 +691,35 @@ class JadwalIklanDialog(_DialogIsian):
             centang.setChecked(nilai is not None)
             kotak.setEnabled(nilai is not None)
 
+        # Video untuk strip panel atas dan video untuk layar penuh berbeda
+        # bentuknya (mendatar kecil vs seluruh layar): satu berkas dapat
+        # dibatasi pada salah satunya.
+        self.tampil = QComboBox()
+        for kunci in daftar_putar.TAMPIL_SAH:
+            self.tampil.addItem(daftar_putar.LABEL_TAMPIL[kunci], kunci)
+        self.tampil.setCurrentIndex(self.tampil.findData(butir.tampil))
+        self.tampil.setToolTip(
+            "Panel atas: strip di atas kartu layanan. Layar penuh: saat anjungan "
+            "menganggur dan iklan memenuhi layar."
+        )
+        self.form.addRow("Tampil di", self.tampil)
+
+        # Bentuk berkas terhadap tempat tampilnya: dibaca sekali dari kepala
+        # berkas, peringatannya mengikuti pilihan "Tampil di".
+        from app.services.ukuran_media import ukuran_media
+
+        self._ukuran = ukuran_media(berkas) if berkas is not None else None
+        self.label_ukuran = QLabel()
+        self.label_ukuran.setWordWrap(True)
+        self.peringatan_rasio = QLabel()
+        self.peringatan_rasio.setWordWrap(True)
+        self.peringatan_rasio.setStyleSheet("color: #92400e;")
+        if berkas is not None:
+            self.form.addRow("Ukuran", self.label_ukuran)
+            self.form.addRow("", self.peringatan_rasio)
+        self.tampil.currentIndexChanged.connect(self._perbarui_rasio)
+        self._perbarui_rasio()
+
         self.detik = QSpinBox()
         # Satu di bawah batas bawah berarti "ikut pengaturan umum".
         self.detik.setRange(daftar_putar.DETIK_MIN - 1, daftar_putar.DETIK_MAKS)
@@ -647,6 +731,16 @@ class JadwalIklanDialog(_DialogIsian):
         else:
             # Video selalu diputar sampai selesai.
             self.detik.setVisible(False)
+
+    def _perbarui_rasio(self) -> None:
+        from app.services.ukuran_media import keterangan_rasio
+
+        keterangan, peringatan = keterangan_rasio(
+            self._ukuran, self.tampil.currentData() or daftar_putar.TAMPIL_KEDUANYA
+        )
+        self.label_ukuran.setText(keterangan)
+        self.peringatan_rasio.setText(f"⚠ {peringatan}" if peringatan else "")
+        self.peringatan_rasio.setVisible(bool(peringatan))
 
     @staticmethod
     def _kotak_tanggal(nilai, cadangan: QDate) -> QDateEdit:
@@ -670,6 +764,7 @@ class JadwalIklanDialog(_DialogIsian):
             mulai,
             selesai,
             None if detik < daftar_putar.DETIK_MIN else detik,
+            self.tampil.currentData() or daftar_putar.TAMPIL_KEDUANYA,
         )
 
     def simpan(self) -> None:

@@ -8,6 +8,7 @@ dari dalam aplikasi.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import sqlalchemy as sa
@@ -66,6 +67,12 @@ BAWAAN: dict[str, str] = {
     "kiosk.daftar_putar": "",
     "kiosk.suara_video": "false",
     "kiosk.iklan_layar_penuh_detik": "60",
+    "kiosk.iklan_putaran": "2",
+    "kiosk.animasi_kembali": "true",
+    "kiosk.animasi_mulai_detik": "2",
+    "kiosk.animasi_nomor_menunggu": "true",
+    "kiosk.panggilan_hentikan_iklan": "true",
+    "kiosk.animasi_iklan_muncul": "true",
     "kiosk.tema": "biru",
     "kiosk.tema_agustus": "true",
     "display.screen_shape": "auto",
@@ -80,6 +87,8 @@ BAWAAN: dict[str, str] = {
     "display.sound_enabled": "true",
     "display.loket_tampil": "petugas",
     "queue.max_call_attempts": "3",
+    "queue.rasio_prioritas": "3",
+    "kiosk.prioritas_aktif": "true",
     "queue.registration_open": "true",
     "queue.registration_closed_date": "",
     "survey.enabled": "true",
@@ -404,6 +413,28 @@ SKEMA: tuple[Pengaturan, ...] = (
         kelompok="Antrian",
     ),
     Pengaturan(
+        "queue.rasio_prioritas",
+        "Rasio nomor prioritas",
+        "Setiap sekian nomor prioritas (lansia, disabilitas, ibu hamil) yang "
+        "dipanggil beruntun, satu nomor biasa disisipkan supaya tidak menunggu "
+        "tanpa batas. Isi 0 bila prioritas selalu didahulukan.",
+        ANGKA,
+        minimum=0,
+        maksimum=20,
+        satuan="nomor",
+        nilai_khusus="Prioritas selalu lebih dulu",
+        kelompok="Antrian",
+    ),
+    Pengaturan(
+        "kiosk.prioritas_aktif",
+        "Pilihan prioritas di anjungan",
+        "Menampilkan kotak \"Saya lansia / disabilitas / ibu hamil\" di anjungan. "
+        "Nomor yang ditandai pengunjung diperiksa petugas di loket dan dapat "
+        "dicabut.",
+        BOOLEAN,
+        kelompok="Antrian",
+    ),
+    Pengaturan(
         "kiosk.cooldown_seconds",
         "Jeda ambil nomor di kios",
         "Menahan satu orang menekan tombol berulang kali dan memenuhi antrian "
@@ -486,7 +517,8 @@ SKEMA: tuple[Pengaturan, ...] = (
         "urutannya dengan Naik/Turun. Video diputar sampai selesai; satu "
         "video saja diulang terus. Yang tidak dicentang tetap "
         "tersimpan di folder dan dapat dinyalakan lagi kapan saja. "
-        "Atur jadwal… membatasi tanggal tayang dan lama tampil tiap gambar.",
+        "Atur jadwal… membatasi tanggal tayang, lama tampil tiap gambar, dan "
+        "tempat tampilnya: panel atas, layar penuh, atau keduanya.",
         DAFTAR_PUTAR,
         boleh_kosong=True,
         kelompok="Iklan Anjungan",
@@ -500,6 +532,73 @@ SKEMA: tuple[Pengaturan, ...] = (
         "layanan sampai tiketnya keluar, video selalu dibisukan.",
         BOOLEAN,
         kelompok="Iklan Anjungan",
+    ),
+    Pengaturan(
+        "kiosk.animasi_kembali",
+        "Animasi saat kembali ke antrian",
+        "Setelah iklan layar penuh, tiga panel anjungan masuk dari arah acak. "
+        "Dilewati otomatis bila animasi dimatikan di pengaturan Android tablet.",
+        BOOLEAN,
+        kelompok="Perilaku Iklan",
+    ),
+    Pengaturan(
+        "kiosk.animasi_iklan_muncul",
+        "Animasi saat iklan akan muncul",
+        "Sekitar 1,5 detik sebelum iklan layar penuh mulai, tiga panel "
+        "(judul dan loket, pilihan layanan, hasil nomor) keluar ke arah acak "
+        "lalu iklan muncul. Disentuh pada saat itu, panel kembali dan iklan "
+        "dibatalkan. Dilewati bila animasi dimatikan di Android tablet atau "
+        "waktu menganggur kurang dari 5 detik.",
+        BOOLEAN,
+        kelompok="Perilaku Iklan",
+    ),
+    Pengaturan(
+        "kiosk.panggilan_hentikan_iklan",
+        "Panggilan menghentikan iklan",
+        "Saat petugas memanggil atau memanggil ulang sebuah nomor, iklan layar "
+        "penuh langsung berhenti, tampilan antrian muncul, dan nomor itu "
+        "ditampilkan besar selama beberapa detik. Waktu menganggur dihitung "
+        "ulang dari nol sesudahnya.",
+        BOOLEAN,
+        kelompok="Perilaku Iklan",
+    ),
+    Pengaturan(
+        "kiosk.animasi_nomor_menunggu",
+        "Animasi nomor menunggu",
+        "Nomor menunggu muncul satu per satu: baris demi baris, dan tiap nomor "
+        "dengan gaya acak (naik, mekar, atau geser dari samping). Berlaku saat "
+        "panel muncul, saat halaman berganti, dan saat kembali dari iklan. "
+        "Dilewati otomatis bila animasi dimatikan di pengaturan Android tablet.",
+        BOOLEAN,
+        kelompok="Perilaku Iklan",
+    ),
+    Pengaturan(
+        "kiosk.animasi_mulai_detik",
+        "Animasi mulai sebelum iklan berakhir",
+        "Pada putaran iklan yang terakhir, iklan meredup dan tiga panel mulai "
+        "masuk sekian detik sebelum berkas terakhir selesai, jadi bagian akhir "
+        "iklan bertumpuk dengan animasi. Isi 0 agar animasi baru mulai setelah "
+        "iklan selesai.",
+        ANGKA,
+        minimum=0,
+        maksimum=5,
+        satuan="detik",
+        nilai_khusus="Setelah iklan selesai",
+        kelompok="Perilaku Iklan",
+    ),
+    Pengaturan(
+        "kiosk.iklan_putaran",
+        "Putaran iklan layar penuh",
+        "Iklan layar penuh berputar sebanyak ini (satu putaran = seluruh daftar "
+        "putar layar penuh diputar sekali), lalu kembali ke tampilan antrian dan "
+        "menunggu waktu menganggur lagi sebelum muncul kembali. Isi 0 agar "
+        "berputar terus sampai disentuh.",
+        ANGKA,
+        minimum=0,
+        maksimum=10,
+        satuan="putaran",
+        nilai_khusus="Berputar terus",
+        kelompok="Perilaku Iklan",
     ),
     Pengaturan(
         "kiosk.iklan_layar_penuh_detik",
@@ -710,6 +809,34 @@ def _validasi(kunci: str, nilai: str) -> str:
     return nilai
 
 
+@dataclass(frozen=True)
+class CuplikanPengaturan:
+    """Satu hasil baca konsisten agar endpoint cepat tidak membuat query per kunci."""
+
+    nilai: Mapping[str, str]
+
+    def get(self, key: str, default: str | None = None) -> str:
+        if key in self.nilai:
+            return self.nilai[key]
+        if default is not None:
+            return default
+        raise NotFoundError(f"Pengaturan {key!r} tidak dikenal.")
+
+    def get_int(self, key: str, default: int | None = None) -> int:
+        try:
+            return int(self.get(key, None if default is None else str(default)))
+        except (ValueError, NotFoundError):
+            if default is not None:
+                return default
+            return int(BAWAAN.get(key, "0"))
+
+    def get_bool(self, key: str, default: bool = False) -> bool:
+        try:
+            return self.get(key).strip().lower() in _BENAR
+        except NotFoundError:
+            return default
+
+
 class SettingsService:
     """Pembacaan dan perubahan pengaturan aplikasi."""
 
@@ -758,6 +885,10 @@ class SettingsService:
                 r.key: r.value for r in session.scalars(sa.select(ApplicationSetting))
             }
         return {**BAWAAN, **tersimpan}
+
+    def cuplikan(self) -> CuplikanPengaturan:
+        """Baca semua kunci sekali agar satu respons memakai keadaan yang sama."""
+        return CuplikanPengaturan(self.all())
 
     # -----------------------------------------------------------------
     # Perubahan

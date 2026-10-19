@@ -193,3 +193,21 @@ def test_pilihan_bertahan_saat_data_disegarkan(qtbot):
 
     assert papan.pilihan == 1
     assert papan.kartu_layanan[1].property("terpilih") is True
+
+
+def test_papan_kosong_cukup_tinggi_untuk_pesannya(qtbot):
+    """Label 'Tidak ada yang menunggu.' tidak boleh terjepit lalu terpotong."""
+    from datetime import datetime
+
+    from app.ui.queue.papan_tunggu import PapanTunggu
+
+    papan = PapanTunggu(tinggi_menurut_isi=True)
+    qtbot.addWidget(papan)
+    papan.resize(500, 200)
+    papan.show()
+    papan.setel([], (), datetime(2026, 10, 19, 8, 0))
+    qtbot.wait(50)
+
+    assert papan.label_kosong.isVisible()
+    assert papan.label_kosong.height() >= papan.label_kosong.sizeHint().height()
+    assert papan.height() >= papan.layout().minimumSize().height()

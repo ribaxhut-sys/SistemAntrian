@@ -47,6 +47,7 @@ from app.services import audit_service
 from app.services.auth_service import AuthService
 from app.services.permissions import Permission
 from app.services.queue_service import BATAS_HADIR_PETUGAS_DETIK, LABEL_STATUS
+from app.services.settings_service import SettingsService
 from app.services.survey_service import SurveySummary
 from app.utils.formatting import durasi_singkat
 
@@ -856,8 +857,16 @@ class DashboardService:
 
                 # Daftar kosong berarti loket boleh memanggil semua layanan.
                 diizinkan = [k.id for k in loket.categories] or None
-                menunggu_baris = repo.list_menunggu(
-                    sesi.branch_id, hari_ini, category_ids=diizinkan
+                menunggu_baris = repo.list_menunggu_berurutan(
+                    sesi.branch_id,
+                    hari_ini,
+                    rasio=max(
+                        0,
+                        SettingsService(self.auth).get_int(
+                            "queue.rasio_prioritas", 3
+                        ),
+                    ),
+                    category_ids=diizinkan,
                 )
                 sisa = len(menunggu_baris)
                 berikutnya = [

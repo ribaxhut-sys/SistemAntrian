@@ -4,7 +4,7 @@ param(
 )
 
 <#
-    Build installer Windows Sistem Antrian CRO 1.0.9.
+    Build installer Windows Sistem Antrian CRO 1.0.11.
 
         .\build-installer.ps1
 
@@ -52,7 +52,17 @@ try {
         $previousAntrianEnv[$_.Name] = $_.Value
         Remove-Item "Env:\$($_.Name)"
     }
-    $env:ANTRIAN_DB_PATH = Join-Path $stageRoot "test-data\queue.db"
+    # Aplikasi hanya mendukung PostgreSQL. Pemeriksaan hasil build memakai
+    # database uji khusus (antrian_uji), TIDAK PERNAH database kerja.
+    $urlUji = $previousAntrianEnv["ANTRIAN_DB_URL"]
+    if (-not $urlUji) {
+        $berkasUji = Join-Path $HOME ".antrian-uji-db"
+        if (Test-Path $berkasUji) { $urlUji = (Get-Content $berkasUji -Raw).Trim() }
+    }
+    if (-not $urlUji -or $urlUji -notmatch '/antrian_uji(\?|$)') {
+        throw "Build installer butuh PostgreSQL antrian_uji: isi ANTRIAN_DB_URL atau ~/.antrian-uji-db (nama database harus antrian_uji)."
+    }
+    $env:ANTRIAN_DB_URL = $urlUji
     $env:ANTRIAN_BACKUP_DIR = Join-Path $stageRoot "test-backup"
     $env:ANTRIAN_LOG_DIR = Join-Path $stageRoot "test-logs"
 
@@ -129,7 +139,7 @@ finally {
     Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$installer = Join-Path $output "AntrianCRO-Setup-1.0.9.exe"
+$installer = Join-Path $output "AntrianCRO-Setup-1.0.11.exe"
 if (-not (Test-Path $installer)) { throw "Installer tidak ditemukan: $installer" }
 
 # Nama tetap untuk dibagikan ke petugas: panduannya tidak perlu berubah
@@ -140,3 +150,7 @@ Copy-Item -LiteralPath $installer -Destination $pembaruan -Force
 Write-Host ""
 Write-Host "Selesai: $installer" -ForegroundColor Green
 Write-Host "Untuk petugas: $pembaruan" -ForegroundColor Green
+# PC loket hanya menerima pembaruan lewat server yang DITANDATANGANI kunci
+# pengembang (app/services/pembaruan_windows.py).
+Write-Host "Sebelum dibagikan lewat server, tandatangani:" -ForegroundColor Yellow
+Write-Host "  .\.venv\Scripts\python.exe alat\tandatangani_pembaruan.py `"$pembaruan`" --kunci <kunci-reset.pem>" -ForegroundColor Yellow

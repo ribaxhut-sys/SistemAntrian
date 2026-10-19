@@ -328,6 +328,33 @@ def test_layar_anjungan_memuat_nomor_menunggu(kategori):
     assert jawab.json()["waiting_queue_numbers"] == ["A-001", "A-002"]
 
 
+def test_polling_layar_anjungan_tidak_mengulang_query_yang_sama(kategori):
+    """Polling satu detik harus tetap ringan meski tablet sudah dipasangkan."""
+    from app.core.database import get_engine
+
+    klien = _klien()
+    header = _pasang("tablet-hitung-query")
+    # Kontak pertama memang mencatat versi/IP perangkat. Ukur polling rutin
+    # sesudahnya; pencatatan kontak dibatasi sekali tiap 30 detik.
+    assert klien.get("/v1/kiosk/display", headers=header).status_code == 200
+    perintah: list[str] = []
+
+    def hitung(_conn, _cursor, statement, *_args):
+        perintah.append(" ".join(statement.split()))
+
+    mesin = get_engine()
+    sa.event.listen(mesin, "before_cursor_execute", hitung)
+    try:
+        jawab = klien.get("/v1/kiosk/display", headers=header)
+    finally:
+        sa.event.remove(mesin, "before_cursor_execute", hitung)
+
+    assert jawab.status_code == 200
+    assert len(perintah) <= 10, (
+        f"polling anjungan menjalankan {len(perintah)} pernyataan SQL: {perintah}"
+    )
+
+
 # ---------------------------------------------------------------------
 # Restart API dari tablet
 # ---------------------------------------------------------------------

@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -22,6 +24,7 @@ from PySide6.QtWidgets import (
 from app.core import clock
 from app.models import QueueStatus
 from app.services.auth_service import AuthService
+from app.services.dashboard_service import DashboardService
 from app.services.master_data_service import MasterDataService
 from app.services.note_service import NoteService
 from app.services.queue_service import QueueInfo, QueueService
@@ -39,7 +42,10 @@ from app.ui.common import (
     tampilkan_peringatan,
 )
 from app.ui.efek import pasang_efek
+from app.ui.kilau import KilauTombol
 from app.ui.queue.note_panel import NotePanel
+from app.services.urutan_prioritas import MODE_BIASA, MODE_OTOMATIS, MODE_PRIORITAS
+from app.ui.queue.kartu_berikutnya import KartuBerikutnya
 from app.ui.queue.papan_tunggu import PapanTunggu
 from app.ui.queue.pelapor_form import PelaporForm
 from app.ui.style import (
@@ -267,10 +273,31 @@ class ServicePage(QWidget):
         self.pilih_kategori.setMinimumWidth(200)
         susunan.addLayout(self._berlabel("JENIS LAYANAN", self.pilih_kategori))
 
+        # Pilihan sekali pakai untuk panggilan berikutnya: otomatis mengikuti
+        # rasio prioritas; petugas dapat langsung memilih yang prioritas atau
+        # yang biasa. Kembali ke otomatis sesudah dipakai.
+        self.pilih_urutan = QComboBox()
+        self.pilih_urutan.addItem("Otomatis", MODE_OTOMATIS)
+        self.pilih_urutan.addItem("Prioritas dulu", MODE_PRIORITAS)
+        self.pilih_urutan.addItem("Biasa dulu", MODE_BIASA)
+        self.pilih_urutan.setMinimumWidth(130)
+        self.pilih_urutan.setToolTip(
+            "Urutan panggil untuk nomor berikutnya. Otomatis mengikuti rasio "
+            "prioritas di Pengaturan."
+        )
+        susunan.addLayout(self._berlabel("URUTAN PANGGIL", self.pilih_urutan))
+
         self.tombol_istirahat = tombol("Mulai Istirahat")
-        self.tombol_istirahat.setMinimumHeight(40)
+        # Padding bawaan tombol (9 px) membuatnya 42 px, dua piksel lebih
+        # tinggi daripada kotak pilihan di sebelahnya.
+        self.tombol_istirahat.setStyleSheet(
+            "padding-top: 8px; padding-bottom: 8px;"
+        )
         self.tombol_istirahat.clicked.connect(self.alihkan_istirahat)
-        susunan.addLayout(self._berlabel("", self.tombol_istirahat))
+        # Keterangan kosong (spasi tak terputus) menyamakan tinggi kolom ini
+        # dengan kolom LOKET dan JENIS LAYANAN, sehingga tombol sejajar
+        # dengan kotak pilihannya, bukan dengan keterangannya.
+        susunan.addLayout(self._berlabel(" ", self.tombol_istirahat))
 
         _beri_bayangan(kepala)
         return kepala
@@ -305,9 +332,11 @@ class ServicePage(QWidget):
 
         # Papan tunggu mengisi sisa tinggi kolom kiri: apa yang dilihat
         # pengunjung di layar antrian, tanpa berpindah tab.
-        # (Papan tunggu pindah ke tab Menunggu Dilayani di panel kanan:
-        # di sana ada sisa tinggi, di kolom ini tidak.)
-        kolom.addStretch(1)
+        # (Papan tunggu pindah ke tab Menunggu Dilayani di panel kanan.)
+        # Kartu ini hanya memakai sisa tinggi kolom dan tidak tampak bila
+        # sisanya terlalu kecil, jadi tidak pernah membuat halaman bergulir.
+        self.kartu_berikutnya = KartuBerikutnya(TUNGGU_LAMA_MENIT)
+        kolom.addWidget(self.kartu_berikutnya, stretch=1)
         # Baris survey tidak lagi di sini: ia pindah ke bawah panel kanan,
         # yang punya sisa tinggi, supaya kolom kerja muat tanpa gulir.
         self._baris_survey = self._bangun_baris_survey()
@@ -356,9 +385,18 @@ class ServicePage(QWidget):
         panggil_ulang.clicked.connect(self.panggil_ulang)
         self.aksi["panggil_ulang"] = panggil_ulang
         kolom_tombol.addWidget(panggil_ulang)
-        # Lebar tetap: tombol tidak boleh bergeser ketika status berganti.
+        # Lebar mengikuti tombol terlebar, bukan angka tetap: label
+        # "Panggil Berikutnya  ·  F2" butuh 254 px dengan Segoe UI dan
+        # terpotong ketika pembungkus dikunci 250 px. Kebijakan Minimum
+        # menjadikan sizeHint (bukan angka buatan) sebagai lebar terkecil;
+        # `setMinimumWidth` sengaja tidak dipakai karena nilai eksplisit
+        # menggantikan sizeHint itu dan layout boleh memerasnya di bawah
+        # kebutuhan teks. Teks kedua tombol tetap, jadi lebarnya tidak
+        # bergeser ketika status berganti.
         pembungkus_tombol = QWidget()
-        pembungkus_tombol.setFixedWidth(250)
+        pembungkus_tombol.setSizePolicy(
+            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred
+        )
         pembungkus_tombol.setLayout(kolom_tombol)
         kolom_tombol.setContentsMargins(0, 0, 0, 0)
         utama.addWidget(pembungkus_tombol, alignment=Qt.AlignmentFlag.AlignVCenter)
@@ -367,6 +405,25 @@ class ServicePage(QWidget):
         self.label_status = QLabel("")
         self.label_status.setAlignment(Qt.AlignmentFlag.AlignLeft)
         baris_atas.addWidget(self.label_status)
+
+        # Nomor prioritas ditandai di sini, di baris yang sudah ada, supaya
+        # kartu ini tidak bertambah tinggi. Tombol "Cabut prioritas" untuk
+        # pengunjung yang mencentang di anjungan tetapi tidak berhak.
+        self.pil_prioritas = QLabel("")
+        self.pil_prioritas.setStyleSheet(
+            f"background: {WARNING_SOFT}; color: {WARNING}; font-weight: 700;"
+            " border-radius: 10px; padding: 3px 10px;"
+        )
+        self.pil_prioritas.setVisible(False)
+        baris_atas.addWidget(self.pil_prioritas)
+        self.tombol_ubah_prioritas = QPushButton("Cabut prioritas")
+        self.tombol_ubah_prioritas.setFlat(True)
+        self.tombol_ubah_prioritas.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tombol_ubah_prioritas.clicked.connect(
+            lambda: self._cabut_prioritas(self.antrian)
+        )
+        self.tombol_ubah_prioritas.setVisible(False)
+        baris_atas.addWidget(self.tombol_ubah_prioritas)
         baris_atas.addStretch()
 
         self.label_durasi = QLabel("")
@@ -455,12 +512,18 @@ class ServicePage(QWidget):
         # Panggil Berikutnya dan Panggil Ulang ada di kartu loket di atas.
         baris_utama = QHBoxLayout()
         baris_utama.setSpacing(8)
+        # Dengan panel catatan, "selesai" bukan tombol di baris ini: ia
+        # menjadi Simpan & Selesai di kaki panel catatan (dipasang di
+        # `_bangun_panel_kanan`), karena menyelesaikan pelayanan tanpa
+        # menulis catatan tidak boleh terjadi.
         for kunci, teks, handler in (
             ("mulai_layani", "Mulai Melayani  ·  F4", self.mulai_melayani),
             ("selesai", "Selesai  ·  F8", self.selesaikan),
             ("tunda", "Tunda", self.tunda),
             ("lanjutkan", "Lanjutkan", self.lanjutkan),
         ):
+            if kunci == "selesai" and self.note is not None:
+                continue
             baris_utama.addWidget(buat_aksi(kunci, teks, handler), stretch=1)
         kotak.addLayout(baris_utama)
 
@@ -537,6 +600,8 @@ class ServicePage(QWidget):
         if self.note is not None and self.pelapor is not None:
             self.panel_pengaduan = NotePanel(self.note, self.pelapor)
             self.tab_kanan.addTab(self.panel_pengaduan, JUDUL_TAB_PENGADUAN)
+            self.panel_pengaduan.tombol_selesai.clicked.connect(self.selesaikan)
+            self.aksi["selesai"] = self.panel_pengaduan.tombol_selesai
             # Penanda isian yang belum disimpan, supaya tidak terlewat
             # ketika petugas berpindah ke tab lain.
             self.panel_pengaduan.isian_deskripsi.textChanged.connect(
@@ -594,6 +659,7 @@ class ServicePage(QWidget):
         # Klik kartu layanan menyaring daftar nomor di bawahnya.
         self.papan_tunggu.layananDipilih.connect(self._saring_menunggu)
         self._menunggu_penuh: list[QueueInfo] = []
+        self._sedang_segar = False
         susunan.addWidget(self.papan_tunggu)
 
         self.tabel = QTableWidget(0, 4)
@@ -626,6 +692,24 @@ class ServicePage(QWidget):
         ):
             kepala.setSectionResizeMode(kolom, mode)
         susunan.addWidget(self.tabel, stretch=1)
+
+        # Prioritas hanya DITANDAI di anjungan; petugas hanya mencabutnya
+        # bila pengunjung yang mencentang ternyata tidak berhak.
+        baris_prioritas = QHBoxLayout()
+        baris_prioritas.setSpacing(8)
+        self.tombol_cabut_prioritas = QPushButton("Cabut prioritas")
+        self.tombol_cabut_prioritas.clicked.connect(
+            lambda: self._cabut_prioritas(self._nomor_menunggu_terpilih())
+        )
+        baris_prioritas.addWidget(self.tombol_cabut_prioritas)
+        baris_prioritas.addStretch()
+        self.baris_prioritas = QWidget()
+        self.baris_prioritas.setLayout(baris_prioritas)
+        baris_prioritas.setContentsMargins(0, 0, 0, 0)
+        susunan.addWidget(self.baris_prioritas)
+        self._tampil_menunggu: list[QueueInfo] = []
+        self.tabel.itemSelectionChanged.connect(self._perbarui_tombol_prioritas)
+        self._perbarui_tombol_prioritas()
 
         self.panel_kosong = QFrame()
         self.panel_kosong.setObjectName("panelKosongMenunggu")
@@ -991,7 +1075,18 @@ class ServicePage(QWidget):
         menunggu = self.queue.list_waiting()
         dilewati = self.queue.list_skipped()
         kategori = self.master.list_categories(only_active=True, only_leaf=True)
-        return diminta, loket_id, loket, antrian, menunggu, dilewati, kategori
+        # Ringkasan kerja hari ini untuk kartu "Berikutnya & hari ini".
+        # Kegagalannya tidak boleh menggagalkan penyegaran pelayanan.
+        ringkasan = None
+        if self.auth is not None:
+            try:
+                ringkasan = DashboardService(self.auth).ringkasan_petugas()
+            except Exception:  # noqa: BLE001 - hanya hiasan
+                ringkasan = None
+        return (
+            diminta, loket_id, loket, antrian, menunggu, dilewati, kategori,
+            ringkasan,
+        )
 
     def _mulai_muat_latar(self) -> None:
         if self.loket_id is None and self.auth is None:
@@ -1003,7 +1098,9 @@ class ServicePage(QWidget):
         pekerja = PekerjaLatar(lambda: self._ambil_snapshot(loket_id), self)
         pekerja.berhasil.connect(self._selesai_muat_latar)
         pekerja.gagal.connect(self._gagal_muat_latar)
-        pekerja.finished.connect(self._bersihkan_pekerja_data)
+        pekerja.finished.connect(
+            lambda p=pekerja: self._bersihkan_pekerja_data(p)
+        )
         self._pekerja_data = pekerja
         pekerja.start()
 
@@ -1018,9 +1115,19 @@ class ServicePage(QWidget):
         get_logger("ui.service").warning("Penyegaran pelayanan gagal: %s", exc)
         self._tandai_gagal_sinkron()
 
-    def _bersihkan_pekerja_data(self) -> None:
-        pekerja = self._pekerja_data
-        self._pekerja_data = None
+    def _bersihkan_pekerja_data(self, pekerja: PekerjaLatar | None = None) -> None:
+        """
+        Bersihkan pekerja yang BARU SELESAI, bukan pekerja yang kini dipegang.
+
+        Sinyal `finished` pekerja lama dapat tiba sesudah penyegaran
+        berikutnya dimulai; membuang `self._pekerja_data` di sini berarti
+        menghapus pekerja baru yang masih berjalan, dan Qt menghentikan
+        proses dengan "QThread: Destroyed while thread is still running".
+        """
+        if pekerja is None:
+            pekerja = self._pekerja_data
+        if pekerja is self._pekerja_data:
+            self._pekerja_data = None
         if pekerja is not None:
             pekerja.deleteLater()
         if self._data_ditunda and self.isVisible():
@@ -1037,7 +1144,9 @@ class ServicePage(QWidget):
         self._set_sibuk(self._pekerja_aksi is not None)
 
     def _terapkan_snapshot(self, snapshot) -> None:
-        _, loket_id, loket, antrian, menunggu, dilewati, kategori = snapshot
+        _, loket_id, loket, antrian, menunggu, dilewati, kategori, ringkasan = (
+            snapshot
+        )
         if loket_id != self.loket_id:
             self.pilih_loket.blockSignals(True)
             indeks = self.pilih_loket.findData(loket_id)
@@ -1069,8 +1178,17 @@ class ServicePage(QWidget):
         self._tampilkan_antrian()
         # Papan lebih dulu: ia mengembalikan pilihan ke "Semua" bila
         # layanan yang dipilih sudah tidak punya antrian.
-        self.papan_tunggu.setel(menunggu, self.loket_kategori, clock.now())
+        # Tabel digambar sekali di bawah; sinyal pilihan yang dikembalikan
+        # papan selama setel() tidak perlu menggambarnya dengan data lama.
+        self._sedang_segar = True
+        try:
+            self.papan_tunggu.setel(menunggu, self.loket_kategori, clock.now())
+        finally:
+            self._sedang_segar = False
         self._isi_tabel(menunggu)
+        self.kartu_berikutnya.setel(
+            menunggu, self.loket_kategori, clock.now(), ringkasan
+        )
         self._isi_tabel_dilewati(dilewati)
 
     def _tandai_gagal_sinkron(self) -> None:
@@ -1138,6 +1256,7 @@ class ServicePage(QWidget):
                 )
             )
 
+        self._tampilkan_prioritas_aktif()
         self._perbarui_panel_kanan()
         self._warnai_panel_antrian()
         self._perbarui_durasi()
@@ -1264,8 +1383,38 @@ class ServicePage(QWidget):
         self._perbarui_tombol_panggil_kembali()
         self._sorot_aksi_utama()
 
+    def _sasaran_kilau(self) -> str | None:
+        """
+        Tombol yang berkilau: langkah yang paling mungkin diambil petugas.
+
+        Loket kosong: Panggil Berikutnya. Sudah dipanggil: Panggil Ulang,
+        sampai batas panggilan; sesudah itu Lewati Sementara.
+        """
+        if self._mode_ganti_loket or self._dialihkan_ke_petugas_lain():
+            return None
+        if self.antrian is None:
+            return "panggil" if self.tombol_panggil.isEnabled() else None
+        if self.antrian.status is QueueStatus.CALLED:
+            kunci = (
+                "lewati" if self.antrian.melewati_batas_panggilan else "panggil_ulang"
+            )
+            return kunci if self.aksi[kunci].isEnabled() else None
+        return None
+
+    def _setel_kilau(self) -> None:
+        if not hasattr(self, "kilau"):
+            self.kilau = {
+                "panggil": KilauTombol(self.tombol_panggil, "#FFFFFF"),
+                "panggil_ulang": KilauTombol(self.aksi["panggil_ulang"], PRIMARY),
+                "lewati": KilauTombol(self.aksi["lewati"], WARNING),
+            }
+        sasaran = self._sasaran_kilau()
+        for kunci, efek in self.kilau.items():
+            efek.aktifkan(kunci == sasaran)
+
     def _sorot_aksi_utama(self) -> None:
         """Tonjolkan tepat satu langkah berikutnya tanpa memindahkan tombol."""
+        self._setel_kilau()
         setel_variant(
             self.tombol_panggil,
             "primary" if self.tombol_panggil.isEnabled() else "",
@@ -1315,6 +1464,12 @@ class ServicePage(QWidget):
             return
         if self.aksi["selesai"].isEnabled():
             setel_variant(self.aksi["selesai"], "success")
+        panel = self.panel_pengaduan
+        if panel is not None and not panel.catatan_memadai:
+            self.label_petunjuk_aksi.setText(
+                "Isi catatan petugas untuk menyelesaikan pelayanan"
+            )
+            return
         self.label_petunjuk_aksi.setText("Pelayanan sedang berjalan")
 
     def _dialihkan_ke_petugas_lain(self) -> bool:
@@ -1453,6 +1608,7 @@ class ServicePage(QWidget):
         self.panel_kosong.setVisible(not menunggu)
 
         self.tabel.setRowCount(len(tampil))
+        self._tampil_menunggu = list(tampil)
         # Judul tab dan warnanya selalu menghitung SELURUH antrian, bukan
         # hanya yang sedang disaring.
         lama_menit = [
@@ -1461,7 +1617,7 @@ class ServicePage(QWidget):
         for baris, q in enumerate(tampil):
             lama = int((sekarang - q.created_at).total_seconds() // 60)
             nilai = [
-                q.queue_number,
+                f"★ {q.queue_number}" if q.prioritas else q.queue_number,
                 q.category_name,
                 q.created_at.strftime("%H:%M"),
                 f"{lama} menit",
@@ -1473,8 +1629,49 @@ class ServicePage(QWidget):
 
         self._perbarui_judul_tab_menunggu(len(menunggu), lama_menit)
 
+    # -----------------------------------------------------------------
+    # Prioritas
+    # -----------------------------------------------------------------
+
+    def _tampilkan_prioritas_aktif(self) -> None:
+        """Pita prioritas pada nomor yang sedang ditangani loket ini."""
+        antrian = self.antrian
+        ada = antrian is not None and antrian.prioritas is not None
+        self.pil_prioritas.setVisible(ada)
+        self.tombol_ubah_prioritas.setVisible(ada)
+        if not ada:
+            return
+        teks = f"★ PRIORITAS · {antrian.label_prioritas}"
+        if antrian.prioritas_mandiri:
+            teks += " · dipilih pengunjung, mohon periksa"
+        self.pil_prioritas.setText(teks)
+
+    def _perbarui_tombol_prioritas(self) -> None:
+        dipilih = self._nomor_menunggu_terpilih()
+        self.tombol_cabut_prioritas.setEnabled(
+            dipilih is not None and dipilih.prioritas is not None
+        )
+
+    def _nomor_menunggu_terpilih(self) -> QueueInfo | None:
+        baris = self.tabel.currentRow()
+        if 0 <= baris < len(self._tampil_menunggu):
+            return self._tampil_menunggu[baris]
+        return None
+
+    def _cabut_prioritas(self, target: QueueInfo | None) -> None:
+        """Cabut prioritas pada nomor aktif atau baris terpilih."""
+        if target is None or target.prioritas is None:
+            return
+        antrian_id = target.id
+        self._jalankan(
+            lambda: self.queue.cabut_prioritas(antrian_id),
+            "Gagal mencabut prioritas",
+        )
+
     def _saring_menunggu(self, _kategori_id=None) -> None:
         """Pilihan kartu berubah: gambar ulang daftar dari data terakhir."""
+        if self._sedang_segar:
+            return
         self._isi_tabel(self._menunggu_penuh)
 
     def _isi_tabel_dilewati(self, dilewati: list[QueueInfo]) -> None:
@@ -1642,7 +1839,9 @@ class ServicePage(QWidget):
             lambda hasil: self._selesai_aksi(hasil, setelah)
         )
         pekerja.gagal.connect(lambda exc: self._gagal_aksi(exc, judul_gagal))
-        pekerja.finished.connect(self._bersihkan_pekerja_aksi)
+        pekerja.finished.connect(
+            lambda p=pekerja: self._bersihkan_pekerja_aksi(p)
+        )
         self._pekerja_aksi = pekerja
         pekerja.start()
 
@@ -1655,9 +1854,12 @@ class ServicePage(QWidget):
     def _gagal_aksi(self, exc: Exception, judul: str) -> None:
         tampilkan_error(self, exc, judul)
 
-    def _bersihkan_pekerja_aksi(self) -> None:
-        pekerja = self._pekerja_aksi
-        self._pekerja_aksi = None
+    def _bersihkan_pekerja_aksi(self, pekerja: PekerjaLatar | None = None) -> None:
+        """Seperti `_bersihkan_pekerja_data`: hanya yang baru selesai yang dibuang."""
+        if pekerja is None:
+            pekerja = self._pekerja_aksi
+        if pekerja is self._pekerja_aksi:
+            self._pekerja_aksi = None
         if pekerja is not None:
             pekerja.deleteLater()
         self._set_sibuk(
@@ -1685,14 +1887,22 @@ class ServicePage(QWidget):
         if self.loket_id is None or not self.tombol_panggil.isEnabled():
             return
         category_id = self.pilih_kategori.currentData()
+        urutan = self.pilih_urutan.currentData() or MODE_OTOMATIS
         loket_id = self.loket_id
         survey_lama = self.baru_selesai
+
+        def setelah(_hasil) -> None:
+            # Pilihan manual hanya berlaku untuk satu panggilan.
+            self.pilih_urutan.setCurrentIndex(0)
+            if survey_lama is not None:
+                self._lewati_survey_lama(survey_lama)
+
         self._jalankan(
-            lambda: self.queue.call_next(loket_id, category_id=category_id),
+            lambda: self.queue.call_next(
+                loket_id, category_id=category_id, urutan=urutan
+            ),
             "Gagal memanggil antrian",
-            (lambda _hasil: self._lewati_survey_lama(survey_lama))
-            if survey_lama is not None
-            else None,
+            setelah,
         )
 
     def _lewati_survey_lama(self, survey_lama: QueueInfo) -> None:
@@ -1742,17 +1952,26 @@ class ServicePage(QWidget):
         tersimpan pada detik itu hilang tanpa dapat diketik ulang, karena
         yang menceritakannya sudah berdiri meninggalkan meja.
         """
-        if self.antrian is None or not self.aksi["selesai"].isEnabled():
+        if self.antrian is None:
             return
+        panel = self.panel_pengaduan
         if (
-            self.panel_pengaduan is not None
-            and self.panel_pengaduan.ada_isian
-            and not self.panel_pengaduan.simpan()
+            panel is not None
+            and self.antrian.status is QueueStatus.SERVING
+            and not panel.catatan_memadai
         ):
+            # F8 tanpa catatan: bawa petugas ke kotaknya, jangan diam saja.
+            self.tab_kanan.setCurrentWidget(panel)
+            panel.fokus_catatan()
+            return
+        if not self.aksi["selesai"].isEnabled():
+            return
+        if panel is not None and not panel.simpan():
             return
         antrian_id = self.antrian.id
+        wajib_catatan = panel is not None
         self._jalankan(
-            lambda: self.queue.complete(antrian_id),
+            lambda: self.queue.complete(antrian_id, wajib_catatan=wajib_catatan),
             "Gagal menyelesaikan pelayanan",
             self._simpan_antrian_baru_selesai,
         )

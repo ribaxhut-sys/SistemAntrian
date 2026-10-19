@@ -42,6 +42,27 @@ ditolak `ringkasan_petugas()`; `SUPERVISOR` ditolak `aktivitas_terakhir()`.
 ditentukan dari sesi dan loket bawaan akun di database, sehingga petugas
 tidak dapat meminta data rekannya dengan memanggil service langsung.
 
+## Laporan dan unduhan PDF/Excel
+
+| | Admin/supervisor | Petugas CRO |
+|---|---|---|
+| Menu | **Laporan** | **Laporan Saya** |
+| Hak akses | `REPORT_VIEW` | `QUEUE_CALL` |
+| Cakupan | seluruh cabang | hanya nomor yang ditangani sesi aktif |
+| Service | `ReportService.laporan()` | `ReportService.laporan_petugas()` |
+| Unduhan | PDF dan Excel seluruh cabang | PDF dan Excel pribadi |
+
+Jalur pribadi tidak menerima id petugas dari UI. Service mengambil `user_id`
+dari sesi, menyaring nomor dan survey, serta tidak memasukkan nomor yang masih
+menunggu atau ditangani akun lain. PDF/Excel pribadi menghilangkan tabel lintas
+petugas yang redundan, tetapi tetap memuat per hari, layanan, loket, ringkasan,
+dan riwayat pelayanan milik petugas tersebut.
+
+Ekspor memakai nama berkas berbeda untuk laporan cabang dan pribadi. Berkas
+disusun ke nama sementara pada folder tujuan lalu diganti secara atomik; bila
+pembuatan gagal atau berkas tujuan sedang dikunci aplikasi lain, berkas lama
+tidak ditimpa sebagian.
+
 ## Isi Dashboard (admin & supervisor)
 
 - Angka sekilas: total, menunggu, sedang dilayani, selesai, batal atau dilewati.

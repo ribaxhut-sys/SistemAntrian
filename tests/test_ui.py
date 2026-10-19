@@ -1665,6 +1665,96 @@ def test_klik_kartu_papan_menyaring_daftar_menunggu(
     assert halaman_layanan.tabel.rowCount() == 3
 
 
+def test_tombol_istirahat_sejajar_dengan_kotak_pilihan(halaman_layanan):
+    """Kolom tombol tidak boleh bergeser terhadap LOKET dan JENIS LAYANAN."""
+    from PySide6.QtWidgets import QApplication
+
+    from app.ui.style import STYLESHEET
+
+    QApplication.instance().setStyleSheet(STYLESHEET)
+    halaman_layanan.show()
+    QApplication.processEvents()
+
+    def posisi(w):
+        return w.mapTo(halaman_layanan, w.rect().topLeft()).y(), w.height()
+
+    assert posisi(halaman_layanan.tombol_istirahat) == posisi(
+        halaman_layanan.pilih_loket
+    )
+    assert posisi(halaman_layanan.pilih_kategori) == posisi(
+        halaman_layanan.pilih_loket
+    )
+
+
+def test_kartu_berikutnya_menampilkan_nomor_dan_ringkasan(
+    qtbot, halaman_layanan, terbitkan, auth
+):
+    terbitkan("A", 2)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.resize(900, 1100)
+    halaman_layanan.show()
+    halaman_layanan.muat_ulang()  # halaman terlihat: dimuat di latar
+
+    kartu = halaman_layanan.kartu_berikutnya
+    qtbot.waitUntil(
+        lambda: "A-001" in " ".join(kartu.baris_tampil), timeout=5000
+    )
+    assert "A-002" in " ".join(kartu.baris_tampil)
+
+
+def _terbit_mandiri(auth, antrian_siap, perangkat: str):
+    """Nomor prioritas yang dicentang pengunjung di anjungan."""
+    from app.services.queue_service import QueueService
+
+    auth.logout()
+    auth.mulai_sesi_kios()
+    return QueueService(auth).create_queue(
+        antrian_siap["kategori"]["A"], perangkat=perangkat, prioritas_mandiri=True
+    )
+
+
+def test_petugas_mencabut_prioritas_dari_daftar(
+    halaman_layanan, terbitkan, auth, antrian_siap
+):
+    terbitkan("A", 1)
+    _terbit_mandiri(auth, antrian_siap, "tab-ui-1")
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+    tabel = halaman_layanan.tabel
+    # Prioritas lebih dulu dan berbintang.
+    assert tabel.item(0, 0).text().startswith("★")
+    assert not halaman_layanan.tombol_cabut_prioritas.isEnabled()
+
+    tabel.setCurrentCell(0, 0)
+    assert halaman_layanan.tombol_cabut_prioritas.isEnabled()
+    halaman_layanan._cabut_prioritas(halaman_layanan._nomor_menunggu_terpilih())
+
+    assert not tabel.item(0, 0).text().startswith("★")
+    assert tabel.item(0, 0).text() == "A-001"
+
+
+def test_petugas_tidak_memiliki_tombol_tandai_prioritas(halaman_layanan):
+    assert not hasattr(halaman_layanan, "tombol_tandai_prioritas")
+
+
+def test_pita_prioritas_tampil_pada_nomor_aktif(
+    halaman_layanan, auth, antrian_siap
+):
+    _terbit_mandiri(auth, antrian_siap, "tab-ui-2")
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+
+    halaman_layanan.panggil_berikutnya()
+
+    assert halaman_layanan.pil_prioritas.isVisibleTo(halaman_layanan)
+    assert "PRIORITAS" in halaman_layanan.pil_prioritas.text()
+    assert "mohon periksa" in halaman_layanan.pil_prioritas.text()
+    assert halaman_layanan.tombol_ubah_prioritas.isVisibleTo(halaman_layanan)
+
+
 def test_tabel_menyusut_setelah_dipanggil(halaman_layanan, terbitkan, auth):
     terbitkan("A", 3)
     auth.logout()
@@ -1704,14 +1794,22 @@ def test_menu_petugas_cro_dan_pendaftaran_tidak_tumpang_tindih(qtbot, auth, antr
     # "Pengaduan" BUKAN pekerjaan yang sama dengan "Pelayanan":
     # panel pelayanan menulis lembar untuk nomor yang sedang di depan meja,
     # layar ini mencari lembar milik hari-hari sebelumnya.
-    assert menu == ["Pelayanan", "Ringkasan Saya", "Survey Kepuasan", "Pengaduan"]
+    assert menu == [
+        "Pelayanan",
+        "Ringkasan Saya",
+        "Survey Kepuasan",
+        "Pengaduan",
+        # Riwayat milik CRO sendiri; disaring lagi oleh ReportService.
+        "Laporan Saya",
+        "Tampilan",
+    ]
 
     auth.logout()
     auth.login("registration", TEST_PASSWORD)
     jendela2 = MainWindow(auth)
     qtbot.addWidget(jendela2)
     menu2 = [jendela2.navigasi.item(i).text() for i in range(jendela2.navigasi.count())]
-    assert menu2 == ["Terbitkan Nomor", "Ringkasan Saya"]
+    assert menu2 == ["Terbitkan Nomor", "Ringkasan Saya", "Tampilan"]
 
 
 # ---------------------------------------------------------------------
@@ -2601,7 +2699,7 @@ def test_menu_hasil_survey_hanya_untuk_supervisor(qtbot, auth, antrian_siap):
     jendela = MainWindow(auth)
     qtbot.addWidget(jendela)
     menu = [jendela.navigasi.item(i).text() for i in range(jendela.navigasi.count())]
-    assert menu == ["Pengaduan", "Dashboard", "Laporan", "Hasil Survey"]
+    assert menu == ["Pengaduan", "Dashboard", "Laporan", "Hasil Survey", "Tampilan"]
 
     for peran in ("cro", "admin", "registration"):
         auth.logout()
@@ -2625,7 +2723,7 @@ def test_supervisor_hanya_memantau(qtbot, auth, antrian_siap):
     # "Pengaduan" ikut ada, dan itu tetap memantau: supervisor
     # boleh MEMBACA lembar pengaduan, tidak boleh menulis maupun
     # menghapusnya — menulis milik CRO, menghapus milik ADMIN.
-    assert menu == ["Pengaduan", "Dashboard", "Laporan", "Hasil Survey"]
+    assert menu == ["Pengaduan", "Dashboard", "Laporan", "Hasil Survey", "Tampilan"]
 
 
 def test_timer_hanya_berjalan_pada_halaman_yang_terlihat(qtbot, auth, antrian_siap):

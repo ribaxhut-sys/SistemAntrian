@@ -143,6 +143,18 @@ Layanan Anjungan menampilkan peringatan di baris Paket suara.
   `{"nama", "mulai", "selesai", "detik"}`; butir tanpa aturan tetap berupa
   nama saja, jadi nilai lama terbaca apa adanya. `welcome_media_files[].seconds`
   membawa lama tampilnya ke tablet.
+- **Tempat tampil (APK 2.4.34.1).** Video untuk strip panel atas (mendatar,
+  kecil) dan video untuk layar penuh (seluruh layar) berbeda bentuknya, jadi
+  di dialog **Atur jadwal…** tiap berkas punya **Tampil di**: *Panel atas*,
+  *Layar penuh*, atau *Keduanya* (bawaan). Disimpan sebagai `"tampil":
+  "panel" | "penuh"` pada butir (tidak ditulis bila keduanya) dan dikirim ke
+  tablet sebagai `welcome_media_files[].show`.
+  - Normal: panel atas memutar berkas *Panel atas* dan *Keduanya*.
+  - Menganggur melewati **Iklan layar penuh saat menganggur**: layar penuh
+    memutar berkas *Layar penuh* dan *Keduanya*. Bila tidak ada satu pun,
+    layar penuh tidak diaktifkan dan layar tetap menampilkan menu — video
+    strip tidak dipaksa memenuhi layar, dan sebaliknya.
+  - APK lama mengabaikan `show` dan memutar semuanya seperti dulu.
 - **Saat pengunjung bertransaksi** (memilih layanan, konfirmasi, menunggu
   tiket, layar "Nomor Anda", atau 15 detik sejak sentuhan terakhir) video
   selalu dibisukan dan panel iklan diredupkan. Sub-menu layanan yang
@@ -150,9 +162,24 @@ Layanan Anjungan menampilkan peringatan di baris Paket suara.
   iklan memenuhi layar.
 - **Iklan layar penuh.** Setelah **Iklan layar penuh saat menganggur**
   (bawaan 60 detik, 0 = mati) tanpa sentuhan, iklan memenuhi layar dengan
-  ajakan "Sentuh layar untuk mengambil nomor antrian". Sentuhan pertama hanya
+  ajakan "Sentuh layar untuk mengambil nomor antrian" (**panel di ATAS layar**, latar
+  navy pekat, tetap tampil selama iklan; video diletakkan di bawah panel
+  sehingga tidak ada bagian video tertutup dan rasio tetap terjaga (mode
+  pas, pita hitam bila rasio berbeda). Tinggi panel ±12% tinggi layar untuk
+  layar memanjang (>2:1, mis. ±4,4:1) dan ±8% untuk layar tegak/biasa,
+  dibatasi 44–96 dp; huruf mengecil otomatis bila teks tak muat. Dibanding
+  menimpa video dengan panel yang muncul-hilang: menimpa menutup bagian atas
+  video pada layar memanjang (video sudah setinggi layar) dan perubahan
+  ukuran area video tiap siklus memicu tata ulang pemutar, jadi dipilih
+  panel tetap; ongkosnya hanya ±8–12% tinggi video). Kode:
+  `tampilkanPanelAjakanIklan`; panel berdenyut halus (~2,8 detik/siklus; latar warna dasar↔puncak +-12% dan teks memudar ringan, tanpa skala sehingga video tidak berubah ukuran; `mulaiDenyutAjakanIklan`), dihentikan saat iklan selesai/disentuh, mode putar saja, onStop, onDestroy; belum diuji di perangkat, hanya dikompilasi. Sentuhan pertama hanya
   mengembalikan layar biasa, tidak diteruskan ke tombol layanan. Tidak aktif
   selama dialog terbuka, pembaruan APK, atau bila media gagal diputar.
+  Mulai APK 2.4.34.1 iklan memenuhi **seluruh layar** tanpa margin, padding,
+  sudut membulat, dan garis tepi, di atas latar hitam. Video dan gambar tetap
+  utuh (rasio dijaga; pita hitam bila rasionya berbeda dengan layar), tidak
+  dipotong. Siapkan video dengan rasio yang sama dengan layar tablet agar
+  tidak ada pita hitam.
 - **Laporan tayang.** Tablet menghitung berapa kali tiap berkas mulai tampil
   (satu berkas yang tampil terus dihitung tiap putaran/lama tampilnya) dan
   berapa kali gagal, lalu mengirimnya tiap menit ke
@@ -226,6 +253,212 @@ seketika tanpa tombol Simpan:
 
 Lama tampil gambar, suara video, dan posisi baris loket tetap mengikuti
 pengaturan server pada kedua sumber.
+
+### Putaran iklan layar penuh (setelah 2.4.34.1, belum dirilis)
+
+Iklan layar penuh tidak lagi berputar tanpa henti: setelah
+**Putaran iklan layar penuh** (`kiosk.iklan_putaran`, bawaan **2**, 0 = terus)
+putaran selesai, anjungan kembali ke tampilan antrian dan menunggu
+**Iklan layar penuh saat menganggur** dari nol; bila tetap tidak ada
+kegiatan, iklan muncul lagi, dan seterusnya. Satu putaran = seluruh daftar
+layar penuh diputar sekali (satu video = diputar sekali sampai selesai; satu
+gambar = tampil sekali selama lama tampilnya). Dikirim ke tablet sebagai
+`fullscreen_ad_loops` pada `/v1/kiosk/display`. Sentuhan tetap langsung
+kembali ke menu dan menyetel ulang hitungan. Mode putar saja tetap berputar
+terus (tidak ada tampilan antrian untuk kembali).
+
+### Animasi kembali ke antrian (setelah 2.4.34.1, belum dirilis)
+
+Saat iklan layar penuh selesai, tiga panel (judul dan loket, pilihan layanan,
+hasil nomor) masuk dari **arah acak yang berbeda satu sama lain** (kiri,
+kanan, atas, bawah) dan berbeda dari kali sebelumnya, dengan pantulan kecil.
+Putaran habis: **1800 ms** per panel, berurutan 250 ms, pantulan 0,3.
+Pengunjung menyentuh: 900 ms tanpa jeda, supaya tidak menunda pilihan
+layanan. Hanya geser dan transparansi.
+
+**Mulai sebelum iklan berakhir.** Pada berkas terakhir di putaran terakhir,
+iklan meredup (600 ms, suara dibisukan) lalu tampilan antrian mulai masuk
+`kiosk.animasi_mulai_detik` (bawaan **2** detik; `return_animation_lead_seconds`)
+sebelum berkas itu selesai, jadi akhir iklan bertumpuk dengan animasi. Berkas
+yang lebih pendek dari jeda itu mulai segera; 0 = animasi baru mulai setelah
+iklan selesai. Waktu mulai dihitung dari durasi video (`getDuration`) atau lama
+tampil gambar. Sentuhan di tengah peredupan membatalkannya dan langsung ke
+menu.
+Saklar **Animasi saat kembali ke antrian** (`kiosk.animasi_kembali`, bawaan
+nyala; `return_animation` pada `/v1/kiosk/display`); dilewati otomatis bila
+animasi dimatikan di pengaturan Android tablet.
+
+### Animasi nomor menunggu (setelah 2.4.34.1, belum dirilis)
+
+Nomor menunggu tidak lagi muncul sekaligus: **baris demi baris** (selang 200
+ms) dan **di dalam baris tiap nomor** selang 70 ms, dengan gaya yang **diacak
+dari gaya lama papan**: *papan balik* (berputar dari sumbu horizontal),
+*papan balik tegak* (sumbu vertikal), dan *pop* (membesar dengan pantulan),
+berbeda dari nomor sebelumnya. Total selang dibatasi 1,5 detik; paling banyak
+24 nomor dianimasikan. Dipakai saat panel pertama tampil, saat **halaman
+berganti**, dan saat **kembali dari iklan** (mulai sesudah panelnya hampir
+tiba). **Nomor baru bertambah tetap memakai *pop*** (bukan acak) supaya jelas
+itu nomor baru. Saklar **Animasi nomor menunggu**
+(`kiosk.animasi_nomor_menunggu`, bawaan nyala; `waiting_animation` pada
+`/v1/kiosk/display`); dilewati bila animasi Android dimatikan. Bila saklar
+mati, perilaku lama (papan balik berurutan 45 ms saat halaman berganti, pop
+untuk nomor baru) dipakai.
+
+**Perataan.** Nomor menunggu mengisi dari **atas** panel: bila tidak penuh,
+ruang kosong ada di bawah (sebelumnya blok nomor di tengah vertikal dan ikut
+bergeser tiap ada nomor dipanggil). Titik halaman tetap di bagian bawah.
+
+### Panel keluar saat iklan akan muncul; kotak prioritas di atas (setelah 2.4.34.1, belum dirilis)
+
+- Kotak prioritas kini di **atas** tombol layanan (`showCategories`), di semua
+  tingkat menu.
+- Kebalikan animasi kembali: ±1,5 detik sebelum waktu menganggur habis, tiga panel
+  keluar ke arah acak (`mulaiKeluarPanel`, arah dari `arahPanelBaru`, dipakai
+  bersama animasi masuk), lalu iklan memudar masuk tanpa transisi lain
+  (`panelSudahKeluar`). Disentuh atau ada panggilan di tengah animasi → panel
+  kembali dan iklan batal (`batalkanKeluarPanel`).
+- Setelan server **Animasi saat iklan akan muncul** (`kiosk.animasi_iklan_muncul`,
+  API `ad_entry_animation`, bawaan aktif). Dilewati bila animasi Android mati,
+  mode putar saja, atau waktu menganggur < 5 detik.
+
+### Bintang prioritas pada nomor menunggu (setelah 2.4.34.1, belum dirilis)
+
+Nomor prioritas diberi bintang kecil di **pojok kiri atas ubin** (digambar terpisah, teks nomor tetap polos) dan latar amber lembut di daftar nomor menunggu, **tanpa menyebut alasan**
+(lansia/disabilitas/ibu hamil tidak pernah dikirim ke perangkat publik).
+- Anjungan: `/v1/kiosk/display` mengirim `waiting_priority_numbers` (subset
+  `waiting_queue_numbers`); `nomorPrioritasMenunggu` masuk tanda gambar ulang.
+- Layar antrian Android: `/v1/layar/state` mengirim `next_priority` (subset `next`).
+- Layar Windows: `LabelNomorMenunggu` (display_page.py) menggambar bintang bila `QueueInfo.prioritas`.
+- Nomor milik pengunjung di anjungan tetap berlatar `UTAMA` (sorotan tidak tertimpa kuning).
+- Server: `QueueService.nomor_prioritas_menunggu_untuk_layar()`.
+
+### Warna kilau bebas (setelah 2.4.34.1, belum dirilis)
+
+Pengaturan > warna kilau: bulatan pelangi "+" di barisan paling depan, sebelum 7 warna tetap,
+membuka pemilih (pita jenis warna, bidang kejenuhan x kecerahan, isian hex).
+Disimpan per tablet di `warna_kilau` sebagai `#RRGGBB`; pilihan lama (`emas`,
+`biru`, dst.) tetap berlaku. Kecerahan dibatasi minimal 0,5
+(`NILAI_MINIMUM_KILAU`) supaya sapuan terlihat; sapuan pratinjau jalan saat jari
+dilepas. Kode: `bukaPemilihWarnaKilau`, `BidangWarnaKilau`.
+
+### Warna latar iklan penuh per tablet (setelah 2.4.34.1, belum dirilis)
+
+Pengaturan (dialog yang dilindungi PIN) > bagian Tampilan > **Warna latar iklan
+layar penuh**: 5 bulatan cepat (navy, hitam, hijau tua, merah marun, ungu tua)
+dan bulatan "+" yang membuka isian `#RRGGBB` dengan pratinjau. Disimpan lokal di
+SharedPreferences kunci `latar_iklan_penuh` (bukan di server; tanpa kolom DB,
+tanpa API). Bawaan navy `#0F172A`.
+- Validasi (`uraiLatarIklan`): wajib `#RRGGBB` dan luminans relatif WCAG <= 0,6;
+  isian yang tak sah mematikan tombol "Pakai warna ini" dengan pesan, nilai
+  tersimpan yang tak sah jatuh ke navy.
+- Turunan otomatis (`terapkanLatarIklanPenuh`): teks putih di latar gelap,
+  hitam di latar terang (kontras tertinggi); puncak denyut = warna dasar
+  digeser 12% (ke putih untuk latar gelap, ke hitam untuk latar terang).
+  Siklus tetap 2,8 detik.
+- Satu sumber: variabel `latarIklanPenuh` (menggantikan konstanta
+  `LATAR_IKLAN_PENUH`) dipakai panel ajakan, sisi video (`VideoTekstur`), latar
+  gambar, `rootLayout`, dan `panelInfo`. Hanya panel atas yang berdenyut.
+  Perubahan saat iklan tampil langsung diterapkan. Kode: `barisLatarIklan`,
+  `bukaIsianLatarIklan`. Belum diuji di perangkat, hanya dikompilasi.
+
+### Latar kertas (setelah 2.4.34.1, belum dirilis)
+
+Latar di belakang panel anjungan bisa berupa kertas: warna tema dihangatkan ke
+krem dan diberi butiran halus (bitmap 128x128 dibuat di kode, diulang), panel
+mendapat bayangan sedikit lebih tebal. Pengaturan per tablet **Latar belakang
+tablet ini** (kunci `latar_kertas`): `polos` (bawaan, tampilan tidak berubah),
+`tema` (kertas hanya di tema terang; gelap dan kontras tinggi tetap polos),
+`kertas` (selalu). Berlaku seketika lewat bangun ulang tampilan.
+
+### Dialog Media di tablet ini (setelah 2.4.34.1, belum dirilis)
+
+Pengaturan > Kelola media tablet (`showMediaTablet`). Isi: ringkasan (jumlah,
+total ukuran, sumber aktif, sisa ruang), penanda "N berkas di server belum ada
+di tablet" (ketuk untuk Salin dari server; hilang diam-diam bila server tidak
+terjangkau), daftar dikelompokkan **Video** dan **Gambar** dengan gambar mini
+(video: ikon putar + durasi; dibuat di latar belakang, di-cache), lencana tempat
+tampil, menu **Aksi** per berkas (panel atas / layar penuh / keduanya / Hapus),
+menu **Lainnya** > Hapus semua berkas. Keadaan kosong menampilkan tombol besar
+Salin dari server dan Tambah berkas. Dialog dibuka ulang sesudah tiap aksi.
+
+### Panggilan mengalahkan iklan (setelah 2.4.34.1, belum dirilis)
+
+Prioritas tampilan: **panggilan > transaksi pengunjung > iklan layar penuh >
+iklan panel**. Saat petugas memanggil atau memanggil ulang nomor, iklan layar
+penuh langsung berhenti (animasi panel masuk 900 ms), nomor dan loket tampil
+besar sebagai banner ±6 detik, dan hitungan menganggur dimulai dari nol.
+
+- Server: `/v1/kiosk/display` mengirim `call_interrupts_ad` (setelan
+  **Panggilan menghentikan iklan**, grup *Perilaku Iklan*, bawaan aktif) dan
+  `call_count` per loket (jumlah panggilan + panggilan ulang).
+- Tablet mengenali panggilan baru dari perubahan `nomor#call_count` loket
+  berstatus Dipanggil (`deteksiPanggilanBaru`). Muatan pertama tidak dihitung.
+  Selama iklan layar penuh aktif, display diambil tiap 1 detik (biasanya 5).
+- Tidak berlaku pada mode putar saja; tidak mengganggu layar konfirmasi atau
+  hasil (iklan tetap dihentikan, banner ditahan).
+- Pembatalan: peredupan/animasi awal menjelang akhir iklan dibatalkan.
+
+### Teks loket tanpa panggilan (setelah 2.4.34.1, belum dirilis)
+
+Loket yang aktif tetapi tidak sedang memanggil menampilkan **"Siap melayani"**
+(satu baris, huruf menyusut otomatis sampai muat); loket istirahat
+menampilkan "Istirahat". Berlaku di baris "NOMOR DI LOKET" anjungan dan di
+kartu loket layar antrian (`status` `KOSONG` dari `/v1/kiosk/display` dan
+`/v1/layar/state` tidak diubah). Sebelumnya anjungan menampilkan "—" dan layar
+antrian menampilkan "KOSONG".
+
+### PIN pengaturan dan mode putar saja (setelah 2.4.34.1, belum dirilis)
+
+- **PIN pengaturan.** Satu PIN 6 angka untuk semua tablet, diatur admin di
+  Layanan Anjungan → **PIN anjungan ▾** (atur/ganti/hapus). Server menyimpan
+  hash PBKDF2-SHA1 berbumbu (`kiosk.pin_pengaturan`, tidak tampil di
+  Pengaturan), bukan PIN-nya (`app/services/pin_anjungan.py`). Tombol ⚙ di
+  anjungan meminta PIN lewat papan angka; tablet memverifikasi ke server
+  (`POST /v1/kiosk/pin/verifikasi`, penundaan 1/5/15 menit per tablet setelah
+  5/10/15 kali salah, dihitung di server) dan, bila server tidak terjangkau,
+  dengan hash terakhir yang dikirim pada `/v1/kiosk/display`
+  (`settings_pin`). Hash itu **hanya dikirim ke tablet yang dipasangkan**;
+  tablet token bersama tidak menerimanya (lihat keamanan-sesi.md). Pada
+  token bersama penundaan dihitung per alamat IP. Pengaturan menutup sendiri
+  setelah 2 menit tanpa sentuhan.
+  - **Tidak diminta** pada tablet yang belum pernah tersambung (belum
+    dipasang, supaya alamat server dapat diisi) dan bila server belum
+    memasang PIN.
+- **Mode putar saja.** Bila server tidak terjangkau ≥ 30 detik (dan tablet
+  pernah tersambung), semua fitur mati: tanpa menu, tiket, kotak prioritas,
+  dan ⚙. Layar memutar video dari salinan di tablet (daftar *Layar penuh*;
+  bila kosong, daftar *Panel atas*) dengan teks redup "Menghubungkan ke
+  server…". Tanpa media: "Layanan antrian sementara tidak tersedia. Silakan
+  hubungi petugas." Kembali normal otomatis begitu server terjangkau; tidak
+  menyela pengunjung yang sedang di layar konfirmasi atau hasil nomor.
+  Daftar media terakhir disimpan di tablet supaya mode ini bekerja sesudah
+  dinyalakan ulang saat server mati.
+- **Jalan pulih.** Dalam mode putar saja, sentuh-tahan pojok kiri bawah
+  5 detik (tanpa tanda di layar) membuka papan PIN yang diperiksa dengan hash
+  tersimpan; bila benar, ⚙ terbuka untuk memperbaiki alamat server.
+- **Tempat tampil untuk folder tablet.** Pada sumber media *Folder media di
+  tablet ini*, tiap berkas di **Kelola media tablet** punya tombol *Keduanya /
+  Panel atas / Layar penuh* (disimpan di tablet menurut nama berkas). Pada
+  sumber server, aturan server yang berlaku.
+
+### Salinan media: status, segarkan, dan salin dari server
+
+- **Status per anjungan.** Tablet melaporkan berapa berkas daftar putar yang
+  sudah tersalin utuh (`POST /v1/kiosk/media-status`: `total`, `copied`,
+  `bytes`). Kartu perangkat di **Layanan Anjungan** menampilkannya di kolom
+  **Media**, mis. "2 dari 3 tersalin · 58 MB" (hijau bila lengkap, kuning
+  bila belum). Dilaporkan saat angkanya berubah dan paling lama lima menit
+  sekali.
+- **Segarkan media.** Tombol **Segarkan media** pada baris anjungan meminta
+  tablet itu memeriksa dan menyalin ulang medianya sekarang, dengan
+  melewati jeda coba-ulang unduhan yang gagal. Server menyimpan penandanya
+  (`kiosk_device.media_segarkan`) dan mengirimnya sebagai `media_refresh`
+  pada `GET /v1/kiosk/display`; tablet menanganinya sekali per penanda.
+- **Salin dari server.** Di ⚙ Pengaturan tablet → **Kelola media tablet** →
+  **Salin dari server**: daftar SEMUA berkas di folder media server
+  (`GET /v1/kiosk/media-library`, bukan hanya daftar putar), dipilih lalu
+  disalin ke folder media tablet (`GET /v1/kiosk/media-library/{nama}`).
+  Dipakai bila sumber media = Folder media di tablet ini (tanpa jaringan).
 
 If the tablet loses its connection after requesting a number, use **Ulangi
 permintaan tiket**. The APK reuses the same request ID, so the server returns

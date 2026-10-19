@@ -419,4 +419,6 @@ API anjungan mempunyai dua endpoint tanpa token:
 - [Keamanan sesi petugas](keamanan-sesi.md)
 - [Uji terima sebelum operasional](acceptance-test.md)
 - [Peran komputer](peran-komputer.md)
+- [Serah terima untuk AI (Codex dan Claude): keadaan terbaru](serah-terima-ai.md)
+- [Nomor prioritas](prioritas-antrian.md)
 - [Catatan lanjutan pengembangan](lanjutan.md)

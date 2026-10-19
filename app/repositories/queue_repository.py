@@ -248,6 +248,30 @@ class QueueRepository:
             stmt = stmt.where(Queue.category_id.in_(list(category_ids)))
         return list(self.session.scalars(self._dengan_relasi(stmt)))
 
+    def list_menunggu_berurutan(
+        self,
+        branch_id: int,
+        tanggal: date,
+        *,
+        rasio: int,
+        category_id: int | None = None,
+        category_ids: Sequence[int] | None = None,
+    ) -> list[Queue]:
+        """
+        Antrian menunggu menurut URUTAN PANGGIL: nomor prioritas lebih dulu
+        dengan rasio yang berlaku (lihat `app.services.urutan_prioritas`).
+        Tanpa nomor prioritas hasilnya sama dengan `list_menunggu`.
+        """
+        from app.services.urutan_prioritas import susun
+
+        daftar = self.list_menunggu(
+            branch_id, tanggal, category_id=category_id, category_ids=category_ids
+        )
+        if not any(a.prioritas for a in daftar):
+            return daftar
+        beruntun = self.prioritas_beruntun(branch_id, tanggal, rasio) if rasio else 0
+        return susun(daftar, rasio=rasio, beruntun=beruntun)
+
     def list_dilewati(self, branch_id: int, tanggal: date) -> list[Queue]:
         """Nomor yang dilewati sementara, terbaru lebih dulu."""
         stmt = (
@@ -293,6 +317,50 @@ class QueueRepository:
             branch_id, tanggal, category_id=category_id, category_ids=category_ids
         )
         return daftar[0] if daftar else None
+
+    def jumlah_prioritas_terbit_sejak(
+        self,
+        branch_id: int,
+        tanggal: date,
+        sejak: datetime,
+        *,
+        category_ids: Sequence[int] | None = None,
+    ) -> int:
+        """Nomor prioritas yang terbit hari ini sejak `sejak` (apa pun statusnya)."""
+        stmt = sa.select(sa.func.count(Queue.id)).where(
+            Queue.branch_id == branch_id,
+            Queue.queue_date == tanggal,
+            Queue.prioritas.is_not(None),
+            Queue.created_at >= sejak,
+        )
+        if category_ids is not None:
+            stmt = stmt.where(Queue.category_id.in_(list(category_ids)))
+        return int(self.session.scalar(stmt) or 0)
+
+    def prioritas_beruntun(self, branch_id: int, tanggal: date, batas: int) -> int:
+        """
+        Berapa nomor prioritas yang baru saja dipanggil berturut-turut.
+
+        Dihitung dari pemanggilan terbaru hari ini, lintas loket: yang
+        diadilkan adalah antrian, bukan satu loket. Berhenti di nomor biasa
+        pertama; `batas` membatasi pembacaan.
+        """
+        terakhir = self.session.scalars(
+            sa.select(Queue.prioritas)
+            .where(
+                Queue.branch_id == branch_id,
+                Queue.queue_date == tanggal,
+                Queue.called_at.is_not(None),
+            )
+            .order_by(Queue.called_at.desc(), Queue.id.desc())
+            .limit(max(1, batas))
+        )
+        hitung = 0
+        for alasan in terakhir:
+            if not alasan:
+                break
+            hitung += 1
+        return hitung
 
     def sedang_ditangani_loket(self, counter_id: int, tanggal: date) -> Queue | None:
         """Antrian yang sedang dipegang sebuah loket, bila ada."""

@@ -52,6 +52,10 @@ KUNCI_TOKEN_BERSAMA = "kiosk.token_bersama_aktif"
 #: Satu nilai, bukan centang per perangkat: dua anjungan yang sama-sama
 #: bersuara mengulang pengumuman yang sama dengan selisih setengah detik.
 KUNCI_ANJUNGAN_BERSUARA = "kiosk.suara_panggilan_perangkat"
+#: Alamat IPv4 LAN tempat API anjungan mendengarkan; kosong = semua antarmuka.
+#: Dibaca proses API (tugas SYSTEM) saat menyala, jadi berubahnya baru berlaku
+#: setelah API dinyalakan ulang.
+KUNCI_ALAMAT_API = "kiosk.api_alamat"
 
 
 def hash_token(token: str) -> str:
@@ -73,6 +77,28 @@ class PerangkatInfo:
     printer_ok: bool | None
     printer_pesan: str
     printer_waktu: datetime | None
+    media_total: int | None = None
+    media_tersalin: int | None = None
+    media_byte: int | None = None
+    media_waktu: datetime | None = None
+
+    @property
+    def teks_media(self) -> str:
+        """Ringkasan salinan media untuk daftar perangkat; "" bila belum ada."""
+        if self.media_total is None or self.media_tersalin is None:
+            return ""
+        ukuran = ""
+        if self.media_byte:
+            ukuran = f" · {self.media_byte / 1_048_576:.0f} MB"
+        return f"{self.media_tersalin} dari {self.media_total} tersalin{ukuran}"
+
+    @property
+    def media_lengkap(self) -> bool:
+        return (
+            self.media_total is not None
+            and self.media_tersalin is not None
+            and self.media_tersalin >= self.media_total
+        )
 
     @property
     def label_jenis(self) -> str:
@@ -103,6 +129,10 @@ def _info(baris: KioskDevice) -> PerangkatInfo:
         printer_ok=baris.printer_ok,
         printer_pesan=baris.printer_pesan,
         printer_waktu=baris.printer_waktu,
+        media_total=baris.media_total,
+        media_tersalin=baris.media_tersalin,
+        media_byte=baris.media_byte,
+        media_waktu=baris.media_waktu,
     )
 
 
@@ -126,6 +156,28 @@ def token_bersama_aktif() -> bool:
             sa.select(ApplicationSetting).where(ApplicationSetting.key == KUNCI_TOKEN_BERSAMA)
         )
         return baris is None or baris.value.strip().lower() not in {"false", "0", "tidak"}
+
+
+def alamat_api_tersimpan() -> str:
+    """Alamat yang dipilih admin di Layanan Anjungan, atau kosong."""
+    with session_scope() as session:
+        nilai = session.scalar(
+            sa.select(ApplicationSetting.value).where(ApplicationSetting.key == KUNCI_ALAMAT_API)
+        )
+    return (nilai or "").strip()
+
+
+def alamat_api_sah(alamat: str) -> bool:
+    """Kosong (semua antarmuka) atau IPv4 privat non-loopback."""
+    import ipaddress
+
+    if not alamat:
+        return True
+    try:
+        ip = ipaddress.IPv4Address(alamat)
+    except ValueError:
+        return False
+    return ip.is_private and not ip.is_loopback and not ip.is_unspecified
 
 
 def anjungan_bersuara() -> str:
@@ -168,6 +220,28 @@ def perangkat_dicabut(device_id: str) -> bool:
             )
             is not None
         )
+
+
+def keadaan_perangkat(device_id: str) -> tuple[bool, bool]:
+    """
+    (dicabut, dipasangkan) untuk device_id yang disebut header token bersama.
+
+    Satu kueri untuk dua pertanyaan API: perangkat yang dicabut ditolak, dan
+    perangkat yang sudah punya token sendiri tidak boleh "diwakili" token
+    bersama — kalau boleh, siapa pun pemegang token bersama dapat menulis
+    status printer/media atas nama tablet itu atau memakai jatah tebakan
+    PIN-nya.
+    """
+    with session_scope() as session:
+        baris = session.execute(
+            sa.select(KioskDevice.dicabut_pada, KioskDevice.token_hash).where(
+                KioskDevice.device_id == device_id
+            )
+        ).first()
+    if baris is None:
+        return False, False
+    dicabut = baris.dicabut_pada is not None
+    return dicabut, (not dicabut and baris.token_hash is not None)
 
 
 def catat_kontak(
@@ -234,6 +308,31 @@ def catat_printer(device_id: str, ok: bool, pesan: str = "") -> None:
         baris.printer_waktu = clock.now()
 
 
+def catat_media(device_id: str, total: int, tersalin: int, byte: int = 0) -> None:
+    """Status salinan media dari tablet (berkas tersalin dari total)."""
+    with session_scope() as session:
+        baris = session.scalar(sa.select(KioskDevice).where(KioskDevice.device_id == device_id))
+        if baris is None:
+            return
+        baris.media_total = max(0, int(total))
+        baris.media_tersalin = max(0, min(int(tersalin), baris.media_total))
+        baris.media_byte = max(0, int(byte))
+        baris.media_waktu = clock.now()
+
+
+def permintaan_segarkan_media(device_id: str) -> int:
+    """
+    Penanda permintaan "segarkan media sekarang" untuk tablet ini, dalam
+    milidetik sejak epoch; 0 bila belum pernah diminta. Tablet menyegarkan
+    salinannya bila nilainya berbeda dari yang terakhir ia tangani.
+    """
+    with session_scope() as session:
+        baris = session.scalar(sa.select(KioskDevice).where(KioskDevice.device_id == device_id))
+        if baris is None or baris.media_segarkan is None:
+            return 0
+        return int(baris.media_segarkan.timestamp() * 1000)
+
+
 def pasangkan(kode: str, device_id: str, nama: str, jenis: str) -> str:
     """
     Tukar kode pasang yang masih berlaku dengan token khusus perangkat ini.
@@ -249,19 +348,23 @@ def pasangkan(kode: str, device_id: str, nama: str, jenis: str) -> str:
     sekarang = clock.now()
     token = secrets.token_urlsafe(48)
     with session_scope() as session:
-        baris_kode = session.scalar(
-            sa.select(KioskPairingCode).where(
+        # Pembaruan bersyarat, bukan baca-lalu-tandai: dua permintaan
+        # bersamaan dengan kode yang sama hanya satu yang mendapat baris.
+        dipakai = session.execute(
+            sa.update(KioskPairingCode)
+            .where(
                 KioskPairingCode.kode == kode,
                 KioskPairingCode.dipakai_pada.is_(None),
                 KioskPairingCode.kedaluwarsa >= sekarang,
             )
+            .values(dipakai_pada=sekarang)
+            .execution_options(synchronize_session=False)
         )
-        if baris_kode is None:
+        if not dipakai.rowcount:
             raise BusinessRuleError(
                 "Kode pasang salah atau sudah kedaluwarsa. Buat kode baru di "
                 "Layanan Anjungan pada komputer server."
             )
-        baris_kode.dipakai_pada = sekarang
 
         baris = session.scalar(sa.select(KioskDevice).where(KioskDevice.device_id == device_id))
         if baris is None:
@@ -364,6 +467,55 @@ class PerangkatService:
             key=lambda p: (p.dicabut, -(p.terakhir_terlihat or datetime.min).timestamp()),
         )
 
+    def pin_diatur(self) -> bool:
+        """Apakah PIN pengaturan anjungan sudah ada (isinya tidak pernah dibaca UI)."""
+        self.auth.require_permission(Permission.CONFIG_MANAGE)
+        from app.services import pin_anjungan
+
+        return pin_anjungan.baca() is not None
+
+    def atur_pin(self, pin: str) -> None:
+        """Pasang atau ganti PIN pengaturan anjungan untuk SEMUA tablet."""
+        sesi = self.auth.require_permission(Permission.CONFIG_MANAGE)
+        from app.services import pin_anjungan
+
+        pin_anjungan.simpan(pin_anjungan.buat(pin))
+        with session_scope() as session:
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="application_setting",
+                pengaturan=pin_anjungan.KUNCI,
+                nilai="(PIN diganti)",
+            )
+
+    def hapus_pin(self) -> None:
+        sesi = self.auth.require_permission(Permission.CONFIG_MANAGE)
+        from app.services import pin_anjungan
+
+        pin_anjungan.simpan(None)
+        with session_scope() as session:
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="application_setting",
+                pengaturan=pin_anjungan.KUNCI,
+                nilai="(PIN dihapus)",
+            )
+
+    def segarkan_media(self, perangkat_id: int) -> None:
+        """Minta satu anjungan menyegarkan salinan medianya sekarang."""
+        self.auth.require_permission(Permission.CONFIG_MANAGE)
+        with session_scope() as session:
+            baris = session.get(KioskDevice, perangkat_id)
+            if baris is None:
+                raise NotFoundError("Perangkat tidak ditemukan.")
+            if baris.dicabut_pada is not None:
+                raise BusinessRuleError("Perangkat ini sudah dicabut.")
+            baris.media_segarkan = clock.now()
+
     def buat_kode(self) -> KodePasang:
         sesi = self.auth.require_permission(Permission.CONFIG_MANAGE)
         sekarang = clock.now()
@@ -457,6 +609,33 @@ class PerangkatService:
                 entity_type="setting",
                 key=KUNCI_TOKEN_BERSAMA,
                 value=nilai,
+            )
+
+    def alamat_api(self) -> str:
+        self.auth.require_permission(Permission.CONFIG_MANAGE)
+        return alamat_api_tersimpan()
+
+    def setel_alamat_api(self, alamat: str) -> None:
+        """Ikat API ke satu IPv4 LAN (kosong = semua antarmuka)."""
+        sesi = self.auth.require_permission(Permission.CONFIG_MANAGE)
+        alamat = (alamat or "").strip()
+        if not alamat_api_sah(alamat):
+            raise ValidationError("Alamat API harus IPv4 jaringan lokal, misalnya 192.168.1.10.")
+        with session_scope() as session:
+            baris = session.scalar(
+                sa.select(ApplicationSetting).where(ApplicationSetting.key == KUNCI_ALAMAT_API)
+            )
+            if baris is None:
+                session.add(ApplicationSetting(key=KUNCI_ALAMAT_API, value=alamat))
+            else:
+                baris.value = alamat
+            audit_service.record(
+                session,
+                AuditAction.CHANGE_CONFIGURATION,
+                user_id=sesi.user_id,
+                entity_type="setting",
+                key=KUNCI_ALAMAT_API,
+                value=alamat or "semua antarmuka",
             )
 
     def anjungan_bersuara(self) -> str:

@@ -324,3 +324,91 @@ def test_tiket_contoh_tidak_menghitung_perkiraan(ticket_pdf, monkeypatch):
         counter_name=None,
     )
     assert ticket_pdf._perkiraan(contoh) is None
+
+
+# ---------------------------------------------------------------------
+# Nomor prioritas yang datang belakangan menyalip nomor biasa
+# ---------------------------------------------------------------------
+
+def test_sisipan_prioritas_nol_tanpa_kedatangan_prioritas():
+    from app.services.queue_service import sisipan_prioritas
+
+    assert sisipan_prioritas(
+        600, laju_per_detik=0, lama_per_orang=300, loket=1, rasio=3, biasa_di_depan=2
+    ) == 0.0
+
+
+def test_sisipan_prioritas_mengikuti_laju_dan_lama_layanan():
+    from app.services.queue_service import sisipan_prioritas
+
+    # 6 prioritas/jam, dasar 20 menit: 2 penyalip (+10 menit) pada putaran
+    # pertama; tunggu 30 menit itu mendatangkan 3 penyalip (+15 menit).
+    tambahan = sisipan_prioritas(
+        1200, laju_per_detik=6 / 3600, lama_per_orang=300, loket=1, rasio=3,
+        biasa_di_depan=5,
+    )
+    assert tambahan == pytest.approx(900)
+    # Dua loket membagi tambahannya.
+    berdua = sisipan_prioritas(
+        1200, laju_per_detik=6 / 3600, lama_per_orang=300, loket=2, rasio=3,
+        biasa_di_depan=5,
+    )
+    assert berdua < tambahan
+
+
+def test_sisipan_prioritas_dibatasi_rasio():
+    """Rasio 3:1 — sebelum tiket terdepan paling banyak 3 prioritas menyalip."""
+    from app.services.queue_service import sisipan_prioritas
+
+    tambahan = sisipan_prioritas(
+        3600, laju_per_detik=60 / 3600, lama_per_orang=300, loket=1, rasio=3,
+        biasa_di_depan=0,
+    )
+    assert tambahan == pytest.approx(3 * 300)
+
+
+def _prioritas_terbit(antrian_siap, jumlah: int, menit_lalu: int) -> None:
+    """Nomor prioritas yang terbit lalu dibatalkan: dihitung lajunya saja."""
+    with session_scope() as session:
+        for i in range(jumlah):
+            session.add(
+                Queue(
+                    branch_id=antrian_siap["branch_id"],
+                    category_id=antrian_siap["kategori"]["A"],
+                    queue_date=clock.today(),
+                    queue_number=f"A-8{menit_lalu:02d}{i}",
+                    sequence_number=800 + menit_lalu * 10 + i,
+                    status=QueueStatus.CANCELLED,
+                    prioritas="LANSIA",
+                    created_at=clock.now() - timedelta(minutes=menit_lalu),
+                )
+            )
+
+
+def test_nomor_biasa_diperpanjang_oleh_laju_prioritas(reg_queue, antrian_siap):
+    _riwayat(antrian_siap, "A", [6] * 5)
+    _loket(antrian_siap, 1)
+    for _ in range(2):
+        reg_queue.create_queue(antrian_siap["kategori"]["A"])
+    nomor = reg_queue.create_queue(antrian_siap["kategori"]["A"])
+    dasar = reg_queue.perkiraan_tunggu(nomor)
+    assert dasar == pytest.approx(12 * 60)
+
+    # Prioritas di luar jendela satu jam tidak dihitung.
+    _prioritas_terbit(antrian_siap, 5, menit_lalu=90)
+    assert reg_queue.perkiraan_tunggu(nomor) == pytest.approx(dasar)
+
+    _prioritas_terbit(antrian_siap, 6, menit_lalu=20)
+    assert reg_queue.perkiraan_tunggu(nomor) > dasar
+
+
+def test_nomor_prioritas_tidak_disalip_prioritas_baru(reg_queue, antrian_siap):
+    _riwayat(antrian_siap, "A", [6] * 5)
+    _loket(antrian_siap, 1)
+    reg_queue.create_queue(antrian_siap["kategori"]["A"], prioritas="LANSIA")
+    nomor = reg_queue.create_queue(antrian_siap["kategori"]["A"], prioritas="LANSIA")
+    dasar = reg_queue.perkiraan_tunggu(nomor)
+
+    _prioritas_terbit(antrian_siap, 6, menit_lalu=20)
+
+    assert reg_queue.perkiraan_tunggu(nomor) == pytest.approx(dasar)

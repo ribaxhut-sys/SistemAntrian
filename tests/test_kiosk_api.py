@@ -45,8 +45,15 @@ class _Queue:
         self.terbit: dict[tuple[str, str | None], QueueInfo] = {}
 
     def create_queue(
-        self, category_id: int, *, perangkat="", request_id=None, kunci_jeda=None
+        self,
+        category_id: int,
+        *,
+        perangkat="",
+        request_id=None,
+        kunci_jeda=None,
+        prioritas_mandiri=False,
     ):
+        self.prioritas_mandiri_terakhir = prioritas_mandiri
         if category_id != 10:
             raise BusinessRuleError("Layanan tidak tersedia.")
         if (perangkat, request_id) in self.terbit:
@@ -76,10 +83,19 @@ class _Queue:
             completed_at=None,
         )
 
-    def display_state(self, *, jumlah_berikutnya: int):
+    def display_state(
+        self,
+        *,
+        jumlah_berikutnya: int,
+        rasio_prioritas=None,
+        loket_tampil=None,
+        sertakan_terkini=True,
+    ):
         assert jumlah_berikutnya == 0
         return SimpleNamespace(
             total_menunggu=2,
+            nomor_menunggu=["A-002", "A-003"],
+            nomor_prioritas=["A-003"],
             loket=[
                 SimpleNamespace(
                     counter_name="Loket 1",
@@ -87,6 +103,7 @@ class _Queue:
                         queue_number="A-001",
                         category_name="Pajak Kendaraan",
                         label_status="DIPANGGIL",
+                        jumlah_panggilan=2,
                     ),
                     istirahat=False,
                 ),
@@ -96,14 +113,17 @@ class _Queue:
             ],
         )
 
-    def pendaftaran_dibuka(self):
+    def pendaftaran_dibuka(self, pengaturan=None):
         return True
 
-    def sisa_jeda_kios(self, perangkat=""):
+    def sisa_jeda_kios(self, perangkat="", pengaturan=None):
         return 0
 
     def nomor_menunggu_untuk_layar(self):
         return ["A-002", "A-003"]
+
+    def nomor_prioritas_menunggu_untuk_layar(self):
+        return ["A-003"]
 
     def ringkasan_tiket(self, queue_info):
         return SimpleNamespace(sisa_antrian=2)
@@ -112,6 +132,9 @@ class _Queue:
 class _Settings:
     welcome_kind = "teks"
     suara_video = False
+
+    def cuplikan(self):
+        return self
 
     def get_bool(self, key, default):
         return {
@@ -214,6 +237,14 @@ def test_udp_server_discovery_returns_api_port():
         thread.join(timeout=1)
 
 
+@pytest.fixture(autouse=True)
+def _tanpa_pin_di_database(monkeypatch):
+    """API diuji dengan layanan palsu; PIN tidak boleh dibaca dari database sungguhan."""
+    from app.services import pin_anjungan
+
+    monkeypatch.setattr(pin_anjungan, "baca", lambda: None)
+
+
 def test_api_returns_active_categories_and_ticket_lines():
     from app.kiosk_api import create_app
 
@@ -273,20 +304,32 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
         "welcome_media": [],
         "welcome_media_files": [],
         "fullscreen_ad_idle_seconds": 60,
+        "fullscreen_ad_loops": 2,
+        "return_animation": True,
+        "return_animation_lead_seconds": 2,
+        "waiting_animation": True,
+        "ad_entry_animation": True,
+        "call_interrupts_ad": True,
         "registration_open": True,
+        "priority_enabled": True,
+        # Token bersama: hash PIN tidak dikirim (test_pin_anjungan.py).
+        "media_refresh": 0,
         "cooldown_remaining_seconds": 0,
         "waiting_queue_numbers": ["A-002", "A-003"],
+        "waiting_priority_numbers": ["A-003"],
         "counters": [
             {
                 "name": "Loket 1",
                 "queue_number": "A-001",
                 "category": "Pajak Kendaraan",
+                "call_count": 2,
                 "status": "DIPANGGIL",
             },
             {
                 "name": "Loket 2",
                 "queue_number": None,
                 "category": None,
+                "call_count": 0,
                 "status": "ISTIRAHAT",
             },
         ],
@@ -685,3 +728,116 @@ def test_versi_layanan_berubah_bila_daftar_layanan_berubah(tmp_path, monkeypatch
         lambda *, only_active: [replace(k, name="PKB") for k in asli(only_active=only_active)],
     )
     assert versi() != awal
+
+
+def test_centang_prioritas_diteruskan_ke_service():
+    from app.kiosk_api import create_app
+
+    services = _Services()
+    client = TestClient(create_app(TOKEN, services))
+    headers = {"Authorization": f"Bearer {TOKEN}", **VERSI_APK}
+
+    biasa = client.post(
+        "/v1/kiosk/tickets",
+        headers=headers,
+        json={"category_id": 10, "request_id": str(uuid4())},
+    )
+    assert biasa.status_code == 200
+    assert services.queue.prioritas_mandiri_terakhir is False
+
+    prioritas = client.post(
+        "/v1/kiosk/tickets",
+        headers=headers,
+        json={"category_id": 10, "request_id": str(uuid4()), "priority": True},
+    )
+    assert prioritas.status_code == 200
+    assert services.queue.prioritas_mandiri_terakhir is True
+
+
+def test_media_status_diterima_tanpa_mengganggu_tablet():
+    from app.kiosk_api import create_app
+
+    client = TestClient(create_app(TOKEN, _Services()))
+    headers = {"Authorization": f"Bearer {TOKEN}", **VERSI_APK}
+
+    ok = client.post(
+        "/v1/kiosk/media-status",
+        headers=headers,
+        json={"total": 3, "copied": 2, "bytes": 1234},
+    )
+    salah = client.post(
+        "/v1/kiosk/media-status", headers=headers, json={"total": -1, "copied": 0}
+    )
+
+    assert ok.status_code == 200 and ok.json() == {"status": "ok"}
+    assert salah.status_code == 422
+
+
+def test_pustaka_media_memuat_semua_berkas_bukan_hanya_daftar_putar(
+    tmp_path, monkeypatch
+):
+    from app.kiosk_api import create_app
+
+    monkeypatch.setattr("app.kiosk_api.base_dir", lambda: tmp_path)
+    folder = tmp_path / "media" / "kiosk"
+    folder.mkdir(parents=True)
+    (folder / "satu.mp4").write_bytes(b"x" * 10)
+    (folder / "dua.jpg").write_bytes(b"y" * 5)
+    (folder / "catatan.txt").write_text("bukan media")
+    client = TestClient(create_app(TOKEN, _Services()))
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+
+    daftar = client.get("/v1/kiosk/media-library", headers=headers)
+
+    assert daftar.status_code == 200
+    nama = {item["name"]: item for item in daftar.json()}
+    assert set(nama) == {"satu.mp4", "dua.jpg"}
+    assert nama["satu.mp4"]["video"] is True and nama["dua.jpg"]["video"] is False
+    assert nama["satu.mp4"]["size"] == 10
+    unduh = client.get("/v1/kiosk/media-library/satu.mp4", headers=headers)
+    assert unduh.status_code == 200 and unduh.content == b"x" * 10
+    assert client.get("/v1/kiosk/media-library/catatan.txt", headers=headers).status_code == 404
+    assert client.get("/v1/kiosk/media-library/%2e%2e%2fx.mp4", headers=headers).status_code in {
+        404,
+        307,
+    }
+    assert client.get("/v1/kiosk/media-library").status_code == 401
+
+
+def test_display_menyebut_tempat_tampil_tiap_berkas(tmp_path, monkeypatch):
+    """APK baru membedakan panel atas dan layar penuh; APK lama mengabaikannya."""
+    from app.kiosk_api import create_app
+    from app.services import daftar_putar
+
+    monkeypatch.setattr("app.kiosk_api.base_dir", lambda: tmp_path)
+    folder = tmp_path / "media" / "kiosk"
+    folder.mkdir(parents=True)
+    for nama in ("a.mp4", "b.mp4", "c.jpg"):
+        (folder / nama).write_bytes(b"x")
+    services = _Services()
+    daftar = daftar_putar.tulis(
+        [
+            daftar_putar.Butir("a.mp4", tampil=daftar_putar.TAMPIL_PANEL),
+            daftar_putar.Butir("b.mp4", tampil=daftar_putar.TAMPIL_PENUH),
+            "c.jpg",
+        ]
+    )
+    nilai_asli = services.settings.get
+
+    def get(kunci, bawaan=None):
+        if kunci == daftar_putar.KUNCI:
+            return daftar
+        if kunci == "kiosk.welcome_kind":
+            return "media"
+        return nilai_asli(kunci, bawaan)
+
+    services.settings.get = get
+    client = TestClient(create_app(TOKEN, services))
+
+    isi = client.get(
+        "/v1/kiosk/display", headers={"Authorization": f"Bearer {TOKEN}"}
+    ).json()
+
+    tampil = {item["name"]: item["show"] for item in isi["welcome_media_files"]}
+    assert tampil == {"a.mp4": "panel", "b.mp4": "penuh", "c.jpg": "keduanya"}
+    assert isi["welcome_media"] == ["a.mp4", "b.mp4", "c.jpg"]

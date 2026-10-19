@@ -25,22 +25,35 @@ yang membuka lembar itu kemudian.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from app.services.note_service import PANJANG_CATATAN, PANJANG_DESKRIPSI, NoteService
+from app.core.logger import get_logger
+from app.services.note_service import (
+    MIN_HURUF_CATATAN,
+    PANJANG_CATATAN,
+    PANJANG_DESKRIPSI,
+    PESAN_CATATAN_KURANG,
+    NoteService,
+    catatan_memadai,
+    catatan_sama_dengan,
+    jumlah_huruf_catatan,
+    samakan_catatan,
+)
 from app.services.queue_service import QueueInfo
-from app.ui.common import jalankan_aman, tombol
+from app.ui.common import jalankan_aman
 from app.ui.queue.pelapor_form import PelaporForm
+from app.ui.tombol_frasa import TombolFrasa
 from app.ui.style import (
     BORDER,
     DANGER,
@@ -72,6 +85,49 @@ TINGGI_CATATAN = 90
 #: batasnya ketika penolakan muncul harus memotong kalimat orang lain
 #: sambil orangnya menunggu.
 AMBANG_PERINGATAN = 0.9
+
+#: Jeda simpan draf otomatis, dalam milidetik. Tombol Simpan sendiri sudah
+#: menjadi Simpan & Selesai, jadi tulisan yang belum rampung dijaga di sini.
+JEDA_SIMPAN_OTOMATIS = 15_000
+
+#: Peringatan bila catatan persis sama dengan catatan nomor sebelumnya.
+PESAN_CATATAN_SAMA = (
+    "Catatan sama dengan nomor sebelumnya. Sesuaikan dengan pelanggan ini."
+)
+
+logger = get_logger("catatan.panel")
+
+
+class TombolSelesai(QPushButton):
+    """
+    Tombol Simpan & Selesai: menyala hanya bila DUA syarat terpenuhi.
+
+    Izin datang dari layar pelayanan (nomor sedang dilayani) lewat
+    `setEnabled`, seperti tombol aksi lain; syarat isi datang dari panel
+    (catatan memadai) lewat `setel_syarat`. Menumpuk keduanya di sini
+    membuat loop penyalaan tombol di layar pelayanan tetap berlaku tanpa
+    bisa mengabaikan syarat catatan.
+    """
+
+    def __init__(self, teks: str, parent: QWidget | None = None) -> None:
+        super().__init__(teks, parent)
+        self._izin = False
+        self._syarat = False
+        self.setProperty("variant", "success")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAutoDefault(False)
+        super().setEnabled(False)
+
+    def setEnabled(self, aktif: bool) -> None:  # noqa: N802 - nama Qt
+        self._izin = bool(aktif)
+        self._terapkan()
+
+    def setel_syarat(self, terpenuhi: bool) -> None:
+        self._syarat = bool(terpenuhi)
+        self._terapkan()
+
+    def _terapkan(self) -> None:
+        super().setEnabled(self._izin and self._syarat)
 
 
 def _gaya_kapsul(warna: str, latar: str) -> str:
@@ -105,6 +161,11 @@ class NotePanel(QWidget):
         # Ctrl+S sama seperti di mana pun. Petugas yang terbiasa menekannya
         # tidak boleh menemukan panel ini sebagai pengecualian.
         QShortcut(QKeySequence("Ctrl+S"), self, self.simpan)
+
+        self._pewaktu_otomatis = QTimer(self)
+        self._pewaktu_otomatis.setInterval(JEDA_SIMPAN_OTOMATIS)
+        self._pewaktu_otomatis.timeout.connect(self._saat_pewaktu_otomatis)
+        self._pewaktu_otomatis.start()
 
     # =================================================================
     # Tampilan
@@ -168,6 +229,18 @@ class NotePanel(QWidget):
             "Misalnya: berkas belum lengkap, diminta kembali membawa fotokopi."
         )
         self.isian_catatan.setMinimumHeight(TINGGI_CATATAN)
+
+        # Kalimat cepat: satu klik menyisipkan kalimat ke catatan, dan
+        # petugas tetap bisa menambah atau mengubahnya. Daftarnya milik
+        # jenis layanan nomor yang dilayani (lihat `set_antrian`).
+        self.baris_frasa = QVBoxLayout()
+        self.baris_frasa.setSpacing(6)
+        badan.addLayout(self.baris_frasa)
+        self._tombol_frasa: list[TombolFrasa] = []
+        #: Catatan petugas ini pada nomor lain hari ini (bahan peringatan).
+        self._catatan_sebelumnya: list[str] = []
+        self._frasa_bawaan_layar: list[str] = []
+
         badan.addWidget(self.isian_catatan, stretch=1)
 
         self.hitung_catatan = self._penghitung()
@@ -190,10 +263,13 @@ class NotePanel(QWidget):
         self.label_keadaan.setWordWrap(True)
         baris.addWidget(self.label_keadaan, stretch=1)
 
-        self.tombol_simpan = tombol("Simpan (Ctrl+S)", variant="primary")
-        self.tombol_simpan.setMinimumHeight(36)
-        self.tombol_simpan.clicked.connect(self.simpan)
-        baris.addWidget(self.tombol_simpan)
+        # Satu tombol untuk menyimpan dan menutup pelayanan. Kliknya
+        # disambungkan oleh ServicePage (ia yang memegang antrian dan
+        # memanggil `queue.complete`), yang juga mendaftarkannya sebagai
+        # aksi "selesai".
+        self.tombol_selesai = TombolSelesai("Simpan && Selesai  ·  F8")
+        self.tombol_selesai.setMinimumHeight(36)
+        baris.addWidget(self.tombol_selesai)
         return kaki
 
     @staticmethod
@@ -244,6 +320,27 @@ class NotePanel(QWidget):
         """Benar bila ada sesuatu yang layak disimpan."""
         return self.ada_pengaduan or bool(self.isian_catatan.toPlainText().strip())
 
+    @property
+    def catatan_sama_dengan_sebelumnya(self) -> bool:
+        """
+        Benar bila catatan persis sama dengan catatan petugas ini pada nomor lain.
+
+        Hanya peringatan, tidak menghalangi. Catatan yang seluruhnya terdiri
+        dari kalimat cepat dikecualikan: memakai tombol yang sama untuk
+        pelayanan yang sama memang wajar.
+        """
+        catatan = self.isian_catatan.toPlainText()
+        if not catatan_sama_dengan(catatan, self._catatan_sebelumnya):
+            return False
+        baris = {samakan_catatan(b) for b in catatan.splitlines() if b.strip()}
+        frasa = {samakan_catatan(f) for f in self._frasa_bawaan_layar}
+        return not (baris and baris <= frasa)
+
+    @property
+    def catatan_memadai(self) -> bool:
+        """Benar bila catatan petugas cukup untuk menyelesaikan pelayanan."""
+        return catatan_memadai(self.isian_catatan.toPlainText())
+
     def _perbarui_dinamis(self) -> None:
         """
         Selaraskan kapsul, penghitung, tombol, dan Data Pelapor dengan isian.
@@ -253,8 +350,9 @@ class NotePanel(QWidget):
         """
         self._perbarui_kapsul()
         self._perbarui_penghitung()
+        self._perbarui_frasa_terpakai()
         self.pelapor.tandai_wajib(self.ada_pengaduan)
-        self.tombol_simpan.setEnabled(self.ada_isian)
+        self.tombol_selesai.setel_syarat(self.catatan_memadai)
         self._perbarui_keadaan()
 
     def _perbarui_kapsul(self) -> None:
@@ -275,7 +373,15 @@ class NotePanel(QWidget):
         ):
             panjang = len(kotak.toPlainText().strip())
             label.setText(f"{panjang} / {batas}")
-            if panjang > batas:
+            if kotak is self.isian_catatan and not self.catatan_memadai:
+                huruf = jumlah_huruf_catatan(kotak.toPlainText())
+                label.setText(
+                    f"Minimal {MIN_HURUF_CATATAN} huruf "
+                    f"({min(huruf, MIN_HURUF_CATATAN)}/{MIN_HURUF_CATATAN}) · "
+                    f"{panjang} / {batas}"
+                )
+                warna, tebal = WARNING, "font-weight: 700;"
+            elif panjang > batas:
                 warna, tebal = DANGER, "font-weight: 700;"
             elif panjang >= batas * AMBANG_PERINGATAN:
                 warna, tebal = WARNING, "font-weight: 700;"
@@ -294,7 +400,9 @@ class NotePanel(QWidget):
             )
             return
 
-        if self.berubah:
+        if self.catatan_sama_dengan_sebelumnya:
+            teks, warna = PESAN_CATATAN_SAMA, WARNING
+        elif self.berubah:
             teks, warna = "Ada perubahan yang belum disimpan.", WARNING
         elif self.lembar is not None:
             teks = (
@@ -347,6 +455,8 @@ class NotePanel(QWidget):
         self.isian_catatan.blockSignals(False)
         self.pelapor.kosongkan()
 
+        self._muat_frasa(antrian.category_id if aktif else None)
+        self._muat_catatan_sebelumnya(antrian.id if aktif else None)
         if aktif:
             berhasil, lembar = jalankan_aman(
                 self, lambda: self.note.ambil(antrian.id), "Gagal membaca catatan"
@@ -358,6 +468,109 @@ class NotePanel(QWidget):
                 self.pelapor.isi(lembar)
 
         self._perbarui_dinamis()
+
+    # =================================================================
+    # Kalimat cepat
+    # =================================================================
+
+    def _muat_frasa(self, category_id: int | None) -> None:
+        """Pasang tombol kalimat cepat milik jenis layanan nomor ini."""
+        for btn in self._tombol_frasa:
+            self.baris_frasa.removeWidget(btn)
+            btn.deleteLater()
+        self._tombol_frasa = []
+        self._frasa_bawaan_layar = []
+        if category_id is None:
+            return
+        try:
+            daftar = self.note.frasa_cepat(category_id)
+        except Exception:  # noqa: BLE001 - tombol cepat hanya pelengkap
+            logger.warning("Kalimat cepat gagal dibaca", exc_info=True)
+            return
+        self._frasa_bawaan_layar = list(daftar)
+        for kalimat in daftar:
+            btn = TombolFrasa(kalimat)
+            btn.clicked.connect(lambda _=False, k=kalimat: self.sisipkan_frasa(k))
+            self.baris_frasa.addWidget(btn)
+            self._tombol_frasa.append(btn)
+        self._perbarui_frasa_terpakai()
+
+    def _perbarui_frasa_terpakai(self) -> None:
+        """Matikan tombol yang kalimatnya sudah ada di catatan (diberi tanda ✓)."""
+        isi = samakan_catatan(self.isian_catatan.toPlainText())
+        for btn in self._tombol_frasa:
+            btn.tandai_terpakai(samakan_catatan(btn.kalimat) in isi)
+
+    def _muat_catatan_sebelumnya(self, queue_id: int | None) -> None:
+        self._catatan_sebelumnya = []
+        if queue_id is None:
+            return
+        try:
+            self._catatan_sebelumnya = self.note.catatan_terakhir_saya(queue_id)
+        except Exception:  # noqa: BLE001 - peringatan hanya pelengkap
+            logger.warning("Catatan sebelumnya gagal dibaca", exc_info=True)
+
+    def sisipkan_frasa(self, kalimat: str) -> None:
+        """Tambahkan kalimat ke catatan, pada baris baru bila sudah ada isinya."""
+        sekarang = self.isian_catatan.toPlainText().rstrip()
+        self.isian_catatan.setPlainText(f"{sekarang}\n{kalimat}" if sekarang else kalimat)
+        kursor = self.isian_catatan.textCursor()
+        kursor.movePosition(kursor.MoveOperation.End)
+        self.isian_catatan.setTextCursor(kursor)
+        self.isian_catatan.setFocus()
+
+    def fokus_catatan(self) -> None:
+        """Arahkan petugas ke kotak catatan beserta alasan tombolnya belum menyala."""
+        self.isian_catatan.setFocus()
+        self._perbarui_keadaan(PESAN_CATATAN_KURANG, WARNING)
+
+    # =================================================================
+    # Simpan draf otomatis
+    # =================================================================
+
+    def _saat_pewaktu_otomatis(self) -> None:
+        """
+        Detak simpan otomatis: hanya bila jendelanya sungguh tampil.
+
+        Panel yang sudah ditutup tetapi belum dihancurkan (jendela ditutup,
+        atau widget uji yang menunggu dibersihkan) tidak boleh menulis ke
+        database lama-lama sesudahnya, atas nama sesi siapa pun yang kini
+        masuk. Tab lain pada layar yang sama tetap dihitung tampil.
+        """
+        if self.window().isVisible():
+            self.simpan_otomatis()
+
+    def simpan_otomatis(self) -> None:
+        """
+        Simpan draf diam-diam bila ada perubahan yang sah disimpan.
+
+        Tidak memunculkan dialog apa pun: gagal pun hanya meninggalkan
+        pesan di kaki panel, dan ketikan petugas tidak terganggu. Hanya
+        berjalan bila identitas pelapor sudah lengkap, karena pengaduan
+        tanpa nama tidak boleh disimpan setengah-setengah.
+        """
+        if self.antrian is None or not self.ada_isian or not self.berubah:
+            return
+        if self.ada_pengaduan and self.pelapor.kurang:
+            return
+        nilai = self.pelapor.nilai
+        try:
+            lembar = self.note.simpan(
+                self.antrian.id,
+                nama=nilai.get("nama", ""),
+                nomor_pelanggan=nilai.get("nomor_pelanggan", ""),
+                telepon=nilai.get("telepon", ""),
+                email=nilai.get("email", ""),
+                alamat=nilai.get("alamat", ""),
+                deskripsi=self.isian_deskripsi.toPlainText(),
+                catatan=self.isian_catatan.toPlainText(),
+            )
+        except Exception:  # noqa: BLE001 - draf otomatis tidak boleh mengganggu
+            logger.warning("Simpan draf otomatis gagal", exc_info=True)
+            self._perbarui_keadaan("Draf belum tersimpan otomatis.", WARNING)
+            return
+        self.lembar = lembar
+        self._perbarui_keadaan()
 
     @property
     def _isi_layar(self) -> tuple[str, str]:

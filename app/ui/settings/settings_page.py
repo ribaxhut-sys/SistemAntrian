@@ -115,6 +115,10 @@ KETERANGAN_KELOMPOK: dict[str, str] = {
     "Anjungan": "Judul, tema, dan letak baris loket di tablet ambil nomor.",
     "Panel Anjungan": "Isi panel besar di atas tombol layanan: teks atau media.",
     "Iklan Anjungan": "Urutan, jadwal, dan cara iklan diputar di tablet.",
+    "Perilaku Iklan": (
+        "Berapa putaran iklan layar penuh, gerak panel anjungan, dan apa yang "
+        "terjadi pada iklan saat petugas memanggil."
+    ),
     "Survey": "Penilaian kepuasan yang diminta setelah pelayanan selesai.",
     "Pengaduan": "Berapa lama identitas pelapor pengaduan disimpan.",
     "Ringkasan Harian": "Layar rekap yang dibaca penyelia sepanjang hari.",
@@ -203,6 +207,13 @@ def teks_jadwal(butir: daftar_putar.Butir) -> str:
     if butir.selesai:
         return f"sampai {_tanggal_pendek(butir.selesai)}"
     return ""
+
+
+def teks_tempat(butir: daftar_putar.Butir) -> str:
+    """Tempat tampil bila dibatasi; kosong bila keduanya (bawaan)."""
+    if butir.tampil == daftar_putar.TAMPIL_KEDUANYA:
+        return ""
+    return daftar_putar.LABEL_TAMPIL[butir.tampil]
 
 
 class _DaftarPutar(QWidget):
@@ -318,6 +329,7 @@ class _DaftarPutar(QWidget):
             self,
             self._butir(nama),
             gambar=Path(nama).suffix.lower() not in EKSTENSI_VIDEO,
+            berkas=folder_media_kios() / nama,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -355,6 +367,9 @@ class _DaftarPutar(QWidget):
         bagian = [nama, "video" if video else "gambar"]
         if not video and butir.detik:
             bagian.append(f"{butir.detik} dtk")
+        tempat = teks_tempat(butir)
+        if tempat:
+            bagian.append(f"hanya {tempat.lower()}")
         jadwal = teks_jadwal(butir)
         if jadwal:
             bagian.append(jadwal)
