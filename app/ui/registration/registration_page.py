@@ -61,6 +61,9 @@ class RegistrationPage(QWidget):
         self._pekerja_terbit: PekerjaLatar | None = None
         self._pekerja_cetak: PekerjaLatar | None = None
         self._pekerja_refresh: PekerjaLatar | None = None
+        self._pewaktu_jeda = QTimer(self)
+        self._pewaktu_jeda.setSingleShot(True)
+        self._pewaktu_jeda.timeout.connect(self._akhiri_jeda_penerbitan)
         self.terakhir: QueueInfo | None = None
         self.pendaftaran_dibuka = True
 
@@ -318,7 +321,7 @@ class RegistrationPage(QWidget):
             try:
                 self.terbitkan(category_id)
             finally:
-                QTimer.singleShot(500, self._akhiri_jeda_penerbitan)
+                self._mulai_jeda_penerbitan()
             return
 
         prioritas = self._prioritas_terpilih()
@@ -355,7 +358,7 @@ class RegistrationPage(QWidget):
 
     def _gagal_terbit_latar(self, exc: Exception) -> None:
         tampilkan_error(self, exc, "Gagal menerbitkan nomor")
-        QTimer.singleShot(500, self._akhiri_jeda_penerbitan)
+        self._mulai_jeda_penerbitan()
 
     def _bersihkan_pekerja_terbit(self) -> None:
         pekerja = self._pekerja_terbit
@@ -443,7 +446,7 @@ class RegistrationPage(QWidget):
         if self.ticket is None:
             self.label_cetak.setVisible(False)
             self.tombol_cetak_ulang.setVisible(False)
-            QTimer.singleShot(500, self._akhiri_jeda_penerbitan)
+            self._mulai_jeda_penerbitan()
             return
         self.label_cetak.setText("Mencetak tiket…")
         self.label_cetak.setStyleSheet(f"color: {TEXT_MUTED};")
@@ -469,7 +472,11 @@ class RegistrationPage(QWidget):
         self._pekerja_cetak = None
         if pekerja is not None:
             pekerja.deleteLater()
-        QTimer.singleShot(500, self._akhiri_jeda_penerbitan)
+        self._mulai_jeda_penerbitan()
+
+    def _mulai_jeda_penerbitan(self) -> None:
+        """Jadwalkan pembukaan tombol dengan timer yang ikut halaman."""
+        self._pewaktu_jeda.start(500)
 
     def cetak_ulang(self) -> None:
         """Cetak ulang tiket terakhir, misalnya karena kertas tersangkut."""
@@ -481,6 +488,7 @@ class RegistrationPage(QWidget):
 
     def hentikan(self) -> None:
         """Tunggu singkat pekerjaan database/printer sebelum halaman dibuang."""
+        self._pewaktu_jeda.stop()
         for pekerja in (
             self._pekerja_refresh,
             self._pekerja_terbit,

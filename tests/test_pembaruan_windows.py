@@ -40,8 +40,10 @@ def _pasangan_kunci():
     return rahasia, base64.b64encode(publik).decode("ascii")
 
 
-def _tandatangani(rahasia, versi, ukuran, sha):
-    return base64.b64encode(rahasia.sign(pesan_tanda_tangan(versi, ukuran, sha))).decode()
+def _tandatangani(rahasia, versi, ukuran, sha, catatan=""):
+    return base64.b64encode(
+        rahasia.sign(pesan_tanda_tangan(versi, ukuran, sha, catatan))
+    ).decode()
 
 
 def _server(monkeypatch, isi):
@@ -155,6 +157,28 @@ def test_pembaruan_bertanda_tangan_sah_diterima(monkeypatch):
     )
 
     assert info is not None and tanda_sah(info, publik)
+
+
+def test_catatan_rilis_ikut_dilindungi_tanda_tangan(monkeypatch):
+    rahasia, publik = _pasangan_kunci()
+    sha = "b" * 64
+    catatan = "Perbaikan cetak tiket"
+    _server(monkeypatch, {
+        "latest_version": "1.0.9", "size": 123, "sha256": sha,
+        "signature": _tandatangani(rahasia, "1.0.9", 123, sha, catatan),
+        "release_notes": catatan,
+    })
+
+    info = periksa_pembaruan(
+        "http://server:8765", versi_terpasang="1.0.8", kunci_publik_b64=publik
+    )
+    assert info is not None and tanda_sah(info, publik)
+
+    info_rusak = InfoPembaruan(
+        info.versi, info.berkas, info.ukuran_byte, info.sha256, info.tanda,
+        "Catatan yang diubah",
+    )
+    assert not tanda_sah(info_rusak, publik)
 
 
 @pytest.mark.parametrize("ubah", ["tanpa", "versi", "ukuran", "sha", "kunci_lain"])

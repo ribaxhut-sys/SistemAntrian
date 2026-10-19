@@ -116,6 +116,9 @@ class DashboardPetugasPage(QWidget):
         self._menu_pelayanan = menu_pelayanan
         self._pekerja: PekerjaLatar | None = None
         self.data: DashboardPetugas | None = None
+        self._pewaktu_isi_ulang = QTimer(self)
+        self._pewaktu_isi_ulang.setSingleShot(True)
+        self._pewaktu_isi_ulang.timeout.connect(self._isi_ulang)
 
         self._bangun_tampilan()
         self._pasang_penyegar()
@@ -280,7 +283,7 @@ class DashboardPetugasPage(QWidget):
                 getattr(self, "tabel_riwayat", None) and self.tabel_riwayat.viewport(),
             )
         ):
-            QTimer.singleShot(0, self._isi_ulang)
+            self._pewaktu_isi_ulang.start(0)
         return super().eventFilter(sumber, event)
 
     def _isi_ulang(self) -> None:
@@ -336,6 +339,7 @@ class DashboardPetugasPage(QWidget):
     def hentikan(self) -> None:
         self.penyegar.stop()
         self.detik_label.stop()
+        self._pewaktu_isi_ulang.stop()
         if self._pekerja is not None and self._pekerja.isRunning():
             self._pekerja.wait(3_500)
         if self._pekerja is not None and self._pekerja.isRunning():

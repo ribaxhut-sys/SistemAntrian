@@ -190,11 +190,14 @@ def audit_hasil_pembaruan(
     return berhasil
 
 
-def pesan_tanda_tangan(versi: str, ukuran_byte: int, sha256: str) -> bytes:
-    """Byte yang ditandatangani pengembang untuk satu rilis installer."""
-    return DOMAIN_PEMBARUAN + f"{versi}\n{int(ukuran_byte)}\n{sha256.lower()}".encode(
-        "ascii"
-    )
+def pesan_tanda_tangan(
+    versi: str, ukuran_byte: int, sha256: str, catatan: str = ""
+) -> bytes:
+    """Byte yang ditandatangani pengembang, termasuk catatan bila ada."""
+    pesan = f"{versi}\n{int(ukuran_byte)}\n{sha256.lower()}"
+    if catatan:
+        pesan += f"\n{bersihkan_catatan(catatan)}"
+    return DOMAIN_PEMBARUAN + pesan.encode("utf-8")
 
 
 def tanda_sah(info: InfoPembaruan, kunci_publik_b64: str | None = None) -> bool:
@@ -209,7 +212,12 @@ def tanda_sah(info: InfoPembaruan, kunci_publik_b64: str | None = None) -> bool:
         kunci_b64 += "=" * (-len(kunci_b64) % 4)
         kunci = Ed25519PublicKey.from_public_bytes(base64.b64decode(kunci_b64))
         tanda = base64.b64decode(info.tanda.strip(), validate=True)
-        kunci.verify(tanda, pesan_tanda_tangan(info.versi, info.ukuran_byte, info.sha256))
+        kunci.verify(
+            tanda,
+            pesan_tanda_tangan(
+                info.versi, info.ukuran_byte, info.sha256, info.catatan
+            ),
+        )
     except (InvalidSignature, ValueError, binascii.Error):
         return False
     return True

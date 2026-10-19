@@ -86,3 +86,4 @@ backup/apk-sebelum-*/
 backup/*.patch
 backup/apk-salinan-*/
 backup/data-salinan-*/
+.claude/settings.local.json

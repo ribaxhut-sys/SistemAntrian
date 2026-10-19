@@ -16,8 +16,13 @@ jebakan; bagian riwayat commit-nya sudah lama), [istilah.md](istilah.md),
 [layar-antrian.md](layar-antrian.md), [prioritas-antrian.md](prioritas-antrian.md),
 [keamanan-sesi.md](keamanan-sesi.md).
 
-Terakhir diperbarui: **17 Oktober 2026**, oleh Claude (melanjutkan sesi Codex
-yang terhenti karena batas pemakaian).
+Terakhir diperbarui: **19 Oktober 2026**, oleh Codex.
+
+**Pembaruan audit 19 Oktober 2026:** worker ekspor laporan kini dihentikan
+secara aman saat halaman ditutup; timer jeda penerbitan dan penyegaran
+dashboard dimiliki widget dan dihentikan saat teardown; catatan rilis Windows
+ikut dilindungi tanda tangan Ed25519. Tes terarah terkait lulus 132 kasus dan
+lint bersih. Kompilasi debug kedua modul Android juga berhasil.
 
 ---
 

@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         "--versi", default=__version__, help=f"versi installer (bawaan {__version__})"
     )
     parser.add_argument(
-        "--catatan", type=Path, help="berkas teks catatan rilis (opsional, tidak ditandatangani)"
+        "--catatan", type=Path, help="berkas teks catatan rilis (opsional)"
     )
     args = parser.parse_args(argv)
 
@@ -71,8 +71,15 @@ def main(argv: list[str] | None = None) -> int:
     kunci = serialization.load_pem_private_key(
         args.kunci.read_bytes(), kata_sandi.encode("utf-8")
     )
-    tanda = base64.b64encode(kunci.sign(pesan_tanda_tangan(args.versi, ukuran, sha256)))
-    info = InfoPembaruan(args.versi, installer, ukuran, sha256, tanda.decode("ascii"))
+    catatan = ""
+    if args.catatan is not None:
+        catatan = bersihkan_catatan(args.catatan.read_text(encoding="utf-8-sig"))
+    tanda = base64.b64encode(
+        kunci.sign(pesan_tanda_tangan(args.versi, ukuran, sha256, catatan))
+    )
+    info = InfoPembaruan(
+        args.versi, installer, ukuran, sha256, tanda.decode("ascii"), catatan
+    )
     if not tanda_sah(info):
         print(
             "Tanda tangan TIDAK cocok dengan kunci publik di app/core/kunci_publik.py; "
@@ -88,7 +95,6 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Ditulis: {folder / NAMA_VERSI}")
     print(f"Ditulis: {folder / NAMA_TANDA}")
     if args.catatan is not None:
-        catatan = bersihkan_catatan(args.catatan.read_text(encoding="utf-8-sig"))
         (folder / NAMA_CATATAN).write_text(catatan + "\n", encoding="utf-8")
         print(f"Ditulis: {folder / NAMA_CATATAN}")
     print(
