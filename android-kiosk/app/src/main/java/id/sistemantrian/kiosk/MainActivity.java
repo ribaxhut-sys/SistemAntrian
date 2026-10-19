@@ -133,7 +133,7 @@ public final class MainActivity extends Activity {
             {"Merah marun", "#4C0519"}, {"Ungu tua", "#3B0764"}};
     private static final String KILAU_TEMA = "tema";
     /** Kecerahan terendah warna kilau bebas; yang lebih gelap tak terlihat di latar. */
-    private static final float NILAI_MINIMUM_KILAU = 0.5f;
+    static final float NILAI_MINIMUM_KILAU = 0.5f;
     private static final String[][] PILIHAN_KILAU = {
             {KILAU_TEMA, "Ikut tema"},
             {"putih", "Putih"},
@@ -175,84 +175,12 @@ public final class MainActivity extends Activity {
     private TextView subtitleLabel;
 
     /** Satu set warna tampilan anjungan. */
-    private static final class Tema {
-        final int latar, kartu, garis, ink, muted, utama, lembut, emas, abu, hasil, teksTombol;
-        final int[][] chip;
-        final float skala;
-        final boolean gelap;
-
-        Tema(int latar, int kartu, int garis, int ink, int muted, int utama, int lembut,
-             int emas, int abu, int hasil, int teksTombol, int[][] chip, float skala,
-             boolean gelap) {
-            this.latar = latar;
-            this.kartu = kartu;
-            this.garis = garis;
-            this.ink = ink;
-            this.muted = muted;
-            this.utama = utama;
-            this.lembut = lembut;
-            this.emas = emas;
-            this.abu = abu;
-            this.hasil = hasil;
-            this.teksTombol = teksTombol;
-            this.chip = chip;
-            this.skala = skala;
-            this.gelap = gelap;
-        }
-    }
-
+    
     private static int rgb(int r, int g, int b) {
         return Color.rgb(r, g, b);
     }
 
-    private static Tema tema(String kode) {
-        switch (kode) {
-            case "hijau":
-                return new Tema(rgb(242, 248, 244), Color.WHITE, rgb(214, 233, 221),
-                        rgb(13, 59, 42), rgb(85, 117, 102), rgb(17, 120, 90),
-                        rgb(220, 241, 230), rgb(233, 216, 74), rgb(238, 245, 240),
-                        rgb(13, 59, 42), Color.WHITE, new int[][]{
-                        {rgb(214, 241, 227), rgb(15, 107, 74)},
-                        {rgb(232, 245, 201), rgb(77, 122, 15)},
-                        {rgb(253, 236, 207), rgb(154, 91, 10)},
-                        {rgb(215, 238, 245), rgb(14, 106, 133)}}, 1f, false);
-            case "kontras":
-                // Hitam-kuning dan huruf 12% lebih besar: keterbacaan dulu.
-                return new Tema(Color.WHITE, Color.WHITE, Color.BLACK,
-                        Color.BLACK, rgb(31, 31, 31), Color.BLACK,
-                        rgb(255, 230, 0), rgb(255, 230, 0), rgb(235, 235, 235),
-                        Color.BLACK, rgb(255, 230, 0), new int[][]{
-                        {Color.BLACK, rgb(255, 230, 0)}}, 1.12f, false);
-            case "gelap":
-                return new Tema(rgb(11, 18, 32), rgb(20, 29, 48), rgb(36, 49, 77),
-                        rgb(238, 242, 251), rgb(147, 163, 196), rgb(91, 140, 255),
-                        rgb(28, 42, 71), rgb(245, 183, 42), rgb(26, 35, 56),
-                        rgb(0, 8, 20), Color.WHITE, new int[][]{
-                        {rgb(31, 53, 102), rgb(156, 188, 255)},
-                        {rgb(23, 63, 51), rgb(127, 224, 178)},
-                        {rgb(69, 53, 26), rgb(245, 200, 105)},
-                        {rgb(53, 35, 77), rgb(207, 166, 245)}}, 1f, true);
-            case "merah_putih":
-                return new Tema(rgb(255, 247, 246), Color.WHITE, rgb(243, 214, 211),
-                        rgb(92, 11, 11), rgb(138, 90, 87), rgb(200, 16, 46),
-                        rgb(253, 228, 225), Color.WHITE, rgb(250, 240, 239),
-                        rgb(200, 16, 46), Color.WHITE, new int[][]{
-                        {rgb(200, 16, 46), Color.WHITE},
-                        {rgb(253, 228, 225), rgb(200, 16, 46)}}, 1f, false);
-            default:
-                return new Tema(rgb(244, 247, 252), Color.WHITE, rgb(223, 230, 243),
-                        rgb(11, 42, 91), rgb(91, 107, 134), rgb(30, 79, 163),
-                        rgb(227, 235, 250), rgb(245, 183, 42), rgb(241, 245, 249),
-                        rgb(11, 42, 91), Color.WHITE, new int[][]{
-                        {rgb(219, 231, 255), rgb(30, 79, 163)},
-                        {rgb(220, 245, 232), rgb(15, 122, 74)},
-                        {rgb(253, 236, 207), rgb(161, 88, 10)},
-                        {rgb(240, 226, 251), rgb(123, 63, 176)},
-                        {rgb(207, 244, 244), rgb(14, 116, 120)},
-                        {rgb(253, 226, 221), rgb(176, 58, 36)}}, 1f, false);
-        }
-    }
-
+    
     private void terapkanPalet(Tema t) {
         temaWarna = t;
         INK = t.ink;
@@ -341,7 +269,7 @@ public final class MainActivity extends Activity {
      */
     private void terapkanTemaBilaBerubah() {
         String baru = temaBerlaku();
-        if (baru.equals(temaAktif) && kertasAktif(tema(baru), baru) == kertasTerbangun) return;
+        if (baru.equals(temaAktif) && kertasAktif(Tema.dari(baru), baru) == kertasTerbangun) return;
         if (showingConfirmation || showingResult || requestInFlight
                 || updating || updateRequired) return;
         bangunUlangTampilan();
@@ -995,7 +923,7 @@ public final class MainActivity extends Activity {
         float heightDp = getResources().getDisplayMetrics().heightPixels / density;
         boolean modeMemanjang = widthDp / Math.max(1f, heightDp) > 2.5f;
         temaAktif = temaBerlaku();
-        terapkanPalet(tema(temaAktif));
+        terapkanPalet(Tema.dari(temaAktif));
         kertasTerbangun = kertasAktif(temaWarna, temaAktif);
         uiScale = Math.max(0.8f, Math.min(2.2f,
                 Math.min(widthDp / 360f, heightDp / 640f))) * temaWarna.skala;
@@ -5970,97 +5898,6 @@ public final class MainActivity extends Activity {
         rapikanTombolDialog(dialog);
     }
 
-    /** Bidang sentuh pemilih warna: pita hue (bilahHue) atau kejenuhan x kecerahan. */
-    private static final class BidangWarnaKilau extends View {
-        private final float[] hsv;
-        private final boolean bilahHue;
-        private final Runnable saatBerubah;
-        private final Runnable saatLepas;
-        private final android.graphics.Paint cat =
-                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-
-        BidangWarnaKilau(android.content.Context konteks, float[] hsv, boolean bilahHue,
-                Runnable saatBerubah, Runnable saatLepas) {
-            super(konteks);
-            this.hsv = hsv;
-            this.bilahHue = bilahHue;
-            this.saatBerubah = saatBerubah;
-            this.saatLepas = saatLepas;
-        }
-
-        @Override
-        protected void onDraw(android.graphics.Canvas kanvas) {
-            int w = getWidth();
-            int h = getHeight();
-            float tebal = getResources().getDisplayMetrics().density * 3f;
-            cat.setStyle(android.graphics.Paint.Style.FILL);
-            if (bilahHue) {
-                int[] warna = new int[7];
-                for (int i = 0; i < warna.length; i++) {
-                    warna[i] = Color.HSVToColor(new float[]{i * 60f, 1f, 1f});
-                }
-                cat.setShader(new android.graphics.LinearGradient(0, 0, w, 0, warna, null,
-                        android.graphics.Shader.TileMode.CLAMP));
-                kanvas.drawRect(0, 0, w, h, cat);
-                cat.setShader(null);
-                float x = hsv[0] / 360f * w;
-                cat.setStyle(android.graphics.Paint.Style.STROKE);
-                cat.setStrokeWidth(tebal);
-                cat.setColor(Color.WHITE);
-                kanvas.drawRect(x - tebal, tebal / 2, x + tebal, h - tebal / 2, cat);
-                return;
-            }
-            cat.setShader(new android.graphics.LinearGradient(0, 0, w, 0, Color.WHITE,
-                    Color.HSVToColor(new float[]{hsv[0], 1f, 1f}),
-                    android.graphics.Shader.TileMode.CLAMP));
-            kanvas.drawRect(0, 0, w, h, cat);
-            cat.setShader(new android.graphics.LinearGradient(0, 0, 0, h, 0x00000000,
-                    (int) (255 * (1f - NILAI_MINIMUM_KILAU)) << 24,
-                    android.graphics.Shader.TileMode.CLAMP));
-            kanvas.drawRect(0, 0, w, h, cat);
-            cat.setShader(null);
-            float cx = hsv[1] * w;
-            float cy = (1f - hsv[2]) / (1f - NILAI_MINIMUM_KILAU) * h;
-            cat.setStyle(android.graphics.Paint.Style.STROKE);
-            cat.setStrokeWidth(tebal);
-            cat.setColor(Color.BLACK);
-            kanvas.drawCircle(cx, cy, tebal * 3.3f, cat);
-            cat.setColor(Color.WHITE);
-            kanvas.drawCircle(cx, cy, tebal * 3f, cat);
-        }
-
-        @Override
-        public boolean onTouchEvent(android.view.MotionEvent e) {
-            int aksi = e.getActionMasked();
-            if (aksi == android.view.MotionEvent.ACTION_DOWN && getParent() != null) {
-                getParent().requestDisallowInterceptTouchEvent(true);
-            }
-            if (aksi == android.view.MotionEvent.ACTION_DOWN
-                    || aksi == android.view.MotionEvent.ACTION_MOVE) {
-                float x = Math.max(0f, Math.min(1f, e.getX() / Math.max(1, getWidth())));
-                float y = Math.max(0f, Math.min(1f, e.getY() / Math.max(1, getHeight())));
-                if (bilahHue) {
-                    hsv[0] = Math.min(359.99f, x * 360f);
-                } else {
-                    hsv[1] = x;
-                    hsv[2] = 1f - y * (1f - NILAI_MINIMUM_KILAU);
-                }
-                saatBerubah.run();
-                return true;
-            }
-            if (aksi == android.view.MotionEvent.ACTION_UP) {
-                saatLepas.run();
-                performClick();
-                return true;
-            }
-            return super.onTouchEvent(e);
-        }
-
-        @Override
-        public boolean performClick() {
-            return super.performClick();
-        }
-    }
 
     /** Tab Pengaturan terakhir; dibuka lagi di tab yang sama selama aplikasi hidup. */
     private int tabPengaturan;
