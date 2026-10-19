@@ -84,3 +84,5 @@ Desktop.ini
 data/tampilan.json
 backup/apk-sebelum-*/
 backup/*.patch
+backup/apk-salinan-*/
+backup/data-salinan-*/
