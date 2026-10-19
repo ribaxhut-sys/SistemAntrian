@@ -42,6 +42,7 @@ from app.ui.common import (
     tampilkan_peringatan,
 )
 from app.ui.efek import pasang_efek
+from app.ui.kilau import KilauTombol
 from app.ui.queue.note_panel import NotePanel
 from app.services.urutan_prioritas import MODE_BIASA, MODE_OTOMATIS, MODE_PRIORITAS
 from app.ui.queue.kartu_berikutnya import KartuBerikutnya
@@ -1370,8 +1371,38 @@ class ServicePage(QWidget):
         self._perbarui_tombol_panggil_kembali()
         self._sorot_aksi_utama()
 
+    def _sasaran_kilau(self) -> str | None:
+        """
+        Tombol yang berkilau: langkah yang paling mungkin diambil petugas.
+
+        Loket kosong: Panggil Berikutnya. Sudah dipanggil: Panggil Ulang,
+        sampai batas panggilan; sesudah itu Lewati Sementara.
+        """
+        if self._mode_ganti_loket or self._dialihkan_ke_petugas_lain():
+            return None
+        if self.antrian is None:
+            return "panggil" if self.tombol_panggil.isEnabled() else None
+        if self.antrian.status is QueueStatus.CALLED:
+            kunci = (
+                "lewati" if self.antrian.melewati_batas_panggilan else "panggil_ulang"
+            )
+            return kunci if self.aksi[kunci].isEnabled() else None
+        return None
+
+    def _setel_kilau(self) -> None:
+        if not hasattr(self, "kilau"):
+            self.kilau = {
+                "panggil": KilauTombol(self.tombol_panggil, "#FFFFFF"),
+                "panggil_ulang": KilauTombol(self.aksi["panggil_ulang"], PRIMARY),
+                "lewati": KilauTombol(self.aksi["lewati"], WARNING),
+            }
+        sasaran = self._sasaran_kilau()
+        for kunci, efek in self.kilau.items():
+            efek.aktifkan(kunci == sasaran)
+
     def _sorot_aksi_utama(self) -> None:
         """Tonjolkan tepat satu langkah berikutnya tanpa memindahkan tombol."""
+        self._setel_kilau()
         setel_variant(
             self.tombol_panggil,
             "primary" if self.tombol_panggil.isEnabled() else "",
