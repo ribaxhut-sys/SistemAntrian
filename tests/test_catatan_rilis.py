@@ -46,12 +46,14 @@ def test_server_membagikan_catatan_bila_ada(monkeypatch, tmp_path):
     assert data["sha256"] == hashlib.sha256(isi).hexdigest()
 
 
-def test_klien_membaca_catatan_tanpa_memengaruhi_tanda_tangan(monkeypatch):
+def test_klien_menerima_catatan_yang_ikut_ditandatangani(monkeypatch):
     rahasia, publik = _pasangan_kunci()
     sha = "b" * 64
     _server(monkeypatch, {
         "latest_version": "1.0.9", "size": 123, "sha256": sha,
-        "signature": _tandatangani(rahasia, "1.0.9", 123, sha),
+        "signature": _tandatangani(
+            rahasia, "1.0.9", 123, sha, "Perbaikan\x00 cetak tiket"
+        ),
         "release_notes": "Perbaikan\x00 cetak tiket",
     })
 
@@ -61,6 +63,23 @@ def test_klien_membaca_catatan_tanpa_memengaruhi_tanda_tangan(monkeypatch):
 
     assert info is not None
     assert info.catatan == "Perbaikan cetak tiket"
+
+
+def test_klien_menolak_catatan_yang_diubah_setelah_ditandatangani(monkeypatch):
+    """Catatan ikut pesan yang ditandatangani: mengubahnya membatalkan tanda tangan."""
+    rahasia, publik = _pasangan_kunci()
+    sha = "d" * 64
+    _server(monkeypatch, {
+        "latest_version": "1.0.9", "size": 123, "sha256": sha,
+        "signature": _tandatangani(rahasia, "1.0.9", 123, sha, "Perbaikan cetak tiket"),
+        "release_notes": "Unduh dari alamat lain",
+    })
+
+    info = periksa_pembaruan(
+        "http://server:8765", versi_terpasang="1.0.8", kunci_publik_b64=publik
+    )
+
+    assert info is None
 
 
 def test_server_lama_tanpa_catatan_tetap_diterima(monkeypatch):
