@@ -773,6 +773,21 @@ def test_media_status_diterima_tanpa_mengganggu_tablet():
     assert salah.status_code == 422
 
 
+def test_laporan_baterai_diterima_dan_nilai_liar_ditolak():
+    from app.kiosk_api import create_app
+
+    client = TestClient(create_app(TOKEN, _Services()))
+    headers = {"Authorization": f"Bearer {TOKEN}", **VERSI_APK}
+
+    ok = client.post(
+        "/v1/kiosk/baterai", headers=headers, json={"percent": 55, "charging": True}
+    )
+    liar = client.post("/v1/kiosk/baterai", headers=headers, json={"percent": 500})
+
+    assert ok.status_code == 200 and ok.json() == {"status": "ok"}
+    assert liar.status_code == 422
+
+
 def test_pustaka_media_memuat_semua_berkas_bukan_hanya_daftar_putar(
     tmp_path, monkeypatch
 ):

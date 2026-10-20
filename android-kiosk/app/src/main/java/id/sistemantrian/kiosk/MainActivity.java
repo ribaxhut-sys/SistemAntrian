@@ -570,6 +570,9 @@ public final class MainActivity extends Activity {
     private static final String MEDIA_SEGARKAN_DITANGANI = "media_segarkan_ditangani";
     /** Status salinan media terakhir yang dilaporkan: {total, tersalin}. */
     private int[] statusMediaTerakhir;
+    private int bateraiTerakhirPersen = -1;
+    private boolean bateraiTerakhirMengisi;
+    private long bateraiTerakhirWaktu;
     private long statusMediaWaktu;
     /** Video yang sedang diputar langsung dari server, belum dari salinan. */
     private String videoLewatJaringan;
@@ -1217,6 +1220,7 @@ public final class MainActivity extends Activity {
                 unduhGagalPada.clear();
                 statusMediaTerakhir = null;
             }
+            laporkanBaterai();
             if (!sumberTablet()) {
                 sinkronkanSalinan();
                 laporkanStatusMedia();
@@ -2557,6 +2561,42 @@ public final class MainActivity extends Activity {
                 }
             }
         });
+    }
+
+    /**
+     * Lapor tingkat baterai ke server untuk Kesehatan Sistem. Hanya bila
+     * berubah 5 poin atau lebih, status pengisian berganti, atau sudah lima
+     * menit; baterai tablet anjungan yang habis di tengah jam layanan adalah
+     * gangguan yang paling mudah dicegah bila terlihat lebih dulu.
+     */
+    private void laporkanBaterai() {
+        if (!hasServerConfig()) return;
+        Intent baterai = registerReceiver(null,
+                new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (baterai == null) return;
+        int level = baterai.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
+        int skala = baterai.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1);
+        if (level < 0 || skala <= 0) return;
+        int persen = Math.round(level * 100f / skala);
+        int status = baterai.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1);
+        boolean mengisi = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING
+                || status == android.os.BatteryManager.BATTERY_STATUS_FULL;
+        long sekarang = System.currentTimeMillis();
+        if (bateraiTerakhirPersen >= 0
+                && Math.abs(persen - bateraiTerakhirPersen) < 5
+                && mengisi == bateraiTerakhirMengisi
+                && sekarang - bateraiTerakhirWaktu < 300_000L) {
+            return;
+        }
+        bateraiTerakhirPersen = persen;
+        bateraiTerakhirMengisi = mengisi;
+        bateraiTerakhirWaktu = sekarang;
+        request("POST", "/v1/kiosk/baterai",
+                new JSONObjectBuilder()
+                        .put("percent", persen)
+                        .put("charging", mengisi)
+                        .build(),
+                json -> { }, error -> { });
     }
 
     /**

@@ -139,6 +139,11 @@ class PrinterReport(BaseModel):
     message: str = Field(default="", max_length=200)
 
 
+class BateraiReport(BaseModel):
+    percent: int = Field(ge=0, le=100)
+    charging: bool = False
+
+
 class MediaReportItem(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     plays: int = Field(default=0, ge=0)
@@ -852,6 +857,21 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             tunda = batas_pin.catat_gagal(kunci)
         logger.warning("PIN pengaturan salah dari anjungan %s", kunci)
         return {"ok": False, "locked_seconds": tunda}
+
+    @app.post("/v1/kiosk/baterai")
+    def baterai_report(
+        laporan: BateraiReport,
+        device_id: str = Depends(require_token),  # noqa: B008
+    ):
+        """Tingkat baterai tablet, untuk Kesehatan Sistem."""
+        if perangkat is not None and device_id:
+            try:
+                perangkat.catat_baterai(device_id, laporan.percent, laporan.charging)
+            except Exception:
+                logger.warning(
+                    "Status baterai %s gagal dicatat", device_id, exc_info=True
+                )
+        return {"status": "ok"}
 
     @app.post("/v1/kiosk/media-status")
     def media_status(

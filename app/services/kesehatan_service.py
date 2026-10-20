@@ -236,6 +236,21 @@ def nilai_migrasi(terpasang: str | None, terbaru: str | None, dikenal: bool) -> 
     )
 
 
+#: Laporan baterai yang lebih tua dari ini tidak lagi dipercaya.
+BATERAI_SEGAR = timedelta(minutes=30)
+BATERAI_RENDAH = 20
+BATERAI_KRITIS = 10
+
+
+def _baterai_segar(p, sekarang: datetime) -> tuple[int, bool] | None:
+    """(persen, sedang diisi) bila tablet baru saja melapor; selain itu None."""
+    persen = getattr(p, "baterai_persen", None)
+    waktu = getattr(p, "baterai_waktu", None)
+    if persen is None or waktu is None or sekarang - waktu > BATERAI_SEGAR:
+        return None
+    return persen, bool(getattr(p, "baterai_mengisi", False))
+
+
 def nilai_perangkat(
     p, apk_terbaru: dict[str, int], sekarang: datetime | None = None
 ) -> Pemeriksaan:
@@ -250,6 +265,10 @@ def nilai_perangkat(
         bagian.append(f"APK {p.versi_nama or p.versi_kode}")
     if p.printer_ok is not None:
         bagian.append("printer normal" if p.printer_ok else "printer bermasalah")
+    baterai = _baterai_segar(p, sekarang)
+    if baterai is not None:
+        persen, mengisi = baterai
+        bagian.append(f"baterai {persen}%" + (" (diisi)" if mengisi else ""))
     ringkasan = " · ".join(bagian)
 
     saran: list[str] = []
@@ -287,6 +306,16 @@ def nilai_perangkat(
                 "Periksa kabel USB/OTG, daya, dan kertas printer. Kegagalan cetak "
                 "tidak membatalkan nomor."
             )
+    if baterai is not None and not baterai[1] and baterai[0] <= BATERAI_RENDAH:
+        # Sesudah penilaian koneksi, supaya tidak ditimpa olehnya.
+        if baterai[0] <= BATERAI_KRITIS:
+            tingkat = MASALAH
+        elif tingkat != MASALAH:
+            tingkat = PERINGATAN
+        saran.append(
+            "Baterai tablet hampir habis dan tidak sedang diisi. Sambungkan "
+            "charger agar anjungan tidak mati di tengah jam layanan."
+        )
     return Pemeriksaan(nama, tingkat, ringkasan, tuple(saran), tuple(rincian))
 
 

@@ -640,6 +640,20 @@ def test_status_media_tidak_melebihi_total_dan_abaikan_perangkat_asing(layanan):
     assert info.media_tersalin == 2
 
 
+def test_baterai_tercatat_dibatasi_dan_perangkat_asing_diabaikan(layanan):
+    device_service.catat_kontak(DEVICE, nama="Tablet")
+
+    device_service.catat_baterai(DEVICE, 42, True)
+    (info,) = layanan.daftar()
+    assert (info.baterai_persen, info.baterai_mengisi) == (42, True)
+    assert info.baterai_waktu is not None
+
+    device_service.catat_baterai(DEVICE, 250, False)
+    device_service.catat_baterai("tidak-dikenal", 10, False)
+    (info,) = layanan.daftar()
+    assert (info.baterai_persen, info.baterai_mengisi) == (100, False)
+
+
 def test_segarkan_media_mengubah_penanda_untuk_tablet_itu(layanan):
     device_service.catat_kontak(DEVICE, nama="Tablet")
     device_service.catat_kontak("tablet-lain-001", nama="Lain")
