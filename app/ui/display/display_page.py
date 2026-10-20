@@ -34,7 +34,7 @@ from app.services.settings_service import (
     SettingsService,
 )
 from app.services.sound_service import SoundPlayer, suara_diaktifkan
-from app.ui.common import jalankan_aman
+from app.ui.common import PekerjaLatar, jalankan_aman, lepaskan_pekerja
 from app.ui.display.tema import (
     BENTO,
     FOKUS,
@@ -1272,13 +1272,15 @@ class DisplayPage(QWidget):
         #: Lebar, ukuran rancangan, dan teks yang terakhir diukur untuk
         #: judul. Sama berarti hasil pengukurannya masih berlaku.
         self._kunci_judul: tuple | None = None
+        #: Pekerja penyegaran berkala yang sedang berjalan (lihat `muat_ulang_latar`).
+        self._pekerja_data: PekerjaLatar | None = None
 
         self._bangun_tampilan()
         self.muat_ulang()
 
         self.pewaktu = QTimer(self)
         self.pewaktu.setInterval(SELANG_SEGAR_MS)
-        self.pewaktu.timeout.connect(self.muat_ulang)
+        self.pewaktu.timeout.connect(self.muat_ulang_latar)
 
         # Jam tetap berdetik walau data tidak berubah. Papan yang jamnya
         # berhenti membuat pengunjung mengira layarnya menggantung.
@@ -2117,7 +2119,13 @@ class DisplayPage(QWidget):
     def muat_ulang(self) -> None:
         """Ambil keadaan terbaru dan perbarui layar."""
         self.perbarui_jam()
-        berhasil, keadaan = jalankan_aman(self, lambda: self.queue.display_state(
+        berhasil, keadaan = jalankan_aman(self, self._ambil_keadaan)
+        if not berhasil or keadaan is None:
+            return
+        self._terapkan_keadaan(keadaan)
+
+    def _ambil_keadaan(self) -> DisplayState:
+        return self.queue.display_state(
             self.jumlah_berikutnya,
             # Papan yang tidak menampilkan daftar menunggu tidak meminta
             # nomornya sama sekali — lihat `daftar_menunggu_tampil`. Papan
@@ -2129,12 +2137,40 @@ class DisplayPage(QWidget):
             self.baris_diminta * KOLOM_PER_LAYANAN * MAKS_HALAMAN
             if self.daftar_menunggu_tampil
             else 0,
-        ))
-        if not berhasil or keadaan is None:
-            return
+        )
+
+    def _terapkan_keadaan(self, keadaan: DisplayState) -> None:
         self.tampilkan(keadaan)
         if self.panel_info_kios is not None:
             self.panel_info_kios.muat_pengaturan()
+
+    def muat_ulang_latar(self) -> None:
+        """
+        Penyegaran berkala: kueri berjalan di utas lain.
+
+        Di utas UI, PostgreSQL yang lambat atau putus membekukan papan yang
+        sedang dilihat pengunjung. Di sini papan tetap menampilkan keadaan
+        terakhir, dan kegagalan hanya dicatat: dialog galat tiap dua detik
+        di layar publik lebih buruk daripada angka yang sedikit usang.
+        """
+        self.perbarui_jam()
+        if self._pekerja_data is not None and self._pekerja_data.isRunning():
+            return  # kueri sebelumnya belum kembali; jangan menumpuk
+        pekerja = PekerjaLatar(self._ambil_keadaan, self)
+        pekerja.berhasil.connect(self._terapkan_keadaan)
+        pekerja.gagal.connect(
+            lambda exc: get_logger("ui.display").warning(
+                "Penyegaran layar antrian gagal: %s", exc
+            )
+        )
+        pekerja.finished.connect(lambda p=pekerja: self._bersihkan_pekerja(p))
+        self._pekerja_data = pekerja
+        pekerja.start()
+
+    def _bersihkan_pekerja(self, pekerja: PekerjaLatar) -> None:
+        if pekerja is self._pekerja_data:
+            self._pekerja_data = None
+        pekerja.deleteLater()
 
     def perbarui_jam(self) -> None:
         """Tulis tanggal dan jam terkini di kepala papan."""
@@ -2861,6 +2897,9 @@ class DisplayPage(QWidget):
         self.pewaktu.stop()
         self.pewaktu_jam.stop()
         self.pewaktu_halaman.stop()
+        if self._pekerja_data is not None:
+            lepaskan_pekerja(self._pekerja_data)
+            self._pekerja_data = None
         # Animasi yang masih berjalan akan menyentuh efek milik panel yang
         # sebentar lagi dibuang bersama jendelanya.
         self._hentikan_animasi_halaman()
