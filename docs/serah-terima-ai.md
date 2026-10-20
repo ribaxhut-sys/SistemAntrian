@@ -16,7 +16,20 @@ jebakan; bagian riwayat commit-nya sudah lama), [istilah.md](istilah.md),
 [layar-antrian.md](layar-antrian.md), [prioritas-antrian.md](prioritas-antrian.md),
 [keamanan-sesi.md](keamanan-sesi.md).
 
-Terakhir diperbarui: **19 Oktober 2026**, oleh Codex.
+Terakhir diperbarui: **20 Oktober 2026**, oleh Codex.
+
+**Audit 20 Oktober 2026 (Codex):** lint `ruff check app tests alembic alat`
+bersih. Tes terarah untuk keluar/ambil alih, Pelayanan Aktif, pembaruan
+Windows, catatan wajib, dan laporan: **117 lulus, 1 peringatan deprecation
+Starlette, 0 gagal** (162 detik). Status tetap **Siap staging/UAT**, belum
+siap produksi: build installer tanpa `-SkipTests`, uji PC bersih, tanda tangan
+installer, serta uji perangkat Android masih belum terbukti. Workspace masih
+memiliki salinan installer lama yang sengaja belum terlacak di
+`backup/installer-1.0.11-sebelum-audit/`; jangan dihapus tanpa persetujuan.
+
+**Build bertes 20 Oktober 2026 (Claude):** `.\build-installer.ps1` tanpa `-SkipTests` selesai dengan kode keluar 0 (menyelesaikan sisa risiko "build tanpa `-SkipTests`" di atas). Pytest: **2030 lulus, 8 dilewati, 0 gagal** (37 mnt 24 dtk), lalu PyInstaller dan Inno Setup berhasil; perbaikan `tests/conftest.py` (menunggu `_UTAS_TERTINGGAL`) terbukti. `dist\AntrianCRO-Setup-1.0.11.exe` (67.126.060 byte, dibangun 20 Okt 10:56, sha256 `05454E84744629ACAD6DFFA2374EB43D408B78BE762CE1EC1F276A8FD4F0344D`) kini installer **bertes**, tetapi **belum ditandatangani** dan **belum dipasang** di PC mana pun. `dist\Pembaruan-AntrianCRO.exe` belum ditandatangani (butuh kunci Ed25519 pemilik). Backup sebelum build: `backup/*-20261020-101139*` (dump `antrian`, salinan `data/` dan `apk/`, bundle repo 69 MB).
+
+**Dugaan bottleneck (belum diukur):** `DisplayPage.muat_ulang` (`app/ui/display/display_page.py`) memanggil `queue.display_state` di utas UI tiap 2 detik; bila PostgreSQL lambat atau putus, layar antrian Windows membeku. Halaman Pelayanan sudah memuat di latar belakang (`_mulai_muat_latar`) dan bisa jadi contoh. `time.sleep(0.5)` di `layanan_anjungan_page.py` (baris ~604 dan ~621) belum diperiksa konteks utasnya. Ukur durasi `display_state` pada data nyata sebelum mengubah.
 
 **Aturan keluar petugas 19 Oktober 2026:** nomor berstatus `CALLED` yang
 ditinggalkan petugas dikembalikan ke `WAITING`. Nomor `SERVING` atau `PAUSED`
@@ -618,7 +631,9 @@ menyeret APK ke jendela BlueStacks. Tangkapan layar:
 | 2026-10-19 | Claude | Laporan dirapikan: laporan pribadi tanpa kolom/kartu menunggu dan prioritas (kartu 'Nomor dipanggil'); kartu berwarna + pembanding periode sebelumnya (`Laporan.total_sebelumnya`, `kartu_ringkasan`), sorotan, grafik tren (`grafik_tren.py`, `deret_tren`), tabel layar ringkas dan dapat diurutkan + baris total, tab Riwayat saya, tombol Tahun ini, keadaan kosong. Survei kini dihitung pada hari nomor terbit. Belum di-commit. |
 | 2026-10-19 | Claude | Catatan petugas WAJIB untuk menyelesaikan pelayanan: tombol Selesai dihapus, diganti **Simpan & Selesai (F8)** di kaki panel catatan (`TombolSelesai`: menyala bila nomor sedang dilayani DAN catatan memadai, min. 10 huruf dengan >=3 huruf berbeda, `catatan_memadai`). `QueueService.complete(..., wajib_catatan=True)` memeriksa lembar tersimpan (UI memakainya; pemanggil lain tetap default tanpa syarat). Kalimat cepat per jenis layanan (`service_category.frasa_catatan`, migrasi f1b4c8d2a6e9, diatur di dialog Data Master, bawaan `FRASA_BAWAAN`). Simpan draf otomatis tiap 15 dtk. Admin: `selesaikan_paksa` + tombol di halaman Pelayanan Aktif (tanpa syarat catatan, alasan wajib, audit COMPLETE_QUEUE paksa=True). Belum di-commit. |
 | 2026-10-19 | Claude | Rilis APK anjungan **2.4.34.3** (ubin nomor menunggu hampir datar, pergantian halaman memudar tanpa putaran 3D) dan layar **1.6** (nomor menunggu lebih datar); `apk/` lama disalin ke `backup/apk-sebelum-2.4.34.3/`. Suite penuh 1997 lulus, lalu push cabang. Temuan: simpan otomatis NotePanel (15 dtk) dulu menulis ke DB sesudah panel ditutup (kini hanya bila jendela tampil). `build-installer.ps1` kini memakai PostgreSQL `antrian_uji` (dari `ANTRIAN_DB_URL` atau `~/.antrian-uji-db`) untuk uji bundel, bukan SQLite. **Regresi papan tunggu (d5b3fbf) tidak terreproduksi** (19 Okt, sesi berikutnya): tes `tests/test_regresi_papan_panggil.py` (tampil, panggil nomor, tunggu 300 ms; 800x600, 1093x614, 1366x768, 1920x1080) lulus di HEAD maupun di `d5b3fbf` sendiri. Tes dijaga tetap ada; bila proses Qt mati tanpa pesan lagi, mulai dari sini. |
+| 2026-10-20 | Claude | Backup penuh, build installer bertes lulus (2030 lulus, kode keluar 0), dugaan bottleneck layar antrian (bagian atas). |
 | 2026-10-19 | Claude | Audit kesiapan produksi: keluar aplikasi untuk peran tanpa QUEUE_CALL, akses admin ke Pelayanan Aktif, ambil alih tidak merebut dari pemilik yang masih hadir, 24 tes baru (lihat bagian atas). Status Siap staging/UAT. |
+| 2026-10-20 | Codex | Audit ulang: lint bersih dan 117 tes terarah lulus; status tetap Siap staging/UAT, dengan build installer tanpa `-SkipTests` dan validasi perangkat/PC bersih sebagai sisa risiko. |
 
 Saat menutup sesi: perbarui bagian 3 (keadaan, commit, versi), 6 (belum
 selesai), dan tabel di atas.
