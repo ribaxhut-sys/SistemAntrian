@@ -25,6 +25,12 @@ def test_halaman_tampil_lalu_panggil_berikutnya_tidak_mematikan_proses(
     halaman_kerja.show()
     qtbot.waitExposed(halaman_kerja)
     halaman_kerja.panggil_berikutnya()
+    # Pemanggilan berjalan di latar belakang; di mesin CI yang lambat 300 ms
+    # tetap menunggu tidak cukup. Tunggu hasilnya, bukan jamnya.
+    qtbot.waitUntil(
+        lambda: halaman_kerja.label_nomor.text() == "A-001" or bool(dicatat),
+        timeout=10_000,
+    )
     qtbot.wait(300)
     assert not dicatat, dicatat
     assert halaman_kerja.label_nomor.text() == "A-001"
