@@ -13,7 +13,7 @@ pytest==9.1.1
 # Pengujian widget PySide6: mengelola daur hidup QApplication dan
 # menunggu sinyal Qt secara andal. Dev-only, tidak ikut ke dalam .exe.
 pytest-qt==4.5.0
-httpx==0.28.1
+httpx2==2.15.1
 
 # Lint ringan (lihat ruff.toml): galat nyata, bukan gaya.
 ruff==0.17.0
