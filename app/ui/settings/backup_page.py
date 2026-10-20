@@ -11,8 +11,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QDateEdit,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -180,9 +184,60 @@ class BackupPage(QWidget):
         self.tabel_audit.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
+        susunan.insertLayout(1, self._bangun_filter_audit())
         susunan.addWidget(self.tabel_audit, stretch=1)
 
         return panel
+
+    def _bangun_filter_audit(self) -> QHBoxLayout:
+        baris = QHBoxLayout()
+        baris.setSpacing(8)
+        self.pilih_aksi_audit = QComboBox()
+        self.pilih_aksi_audit.addItem("Semua tindakan", None)
+        self.pilih_aksi_audit.setMinimumWidth(190)
+        self.isian_pelaku_audit = QLineEdit()
+        self.isian_pelaku_audit.setPlaceholderText("Pelaku (nama pengguna / sistem)")
+        self.centang_tanggal_audit = QCheckBox("Tanggal")
+        hari_ini = QDate.currentDate()
+        self.tanggal_dari_audit = QDateEdit(hari_ini.addDays(-7))
+        self.tanggal_sampai_audit = QDateEdit(hari_ini)
+        for kotak in (self.tanggal_dari_audit, self.tanggal_sampai_audit):
+            kotak.setCalendarPopup(True)
+            kotak.setDisplayFormat("dd/MM/yyyy")
+            kotak.setEnabled(False)
+        self.centang_tanggal_audit.toggled.connect(self.tanggal_dari_audit.setEnabled)
+        self.centang_tanggal_audit.toggled.connect(self.tanggal_sampai_audit.setEnabled)
+        self.tombol_filter_audit = tombol("Terapkan", variant="primary")
+        self.tombol_filter_audit.clicked.connect(self._muat_audit)
+        self.isian_pelaku_audit.returnPressed.connect(self._muat_audit)
+        for widget in (
+            self.pilih_aksi_audit,
+            self.isian_pelaku_audit,
+            self.centang_tanggal_audit,
+            self.tanggal_dari_audit,
+            self.tanggal_sampai_audit,
+            self.tombol_filter_audit,
+        ):
+            baris.addWidget(widget)
+        baris.addStretch(1)
+        return baris
+
+    def _muat_pilihan_aksi_audit(self) -> None:
+        """Isi pilihan tindakan dari yang pernah tercatat; pilihan aktif dipertahankan."""
+        berhasil, aksi = jalankan_aman(
+            self, audit_service.daftar_aksi, "Gagal membaca daftar tindakan"
+        )
+        if not berhasil:
+            return
+        terpilih = self.pilih_aksi_audit.currentData()
+        self.pilih_aksi_audit.blockSignals(True)
+        self.pilih_aksi_audit.clear()
+        self.pilih_aksi_audit.addItem("Semua tindakan", None)
+        for nama in aksi or []:
+            self.pilih_aksi_audit.addItem(nama, nama)
+        indeks = self.pilih_aksi_audit.findData(terpilih)
+        self.pilih_aksi_audit.setCurrentIndex(max(indeks, 0))
+        self.pilih_aksi_audit.blockSignals(False)
 
     # -----------------------------------------------------------------
     # Data
@@ -193,6 +248,7 @@ class BackupPage(QWidget):
         self._muat_status()
         self._muat_enkripsi()
         self._muat_backup()
+        self._muat_pilihan_aksi_audit()
         self._muat_audit()
 
     def _muat_status(self) -> None:
@@ -264,7 +320,21 @@ class BackupPage(QWidget):
     def _muat_audit(self) -> None:
         berhasil, data = jalankan_aman(
             self,
-            lambda: audit_service.list_terakhir(batas=BATAS_AUDIT),
+            lambda: audit_service.list_terakhir(
+                batas=BATAS_AUDIT,
+                aksi=self.pilih_aksi_audit.currentData(),
+                pelaku=self.isian_pelaku_audit.text().strip() or None,
+                sejak=(
+                    self.tanggal_dari_audit.date().toPython()
+                    if self.centang_tanggal_audit.isChecked()
+                    else None
+                ),
+                sampai=(
+                    self.tanggal_sampai_audit.date().toPython()
+                    if self.centang_tanggal_audit.isChecked()
+                    else None
+                ),
+            ),
             "Gagal membaca jejak aktivitas",
         )
         if not berhasil:
