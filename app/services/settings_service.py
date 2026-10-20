@@ -54,6 +54,8 @@ BAWAAN: dict[str, str] = {
     "backup.pg_dump_path": "",
     "backup.retention_days": "30",
     "backup.salinan_folder": "",
+    "laporan.mingguan_aktif": "false",
+    "laporan.mingguan_folder": "",
     "dashboard.refresh_seconds": "30",
     "sesi.idle_menit": "15",
     "kiosk.cooldown_seconds": "10",
@@ -695,6 +697,23 @@ SKEMA: tuple[Pengaturan, ...] = (
         TEKS,
         boleh_kosong=True,
         kelompok="Backup",
+    ),
+    Pengaturan(
+        "laporan.mingguan_aktif",
+        "Laporan mingguan otomatis",
+        "Saat admin atau supervisor membuka aplikasi, PDF laporan minggu lalu "
+        "(Senin sampai Minggu) dibuat sekali bila belum ada.",
+        BOOLEAN,
+        kelompok="Laporan",
+    ),
+    Pengaturan(
+        "laporan.mingguan_folder",
+        "Folder laporan mingguan",
+        "Tempat PDF laporan mingguan disimpan, di komputer yang membukanya. "
+        "Kosongkan untuk folder laporan-mingguan di samping data aplikasi.",
+        TEKS,
+        boleh_kosong=True,
+        kelompok="Laporan",
     ),
     Pengaturan(
         "backup.retention_days",

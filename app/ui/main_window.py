@@ -47,12 +47,14 @@ from app.services.survey_service import SurveyService
 from app.services.ticket_service import TicketService, buat_printer, mode_pencetak
 from app.services.user_service import UserService
 from app.ui.common import (
+    PekerjaLatar,
     judul,
     keterangan,
     konfirmasi,
     tampilkan_error,
     tampilkan_peringatan,
     tombol,
+    lepaskan_pekerja,
 )
 from app.ui.dashboard.dashboard_page import DashboardPage
 from app.ui.dashboard.petugas_page import (
@@ -117,6 +119,10 @@ TUNDA_PERIKSA_ANJUNGAN_AWAL_MS = 1_500
 # Pembaruan bukan keadaan darurat. Sekali saat aplikasi mulai dan dua kali
 # per jam cukup untuk memberi tahu petugas tanpa membebani API server.
 TUNDA_PERIKSA_PEMBARUAN_AWAL_MS = 3_000
+
+# Laporan mingguan dibuat sesudah layar kerja tenang, bukan bersaing dengan
+# pemuatan pertama dasbor.
+TUNDA_LAPORAN_MINGGUAN_MS = 20_000
 SELANG_PERIKSA_PEMBARUAN_MS = 30 * 60 * 1_000
 
 #: Judul menu halaman Layanan Anjungan; juga dipakai pita peringatan untuk
@@ -596,6 +602,35 @@ class MainWindow(QMainWindow):
         if not self.mode_kios:
             self._pasang_bilah_database()
             self._pasang_pemeriksa_pembaruan()
+            self._pasang_laporan_mingguan()
+
+    def _pasang_laporan_mingguan(self) -> None:
+        """Jadwalkan pembuatan laporan minggu lalu bagi pemegang REPORT_VIEW."""
+        self._pekerja_laporan: PekerjaLatar | None = None
+        self._pewaktu_laporan_awal = QTimer(self)
+        self._pewaktu_laporan_awal.setSingleShot(True)
+        self._pewaktu_laporan_awal.setInterval(TUNDA_LAPORAN_MINGGUAN_MS)
+        self._pewaktu_laporan_awal.timeout.connect(self._buat_laporan_mingguan)
+        if self.auth.has_permission(Permission.REPORT_VIEW):
+            self._pewaktu_laporan_awal.start()
+
+    def _buat_laporan_mingguan(self) -> None:
+        from app.services.laporan_terjadwal import buat_laporan_mingguan_bila_perlu
+
+        if self._ditutup or self._pekerja_laporan is not None:
+            return
+        pekerja = PekerjaLatar(
+            lambda: buat_laporan_mingguan_bila_perlu(self.auth), self
+        )
+        pekerja.finished.connect(self._laporan_mingguan_selesai)
+        self._pekerja_laporan = pekerja
+        pekerja.start()
+
+    def _laporan_mingguan_selesai(self) -> None:
+        pekerja = self._pekerja_laporan
+        self._pekerja_laporan = None
+        if pekerja is not None:
+            pekerja.deleteLater()
 
     def _bangun_kepala(self) -> QWidget:
         kepala = QFrame()
@@ -1610,6 +1645,7 @@ class MainWindow(QMainWindow):
             "_pewaktu_api",
             "_pewaktu_pembaruan_awal",
             "_pewaktu_pembaruan",
+            "_pewaktu_laporan_awal",
         ):
             pewaktu_api = getattr(self, nama, None)
             if pewaktu_api is not None:
@@ -1618,6 +1654,10 @@ class MainWindow(QMainWindow):
         if pewaktu is not None:
             pewaktu.stop()
         self._hentikan_tanda_hadir()
+        pekerja_laporan = getattr(self, "_pekerja_laporan", None)
+        if pekerja_laporan is not None:
+            lepaskan_pekerja(pekerja_laporan)
+            self._pekerja_laporan = None
         for nama, batas_ms in (
             ("_pemeriksa_db", 400),
             ("_pemeriksa_anjungan", 3000),
