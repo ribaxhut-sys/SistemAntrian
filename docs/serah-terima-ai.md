@@ -34,7 +34,31 @@ dan Maxtor, DPI 125/150%, uji lima loket. **Belum dikerjakan (besar, perlu
 perangkat atau keputusan):** pemecahan `MainActivity.java`, ganti monkeypatch
 tema, fitur baru (filter audit, laporan terjadwal, kesehatan tablet).
 
-**Identitas tetap dan versi baru (20 Oktober 2026, Claude, cabang `fitur/identitas-bapenda`):**
+**Peningkatan lanjutan (20 Oktober 2026, Claude, cabang `fitur/identitas-bapenda`, belum di-push):**
+backup lebih dulu: `backup/antrian-20261020-184421-sebelum-peningkatan.dump` (+ `.sha256`,
+196 entri terbaca `pg_restore -l`) dan `backup/repo-20261020-184421.bundle`. Lalu:
+(1) `httpx2==2.15.1` menggantikan `httpx` di `requirements-dev.txt` (peringatan Starlette hilang);
+(2) **Jejak Aktivitas** (menu Backup) punya filter tindakan, pelaku ("sistem" = tanpa
+pengguna), dan rentang tanggal: `audit_service.list_terakhir(aksi, pelaku, sejak, sampai)`,
+`daftar_aksi()`, `tests/test_filter_audit.py`; (3) **laporan mingguan otomatis**
+(`app/services/laporan_terjadwal.py`, pengaturan `laporan.mingguan_aktif` (bawaan **mati**)
+dan `laporan.mingguan_folder`): karena laporan menuntut `REPORT_VIEW`, PDF minggu lalu
+(Senin-Minggu) dibuat 20 dtk setelah admin/supervisor membuka aplikasi bila berkasnya
+belum ada (berkas = penanda), tercatat `EXPORT_REPORT`; `tests/test_laporan_terjadwal.py`;
+(4) **baterai tablet**: migrasi **`a7e3c9d5b214`** (head baru; 3 kolom nullable di
+`kiosk_device`), `POST /v1/kiosk/baterai`, anjungan Android melapor tiap 5 menit/saat
+berubah ≥5 poin (`laporkanBaterai`), Kesehatan Sistem: <=20% tanpa charger PERINGATAN,
+<=10% MASALAH, laporan >30 menit diabaikan; **database kerja `antrian` belum di-migrasi**
+(berjalan otomatis saat aplikasi dibuka; backup sudah ada), APK hanya dikompilasi
+(versi tidak dinaikkan, `apk/` tidak disentuh); (5) `MainActivity` tahap 8:
+`BantuWarna`, `Loket`, `Category` berkas sendiri (6564 baris). **Sengaja tidak
+dikerjakan:** penggantian monkeypatch tema (ratusan titik gaya, tanpa uji visual
+risikonya lebih besar dari manfaatnya; ketergantungan urutan tes sudah dijaga fixture
+`tema_dan_gaya_pulih`) dan pemecahan `MainActivity` per layar (butuh uji perangkat tiap
+tahap). Suite penuh setelah semua perubahan ini: **2054 lulus, 8 dilewati, 0 gagal** (30 mnt 42 dtk), lint bersih. Yang tetap menunggu manusia: bangun ulang + tanda tangan installer 1.2, uji PC
+bersih, uji APK 2.5.1/Maxtor/baterai di perangkat, DPI 125/150%, uji lima loket.
+
+**Peningkatan layar antrian (20 Oktober 2026, Claude, cabang `fitur/identitas-bapenda`):**
 keputusan pemilik: tampil **"Sistem Antrian CRO - Bapenda DKI Jakarta"**, tidak
 dapat diubah admin; nama produk teknis (`APP_NAME`, jalur data, tugas
 terjadwal) tetap `Sistem Antrian CRO` supaya pembaruan PC lama tidak putus.
