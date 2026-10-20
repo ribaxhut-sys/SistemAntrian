@@ -34,6 +34,8 @@ dan Maxtor, DPI 125/150%, uji lima loket. **Belum dikerjakan (besar, perlu
 perangkat atau keputusan):** pemecahan `MainActivity.java`, ganti monkeypatch
 tema, fitur baru (filter audit, laporan terjadwal, kesehatan tablet).
 
+**Installer 1.2 dibangun (20 Oktober 2026, Claude):** `.uild-installer.ps1` tanpa `-SkipTests`, kode keluar 0; pytest 2054 lulus, 8 dilewati, 0 gagal (31 mnt 13 dtk). `dist\AntrianCRO-Setup-1.2.exe` 67.526.579 byte, sha256 `7d4f7bba3ea58d4caf4dda8858cfcdfb55a1cb46ebb56283798d597e4eb3cc87`; `dist\Pembaruan-AntrianCRO.exe` sha256 `7d4f7bba3ea58d4caf4dda8858cfcdfb55a1cb46ebb56283798d597e4eb3cc87`. **Belum ditandatangani** (`alat	andatangani_pembaruan.py` + kunci pemilik, lalu `publikasikan-pembaruan.ps1`) dan **belum dipasang** di PC mana pun. Penomoran MainActivity: tahap 9 (`BantuGambar`) dan 10 (`BantuTeks`), kini 6499 baris. ADB BlueStacks: instal/push gagal `error: closed`; APK debug 2.5.1 harus diseret manual ke jendela BlueStacks (terpasang masih 2.5).
+
 **Peningkatan lanjutan (20 Oktober 2026, Claude, cabang `fitur/identitas-bapenda`, belum di-push):**
 backup lebih dulu: `backup/antrian-20261020-184421-sebelum-peningkatan.dump` (+ `.sha256`,
 196 entri terbaca `pg_restore -l`) dan `backup/repo-20261020-184421.bundle`. Lalu:
