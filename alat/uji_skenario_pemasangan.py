@@ -5,7 +5,6 @@ Memakai database sementara `antrian_skenario` (dibuat lalu dihapus); tidak menye
 """
 import os
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
