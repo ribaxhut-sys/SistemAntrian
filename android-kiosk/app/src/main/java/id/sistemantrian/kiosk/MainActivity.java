@@ -216,7 +216,7 @@ public final class MainActivity extends Activity {
      * Identitas tetap aplikasi. Tidak dapat diubah dari server maupun dari
      * pengaturan tablet; ubah hanya di sini (dan di app/core/identitas.py).
      */
-    static final String NAMA_TAMPIL = "Sistem Antrian CRO - Bapenda DKI Jakarta";
+    static final String NAMA_TAMPIL = "Bapenda DKI Jakarta";
 
     private String judulBerlaku() {
         return NAMA_TAMPIL;

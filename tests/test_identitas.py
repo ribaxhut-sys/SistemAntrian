@@ -28,15 +28,16 @@ def test_judul_tiket_selalu_identitas_tetap(ticket_pdf, antrian_siap, terbitkan)
     assert ticket_pdf.susun(nomor).header == identitas.JUDUL_TIKET
 
 
-def test_android_memakai_identitas_yang_sama():
+def test_android_memakai_nama_instansi_saja():
+    """Judul di tablet hanya nama instansi; Windows tetap memakai NAMA_TAMPIL penuh."""
     kiosk = (
         RAKIT / "android-kiosk/app/src/main/java/id/sistemantrian/kiosk/MainActivity.java"
     ).read_text(encoding="utf-8")
     layar = (
         RAKIT / "android-kiosk/layar/src/main/java/id/sistemantrian/layar/MainActivity.java"
     ).read_text(encoding="utf-8")
-    assert f'NAMA_TAMPIL = "{identitas.NAMA_TAMPIL}"' in kiosk
-    assert f'NAMA_TAMPIL = "{identitas.NAMA_TAMPIL}"' in layar
+    assert f'NAMA_TAMPIL = "{identitas.INSTANSI}"' in kiosk
+    assert f'NAMA_TAMPIL = "{identitas.INSTANSI}"' in layar
     for manifes in (
         "android-kiosk/app/src/main/AndroidManifest.xml",
         "android-kiosk/layar/src/main/AndroidManifest.xml",
