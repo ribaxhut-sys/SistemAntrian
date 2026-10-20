@@ -1,5 +1,9 @@
 package id.sistemantrian.kiosk;
 
+import static id.sistemantrian.kiosk.BantuWarna.campur;
+import static id.sistemantrian.kiosk.BantuWarna.darker;
+import static id.sistemantrian.kiosk.BantuWarna.luminansWarna;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.PendingIntent;
@@ -682,45 +686,6 @@ public final class MainActivity extends Activity {
     private final Map<String, String> galatTayang = new HashMap<>();
     private final Map<String, Boolean> terakhirGagal = new HashMap<>();
     private boolean laporanTayangTerkirim;
-
-    private static final class Loket {
-        final String nama;
-        final String nomor;
-        final String layanan;
-        final String status;
-        /** Bertambah tiap panggilan dan panggilan ulang. */
-        final int panggilan;
-
-        Loket(JSONObject json) {
-            nama = json.optString("name", "");
-            nomor = json.isNull("queue_number") ? "" : json.optString("queue_number", "");
-            layanan = json.isNull("category") ? "" : json.optString("category", "");
-            status = json.optString("status", "KOSONG");
-            panggilan = json.optInt("call_count", 0);
-        }
-
-        String tanda() {
-            return nama + "=" + nomor + "/" + layanan + "/" + status;
-        }
-    }
-
-    private static final class Category {
-        final int id;
-        final String name;
-        final String prefix;
-        final String info;
-        final Integer parentId;
-        final boolean group;
-
-        Category(JSONObject json) {
-            id = json.optInt("id");
-            name = json.optString("name");
-            prefix = json.optString("prefix");
-            info = json.optString("info");
-            parentId = json.isNull("parent_id") ? null : json.optInt("parent_id");
-            group = json.optBoolean("is_group");
-        }
-    }
 
     private interface Success {
         void accept(JSONObject json) throws Exception;
@@ -1894,16 +1859,6 @@ public final class MainActivity extends Activity {
             ajakanIklanPenuh.setScaleY(1f + 0.04f * f);
         });
         animatorDenyutAjakan.start();
-    }
-
-    /** Luminans relatif WCAG 0..1 (sama dengan app/services/warna_iklan.py). */
-    private static double luminansWarna(int warna) {
-        double[] c = {Color.red(warna) / 255.0, Color.green(warna) / 255.0,
-                Color.blue(warna) / 255.0};
-        for (int i = 0; i < 3; i++) {
-            c[i] = c[i] <= 0.03928 ? c[i] / 12.92 : Math.pow((c[i] + 0.055) / 1.055, 2.4);
-        }
-        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
     }
 
     /** `#RRGGBB` yang sah dan tidak terlalu terang, atau null. */
@@ -3518,14 +3473,6 @@ public final class MainActivity extends Activity {
             action.run();
         });
         return card;
-    }
-
-    /** Campuran dua warna; `porsi` 0 = warna pertama, 1 = warna kedua. */
-    private static int campur(int satu, int dua, float porsi) {
-        return Color.rgb(
-                Math.round(Color.red(satu) + (Color.red(dua) - Color.red(satu)) * porsi),
-                Math.round(Color.green(satu) + (Color.green(dua) - Color.green(satu)) * porsi),
-                Math.round(Color.blue(satu) + (Color.blue(dua) - Color.blue(satu)) * porsi));
     }
 
     private StateListDrawable latarKartu(int latar) {
@@ -6591,13 +6538,6 @@ public final class MainActivity extends Activity {
                 rounded(pressed, radius));
         states.addState(new int[]{}, rounded(normal, radius));
         return states;
-    }
-
-    private static int darker(int color) {
-        return Color.rgb(
-                Math.max(0, (int) (Color.red(color) * 0.82)),
-                Math.max(0, (int) (Color.green(color) * 0.82)),
-                Math.max(0, (int) (Color.blue(color) * 0.82)));
     }
 
     @Override
