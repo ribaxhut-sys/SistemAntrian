@@ -18,6 +18,22 @@ jebakan; bagian riwayat commit-nya sudah lama), [istilah.md](istilah.md),
 
 Terakhir diperbarui: **20 Oktober 2026**, oleh Claude.
 
+**Peningkatan layar antrian (20 Oktober 2026, Claude, cabang `fitur/identitas-bapenda`):**
+penyegaran berkala `DisplayPage` kini lewat `muat_ulang_latar` (`PekerjaLatar`,
+tidak menumpuk, kegagalan hanya dicatat tanpa dialog); `muat_ulang()` sinkron
+tetap dipakai saat dibuat dan oleh tes. `test_display.py`: 168 lulus, lint
+bersih. Pemeriksaan dugaan lain: `time.sleep(0.5)` di `layanan_anjungan_page.py`
+**aman** (berjalan di pekerja latar `_jalankan`); peringatan tanda tangan
+pembaruan, backup otomatis dengan salinan kedua, prosedur cadangan kunci
+(`keamanan-sesi.md`), dan batas hadir 90 detik **sudah ada**, jadi tidak diubah.
+Peringatan Starlette (`httpx` di `TestClient`) berasal dari dependensi; perbaikannya
+`httpx2`, belum dilakukan karena mengubah dependensi. **Masih butuh pemilik/perangkat:**
+bangun ulang + tanda tangan installer 1.2 (`build-installer.ps1`, lalu
+`publikasikan-pembaruan.ps1` dengan kunci pemilik), uji PC bersih, uji APK 2.5.1
+dan Maxtor, DPI 125/150%, uji lima loket. **Belum dikerjakan (besar, perlu
+perangkat atau keputusan):** pemecahan `MainActivity.java`, ganti monkeypatch
+tema, fitur baru (filter audit, laporan terjadwal, kesehatan tablet).
+
 **Identitas tetap dan versi baru (20 Oktober 2026, Claude, cabang `fitur/identitas-bapenda`):**
 keputusan pemilik: tampil **"Sistem Antrian CRO - Bapenda DKI Jakarta"**, tidak
 dapat diubah admin; nama produk teknis (`APP_NAME`, jalur data, tugas
