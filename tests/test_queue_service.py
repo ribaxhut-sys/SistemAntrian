@@ -1447,15 +1447,25 @@ def test_admin_dapat_membatalkan_paksa_pelayanan_aktif(
     assert QueueService(admin).list_pelayanan_aktif() == []
 
 
-def test_hanya_admin_dapat_melihat_dan_mengalihkan_pelayanan(cro_queue):
-    with pytest.raises(AuthorizationError):
-        cro_queue.list_pelayanan_aktif()
+def test_hanya_admin_dapat_mengalihkan_pelayanan(cro_queue):
+    # Melihat daftar boleh bagi CRO (untuk mengambil alih nomor yang ditinggal);
+    # mengalihkan dan membatalkan paksa tetap hanya admin.
+    assert cro_queue.list_pelayanan_aktif() == []
     with pytest.raises(AuthorizationError):
         cro_queue.list_tujuan_pengalihan()
     with pytest.raises(AuthorizationError):
         cro_queue.alihkan_pelayanan(1, 1, "uji")
     with pytest.raises(AuthorizationError):
         cro_queue.batalkan_paksa(1, "uji")
+
+
+@pytest.mark.parametrize("peran", ["registration", "supervisor", "display"])
+def test_peran_lain_tidak_dapat_melihat_pelayanan_aktif(auth, antrian_siap, peran):
+    auth.logout()
+    auth.login(peran, TEST_PASSWORD)
+
+    with pytest.raises(AuthorizationError):
+        QueueService(auth).list_pelayanan_aktif()
 
 
 # ---------------------------------------------------------------------

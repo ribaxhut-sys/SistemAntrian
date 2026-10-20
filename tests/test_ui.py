@@ -343,7 +343,7 @@ def test_admin_melihat_menu_data_master(qtbot, admin_auth):
     assert "Data Master" in menu
 
 
-def test_hanya_admin_melihat_menu_pelayanan_aktif(qtbot, auth):
+def test_menu_pelayanan_aktif_hanya_untuk_admin_dan_cro(qtbot, auth):
     auth.login("admin", TEST_PASSWORD)
     admin = MainWindow(auth)
     qtbot.addWidget(admin)
@@ -359,7 +359,16 @@ def test_hanya_admin_melihat_menu_pelayanan_aktif(qtbot, auth):
     menu_petugas = [
         petugas.navigasi.item(i).text() for i in range(petugas.navigasi.count())
     ]
-    assert "Pelayanan Aktif" not in menu_petugas
+    # CRO melihatnya untuk mengambil alih nomor yang ditinggal petugas lain.
+    assert "Pelayanan Aktif" in menu_petugas
+
+    for peran in ("supervisor", "registration"):
+        auth.logout()
+        auth.login(peran, TEST_PASSWORD)
+        lain = MainWindow(auth)
+        qtbot.addWidget(lain)
+        menu_lain = [lain.navigasi.item(i).text() for i in range(lain.navigasi.count())]
+        assert "Pelayanan Aktif" not in menu_lain, peran
 
 
 @pytest.mark.parametrize("peran", ["cro", "supervisor", "registration", "display"])
@@ -1799,6 +1808,8 @@ def test_menu_petugas_cro_dan_pendaftaran_tidak_tumpang_tindih(qtbot, auth, antr
         "Ringkasan Saya",
         "Survey Kepuasan",
         "Pengaduan",
+        # Untuk mengambil alih nomor yang ditinggal petugas lain.
+        "Pelayanan Aktif",
         # Riwayat milik CRO sendiri; disaring lagi oleh ReportService.
         "Laporan Saya",
         "Tampilan",

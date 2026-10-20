@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from app.core.logger import get_logger
 from app.services.queue_service import QueueInfo, QueueService, TransferTargetInfo
+from app.services.permissions import Permission
 from app.ui.common import (
     PekerjaLatar,
     jalankan_aman,
@@ -104,7 +105,17 @@ class ActiveServicePage(QWidget):
         self.tombol_alihkan = tombol("Alihkan Pelayanan", variant="primary")
         self.tombol_alihkan.clicked.connect(self.alihkan)
         aksi.addWidget(self.tombol_alihkan)
+        self.tombol_ambil_alih = tombol("Ambil Alih", variant="primary")
+        self.tombol_ambil_alih.clicked.connect(self.ambil_alih)
+        aksi.addWidget(self.tombol_ambil_alih)
         susunan.addLayout(aksi)
+        # Service tetap menegakkan hak; ini hanya menyembunyikan tombol yang
+        # pasti ditolak: CRO mengambil alih, admin mengalihkan/menutup paksa.
+        auth = self.queue.auth
+        admin = auth.has_permission(Permission.QUEUE_REASSIGN)
+        self.tombol_ambil_alih.setVisible(auth.has_permission(Permission.QUEUE_CALL))
+        for tombol_admin in (self.tombol_selesai, self.tombol_batal, self.tombol_alihkan):
+            tombol_admin.setVisible(admin)
         self._perbarui_tombol()
 
     def muat_ulang(self) -> None:
@@ -132,7 +143,9 @@ class ActiveServicePage(QWidget):
     def _ambil_data(self) -> tuple[list[QueueInfo], list[TransferTargetInfo]]:
         return (
             self.queue.list_pelayanan_aktif(),
-            self.queue.list_tujuan_pengalihan(),
+            self.queue.list_tujuan_pengalihan()
+            if self.queue.auth.has_permission(Permission.QUEUE_REASSIGN)
+            else [],
         )
 
     def _terapkan_data(
@@ -260,6 +273,22 @@ class ActiveServicePage(QWidget):
         if berhasil:
             tampilkan_info(self, f"{antrian.queue_number} berhasil dialihkan.")
             self.input_alasan.clear()
+            self.muat_ulang()
+
+    def ambil_alih(self) -> None:
+        """Ambil nomor aktif ke loket bawaan petugas yang sedang masuk."""
+        antrian = self._antrian_terpilih()
+        if antrian is None or antrian.status.value not in ("SERVING", "PAUSED"):
+            return
+        if not konfirmasi(self, f"Ambil alih pelayanan {antrian.queue_number}?"):
+            return
+        berhasil, _ = jalankan_aman(
+            self,
+            lambda: self.queue.ambil_alih_pelayanan(antrian.id),
+            "Gagal mengambil alih pelayanan",
+        )
+        if berhasil:
+            tampilkan_info(self, f"{antrian.queue_number} berhasil diambil alih.")
             self.muat_ulang()
 
     def selesaikan_paksa(self) -> None:

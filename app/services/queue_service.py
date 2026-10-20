@@ -1578,6 +1578,53 @@ class QueueService:
             logger.info("Pelayanan %s dimulai", antrian.queue_number)
             return _as_info(antrian, repo.jumlah_pemanggilan(antrian.id))
 
+    def siapkan_logout_petugas(self) -> list[str]:
+        """Kembalikan panggilan yang belum dimulai sebelum sesi petugas berakhir.
+
+        Nomor yang sudah mulai dilayani tetap aktif agar petugas lain dapat
+        mengambil alih. Sebaliknya, nomor yang baru dipanggil aman
+        dikembalikan ke antrean agar dapat dipanggil petugas lain.
+        """
+        sesi = self.auth.require_session()
+        if not self.auth.has_permission(Permission.QUEUE_CALL):
+            # Admin, supervisor, dan pendaftaran tidak memegang nomor; tidak
+            # ada yang perlu dikembalikan, dan keluar tidak boleh tertahan
+            # hanya karena perannya tidak memanggil.
+            return []
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            aktif = [
+                row
+                for row in repo.list_sedang_ditangani(
+                    sesi.branch_id, clock.today(), for_update=True
+                )
+                if row.served_by_user_id == sesi.user_id
+            ]
+            masih_dilayani = [
+                row.queue_number
+                for row in aktif
+                if row.status in (QueueStatus.SERVING, QueueStatus.PAUSED)
+            ]
+            for antrian in aktif:
+                if antrian.status is not QueueStatus.CALLED:
+                    continue
+                nomor = antrian.queue_number
+                antrian.status = QueueStatus.WAITING
+                antrian.counter_id = None
+                antrian.served_by_user_id = None
+                antrian.called_at = None
+                audit_service.record(
+                    session,
+                    AuditAction.RETURN_QUEUE_TO_WAITING,
+                    user_id=sesi.user_id,
+                    entity_type="queue",
+                    entity_id=antrian.id,
+                    nomor=nomor,
+                    tindakan="dikembalikan ke antrean saat petugas keluar",
+                )
+                logger.info("Antrian %s dikembalikan saat petugas keluar", nomor)
+            return masih_dilayani
+
     def pause(self, queue_id: int) -> QueueInfo:
         """Tunda pelayanan sementara, misalnya menunggu berkas."""
         return self._ubah_sederhana(
@@ -1667,8 +1714,18 @@ class QueueService:
     # -----------------------------------------------------------------
 
     def list_pelayanan_aktif(self) -> list[QueueInfo]:
-        """Daftar nomor yang sedang dipegang loket pada cabang admin."""
-        sesi = self.auth.require_permission(Permission.QUEUE_REASSIGN)
+        """
+        Daftar pelayanan aktif di cabang sesi.
+
+        Dilihat petugas pelayanan (untuk mengambil alih nomor yang ditinggal)
+        dan admin (untuk mengalihkan, membatalkan, atau menyelesaikan paksa).
+        Admin tidak memegang QUEUE_CALL, jadi salah satu hak sudah cukup.
+        """
+        sesi = (
+            self.auth.require_permission(Permission.QUEUE_CALL)
+            if self.auth.has_permission(Permission.QUEUE_CALL)
+            else self.auth.require_permission(Permission.QUEUE_REASSIGN)
+        )
         with session_scope() as session:
             repo = QueueRepository(session)
             return [
@@ -1703,6 +1760,64 @@ class QueueService:
                     )
                 )
             return sorted(hasil, key=lambda item: item.full_name.casefold())
+
+    def ambil_alih_pelayanan(self, queue_id: int) -> QueueInfo:
+        """Pindahkan pelayanan aktif ke petugas yang sedang masuk.
+
+        Status dan waktu mulai dipertahankan agar durasi pelayanan tidak
+        hilang; penguncian baris mencegah dua petugas mengambil nomor sama.
+        """
+        sesi = self.auth.require_permission(Permission.QUEUE_CALL)
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            petugas = session.get(User, sesi.user_id, with_for_update=True)
+            if petugas is None or petugas.default_counter_id is None:
+                raise BusinessRuleError("Akun Anda belum memiliki loket bawaan.")
+            antrian = repo.get_by_id(queue_id, for_update=True)
+            if (antrian is None or antrian.branch_id != sesi.branch_id
+                    or antrian.queue_date != clock.today()
+                    or antrian.status not in (QueueStatus.SERVING, QueueStatus.PAUSED)):
+                raise BusinessRuleError("Nomor itu tidak lagi dapat diambil alih.")
+            # Pengambilalihan untuk nomor yang ditinggal, bukan untuk merebut
+            # dari rekan yang sedang melayani. Pemilik dianggap pergi bila ia
+            # sudah keluar (tanda hadir loket dilepas) atau komputernya mati
+            # sehingga tanda hadirnya basi.
+            if antrian.served_by_user_id not in (None, sesi.user_id):
+                batas_hadir = clock.now() - timedelta(seconds=BATAS_HADIR_PETUGAS_DETIK)
+                masih_hadir = session.scalar(
+                    sa.select(Counter.id).where(
+                        Counter.petugas_user_id == antrian.served_by_user_id,
+                        Counter.petugas_terlihat_pada.is_not(None),
+                        Counter.petugas_terlihat_pada >= batas_hadir,
+                    )
+                )
+                if masih_hadir is not None:
+                    nama = antrian.served_by.full_name if antrian.served_by else "Petugas"
+                    raise BusinessRuleError(
+                        f"{nama} masih hadir dan melayani nomor ini. "
+                        "Minta admin mengalihkannya bila perlu."
+                    )
+            loket = self._pastikan_loket_aktif(
+                session, petugas.default_counter_id, sesi.branch_id, kunci=True
+            )
+            aktif = repo.list_sedang_ditangani(sesi.branch_id, clock.today(), for_update=True)
+            if any(row.id != queue_id and row.counter_id == loket.id for row in aktif):
+                raise BusinessRuleError(f"Loket {loket.name!r} masih menangani nomor lain.")
+            if any(row.id != queue_id and row.served_by_user_id == sesi.user_id for row in aktif):
+                raise BusinessRuleError("Anda masih menangani nomor lain.")
+            lama_id = antrian.served_by_user_id
+            lama_nama = antrian.served_by.full_name if antrian.served_by else None
+            antrian.counter = loket
+            antrian.served_by = petugas
+            audit_service.record(
+                session, AuditAction.REASSIGN_QUEUE, user_id=sesi.user_id,
+                entity_type="queue", entity_id=antrian.id, nomor=antrian.queue_number,
+                tindakan="ambil alih pelayanan tanpa izin khusus",
+                petugas_lama_id=lama_id, petugas_lama=lama_nama,
+                petugas_baru_id=petugas.id, petugas_baru=petugas.full_name,
+                loket_baru=loket.name,
+            )
+            return _as_info(antrian, repo.jumlah_pemanggilan(antrian.id))
 
     def alihkan_pelayanan(
         self, queue_id: int, target_user_id: int, alasan: str

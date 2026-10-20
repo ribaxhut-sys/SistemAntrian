@@ -45,7 +45,14 @@ from app.services.note_service import NoteService
 from app.services.survey_service import SurveyService
 from app.services.ticket_service import TicketService, buat_printer, mode_pencetak
 from app.services.user_service import UserService
-from app.ui.common import judul, keterangan, konfirmasi, tampilkan_error, tombol
+from app.ui.common import (
+    judul,
+    keterangan,
+    konfirmasi,
+    tampilkan_error,
+    tampilkan_peringatan,
+    tombol,
+)
 from app.ui.dashboard.dashboard_page import DashboardPage
 from app.ui.dashboard.petugas_page import (
     DashboardPendaftaranPage,
@@ -213,6 +220,8 @@ class _Menu:
     hanya_server: bool = False
     #: Hanya untuk sesi yang mewakili akun (bukan sesi kios tanpa login).
     hanya_akun: bool = False
+    #: Hak lain yang juga membuka menu ini (selain `permission`).
+    atau: tuple[Permission, ...] = ()
     #: Menu pelengkap: tampil hanya bila sesi punya menu kerja lain, supaya
     #: akun tanpa kewenangan apa pun tetap melihat pesan "tidak ada menu".
     pelengkap: bool = False
@@ -746,10 +755,13 @@ class MainWindow(QMainWindow):
                 Permission.CONFIG_MANAGE,
                 lambda: KesehatanPage(KesehatanService(self.auth, self.backup_service)),
             ),
+            # CRO melihatnya untuk mengambil alih nomor yang ditinggal; admin
+            # untuk mengalihkan, membatalkan, atau menyelesaikan paksa.
             _Menu(
                 "Pelayanan Aktif",
-                Permission.QUEUE_REASSIGN,
+                Permission.QUEUE_CALL,
                 lambda: ActiveServicePage(self.queue_service),
+                atau=(Permission.QUEUE_REASSIGN,),
             ),
             _Menu(
                 "Tutup Hari",
@@ -832,8 +844,10 @@ class MainWindow(QMainWindow):
                 return False
             if butir.hanya_akun and sesi_menu.user_id is None:
                 return False
-            return butir.permission is None or self.auth.has_permission(
-                butir.permission
+            return (
+                butir.permission is None
+                or self.auth.has_permission(butir.permission)
+                or any(self.auth.has_permission(p) for p in butir.atau)
             )
 
         # Menu pelengkap (Tampilan) hanya menemani menu kerja yang benar-benar
@@ -1362,9 +1376,34 @@ class MainWindow(QMainWindow):
         if self._pengamat_aktivitas is not None:
             self._pengamat_aktivitas.catat()
         if keluar:
+            if not self._siapkan_logout_petugas():
+                return
             self._hentikan_tanda_hadir()
             self.auth.logout()
             self.close()
+
+    def _siapkan_logout_petugas(self) -> bool:
+        """Jalankan aturan antrean sebelum sesi petugas ditutup."""
+        if getattr(self, "_logout_disiapkan", False):
+            return True
+        if self.mode_kios or not self.auth.is_authenticated:
+            self._logout_disiapkan = True
+            return True
+        try:
+            masih_dilayani = self.queue_service.siapkan_logout_petugas()
+        except AppError as exc:
+            tampilkan_peringatan(self, exc.user_message, "Belum dapat keluar")
+            return False
+        self._logout_disiapkan = True
+        if masih_dilayani:
+            tampilkan_peringatan(
+                self,
+                "Nomor berikut masih dalam pelayanan: "
+                + ", ".join(masih_dilayani)
+                + ". Nomor tetap aktif dan dapat diambil alih petugas lain.",
+                "Pelayanan Masih Aktif",
+            )
+        return True
 
     def _hentikan_tanda_hadir(self) -> None:
         """
@@ -1540,12 +1579,17 @@ class MainWindow(QMainWindow):
         )
         if not konfirmasi(self, pertanyaan):
             return
+        if not self._siapkan_logout_petugas():
+            return
         self._hentikan_tanda_hadir()
         self.auth.logout()
         self.close()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - nama dari Qt
         """Pastikan sesi berakhir walau jendela ditutup lewat tombol silang."""
+        if not self._siapkan_logout_petugas():
+            event.ignore()
+            return
         self._ditutup = True
         pewaktu_kunci = getattr(self, "_pewaktu_kunci", None)
         if pewaktu_kunci is not None:

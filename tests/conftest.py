@@ -590,3 +590,33 @@ def tema_dan_gaya_pulih():
             if awal is not None:
                 app.setStyleSheet(awal[0])
                 app.setPalette(awal[1])
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _tunggu_utas_tertinggal():
+    """
+    Tunggu utas pemeriksa yang sengaja dilepas jendela uji sebelum keluar.
+
+    `MainWindow.closeEvent` melepas utas yang belum selesai dalam batas
+    tunggunya. Bila prosesnya keluar saat utas itu masih berjalan, ia menulis
+    log ke aliran yang sudah tertutup dan Qt menghancurkan QThread yang hidup,
+    sehingga pytest keluar dengan kode non-nol walau semua tes lulus.
+    """
+    yield
+    import sys
+    import time
+
+    modul = sys.modules.get("app.ui.main_window")
+    if modul is None:
+        return
+    batas = time.monotonic() + 30
+    while modul._UTAS_TERTINGGAL and time.monotonic() < batas:
+        for utas in list(modul._UTAS_TERTINGGAL):
+            try:
+                utas.wait(1000)
+            except RuntimeError:
+                modul._UTAS_TERTINGGAL.discard(utas)
+        qt = sys.modules.get("PySide6.QtWidgets")
+        app = qt.QApplication.instance() if qt else None
+        if app is not None:
+            app.processEvents()
