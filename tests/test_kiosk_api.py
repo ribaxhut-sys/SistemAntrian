@@ -296,7 +296,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
     assert abs(isi.pop("server_time_ms") - time.time() * 1000) < 5000
     assert len(isi.pop("categories_version")) == 16
     assert isi == {
-        "title": "KANTOR PELAYANAN",
+        "title": "Sistem Antrian CRO - Bapenda DKI Jakarta",
         "subtitle": "",
         "welcome_text": "Selamat datang",
         "welcome_kind": "teks",
@@ -367,7 +367,7 @@ def test_display_sends_counter_position(tersimpan, dikirim):
     assert isi["counter_position"] == dikirim
 
 
-def test_display_memakai_judul_anjungan_sendiri():
+def test_display_selalu_memakai_identitas_tetap():
     from app.kiosk_api import create_app
 
     services = _Services()
@@ -378,7 +378,7 @@ def test_display_memakai_judul_anjungan_sendiri():
         "/v1/kiosk/display", headers={"Authorization": f"Bearer {TOKEN}"}
     ).json()
 
-    assert isi["title"] == "Selamat datang di Bapenda"
+    assert isi["title"] == "Sistem Antrian CRO - Bapenda DKI Jakarta"
     assert isi["subtitle"] == "UPPRD Menteng · 08.00–15.00"
 
 

@@ -16,7 +16,30 @@ jebakan; bagian riwayat commit-nya sudah lama), [istilah.md](istilah.md),
 [layar-antrian.md](layar-antrian.md), [prioritas-antrian.md](prioritas-antrian.md),
 [keamanan-sesi.md](keamanan-sesi.md).
 
-Terakhir diperbarui: **20 Oktober 2026**, oleh Codex.
+Terakhir diperbarui: **20 Oktober 2026**, oleh Claude.
+
+**Identitas tetap dan versi baru (20 Oktober 2026, Claude, cabang `fitur/identitas-bapenda`):**
+keputusan pemilik: tampil **"Sistem Antrian CRO - Bapenda DKI Jakarta"**, tidak
+dapat diubah admin; nama produk teknis (`APP_NAME`, jalur data, tugas
+terjadwal) tetap `Sistem Antrian CRO` supaya pembaruan PC lama tidak putus.
+Konstanta ada di `app/core/identitas.py` (`NAMA_TAMPIL`, `JUDUL_TIKET`). Dipakai
+di judul jendela, layar masuk, dialog, kepala aplikasi, layar antrian, tiket,
+kop laporan, `/v1/kiosk/display` dan `/v1/display` (`title` selalu identitas),
+publisher installer. Pengaturan `ticket.header`, `display.title`, `kiosk.judul`
+**dihapus** dari skema, bawaan, dan seed (baris lama di database diabaikan).
+Android: judul anjungan dan layar terkunci di kode (`NAMA_TAMPIL`), kolom
+"Judul tablet ini" dihapus, `android:label` memuat "Bapenda DKI Jakarta"; kedua
+modul terkompilasi, **belum diuji di perangkat**. Tes penjaga:
+`tests/test_identitas.py`. **Versi dinaikkan atas permintaan pemilik:**
+Windows `1.2` (`app/__init__.py`, `installer.iss`, `build-installer.ps1`,
+README), APK anjungan `2.5.1` (kode 55); APK layar tetap 1.6 (kode 7). Suite
+penuh: 2023 lulus, 7 gagal karena tes memakai pengaturan judul lama; tujuh tes
+itu diperbarui dan modul terkait lulus (166). **Installer 1.2 dan APK 2.5.1
+belum dibangun**; `dist\AntrianCRO-Setup-1.0.11.exe` dan tanda tangannya
+(`.sig`) milik 1.0.11, jadi rilis 1.2 harus dibangun ulang dan ditandatangani
+ulang (`publikasikan-pembaruan.ps1`). Catatan perubahan lain hari ini: PR #4
+(audit produksi), build bertes 1.0.11 lulus, skrip `publikasikan-pembaruan.ps1`
+menyiapkan folder siap salin untuk server.
 
 **Audit 20 Oktober 2026 (Codex):** lint `ruff check app tests alembic alat`
 bersih. Tes terarah untuk keluar/ambil alih, Pelayanan Aktif, pembaruan

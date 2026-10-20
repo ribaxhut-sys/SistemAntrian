@@ -98,6 +98,9 @@ import java.util.concurrent.Executors;
  */
 public class MainActivity extends Activity implements TextToSpeech.OnInitListener {
 
+    /** Identitas tetap; tidak mengikuti judul dari server (app/core/identitas.py). */
+    private static final String NAMA_TAMPIL = "Sistem Antrian CRO - Bapenda DKI Jakarta";
+
     private static final String PREFS = "layar";
     private static final String SERVER = "server";
     private static final String TOKEN = "token";
@@ -488,7 +491,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         head = new LinearLayout(this);
         head.setOrientation(LinearLayout.VERTICAL);
         head.setGravity(Gravity.CENTER_HORIZONTAL);
-        title = text(title == null ? "ANTRIAN PELAYANAN" : title.getText().toString(),
+        title = text(NAMA_TAMPIL,
                 30, Color.WHITE, true);
         title.setGravity(Gravity.CENTER);
         title.setLetterSpacing(0.04f);
@@ -656,9 +659,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     private void applyState(JSONObject state) {
         lastState = state;
-        String judul = state.optString("title", "").trim();
-        if (!judul.isEmpty() && !judul.contentEquals(title.getText())) {
-            title.setText(judul);
+        // Judul dari server sengaja diabaikan: identitas tidak dapat diubah.
+        if (!NAMA_TAMPIL.contentEquals(title.getText())) {
+            title.setText(NAMA_TAMPIL);
             title.post(() -> fitText(title, 30, title.getWidth(), 0));
         }
         soundEnabled = state.optBoolean("sound_enabled", true);

@@ -59,7 +59,6 @@ BAWAAN: dict[str, str] = {
     "kiosk.cooldown_seconds": "10",
     "kiosk.welcome_kind": "teks",
     "kiosk.welcome_text": "",
-    "kiosk.judul": "",
     "kiosk.subjudul": "",
     "kiosk.welcome_file": "",
     "kiosk.welcome_slide_seconds": "10",
@@ -77,7 +76,6 @@ BAWAAN: dict[str, str] = {
     "kiosk.tema_agustus": "true",
     "display.screen_shape": "auto",
     "display.theme": "kaca",
-    "display.title": "ANTRIAN PELAYANAN CRO",
     "display.info": "",
     "display.next_count": "3",
     "display.list_rows": "5",
@@ -93,7 +91,6 @@ BAWAAN: dict[str, str] = {
     "queue.registration_closed_date": "",
     "survey.enabled": "true",
     "privasi.retensi_pengaduan_bulan": "24",
-    "ticket.header": "BAPENDA DKI JAKARTA",
     "ticket.footer": "Silakan menunggu nomor Anda dipanggil.",
     "ticket.printer": "pdf",
     "ticket.geser_atas_mm": "0",
@@ -170,15 +167,6 @@ SKEMA: tuple[Pengaturan, ...] = (
             ("system", "Cetak ke printer Windows"),
             ("none", "Tidak mencetak, nomor cukup disebutkan"),
         ),
-        kelompok="Tiket",
-    ),
-    Pengaturan(
-        "ticket.header",
-        "Judul tiket",
-        "Baris paling atas tiket antrian, di atas nama kantor. "
-        "Kosongkan bila tiket tidak memerlukan judul.",
-        TEKS,
-        boleh_kosong=True,
         kelompok="Tiket",
     ),
     Pengaturan(
@@ -276,13 +264,6 @@ SKEMA: tuple[Pengaturan, ...] = (
             ("petugas", "Hanya yang ada petugasnya (disarankan)"),
             ("semua", "Semua loket aktif"),
         ),
-        kelompok="Layar Antrian",
-    ),
-    Pengaturan(
-        "display.title",
-        "Judul layar antrian",
-        "Tulisan besar di bagian atas layar yang menghadap pengunjung.",
-        TEKS,
         kelompok="Layar Antrian",
     ),
     Pengaturan(
@@ -446,16 +427,6 @@ SKEMA: tuple[Pengaturan, ...] = (
         satuan="detik",
         nilai_khusus="Tanpa jeda",
         kelompok="Antrian",
-    ),
-    Pengaturan(
-        "kiosk.judul",
-        "Judul anjungan",
-        "Tulisan di bagian atas tablet anjungan, misalnya \"Selamat datang di "
-        "Bapenda DKI Jakarta\". Kosongkan untuk memakai Judul layar antrian. "
-        "Tablet dapat menimpanya di Pengaturan tablet.",
-        TEKS,
-        boleh_kosong=True,
-        kelompok="Anjungan",
     ),
     Pengaturan(
         "kiosk.subjudul",

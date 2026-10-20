@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import APP_NAME
+from app.core.identitas import NAMA_TAMPIL
 from app.core.errors import AppError
 from app.core.logger import get_logger
 from app.services.auth_service import AuthService, AuthSession
@@ -46,7 +46,7 @@ class LoginWindow(QDialog):
         self._gagal_berturut = 0
         self._username_gagal = ""
 
-        self.setWindowTitle(f"{APP_NAME} — Masuk")
+        self.setWindowTitle(f"{NAMA_TAMPIL} — Masuk")
         self.setMinimumWidth(400)
         self._bangun_tampilan()
 
@@ -57,7 +57,7 @@ class LoginWindow(QDialog):
         susunan.setContentsMargins(32, 28, 32, 28)
         susunan.setSpacing(16)
 
-        judul_aplikasi = QLabel(APP_NAME)
+        judul_aplikasi = QLabel(NAMA_TAMPIL)
         judul_aplikasi.setProperty("heading", "true")
         judul_aplikasi.setAlignment(Qt.AlignmentFlag.AlignCenter)
         susunan.addWidget(judul_aplikasi)

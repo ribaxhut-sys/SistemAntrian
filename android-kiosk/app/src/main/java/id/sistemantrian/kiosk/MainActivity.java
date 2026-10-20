@@ -197,11 +197,14 @@ public final class MainActivity extends Activity {
         WARNA_LAYANAN = t.chip;
     }
 
-    /** Judul tablet ini bila diisi, lalu judul server, lalu bawaan. */
+    /**
+     * Identitas tetap aplikasi. Tidak dapat diubah dari server maupun dari
+     * pengaturan tablet; ubah hanya di sini (dan di app/core/identitas.py).
+     */
+    static final String NAMA_TAMPIL = "Sistem Antrian CRO - Bapenda DKI Jakarta";
+
     private String judulBerlaku() {
-        String tablet = preferences == null ? "" : preferences.getString(JUDUL_TABLET, "").trim();
-        if (!tablet.isEmpty()) return tablet;
-        return judulServer.isEmpty() ? "ANTRIAN PELAYANAN CRO" : judulServer;
+        return NAMA_TAMPIL;
     }
 
     private void perbaruiJudul() {
@@ -5152,24 +5155,6 @@ public final class MainActivity extends Activity {
 
         LinearLayout tampilan = bagianPengaturan(fields, "Tampilan anjungan",
                 "Berlaku seketika untuk tablet ini, tanpa tombol Simpan.");
-        EditText judulTablet = isianPengaturan(tampilan, "Judul tablet ini",
-                "Kosongkan untuk mengikuti judul dari server");
-        judulTablet.setText(preferences.getString(JUDUL_TABLET, ""));
-        judulTablet.addTextChangedListener(new android.text.TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence teks, int awal, int jumlah, int sesudah) {
-            }
-
-            @Override
-            public void onTextChanged(CharSequence teks, int awal, int sebelum, int jumlah) {
-            }
-
-            @Override
-            public void afterTextChanged(android.text.Editable teks) {
-                preferences.edit().putString(JUDUL_TABLET, teks.toString().trim()).apply();
-                perbaruiJudul();
-            }
-        });
         tampilan.addView(labelPengaturan("Sumber media sambutan"));
         RadioGroup sumber = new RadioGroup(this);
         RadioButton dariServer = radioPengaturan("Daftar putar server (disalin ke tablet)");

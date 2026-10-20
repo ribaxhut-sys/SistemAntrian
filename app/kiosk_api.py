@@ -27,6 +27,7 @@ from app import __version__
 from app.core import clock
 from app.core.config import TIMEZONE, base_dir, get_config
 from app.core.database import dispose_engine, periksa_koneksi
+from app.core.identitas import NAMA_TAMPIL
 from app.core.errors import (
     AppError,
     AuthenticationError,
@@ -625,7 +626,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         apk = info_apk(folder_apk(base_dir()), "layar")
         paket = info_paket(folder_paket(base_dir()))
         return {
-            "title": services.settings.get("display.title", "ANTRIAN PELAYANAN CRO"),
+            "title": NAMA_TAMPIL,
             "sound_enabled": services.settings.get_bool("display.sound_enabled", True),
             "counters": isi_loket(state),
             "next": [q.queue_number for q in state.berikutnya],
@@ -945,7 +946,6 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         )
         apk = info_apk(folder_apk(base_dir()))
         paket = info_paket(folder_paket(base_dir()))
-        judul = (pengaturan.get("kiosk.judul", "") or "").strip()
         keadaan = services.queue.display_state(
             jumlah_berikutnya=0,
             rasio_prioritas=max(0, pengaturan.get_int("queue.rasio_prioritas", 3)),
@@ -953,9 +953,8 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             sertakan_terkini=False,
         )
         return {
-            # Judul anjungan sendiri; kosong berarti ikut judul layar antrian.
-            "title": judul
-            or pengaturan.get("display.title", "ANTRIAN PELAYANAN CRO"),
+            # Identitas tetap (app/core/identitas.py); tidak dapat diubah admin.
+            "title": NAMA_TAMPIL,
             "subtitle": (pengaturan.get("kiosk.subjudul", "") or "").strip(),
             "welcome_text": pengaturan.get(
                 "kiosk.welcome_text",

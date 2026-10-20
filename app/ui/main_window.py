@@ -25,7 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import APP_NAME, get_config, teks_status_database
+from app.core.config import get_config, teks_status_database
+from app.core.identitas import JUDUL_TIKET, NAMA_TAMPIL
 from app.core.errors import AppError
 from app.core.logger import get_logger
 from app.models.enums import UserRole
@@ -507,9 +508,9 @@ class MainWindow(QMainWindow):
             # Nama petugas tidak ikut ditampilkan. Judul jendela terbaca
             # pada bilah tugas dan pengalih jendela, yang keduanya berada di
             # depan mata pengunjung.
-            self.setWindowTitle(APP_NAME)
+            self.setWindowTitle(NAMA_TAMPIL)
         else:
-            self.setWindowTitle(f"{APP_NAME} — {sesi.full_name}")
+            self.setWindowTitle(f"{NAMA_TAMPIL} — {sesi.full_name}")
         # Ukuran awal mengikuti area kerja dalam piksel logis Qt, sehingga
         # skala Windows 125%/150% ikut diperhitungkan. Batas preferensi
         # mencegah jendela terlalu melebar pada monitor 2K/4K.
@@ -621,7 +622,7 @@ class MainWindow(QMainWindow):
         tanda.setFixedSize(32, 32)
         susunan_merek.addWidget(tanda)
 
-        nama = QLabel(APP_NAME)
+        nama = QLabel(NAMA_TAMPIL)
         nama.setObjectName("judulMerek")
         susunan_merek.addWidget(nama)
         baris_atas.addWidget(merek)
@@ -797,7 +798,7 @@ class MainWindow(QMainWindow):
                 Permission.QUEUE_CALL,
                 lambda: LaporanPage(
                     ReportService(self.auth),
-                    self.settings_service.get("ticket.header", ""),
+                    JUDUL_TIKET,
                     pribadi=True,
                 ),
             ),
@@ -808,7 +809,7 @@ class MainWindow(QMainWindow):
                 Permission.REPORT_VIEW,
                 lambda: LaporanPage(
                     ReportService(self.auth),
-                    self.settings_service.get("ticket.header", ""),
+                    JUDUL_TIKET,
                 ),
             ),
             # Terpisah dari ringkasan harian karena isinya berbeda jenis:

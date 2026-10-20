@@ -33,6 +33,7 @@ from __future__ import annotations
 import sys
 
 from app.core.config import APP_NAME, get_config, lewati_login_pengembang, reset_config
+from app.core.identitas import NAMA_TAMPIL
 from app.core.database import dispose_engine, init_database
 from app.core.logger import get_logger, setup_logging
 from app.core.migrations import current_revision
@@ -215,7 +216,7 @@ def _laporkan_kegagalan_database(config, *, berjendela: bool) -> bool:
         app.setStyleSheet(STYLESHEET)
         kotak = QMessageBox()
         kotak.setIcon(QMessageBox.Icon.Critical)
-        kotak.setWindowTitle(APP_NAME)
+        kotak.setWindowTitle(NAMA_TAMPIL)
         kotak.setText("Aplikasi tidak dapat menghubungi database.")
         kotak.setInformativeText(pesan)
         tutup = kotak.addButton("Tutup", QMessageBox.ButtonRole.RejectRole)

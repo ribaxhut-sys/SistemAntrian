@@ -11,7 +11,7 @@
         android:allowBackup="false"
         android:banner="@drawable/banner"
         android:icon="@drawable/banner"
-        android:label="Layar Antrian"
+        android:label="Layar Antrian - Bapenda DKI Jakarta"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
         android:usesCleartextTraffic="true">
         <activity

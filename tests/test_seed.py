@@ -140,7 +140,7 @@ def test_pengaturan_penting_tersedia(seeded):
     with session_scope() as s:
         keys = {row.key for row in s.scalars(sa.select(ApplicationSetting))}
     assert {
-        "display.title",
+        "ticket.footer",
         "survey.enabled",
         "queue.max_call_attempts",
         "kiosk.cooldown_seconds",

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from app.core import clock
 from app.core.config import get_config
+from app.core.identitas import NAMA_TAMPIL
 from app.core.logger import get_logger
 from app.models import QueueStatus
 from app.services.queue_service import DisplayCounterState, DisplayState, LABEL_STATUS, QueueService
@@ -1385,7 +1386,7 @@ class DisplayPage(QWidget):
         """
         self.kepala = QVBoxLayout()
 
-        self.label_judul = QLabel(self.settings.get("display.title"))
+        self.label_judul = QLabel(NAMA_TAMPIL)
         self.label_judul.setMinimumSize(1, 1)
         self.label_judul.setAlignment(Qt.AlignmentFlag.AlignCenter)
 

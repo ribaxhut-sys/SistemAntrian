@@ -6,7 +6,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Anjungan Antrian"
+        android:label="Anjungan Antrian - Bapenda DKI Jakarta"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="true">
         <activity

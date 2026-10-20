@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import APP_NAME
+from app.core.identitas import NAMA_TAMPIL
 from app.ui.common import tombol
 
 #: Hasil pilihan.
@@ -51,7 +51,7 @@ class ModeDialog(QDialog):
         self._kartu_utama: QPushButton | None = None
 
         self.setObjectName("dialogMode")
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(NAMA_TAMPIL)
         #: Lebar dikunci karena penjelasan di dalam kartu dibungkus per
         #: baris. Dialog yang dapat ditarik melebar membuat penjelasan dua
         #: baris berubah menjadi satu baris panjang, dan kartunya lalu
@@ -110,7 +110,7 @@ class ModeDialog(QDialog):
 
         teks = QVBoxLayout()
         teks.setSpacing(2)
-        nama = QLabel(APP_NAME)
+        nama = QLabel(NAMA_TAMPIL)
         nama.setObjectName("judulMerek")
         teks.addWidget(nama)
         tanya = QLabel("Pilih layar yang akan dibuka di komputer ini")
