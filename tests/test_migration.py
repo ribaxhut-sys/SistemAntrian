@@ -138,3 +138,39 @@ def test_migrasi_turun_naik_satu_langkah_tiap_revisi(database):
 
     init_database()
     _kolom_sesuai_model()
+
+
+def test_database_lebih_baru_daripada_aplikasi_ditolak_dengan_galat_jelas(database):
+    """
+    Aplikasi lama membuka database yang sudah dimigrasi versi lebih baru.
+
+    Dulu Alembic hanya mengeluh "Can't locate revision" dan petugas melihat
+    "tidak dapat menghubungi database". Kini galatnya spesifik, dan database
+    tidak disentuh sama sekali.
+    """
+    import pytest
+
+    from app.core.migrations import AplikasiLebihLamaError, upgrade_to_head
+
+    asli = current_revision()
+    with get_engine().begin() as conn:
+        conn.execute(sa.text("UPDATE alembic_version SET version_num = 'revisi_dari_masa_depan'"))
+    try:
+        with pytest.raises(AplikasiLebihLamaError) as galat:
+            upgrade_to_head()
+        assert galat.value.revisi == "revisi_dari_masa_depan"
+        assert "lebih lama" in str(galat.value)
+        # Tidak ada yang berubah: revisi tetap seperti yang ditulis versi baru.
+        assert current_revision() == "revisi_dari_masa_depan"
+    finally:
+        with get_engine().begin() as conn:
+            conn.execute(sa.text("UPDATE alembic_version SET version_num = :v"), {"v": asli})
+    assert is_up_to_date()
+
+
+def test_database_kosong_dan_database_lama_tetap_dimigrasi(database):
+    """Revisi yang dikenal tidak terkena penjaga 'aplikasi lebih lama'."""
+    from app.core.migrations import upgrade_to_head
+
+    upgrade_to_head()
+    assert is_up_to_date()

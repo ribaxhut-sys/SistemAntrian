@@ -3430,3 +3430,16 @@ def test_layar_backup_menampilkan_status_gagal_dan_checksum(
 
     assert "GAGAL" in halaman.label_status.text()
     assert "tidak dapat ditulis" in halaman.label_status.text()
+
+
+def test_aplikasi_lebih_lama_daripada_database_tidak_dilaporkan_sebagai_koneksi(capsys):
+    """Pesannya menyuruh memperbarui aplikasi, bukan memeriksa jaringan/server."""
+    from app.main import _laporkan_aplikasi_lebih_lama
+
+    _laporkan_aplikasi_lebih_lama(berjendela=False)
+
+    pesan = capsys.readouterr().err
+    assert "versi aplikasi yang lebih baru" in pesan
+    assert "Pasang versi terbaru" in pesan
+    assert "jaringan" not in pesan
+    assert "menghubungi database" not in pesan

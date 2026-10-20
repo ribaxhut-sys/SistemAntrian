@@ -36,7 +36,7 @@ from app.core.config import APP_NAME, get_config, lewati_login_pengembang, reset
 from app.core.identitas import NAMA_TAMPIL
 from app.core.database import dispose_engine, init_database
 from app.core.logger import get_logger, setup_logging
-from app.core.migrations import current_revision
+from app.core.migrations import AplikasiLebihLamaError, current_revision
 from app.core.seed import seed_initial_data
 
 logger = get_logger("main")
@@ -170,6 +170,42 @@ class PenyapuHarian:
         jumlah = hanguskan_antrian_hari_lalu()
         anonimkan_pengaduan_lama()
         return jumlah
+
+
+def _laporkan_aplikasi_lebih_lama(berjendela: bool) -> None:
+    """
+    Aplikasi ini lebih lama daripada database: arahkan petugas memperbarui.
+
+    Mengubah koneksi tidak menolong (databasenya benar), jadi tidak ada
+    tombol itu di sini; aplikasi berhenti setelah pesan ditutup.
+    """
+    pesan = (
+        "Database sudah diperbarui oleh versi aplikasi yang lebih baru.\n\n"
+        "Pasang versi terbaru Sistem Antrian CRO di komputer ini "
+        "(pita pembaruan di aplikasi, atau installer dari admin), "
+        "lalu buka kembali. Data tidak hilang dan tidak perlu diubah."
+    )
+    print(pesan, file=sys.stderr)
+    if not berjendela:
+        return
+    try:
+        from PySide6.QtWidgets import QApplication, QMessageBox
+
+        from app.ui.style import STYLESHEET
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        app.setApplicationName(APP_NAME)
+        pasang_ikon(app)
+        app.setStyleSheet(STYLESHEET)
+        kotak = QMessageBox()
+        kotak.setIcon(QMessageBox.Icon.Warning)
+        kotak.setWindowTitle(NAMA_TAMPIL)
+        kotak.setText("Aplikasi perlu diperbarui.")
+        kotak.setInformativeText(pesan)
+        kotak.addButton("Tutup", QMessageBox.ButtonRole.AcceptRole)
+        kotak.exec()
+    except Exception:
+        logger.exception("Pesan aplikasi lebih lama tidak dapat ditampilkan")
 
 
 def _laporkan_kegagalan_database(config, *, berjendela: bool) -> bool:
@@ -473,6 +509,10 @@ def main(argv: list[str] | None = None) -> int:
             hanguskan_antrian_hari_lalu()
             anonimkan_pengaduan_lama()
             break
+        except AplikasiLebihLamaError:
+            logger.exception("Aplikasi lebih lama daripada database")
+            _laporkan_aplikasi_lebih_lama(berjendela=not tanpa_layar)
+            return 1
         except Exception:
             # Traceback hanya masuk log, tidak pernah ditampilkan ke petugas.
             logger.exception("Inisialisasi database gagal")
