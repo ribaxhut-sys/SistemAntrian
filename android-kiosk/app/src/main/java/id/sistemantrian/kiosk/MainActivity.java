@@ -1,5 +1,10 @@
 package id.sistemantrian.kiosk;
 
+import static id.sistemantrian.kiosk.BantuGambar.huruf;
+import static id.sistemantrian.kiosk.BantuGambar.rounded;
+import static id.sistemantrian.kiosk.BantuGambar.roundedGradient;
+import static id.sistemantrian.kiosk.BantuGambar.roundedOutline;
+import static id.sistemantrian.kiosk.BantuGambar.stateBackground;
 import static id.sistemantrian.kiosk.BantuWarna.campur;
 import static id.sistemantrian.kiosk.BantuWarna.darker;
 import static id.sistemantrian.kiosk.BantuWarna.luminansWarna;
@@ -6466,17 +6471,6 @@ public final class MainActivity extends Activity {
         return view;
     }
 
-    /**
-     * Satu-satunya tempat memilih huruf. Bila huruf merek (mis. Plus Jakarta
-     * Sans) dibundel di assets, cukup ganti isi fungsi ini.
-     */
-    private static Typeface huruf(int tebal) {
-        if (tebal >= 800) return Typeface.create("sans-serif-black", Typeface.NORMAL);
-        if (tebal >= 700) return Typeface.create("sans-serif", Typeface.BOLD);
-        if (tebal >= 500) return Typeface.create("sans-serif-medium", Typeface.NORMAL);
-        return Typeface.create("sans-serif", Typeface.NORMAL);
-    }
-
     private int dp(int value) {
         return Math.round(value * uiScale * getResources().getDisplayMetrics().density);
     }
@@ -6500,43 +6494,11 @@ public final class MainActivity extends Activity {
         return lapis;
     }
 
-    private static GradientDrawable rounded(int color, int radius) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setColor(color);
-        shape.setCornerRadius(radius);
-        return shape;
-    }
-
-    private static GradientDrawable roundedOutline(
-            int color, int stroke, int radius, int strokeWidth) {
-        GradientDrawable shape = rounded(color, radius);
-        shape.setStroke(strokeWidth, stroke);
-        return shape;
-    }
-
-    private static GradientDrawable roundedGradient(
-            int top, int bottom, int radius, int border, int borderWidth) {
-        GradientDrawable shape = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, bottom});
-        shape.setCornerRadius(radius);
-        shape.setStroke(borderWidth, border);
-        return shape;
-    }
-
     private StateListDrawable stateOutline(int normal, int pressed, int radius) {
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[]{android.R.attr.state_pressed},
                 roundedOutline(pressed, UTAMA, radius, dp(2)));
         states.addState(new int[]{}, roundedOutline(normal, GARIS, radius, dp(2)));
-        return states;
-    }
-
-    private static StateListDrawable stateBackground(
-            int normal, int pressed, int radius) {
-        StateListDrawable states = new StateListDrawable();
-        states.addState(new int[]{android.R.attr.state_pressed},
-                rounded(pressed, radius));
-        states.addState(new int[]{}, rounded(normal, radius));
         return states;
     }
 
