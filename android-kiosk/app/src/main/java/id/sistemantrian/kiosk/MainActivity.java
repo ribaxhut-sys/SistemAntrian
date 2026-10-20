@@ -5,6 +5,12 @@ import static id.sistemantrian.kiosk.BantuGambar.rounded;
 import static id.sistemantrian.kiosk.BantuGambar.roundedGradient;
 import static id.sistemantrian.kiosk.BantuGambar.roundedOutline;
 import static id.sistemantrian.kiosk.BantuGambar.stateBackground;
+import static id.sistemantrian.kiosk.BantuTeks.awalanLayanan;
+import static id.sistemantrian.kiosk.BantuTeks.heks;
+import static id.sistemantrian.kiosk.BantuTeks.isMediaKind;
+import static id.sistemantrian.kiosk.BantuTeks.labelTempatLokal;
+import static id.sistemantrian.kiosk.BantuTeks.tempatBerikutnya;
+import static id.sistemantrian.kiosk.BantuTeks.zoneLabel;
 import static id.sistemantrian.kiosk.BantuWarna.campur;
 import static id.sistemantrian.kiosk.BantuWarna.darker;
 import static id.sistemantrian.kiosk.BantuWarna.luminansWarna;
@@ -752,12 +758,6 @@ public final class MainActivity extends Activity {
     };
     private long serverOffsetMillis = 0L;
 
-    private static String zoneLabel(String zone) {
-        if ("Asia/Makassar".equals(zone)) return "WITA";
-        if ("Asia/Jayapura".equals(zone)) return "WIT";
-        return "WIB";
-    }
-
     private final Runnable clock = new Runnable() {
         @Override
         public void run() {
@@ -1400,10 +1400,6 @@ public final class MainActivity extends Activity {
         findParams.topMargin = dp(8);
         placeholder.addView(findServer, findParams);
         contentSlot.addView(placeholder);
-    }
-
-    private static boolean isMediaKind(String kind) {
-        return "media".equals(kind) || "gambar".equals(kind) || "video".equals(kind);
     }
 
     private void applyWelcomeText(String value) {
@@ -3341,11 +3337,6 @@ public final class MainActivity extends Activity {
         return WARNA_LAYANAN[Math.floorMod(indeks, WARNA_LAYANAN.length)];
     }
 
-    private static String awalanLayanan(Category item) {
-        if (!item.prefix.isEmpty()) return item.prefix;
-        return item.name.isEmpty() ? "•" : item.name.substring(0, 1).toUpperCase(Locale.ROOT);
-    }
-
     private View buatKartuLayanan(Category item, int tinggiKartu) {
         return buatKartu(item.group ? "›" : awalanLayanan(item), item.name,
                 item.group ? "Lihat pilihan layanan" : null,
@@ -4808,14 +4799,6 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private static byte[] heks(String teks) {
-        byte[] hasil = new byte[teks.length() / 2];
-        for (int i = 0; i < hasil.length; i++) {
-            hasil[i] = (byte) Integer.parseInt(teks.substring(2 * i, 2 * i + 2), 16);
-        }
-        return hasil;
-    }
-
     /**
      * Seluruh dialog pengaturan berbagi SATU timer diam: sentuhan di dialog
      * mana pun menyetelnya ulang, sepuluh detik terakhir diberi peringatan, dan
@@ -5074,16 +5057,6 @@ public final class MainActivity extends Activity {
         String tempat = tampilLokal(nama);
         if ("keduanya".equals(tempat)) return true;
         return penuh ? "penuh".equals(tempat) : "panel".equals(tempat);
-    }
-
-    private static String tempatBerikutnya(String sekarang) {
-        if ("keduanya".equals(sekarang)) return "panel";
-        return "panel".equals(sekarang) ? "penuh" : "keduanya";
-    }
-
-    private static String labelTempatLokal(String tempat) {
-        if ("panel".equals(tempat)) return "Panel atas";
-        return "penuh".equals(tempat) ? "Layar penuh" : "Keduanya";
     }
 
     private void showSettings() {
