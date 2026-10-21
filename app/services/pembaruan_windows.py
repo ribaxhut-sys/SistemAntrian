@@ -366,7 +366,7 @@ def unduh_pembaruan(
         raise PembaruanError("Alamat komputer server belum tersedia.")
     tujuan_dir = Path(tempfile.gettempdir()) / "AntrianCRO" / "pembaruan"
     tujuan_dir.mkdir(parents=True, exist_ok=True)
-    tujuan = tujuan_dir / f"AntrianCRO-Setup-{info.versi}.exe"
+    tujuan = tujuan_dir / f"Sistem-Antrian-CRO-Setup-Windows-{info.versi}.exe"
     sementara = tujuan.with_suffix(".exe.tmp")
     ringkasan = hashlib.sha256()
     try:

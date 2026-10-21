@@ -183,9 +183,9 @@ def test_versi_rilis_desktop_seragam():
     readme = (root / "README.md").read_text(encoding="utf-8")
 
     assert f'#define MyAppVersion "{__version__}"' in installer
-    assert f"AntrianCRO-Setup-{__version__}" in installer
-    assert f"AntrianCRO-Setup-{__version__}.exe" in build
-    assert f"AntrianCRO-Setup-{__version__}.exe" in readme
+    assert f"Sistem-Antrian-CRO-Setup-Windows-{__version__}" in installer
+    assert f"Sistem-Antrian-CRO-Setup-Windows-{__version__}.exe" in build
+    assert f"Sistem-Antrian-CRO-Setup-Windows-{__version__}.exe" in readme
     assert create_app("token-rilis-panjang", object()).version == __version__
 
 

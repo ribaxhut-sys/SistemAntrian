@@ -28,6 +28,8 @@ signature harus diverifikasi ulang terhadap EXE final sebelum publikasi.
 Pemasangan PC bersih, uji APK/layar pada perangkat nyata, Maxtor, DPI
 125/150%, dan uji lima loket tetap belum terbukti.
 
+**Rilis lokal 21 Oktober 2026 (Claude):** atas permintaan pemilik Windows naik ke **1.3.1**, APK anjungan **2.5.5 (kode 59)** (layar tetap 1.8). Nama installer kini jelas: `dist\Sistem-Antrian-CRO-Setup-Windows-1.3.1.exe` (67.589.761 byte, sha256 a3218c52332d18c3c9908ccc17ab0402a00cb1af6d06ce54a512e87c87842da9), dibangun dengan `-SkipTests`, **belum ditandatangani** dan belum dipasang. `dist\Pembaruan-AntrianCRO.exe` (nama tetap, dipakai alur pembaruan) adalah berkas yang sama; `.sig`/`.version` di `dist` masih milik 1.2. Cadangan `apk\` sebelumnya: `backup\apk-sebelum-2.5.5`.
+
 **Cetak ulang tiket di anjungan + saran bila cetak gagal (21 Oktober 2026, Claude):**
 dialog Cabut prioritas punya opsi **Cetak ulang di anjungan tiket** (mati bila nomor
 bukan dari anjungan berpasangan). Antrean perintah ada di tabel baru

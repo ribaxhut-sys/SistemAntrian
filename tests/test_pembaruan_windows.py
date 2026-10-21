@@ -263,7 +263,7 @@ def test_unduhan_melanjutkan_berkas_sementara(monkeypatch, tmp_path):
     awal = isi[:12]
     folder = tmp_path / "AntrianCRO" / "pembaruan"
     folder.mkdir(parents=True)
-    (folder / "AntrianCRO-Setup-1.0.9.exe.tmp").write_bytes(awal)
+    (folder / "Sistem-Antrian-CRO-Setup-Windows-1.0.9.exe.tmp").write_bytes(awal)
     monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
     permintaan = []
 
@@ -288,7 +288,7 @@ def test_unduhan_melanjutkan_berkas_sementara(monkeypatch, tmp_path):
 def test_unduhan_gagal_mempertahankan_bagian_yang_sudah_ada(monkeypatch, tmp_path):
     folder = tmp_path / "AntrianCRO" / "pembaruan"
     folder.mkdir(parents=True)
-    sementara = folder / "AntrianCRO-Setup-1.0.9.exe.tmp"
+    sementara = folder / "Sistem-Antrian-CRO-Setup-Windows-1.0.9.exe.tmp"
     sementara.write_bytes(b"sebagian")
     monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
     monkeypatch.setattr(
