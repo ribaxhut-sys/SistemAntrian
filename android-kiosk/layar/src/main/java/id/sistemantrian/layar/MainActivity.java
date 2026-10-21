@@ -102,6 +102,15 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private static final String NAMA_TAMPIL = "Bapenda DKI Jakarta";
 
     private static final String PREFS = "layar";
+    private static final String TEMA = "tema";
+    private static final String TEMA_BENING = "bening";
+    /** Tema yang dapat dipilih di pengaturan: {id, nama, deskripsi}. Disimpan per perangkat. */
+    private static final String[][] TEMA_DAFTAR = {
+            {TEMA_BENING, "Bening",
+                    "Latar putih: strip loket, 3 nomor berikutnya, lalu daftar menunggu."},
+            {"dinding", "Dinding",
+                    "Dinding nomor berwarna menurut status, dengan banner panggilan terbaru di atas."},
+    };
     private static final String SERVER = "server";
     private static final String TOKEN = "token";
     private static final String DEVICE_ID = "device_id";
@@ -147,11 +156,16 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private static final int NEXT_MAX = 300;
     /** Lama satu halaman nomor menunggu sebelum berganti, bila nomornya lebih dari satu halaman. */
     private static final long HALAMAN_MS = 8000;
+    /** Jeda antar gelombang "kartu dibalik" pada daftar nomor (tema Dinding). */
+    private static final long BALIK_MS = 30000;
+    /** Lama tiap setengah putaran kartu dan jeda antarbaris pada gelombang kartu dibalik. */
+    private static final long BALIK_SETENGAH_MS = 900;
+    private static final long BALIK_JEDA_BARIS_MS = 320;
     /** Tinggi strip loket pada layar tegak. */
     private static final int CARD_TEGAK_DP = 84;
     /** Lebar kolom status di ujung kanan kartu loket. */
     private static final int STATUS_KOLOM_DP = 112;
-    private static final float NEXT_SP = 34;
+    private static final float NEXT_SP = 30;
     /** Nomor teratas yang dipisah di atas daftar: yang akan dipanggil berikutnya. */
     private static final int AKAN_JUMLAH = 3;
     /** Tinggi bagian "AKAN DIPANGGIL" (label + pil) dan judul daftar, untuk hitungan baris. */
@@ -184,6 +198,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private GridLayout grid;
     private LinearLayout side;
     private TextView nextHeader;
+    /** Tema aktif; null berarti Bening (susunan bawaan di MainActivity). */
+    private TemaLayar tema;
     private LinearLayout akanRow;
     private TextView listHeader;
     private LinearLayout nextList;
@@ -269,6 +285,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         }
         handler.post(clockTick);
         handler.postDelayed(putarHalaman, HALAMAN_MS);
+        handler.postDelayed(balikBarisTugas, BALIK_MS);
         handler.postDelayed(burnInShift, 5 * 60 * 1000L);
         if (!isPaired()) {
             showBanner("Layar belum dipasangkan. Tahan judul 3 detik untuk membuka pengaturan.");
@@ -287,6 +304,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     @Override
     protected void onDestroy() {
         for (android.animation.ObjectAnimator a : denyut.values()) a.cancel();
+        if (tema != null) tema.hentikan();
         handler.removeCallbacksAndMessages(null);
         worker.shutdownNow();
         downloader.shutdownNow();
@@ -305,6 +323,12 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        susunUlang();
+        hideSystemUi();
+    }
+
+    /** Bangun ulang layar (orientasi atau tema berubah) lalu isi dengan keadaan terakhir. */
+    private void susunUlang() {
         buildScreen();
         if (lastState != null) {
             JSONObject state = lastState;
@@ -312,7 +336,6 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             body.post(() -> applyState(state));
         }
         if (failures >= FAILURES_BEFORE_BANNER) body.setAlpha(0.55f);
-        hideSystemUi();
     }
 
     private void hideSystemUi() {
@@ -462,12 +485,28 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             terapkan(!ada ? 6 : nilaiPrioritas ? 2 : pertama ? 5 : 3, ada && nilaiPrioritas);
         }
 
+        /** Gaya langsung menurut kode: 7 = dilayani (biru), 8 = dipanggil (oranye), selain itu seperti setGaya. */
+        void setGayaKode(int kode, boolean tandaiPrioritas) {
+            terapkan(kode, tandaiPrioritas);
+        }
+
         private void terapkan(int baru, boolean tandaiPrioritas) {
             prioritas = tandaiPrioritas;
             if (baru == gaya) return;
             gaya = baru;
-            if (baru == 0) {
+            float kerapatan = getResources().getDisplayMetrics().density;
+            // Datar: tanpa bayangan dan tanpa aksen bertumpuk; hanya garis tipis.
+            setElevation(0f);
+            if (baru == 12) {
+                GradientDrawable badan = new GradientDrawable();
+                badan.setColor(Color.WHITE);
+                badan.setCornerRadius(12 * kerapatan);
+                badan.setStroke(Math.max(1, Math.round(kerapatan)), Color.rgb(226, 232, 240));
+                setBackground(badan);
+                setTextColor(Color.rgb(51, 65, 85));
+            } else if (baru == 0 || baru == 11) {
                 setBackground(null);
+                if (baru == 11) setTextColor(INK);
             } else {
                 float density = getResources().getDisplayMetrics().density;
                 GradientDrawable latar = new GradientDrawable();
@@ -476,12 +515,25 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                         : baru == 3 ? Color.rgb(204, 251, 241)
                         : baru == 4 ? Color.WHITE
                         : baru == 5 ? TEAL
+                        : baru == 7 ? Color.rgb(219, 234, 254)
+                        : baru == 8 ? Color.rgb(254, 243, 199)
+                        : baru == 9 ? Color.rgb(220, 252, 231)
+                        : baru == 10 ? Color.rgb(254, 226, 226)
+                        : baru == 13 ? Color.rgb(243, 232, 255)
                         : baru == 6 ? Color.rgb(248, 250, 252) : Color.rgb(241, 245, 249);
-                int garis = baru == 2 ? AMBER : baru == 3 || baru == 4 || baru == 5 ? TEAL : GARIS;
+                int garis = baru == 2 ? AMBER : baru == 3 || baru == 4 || baru == 5 ? TEAL
+                        : baru == 7 ? Color.rgb(147, 197, 253) : baru == 8 ? Color.rgb(252, 211, 77)
+                        : baru == 9 ? Color.rgb(134, 239, 172) : baru == 10 ? Color.rgb(252, 165, 165)
+                        : baru == 13 ? Color.rgb(216, 180, 254) : GARIS;
+                // Prioritas pada tema Dinding berwarna ungu lembut; bintangnya ikut.
+                bintang.setColor(baru == 13 ? Color.rgb(126, 34, 206) : AMBER);
                 latar.setColor(isi);
                 latar.setStroke(Math.round(density), garis);
                 setBackground(latar);
                 setTextColor(baru == 3 ? TEAL : baru == 5 ? Color.WHITE
+                        : baru == 7 ? Color.rgb(55, 90, 170) : baru == 8 ? Color.rgb(161, 90, 20)
+                        : baru == 9 ? Color.rgb(36, 110, 72) : baru == 10 ? Color.rgb(176, 64, 64)
+                        : baru == 13 ? Color.rgb(120, 60, 170)
                         : baru == 6 ? MUTED : INK);
             }
             invalidate();
@@ -496,6 +548,706 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             bintang.setTextSize(besar);
             canvas.drawText("★", 4 * getResources().getDisplayMetrics().density,
                     besar + 2 * getResources().getDisplayMetrics().density, bintang);
+        }
+    }
+
+    // =================================================================
+    // Tema tampilan (per perangkat)
+    // =================================================================
+
+    /**
+     * Isi layar di bawah judul/jam dan di atas banner/kaki. Polling server,
+     * suara, dan pembaruan tetap di MainActivity; tema hanya menggambar.
+     */
+    private abstract class TemaLayar {
+        abstract View bangun(boolean tegak);
+
+        /** Keadaan terbaru dari server (tiap polling). */
+        abstract void terapkan(JSONObject state);
+
+        /** Satu panggilan baru (sebelum suara dibunyikan). */
+        void panggilanBaru(JSONObject call) { }
+
+        /** Pergantian halaman berkala (tiap HALAMAN_MS). */
+        void putarHalaman() { }
+
+        /** Gelombang kartu dibalik pada baris-baris nomor (tiap BALIK_MS). */
+        void balikBaris() { }
+
+        /** Hentikan animasi sebelum tema diganti atau aplikasi ditutup. */
+        void hentikan() { }
+    }
+
+    private TemaLayar buatTema(String id) {
+        if ("dinding".equals(id)) return new TemaDinding();
+        return null;
+    }
+
+    /** Baris pil bergulir: kolom x baris nomor menunggu, bergantian halaman. */
+    private final class DaftarPil {
+        final LinearLayout wadah;
+        private final int kolom;
+        private final float besarSp;
+        private final int tinggiBarisDp;
+        /** Paling banyak baris per halaman; tinggi baris menyesuaikan sisa ruang sampai tinggiMaksDp. */
+        int maksBaris = Integer.MAX_VALUE;
+        int tinggiMaksDp;
+        private int halaman = 0;
+        int halamanTotal = 1;
+        private String tanda = "";
+        private java.util.List<String> nomor = new java.util.ArrayList<>();
+        private java.util.Set<String> prioritas = new java.util.HashSet<>();
+        private java.util.Map<String, Integer> khusus = new java.util.HashMap<>();
+        /** Nomor menunggu tanpa latar, garis, dan warna; hanya yang berstatus khusus berwarna. */
+        boolean polos = false;
+        private java.util.Map<String, Float> redup = new java.util.HashMap<>();
+        /** Halaman baru saja berganti: semua pil muncul bertahap, bukan bergeser. */
+        private boolean halamanBerganti = false;
+
+        DaftarPil(int kolom, float besarSp, int tinggiBarisDp) {
+            this.kolom = kolom;
+            this.besarSp = besarSp;
+            this.tinggiBarisDp = tinggiBarisDp;
+            this.tinggiMaksDp = tinggiBarisDp;
+            wadah = new LinearLayout(MainActivity.this);
+            wadah.setOrientation(LinearLayout.VERTICAL);
+            wadah.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                if (b - t != ob - ot) v.post(this::gambar);
+            });
+        }
+
+        void isi(java.util.List<String> daftar, java.util.Set<String> prior) {
+            isi(daftar, prior, new java.util.HashMap<>());
+        }
+
+        /** `gayaKhusus`: nomor -> kode gaya (7 dilayani, 8 dipanggil) yang mengalahkan gaya biasa. */
+        void isi(java.util.List<String> daftar, java.util.Set<String> prior,
+                 java.util.Map<String, Integer> gayaKhusus) {
+            isi(daftar, prior, gayaKhusus, new java.util.HashMap<>());
+        }
+
+        /** `kepudaran`: nomor -> kepekatan (0..1); nomor yang baru dilayani memudar sebelum hilang. */
+        void isi(java.util.List<String> daftar, java.util.Set<String> prior,
+                 java.util.Map<String, Integer> gayaKhusus, java.util.Map<String, Float> kepudaran) {
+            nomor = daftar;
+            prioritas = prior;
+            khusus = gayaKhusus;
+            redup = kepudaran;
+            gambar();
+        }
+
+        void putar() {
+            if (halamanTotal <= 1) return;
+            halaman = (halaman + 1) % halamanTotal;
+            halamanBerganti = true;
+            gambar();
+        }
+
+        /**
+         * Gelombang "kartu dibalik": semua baris berputar pada sumbu mendatar dari atas
+         * ke bawah, jeda BALIK_JEDA_BARIS_MS antarbaris. Separuh pertama memutar ke samping (90 derajat),
+         * separuh kedua memutar kembali dari sisi seberang.
+         */
+        void balik() {
+            float jarak = 8000f * getResources().getDisplayMetrics().density;
+            for (int r = 0; r < wadah.getChildCount(); r++) {
+                final View baris = wadah.getChildAt(r);
+                baris.setCameraDistance(jarak);
+                baris.animate().cancel();
+                baris.setRotationX(0f);
+                baris.animate().rotationX(90f).setStartDelay(r * BALIK_JEDA_BARIS_MS)
+                        .setDuration(BALIK_SETENGAH_MS)
+                        .setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(() -> {
+                    baris.setRotationX(-90f);
+                    baris.animate().rotationX(0f).setStartDelay(0).setDuration(BALIK_SETENGAH_MS)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                }).start();
+            }
+        }
+
+        /** Teks "Halaman x dari n" bila lebih dari satu halaman, selain itu kosong. */
+        String keterangan() {
+            if (halamanTotal <= 1) return "";
+            StringBuilder titik = new StringBuilder();
+            for (int h = 0; h < halamanTotal && h < 10; h++) titik.append(h == halaman ? "\u25CF " : "\u25CB ");
+            return titik + " Halaman " + (halaman + 1) + " dari " + halamanTotal;
+        }
+
+        void gambar() {
+            int tinggi = wadah.getHeight();
+            // Baris sebanyak yang muat pada tinggi minimum, dibatasi maksBaris; tinggi tiap
+            // baris lalu dibagi rata dari sisa ruang (paling tinggi tinggiMaksDp), dan
+            // huruf mengikuti tinggi baris.
+            int baris = Math.max(1, Math.min(maksBaris, tinggi / dp(tinggiBarisDp)));
+            int tinggiBaris = Math.max(dp(tinggiBarisDp), Math.min(dp(tinggiMaksDp), tinggi / baris));
+            final float besarIni = Math.min(besarSp,
+                    tinggiBaris / getResources().getDisplayMetrics().density * 0.52f);
+            int perHalaman = baris * kolom;
+            halamanTotal = Math.max(1, (int) Math.ceil(nomor.size() / (double) perHalaman));
+            if (halaman >= halamanTotal) halaman = 0;
+            int awal = halaman * perHalaman;
+            int tampil = Math.max(0, Math.min(nomor.size() - awal, perHalaman));
+            int barisTampil = (int) Math.ceil(tampil / (double) kolom);
+            StringBuilder sig = new StringBuilder().append(wadah.getWidth()).append('x').append(tinggi).append('#');
+            for (int i = 0; i < tampil; i++) {
+                String n = nomor.get(awal + i);
+                Float pekat = redup.get(n);
+                sig.append(n).append(prioritas.contains(n) ? "*" : "").append(khusus.get(n))
+                        .append(pekat == null ? "" : "~" + Math.round(pekat * 10)).append(',');
+            }
+            if (tinggi <= 0 || sig.toString().equals(tanda)) return;
+            tanda = sig.toString();
+            // Posisi pil sebelum digambar ulang, untuk animasi geser (C).
+            final java.util.Map<String, int[]> lama = new java.util.HashMap<>();
+            for (int r = 0; r < wadah.getChildCount(); r++) {
+                View barisLama = wadah.getChildAt(r);
+                if (!(barisLama instanceof LinearLayout)) continue;
+                LinearLayout br = (LinearLayout) barisLama;
+                for (int c = 0; c < br.getChildCount(); c++) {
+                    View v = br.getChildAt(c);
+                    if (v instanceof TextView) {
+                        lama.put(((TextView) v).getText().toString(),
+                                new int[]{br.getLeft() + v.getLeft(), br.getTop() + v.getTop()});
+                    }
+                }
+            }
+            final boolean semuaBaru = lama.isEmpty() || halamanBerganti;
+            halamanBerganti = false;
+            final java.util.List<NomorMenunggu> pilBaru = new java.util.ArrayList<>();
+            wadah.removeAllViews();
+            for (int r = 0; r < barisTampil; r++) {
+                LinearLayout row = new LinearLayout(MainActivity.this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                for (int c = 0; c < kolom; c++) {
+                    int idx = r * kolom + c;
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, tinggiBaris, 1);
+                    lp.setMargins(dp(3), dp(2), dp(3), dp(2));
+                    if (idx >= tampil) {
+                        row.addView(new View(MainActivity.this), lp);
+                        continue;
+                    }
+                    String n = nomor.get(awal + idx);
+                    NomorMenunggu pil = new NomorMenunggu(MainActivity.this);
+                    pil.setText(n);
+                    pil.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(besarIni));
+                    pil.setTextColor(INK);
+                    pil.setGravity(Gravity.CENTER);
+                    pil.setSingleLine(true);
+                    pil.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+                    pil.setPadding(dp(4), 0, dp(4), 0);
+                    Float pekat = redup.get(n);
+                    if (pekat != null) pil.setAlpha(pekat);
+                    Integer kode = khusus.get(n);
+                    if (kode != null) pil.setGayaKode(kode, false);
+                    else if (polos) {
+                        // Hanya prioritas yang berwarna (amber + bintang); selebihnya polos.
+                        if (prioritas.contains(n)) pil.setGayaKode(13, true);
+                        else pil.setGayaKode(12, false);
+                    }
+                    else pil.setGaya(true, prioritas.contains(n), awal + idx == 0, false);
+                    pil.addOnLayoutChangeListener((v, l, t, rr, b, ol, ot, or, ob) -> {
+                        if (rr - l != or - ol) v.post(() -> fitText((TextView) v, besarIni, v.getWidth() - dp(8), 0));
+                    });
+                    row.addView(pil, lp);
+                    pilBaru.add(pil);
+                }
+                wadah.addView(row);
+            }
+            // A: halaman baru, pil muncul satu per satu. B: nomor baru membesar halus.
+            // C: nomor yang sudah ada bergeser mulus ke tempat barunya.
+            wadah.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+                @Override
+                public boolean onPreDraw() {
+                    wadah.getViewTreeObserver().removeOnPreDrawListener(this);
+                    int urut = 0;
+                    for (NomorMenunggu pil : pilBaru) {
+                        View induk = (View) pil.getParent();
+                        float akhirAlpha = pil.getAlpha();
+                        int[] awalPos = lama.get(pil.getText().toString());
+                        if (semuaBaru) {
+                            pil.setAlpha(0f);
+                            pil.animate().alpha(akhirAlpha).setStartDelay(Math.min(urut, 30) * 20L)
+                                    .setDuration(300).start();
+                            urut++;
+                        } else if (awalPos == null) {
+                            pil.setAlpha(0f);
+                            pil.setScaleX(0.9f);
+                            pil.setScaleY(0.9f);
+                            pil.animate().alpha(akhirAlpha).scaleX(1f).scaleY(1f).setDuration(300).start();
+                        } else {
+                            float dx = awalPos[0] - (induk.getLeft() + pil.getLeft());
+                            float dy = awalPos[1] - (induk.getTop() + pil.getTop());
+                            if (dx != 0f || dy != 0f) {
+                                pil.setTranslationX(dx);
+                                pil.setTranslationY(dy);
+                                pil.animate().translationX(0f).translationY(0f).setDuration(250).start();
+                            }
+                        }
+                    }
+                    return true;
+                }
+            });
+        }
+    }
+
+    private java.util.Set<String> himpunanPrioritas(JSONObject state) {
+        java.util.Set<String> hasil = new java.util.HashSet<>();
+        JSONArray baris = state.optJSONArray("next_priority");
+        for (int i = 0; baris != null && i < baris.length(); i++) hasil.add(baris.optString(i));
+        return hasil;
+    }
+
+    private java.util.List<String> daftarMenunggu(JSONObject state) {
+        java.util.List<String> hasil = new java.util.ArrayList<>();
+        JSONArray baris = state.optJSONArray("next");
+        for (int i = 0; baris != null && i < baris.length(); i++) hasil.add(baris.optString(i));
+        return hasil;
+    }
+
+    private void aturPilStatus(TextView pil, String label, String kunciDenyut) {
+        boolean ada = label != null && !label.isEmpty();
+        pil.setVisibility(ada ? View.VISIBLE : View.INVISIBLE);
+        if (ada) {
+            boolean dilayani = "Dilayani".equalsIgnoreCase(label);
+            pil.setText(label.toUpperCase(Locale.ROOT));
+            pil.setTextColor(dilayani ? Color.rgb(55, 90, 170) : Color.rgb(161, 90, 20));
+            pil.setBackground(rounded(dilayani ? Color.rgb(219, 234, 254) : Color.rgb(254, 243, 199), dp(14)));
+        }
+        aturDenyut(kunciDenyut, pil, ada && "Dipanggil".equalsIgnoreCase(label));
+    }
+
+    /** Kecilkan huruf sampai muat lebar (dan tinggi bila `denganTinggi`) setiap kali ukuran view berubah. */
+    private void pasKe(TextView view, float maxSp, boolean denganTinggi) {
+        view.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (r - l != or - ol || (denganTinggi && b - t != ob - ot)) {
+                v.post(() -> fitText((TextView) v, maxSp, v.getWidth() - dp(6),
+                        denganTinggi ? v.getHeight() : 0));
+            }
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Tema Dinding: dinding nomor berwarna menurut status
+    // -----------------------------------------------------------------
+
+    private final class TemaDinding extends TemaLayar {
+        private LinearLayout loketWadah;
+        private LinearLayout panggilWadah;
+        private DaftarPil dinding;
+        private TextView keterangan;
+        private boolean tegakIni;
+        private String tandaLoket = "";
+        private String tandaPanggil = "";
+        private String nomorBaru = "";
+        private final java.util.Map<String, LinearLayout> chipLoket = new java.util.HashMap<>();
+        /** Keterangan "MEMANGGIL" pada kotak loket yang sedang memanggil; titiknya bergerak. */
+        private final java.util.List<TextView> statusMemanggil = new java.util.ArrayList<>();
+        private int langkahTitik = 0;
+        private final Runnable titikTugas = new Runnable() {
+            @Override
+            public void run() {
+                langkahTitik = (langkahTitik + 1) % 4;
+                for (TextView tv : statusMemanggil) tampilkanMemanggil(tv);
+                if (!statusMemanggil.isEmpty()) handler.postDelayed(this, 500);
+            }
+        };
+        private final java.util.Map<String, Long> urutanPanggil = new java.util.HashMap<>();
+        private int tinggiAkar = 0;
+        private JSONObject terakhirState;
+        /** Kapan nomor pertama kali terlihat sudah dilayani/selesai; dasar kepudaran. */
+        private final java.util.Map<String, Long> dilayaniSejak = new java.util.HashMap<>();
+        private boolean sudahMuatAwal = false;
+        private static final long MEMUDAR_MS = 20000;
+
+        @Override
+        View bangun(boolean tegak) {
+            tegakIni = tegak;
+            tandaLoket = "";
+            tandaPanggil = "";
+            chipLoket.clear();
+            LinearLayout akar = new LinearLayout(MainActivity.this);
+            akar.setOrientation(LinearLayout.VERTICAL);
+            tinggiAkar = 0;
+            // Anggaran tinggi blok "sedang dipanggil" bergantung pada tinggi layar; hitung ulang bila berubah.
+            akar.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                if (b - t != ob - ot) {
+                    tinggiAkar = b - t;
+                    if (terakhirState != null) v.post(() -> terapkan(terakhirState));
+                }
+            });
+
+            // Daftar loket paling atas: nomor yang dipegang tiap loket dan statusnya.
+            loketWadah = new LinearLayout(MainActivity.this);
+            loketWadah.setOrientation(LinearLayout.VERTICAL);
+            // Jarak dari judul dan jam supaya kotak loket tidak menempel.
+            loketWadah.setPadding(0, dp(28), 0, dp(8));
+            akar.addView(loketWadah, new LinearLayout.LayoutParams(-1, -2));
+
+            // Satu baris untuk setiap nomor yang sedang dipanggil; tingginya mengikuti jumlahnya.
+            panggilWadah = new LinearLayout(MainActivity.this);
+            panggilWadah.setOrientation(LinearLayout.VERTICAL);
+            akar.addView(panggilWadah, new LinearLayout.LayoutParams(-1, -2));
+
+            // Petunjuk warna.
+            LinearLayout legenda = new LinearLayout(MainActivity.this);
+            legenda.setOrientation(LinearLayout.HORIZONTAL);
+            legenda.setPadding(0, dp(8), 0, dp(4));
+            String[] nama = {"Dipanggil", "Baru dilayani", "Dilewati", "Prioritas"};
+            int[] warna = {Color.rgb(252, 211, 77), Color.rgb(147, 197, 253), Color.rgb(252, 165, 165),
+                    Color.rgb(216, 180, 254)};
+            for (int i = 0; i < nama.length; i++) {
+                LinearLayout item = new LinearLayout(MainActivity.this);
+                item.setOrientation(LinearLayout.HORIZONTAL);
+                item.setGravity(Gravity.CENTER_VERTICAL);
+                View titik = new View(MainActivity.this);
+                titik.setBackground(rounded(warna[i], dp(5)));
+                LinearLayout.LayoutParams lpTitik = new LinearLayout.LayoutParams(dp(10), dp(10));
+                lpTitik.rightMargin = dp(3);
+                item.addView(titik, lpTitik);
+                TextView t = text(nama[i], 12, LIGHT, false);
+                pasKe(t, 12, false);
+                item.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
+                legenda.addView(item, new LinearLayout.LayoutParams(0, -2, 1));
+            }
+            akar.addView(legenda, new LinearLayout.LayoutParams(-1, -2));
+
+            // Paling banyak 15 baris; tinggi baris 50-66 dp menyesuaikan sisa layar, huruf sampai 30sp.
+            dinding = new DaftarPil(tegak ? 3 : 5, 30, 50);
+            dinding.maksBaris = 15;
+            dinding.tinggiMaksDp = 66;
+            dinding.polos = true;
+            akar.addView(dinding.wadah, new LinearLayout.LayoutParams(-1, 0, 1));
+            keterangan = text("", 14, MUTED, false);
+            keterangan.setPadding(0, dp(4), 0, 0);
+            akar.addView(keterangan);
+            return akar;
+        }
+
+        /**
+         * Satu kartu per loket, selalu satu baris (dua baris hanya bila loketnya
+         * lebih dari 7): nomor di atas, nama loket di bawah dengan titik status.
+         * Status dibawa warna garis dan titik (lihat petunjuk warna); semua
+         * teks dikecilkan sampai muat, tidak pernah dipotong.
+         */
+        private void gambarLoket(JSONArray loket) {
+            StringBuilder sig = new StringBuilder();
+            for (int i = 0; i < loket.length(); i++) {
+                JSONObject l = loket.optJSONObject(i);
+                if (l == null) continue;
+                sig.append(l.optString("name")).append('=').append(l.isNull("queue_number")
+                        ? l.optString("status", "") : l.optString("queue_number")).append('!')
+                        .append(l.optString("status", "")).append(';');
+            }
+            sig.append(tegakIni);
+            if (sig.toString().equals(tandaLoket)) return;
+            tandaLoket = sig.toString();
+            hentikanDenyut("chip:");
+            handler.removeCallbacks(titikTugas);
+            statusMemanggil.clear();
+            loketWadah.removeAllViews();
+            chipLoket.clear();
+            int jumlah = loket.length();
+            if (jumlah == 0) return;
+            // Sampai 5 loket: huruf terbesar; 6-7: satu tingkat lebih kecil; lebih dari 7: dua baris.
+            int kolom = jumlah <= 7 ? jumlah : (int) Math.ceil(jumlah / 2.0);
+            float besarNomor = jumlah <= 5 ? 30 : 24;
+            float besarNama = jumlah <= 5 ? 14 : 12;
+            int baris = (int) Math.ceil(jumlah / (double) kolom);
+            for (int r = 0; r < baris; r++) {
+                LinearLayout row = new LinearLayout(MainActivity.this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                for (int c = 0; c < kolom; c++) {
+                    int idx = r * kolom + c;
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(jumlah <= 5 ? 146 : 122), 1);
+                    lp.setMargins(dp(3), dp(3), dp(3), dp(3));
+                    JSONObject l = idx < jumlah ? loket.optJSONObject(idx) : null;
+                    if (l == null) {
+                        row.addView(new View(MainActivity.this), lp);
+                        continue;
+                    }
+                    boolean ada = !l.isNull("queue_number");
+                    String status = l.optString("status", "");
+                    boolean dilayani = "Dilayani".equalsIgnoreCase(status);
+                    int warna = !ada ? MUTED : dilayani ? Color.rgb(55, 90, 170) : Color.rgb(161, 90, 20);
+                    int isiChip = !ada ? Color.WHITE
+                            : dilayani ? Color.rgb(219, 234, 254) : Color.rgb(254, 243, 199);
+                    int garisChip = !ada ? GARIS
+                            : dilayani ? Color.rgb(147, 197, 253) : Color.rgb(252, 211, 77);
+                    LinearLayout chip = new LinearLayout(MainActivity.this);
+                    chip.setOrientation(LinearLayout.VERTICAL);
+                    chip.setGravity(Gravity.CENTER);
+                    GradientDrawable latar = rounded(isiChip, dp(12));
+                    latar.setStroke(dp(ada ? 2 : 1), garisChip);
+                    chip.setBackground(latar);
+                    chip.setPadding(dp(4), dp(6), dp(4), dp(6));
+                    // Susunan tetap di semua kotak: nama loket di atas, nomor di tengah, status di
+                    // bawah. Selama DIPANGGIL nomornya hanya tampil di blok "SEDANG DIPANGGIL",
+                    // jadi tempat nomor dibiarkan kosong; nomor baru muncul setelah dilayani.
+                    boolean masihMemanggil = "Dipanggil".equalsIgnoreCase(status);
+                    chip.setGravity(Gravity.CENTER_HORIZONTAL);
+
+                    TextView nama = text(l.optString("name"), besarNama + 4, LIGHT, true);
+                    nama.setGravity(Gravity.CENTER);
+                    pasKe(nama, besarNama + 4, false);
+                    chip.addView(nama, new LinearLayout.LayoutParams(-1, -2));
+
+                    String isi = masihMemanggil ? "" : ada ? l.optString("queue_number") : "\u2013";
+                    TextView nomor = text(isi, besarNomor, warna, false);
+                    nomor.setGravity(Gravity.CENTER);
+                    // Tanpa ruang tambahan font, dan diukur terhadap lebar DAN tinggi sisa kotak
+                    // supaya nomor tidak terpotong.
+                    nomor.setIncludeFontPadding(false);
+                    pasKe(nomor, besarNomor, true);
+                    chip.addView(nomor, new LinearLayout.LayoutParams(-1, 0, 1));
+
+                    // Keterangan status: DIPANGGIL / DILAYANI, atau SIAP / ISTIRAHAT bila loket kosong.
+                    String teksStatus = ada ? status.toUpperCase(Locale.ROOT)
+                            : "ISTIRAHAT".equals(status) ? "ISTIRAHAT" : "SIAP";
+                    TextView keteranganStatus = text(teksStatus, jumlah <= 5 ? 14 : 12, warna, true);
+                    keteranganStatus.setGravity(Gravity.CENTER);
+                    // Di kotak loket kata kerjanya dari sisi loket: MEMANGGIL (blok nomor tetap DIPANGGIL).
+                    if (masihMemanggil) {
+                        statusMemanggil.add(keteranganStatus);
+                        tampilkanMemanggil(keteranganStatus);
+                    }
+                    pasKe(keteranganStatus, jumlah <= 5 ? 14 : 12, false);
+                    chip.addView(keteranganStatus, new LinearLayout.LayoutParams(-1, -2));
+
+                    row.addView(chip, lp);
+                    chipLoket.put(l.optString("name"), chip);
+                }
+                loketWadah.addView(row, new LinearLayout.LayoutParams(-1, -2));
+            }
+            if (!statusMemanggil.isEmpty()) handler.postDelayed(titikTugas, 500);
+        }
+
+        /** "MEMANGGIL" diikuti 0-3 titik; titik yang belum muncul tetap memakan tempat agar lebar teks tetap. */
+        private void tampilkanMemanggil(TextView tv) {
+            android.text.SpannableString teks = new android.text.SpannableString("MEMANGGIL...");
+            if (langkahTitik < 3) {
+                teks.setSpan(new android.text.style.ForegroundColorSpan(Color.TRANSPARENT),
+                        9 + langkahTitik, 12, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            tv.setText(teks);
+        }
+
+        private void hentikanDenyutBaris() {
+            hentikanDenyut("dinding:");
+        }
+
+        private void hentikanDenyut(String awalan) {
+            java.util.Iterator<java.util.Map.Entry<String, android.animation.ObjectAnimator>> it =
+                    denyut.entrySet().iterator();
+            while (it.hasNext()) {
+                java.util.Map.Entry<String, android.animation.ObjectAnimator> e = it.next();
+                if (e.getKey().startsWith(awalan)) {
+                    e.getValue().cancel();
+                    it.remove();
+                }
+            }
+        }
+
+        /**
+         * Satu baris per nomor yang sedang dipanggil. Makin banyak barisnya,
+         * makin kecil hurufnya dan makin pendek barisnya, sehingga dinding
+         * nomor di bawahnya menyesuaikan sisanya.
+         */
+        private void gambarPanggil(java.util.List<String[]> aktif) {
+            StringBuilder sig = new StringBuilder().append(tegakIni).append('#').append(tinggiAkar).append('#')
+                    .append(nomorBaru).append('#');
+            for (String[] a : aktif) sig.append(a[0]).append('@').append(a[1]).append('/').append(a[2]).append(';');
+            if (sig.toString().equals(tandaPanggil)) return;
+            tandaPanggil = sig.toString();
+            hentikanDenyutBaris();
+            panggilWadah.removeAllViews();
+
+            int n = aktif.size();
+            if (n == 0) {
+                TextView kosong = text("Belum ada nomor yang sedang dipanggil", 16, MUTED, false);
+                kosong.setGravity(Gravity.CENTER);
+                GradientDrawable latar = rounded(Color.rgb(248, 250, 252), dp(12));
+                latar.setStroke(dp(1), GARIS);
+                kosong.setBackground(latar);
+                kosong.setPadding(dp(8), dp(10), dp(8), dp(10));
+                pasKe(kosong, 16, false);
+                panggilWadah.addView(kosong, new LinearLayout.LayoutParams(-1, -2));
+                return;
+            }
+            judulPanggil();
+            // Anggaran: blok ini paling banyak sepertiga tinggi layar, supaya dinding nomor
+            // di bawahnya tetap punya ruang. Baris dikecilkan dahulu, lalu dikurangi.
+            int anggaran = tinggiAkar > 0 ? Math.round(tinggiAkar * 0.34f) : dp(260);
+            int ruangBaris = anggaran - dp(22);
+            int minBaris = dp(46);
+            int tampil = Math.max(1, Math.min(Math.min(n, 6), ruangBaris / minBaris));
+            int idealDp = tampil == 1 ? 92 : tampil == 2 ? 74 : tampil == 3 ? 62 : tampil == 4 ? 54 : 46;
+            int tinggiBaris = Math.max(minBaris - dp(6), Math.min(dp(idealDp), ruangBaris / tampil - dp(6)));
+            float tinggiDp = tinggiBaris / getResources().getDisplayMetrics().density;
+            float besarNomor = Math.min(60f, tinggiDp * 0.62f);
+            float besarLoket = Math.max(13f, Math.min(22f, tinggiDp * 0.24f));
+            for (int i = 0; i < tampil; i++) {
+                String[] a = aktif.get(i);
+                LinearLayout row = new LinearLayout(MainActivity.this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                GradientDrawable latarBaris = rounded(Color.rgb(204, 251, 241), dp(16));
+                latarBaris.setStroke(dp(1), Color.rgb(153, 246, 228));
+                row.setBackground(latarBaris);
+                row.setPadding(dp(12), dp(2), dp(12), dp(2));
+                TextView nomor = text(a[0], besarNomor, Color.rgb(17, 94, 89), false);
+                nomor.setGravity(Gravity.CENTER);
+                pasKe(nomor, besarNomor, true);
+                row.addView(nomor, new LinearLayout.LayoutParams(0, -1, 1.5f));
+                LinearLayout teks = new LinearLayout(MainActivity.this);
+                teks.setOrientation(LinearLayout.VERTICAL);
+                teks.setGravity(Gravity.CENTER_VERTICAL);
+                TextView loket = text(a[1].toUpperCase(Locale.ROOT), besarLoket, Color.rgb(17, 94, 89), true);
+                pasKe(loket, besarLoket, false);
+                teks.addView(loket, new LinearLayout.LayoutParams(-1, -2));
+                if (!a[2].isEmpty() && tinggiDp >= 60) {
+                    float besarLayanan = Math.max(12f, besarLoket - 5);
+                    TextView layanan = text(a[2], besarLayanan, Color.rgb(15, 118, 110), false);
+                    pasKe(layanan, besarLayanan, false);
+                    teks.addView(layanan, new LinearLayout.LayoutParams(-1, -2));
+                }
+                row.addView(teks, new LinearLayout.LayoutParams(0, -2, 1.7f));
+                TextView status = text("", tinggiDp >= 70 ? 16 : 13, Color.WHITE, true);
+                status.setGravity(Gravity.CENTER);
+                status.setPadding(dp(10), dp(3), dp(10), dp(3));
+                aturPilStatus(status, "Dipanggil", "dinding:" + a[1]);
+                row.addView(status, new LinearLayout.LayoutParams(-2, -2));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, tinggiBaris);
+                lp.setMargins(0, dp(3), 0, dp(3));
+                panggilWadah.addView(row, lp);
+                if (a[0].equals(nomorBaru)) {
+                    nomor.setScaleX(0.8f);
+                    nomor.setScaleY(0.8f);
+                    nomor.animate().scaleX(1f).scaleY(1f).setDuration(350)
+                            .setInterpolator(new android.view.animation.OvershootInterpolator()).start();
+                    kedipkan(row);
+                }
+            }
+            if (n > tampil) {
+                TextView lagi = text("+" + (n - tampil) + " nomor lain sedang dipanggil", 13, MUTED, true);
+                lagi.setGravity(Gravity.CENTER);
+                panggilWadah.addView(lagi, new LinearLayout.LayoutParams(-1, -2));
+            }
+            nomorBaru = "";
+        }
+
+        private void judulPanggil() {
+            TextView judul = text("SEDANG DIPANGGIL", 13, LIGHT, true);
+            judul.setPadding(dp(2), 0, 0, dp(1));
+            panggilWadah.addView(judul, new LinearLayout.LayoutParams(-1, -2));
+        }
+
+        @Override
+        void terapkan(JSONObject state) {
+            terakhirState = state;
+            JSONArray loket = state.optJSONArray("counters");
+            if (loket == null) loket = new JSONArray();
+            gambarLoket(loket);
+
+            // Yang sedang dipanggil: loket berstatus Dipanggil, yang terbaru lebih dulu.
+            java.util.List<String[]> aktif = new java.util.ArrayList<>();
+            for (int i = 0; i < loket.length(); i++) {
+                JSONObject l = loket.optJSONObject(i);
+                if (l == null || l.isNull("queue_number")) continue;
+                if (!"Dipanggil".equalsIgnoreCase(l.optString("status"))) continue;
+                aktif.add(new String[]{l.optString("queue_number"), l.optString("name"),
+                        l.isNull("category") ? "" : l.optString("category")});
+            }
+            java.util.Collections.sort(aktif, (x, y) -> {
+                Long wx = urutanPanggil.get(x[0]);
+                Long wy = urutanPanggil.get(y[0]);
+                return Long.compare(wy == null ? 0L : wy, wx == null ? 0L : wx);
+            });
+            gambarPanggil(aktif);
+
+            java.util.List<String> daftarNomor = new java.util.ArrayList<>();
+            java.util.Map<String, Integer> khusus = new java.util.HashMap<>();
+            // Semua nomor yang sudah dipanggil hari ini (terbaru dulu), lalu yang menunggu.
+            JSONArray dipanggil = state.optJSONArray("called");
+            long sekarang = System.currentTimeMillis();
+            java.util.Map<String, Float> kepudaran = new java.util.HashMap<>();
+            for (int i = 0; dipanggil != null && i < dipanggil.length(); i++) {
+                JSONObject d = dipanggil.optJSONObject(i);
+                if (d == null) continue;
+                String nomor = d.optString("n");
+                String st = d.optString("s");
+                // Nomor yang sudah dilayani (atau selesai) memudar selama MEMUDAR_MS lalu
+                // hilang dari dinding; yang tetap: sedang dipanggil dan dilewati. Nomor
+                // yang sedang dilayani tetap terlihat di kotak loketnya.
+                boolean dilayani = "Dilayani".equalsIgnoreCase(st) || "Ditunda".equalsIgnoreCase(st);
+                boolean selesai = "Selesai".equalsIgnoreCase(st);
+                if (dilayani || selesai) {
+                    Long sejak = dilayaniSejak.get(nomor);
+                    if (sejak == null) {
+                        // Waktu muat pertama: yang sudah lama dilayani tidak perlu memudar lagi.
+                        sejak = sudahMuatAwal ? sekarang : sekarang - MEMUDAR_MS;
+                        dilayaniSejak.put(nomor, sejak);
+                    }
+                    long lalu = sekarang - sejak;
+                    if (lalu >= MEMUDAR_MS) continue;
+                    daftarNomor.add(nomor);
+                    khusus.put(nomor, selesai ? 9 : 7);
+                    kepudaran.put(nomor, Math.max(0.25f, 1f - 0.75f * lalu / (float) MEMUDAR_MS));
+                    continue;
+                }
+                dilayaniSejak.remove(nomor);
+                daftarNomor.add(nomor);
+                khusus.put(nomor, "Dipanggil".equalsIgnoreCase(st) ? 8 : 10);
+            }
+            if (dipanggil == null) {
+                // Server lama tanpa riwayat: pakai nomor yang dipegang loket.
+                for (int i = 0; i < loket.length(); i++) {
+                    JSONObject l = loket.optJSONObject(i);
+                    if (l == null || l.isNull("queue_number")) continue;
+                    if (!"Dipanggil".equalsIgnoreCase(l.optString("status"))) continue;
+                    String nomor = l.optString("queue_number");
+                    daftarNomor.add(nomor);
+                    khusus.put(nomor, 8);
+                }
+            }
+            sudahMuatAwal = true;
+            int sudah = 0;
+            for (Integer kode : khusus.values()) if (kode == 8) sudah++;
+            for (String nomor : daftarMenunggu(state)) daftarNomor.add(nomor);
+
+            dinding.isi(daftarNomor, himpunanPrioritas(state), khusus, kepudaran);
+            int total = Math.max(state.optInt("total_waiting"), 0);
+            String ket = dinding.keterangan();
+            keterangan.setText((ket.isEmpty() ? "" : ket + " \u00B7 ")
+                    + sudah + " dipanggil \u00B7 " + total + " menunggu");
+        }
+
+        @Override
+        void panggilanBaru(JSONObject call) {
+            String nomor = call.optString("queue_number");
+            if (nomor.isEmpty()) return;
+            nomorBaru = nomor;
+            urutanPanggil.put(nomor, System.currentTimeMillis());
+            LinearLayout chip = chipLoket.get(call.optString("counter_name"));
+            if (chip != null) kedipkan(chip);
+            // Barisnya sendiri digambar saat keadaan terbaru dari server tiba (segera sesudah ini).
+        }
+
+        @Override
+        void putarHalaman() {
+            dinding.putar();
+        }
+
+        @Override
+        void balikBaris() {
+            dinding.balik();
+        }
+
+        @Override
+        void hentikan() {
+            hentikanDenyutBaris();
+            hentikanDenyut("chip:");
+            handler.removeCallbacks(titikTugas);
+            statusMemanggil.clear();
         }
     }
 
@@ -532,42 +1284,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
      *
      * Judul dan jam selalu bertumpuk di tengah.
      */
-    private void buildScreen() {
-        DisplayMetrics metrics = getResources().getDisplayMetrics();
-        portrait = metrics.heightPixels > metrics.widthPixels;
-
-        FrameLayout frame = new FrameLayout(this);
-        GradientDrawable background = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM, new int[]{BG_TOP, BG_BOTTOM});
-        frame.setBackground(background);
-
-        root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        if (portrait) {
-            root.setPadding(dp(16), dp(16), dp(16), dp(10));
-        } else {
-            root.setPadding(dp(28), dp(16), dp(28), dp(14));
-        }
-        frame.addView(root, new FrameLayout.LayoutParams(-1, -1));
-
-        head = new LinearLayout(this);
-        head.setOrientation(LinearLayout.VERTICAL);
-        head.setGravity(Gravity.CENTER_HORIZONTAL);
-        title = text(NAMA_TAMPIL,
-                30, INK, true);
-        title.setGravity(Gravity.CENTER);
-        title.setLetterSpacing(0.04f);
-        // Judul panjang dikecilkan supaya tetap satu baris di layar tegak.
-        title.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
-            if (r - l != or - ol) v.post(() -> fitText((TextView) v, 30, v.getWidth(), 0));
-        });
-        head.addView(title, new LinearLayout.LayoutParams(-1, -2));
-        clock = text("", 20, LIGHT, false);
-        clock.setGravity(Gravity.CENTER);
-        clock.setPadding(0, dp(2), 0, 0);
-        head.addView(clock, new LinearLayout.LayoutParams(-1, -2));
-        root.addView(head, new LinearLayout.LayoutParams(-1, -2));
-
+    /** Susunan bawaan (tema Bening): kartu loket di kiri/atas, panel samping di kanan/bawah. */
+    private void buildBeningBody() {
         body = new LinearLayout(this);
         body.setOrientation(portrait ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
         body.setPadding(0, dp(12), 0, dp(10));
@@ -644,6 +1362,55 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             body.addView(side, new LinearLayout.LayoutParams(0, -1, 1.2f));
         }
         root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
+    }
+
+    private void buildScreen() {
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        portrait = metrics.heightPixels > metrics.widthPixels;
+
+        FrameLayout frame = new FrameLayout(this);
+        GradientDrawable background = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM, new int[]{BG_TOP, BG_BOTTOM});
+        frame.setBackground(background);
+
+        root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        if (portrait) {
+            root.setPadding(dp(16), dp(16), dp(16), dp(10));
+        } else {
+            root.setPadding(dp(28), dp(16), dp(28), dp(14));
+        }
+        frame.addView(root, new FrameLayout.LayoutParams(-1, -1));
+
+        head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.VERTICAL);
+        head.setGravity(Gravity.CENTER_HORIZONTAL);
+        title = text(NAMA_TAMPIL,
+                30, INK, true);
+        title.setGravity(Gravity.CENTER);
+        title.setLetterSpacing(0.04f);
+        // Judul panjang dikecilkan supaya tetap satu baris di layar tegak.
+        title.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (r - l != or - ol) v.post(() -> fitText((TextView) v, 30, v.getWidth(), 0));
+        });
+        head.addView(title, new LinearLayout.LayoutParams(-1, -2));
+        clock = text("", 20, LIGHT, false);
+        clock.setGravity(Gravity.CENTER);
+        clock.setPadding(0, dp(2), 0, 0);
+        head.addView(clock, new LinearLayout.LayoutParams(-1, -2));
+        root.addView(head, new LinearLayout.LayoutParams(-1, -2));
+
+        if (tema != null) tema.hentikan();
+        tema = buatTema(preferences.getString(TEMA, TEMA_BENING));
+        if (tema != null) {
+            body = new LinearLayout(this);
+            body.setOrientation(LinearLayout.VERTICAL);
+            body.setPadding(0, dp(10), 0, dp(6));
+            body.addView(tema.bangun(portrait), new LinearLayout.LayoutParams(-1, -1));
+            root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
+        } else {
+            buildBeningBody();
+        }
 
         banner = text("", 18, Color.WHITE, true);
         banner.setPadding(dp(16), dp(8), dp(16), dp(8));
@@ -834,7 +1601,52 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         }
     }
 
-    private void applyState(JSONObject state) {
+    /**
+     * Buang dari daftar menunggu setiap nomor yang sudah dipanggil atau sedang
+     * dipegang loket, lalu hitung ulang jumlah menunggu. Pengaman di sisi layar:
+     * nomor yang sudah dilayani tidak boleh tampil sebagai menunggu di tema mana pun.
+     */
+    private JSONObject saring(JSONObject state) {
+        JSONArray next = state.optJSONArray("next");
+        if (next == null || next.length() == 0) return state;
+        java.util.Set<String> sudah = new java.util.HashSet<>();
+        JSONArray dipanggil = state.optJSONArray("called");
+        for (int i = 0; dipanggil != null && i < dipanggil.length(); i++) {
+            JSONObject d = dipanggil.optJSONObject(i);
+            if (d != null) sudah.add(d.optString("n"));
+        }
+        JSONArray loket = state.optJSONArray("counters");
+        for (int i = 0; loket != null && i < loket.length(); i++) {
+            JSONObject l = loket.optJSONObject(i);
+            if (l != null && !l.isNull("queue_number")) sudah.add(l.optString("queue_number"));
+        }
+        if (sudah.isEmpty()) return state;
+        JSONArray baru = new JSONArray();
+        int buang = 0;
+        for (int i = 0; i < next.length(); i++) {
+            String nomor = next.optString(i);
+            if (sudah.contains(nomor)) buang++;
+            else baru.put(nomor);
+        }
+        if (buang == 0) return state;
+        JSONArray priorBaru = new JSONArray();
+        JSONArray prior = state.optJSONArray("next_priority");
+        for (int i = 0; prior != null && i < prior.length(); i++) {
+            if (!sudah.contains(prior.optString(i))) priorBaru.put(prior.optString(i));
+        }
+        try {
+            JSONObject salinan = new JSONObject(state.toString());
+            salinan.put("next", baru);
+            salinan.put("next_priority", priorBaru);
+            salinan.put("total_waiting", Math.max(0, state.optInt("total_waiting") - buang));
+            return salinan;
+        } catch (org.json.JSONException e) {
+            return state;
+        }
+    }
+
+    private void applyState(JSONObject asli) {
+        JSONObject state = saring(asli);
         lastState = state;
         // Judul dari server sengaja diabaikan: identitas tidak dapat diubah.
         if (!NAMA_TAMPIL.contentEquals(title.getText())) {
@@ -846,6 +1658,13 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         serverTimezone = zone.startsWith("Asia/") ? zone : DEFAULT_TIMEZONE;
         long serverTime = state.optLong("server_time_ms", 0L);
         if (serverTime > 0L) serverOffsetMillis = serverTime - System.currentTimeMillis();
+
+        if (tema != null) {
+            tema.terapkan(state);
+            applyVersion(state);
+            syncSoundPack(state.optString("sound_pack_version", ""));
+            return;
+        }
 
         JSONArray counters = state.optJSONArray("counters");
         if (counters == null) counters = new JSONArray();
@@ -1031,10 +1850,22 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     /** Ganti halaman nomor menunggu tiap HALAMAN_MS dengan transisi pudar. */
+    private final Runnable balikBarisTugas = new Runnable() {
+        @Override
+        public void run() {
+            handler.postDelayed(this, BALIK_MS);
+            if (tema != null) tema.balikBaris();
+        }
+    };
+
     private final Runnable putarHalaman = new Runnable() {
         @Override
         public void run() {
             handler.postDelayed(this, HALAMAN_MS);
+            if (tema != null) {
+                tema.putarHalaman();
+                return;
+            }
             if (lastState == null || halamanTotal <= 1 || nextList == null) return;
             halaman = (halaman + 1) % halamanTotal;
             nextList.animate().alpha(0f).setDuration(250).withEndAction(() -> {
@@ -1214,25 +2045,40 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         });
     }
 
+    private boolean segarkanLagi;
+
+    private void ambilState() {
+        if (!isPaired()) return;
+        if (stateInFlight) {
+            // Jawaban yang sedang berjalan bisa lebih lama dari panggilan terbaru: ulangi sesudahnya.
+            segarkanLagi = true;
+            return;
+        }
+        stateInFlight = true;
+        request("GET", "/v1/layar/state?next=" + NEXT_MAX, null, (code, response) -> {
+            stateInFlight = false;
+            if (code == 200 && response instanceof JSONObject) {
+                setConnected(true);
+                applyState((JSONObject) response);
+            } else if (code == 401) {
+                showBanner("Layar ini belum dipasangkan atau sudah dicabut. "
+                        + "Tahan judul 3 detik untuk memasangkan.");
+                dimBody();
+            } else {
+                setConnected(false);
+            }
+            if (segarkanLagi) {
+                segarkanLagi = false;
+                ambilState();
+            }
+        });
+    }
+
     private final Runnable statePoll = new Runnable() {
         @Override
         public void run() {
             handler.postDelayed(this, STATE_INTERVAL_MS);
-            if (!isPaired() || stateInFlight) return;
-            stateInFlight = true;
-            request("GET", "/v1/layar/state?next=" + NEXT_MAX, null, (code, response) -> {
-                stateInFlight = false;
-                if (code == 200 && response instanceof JSONObject) {
-                    setConnected(true);
-                    applyState((JSONObject) response);
-                } else if (code == 401) {
-                    showBanner("Layar ini belum dipasangkan atau sudah dicabut. "
-                            + "Tahan judul 3 detik untuk memasangkan.");
-                    dimBody();
-                } else {
-                    setConnected(false);
-                }
-            });
+            ambilState();
         }
     };
 
@@ -1285,6 +2131,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         if (call == null) return;
         String counter = call.optString("counter_name");
         highlightUntil.put(counter, System.currentTimeMillis() + HIGHLIGHT_MS);
+        if (tema != null) tema.panggilanBaru(call);
+        // Nomor yang baru dipanggil harus segera hilang dari daftar menunggu.
+        ambilState();
         LinearLayout card = cardsByCounter.get(counter);
         if (card != null) {
             TextView number = card.findViewWithTag("number");
@@ -1721,6 +2570,39 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         info.setText("Kode dibuat di komputer server: Layanan Anjungan → Perangkat → "
                 + "Tambah perangkat. Kosongkan kode bila hanya mengganti nama.");
         fields.addView(info);
+
+        TextView temaJudul = new TextView(this);
+        temaJudul.setText("Tema tampilan (hanya untuk layar ini)");
+        temaJudul.setPadding(0, dp(12), 0, 0);
+        fields.addView(temaJudul);
+        String[] namaTema = new String[TEMA_DAFTAR.length];
+        int terpilih = 0;
+        String temaSekarang = preferences.getString(TEMA, TEMA_BENING);
+        for (int i = 0; i < TEMA_DAFTAR.length; i++) {
+            namaTema[i] = TEMA_DAFTAR[i][1];
+            if (TEMA_DAFTAR[i][0].equals(temaSekarang)) terpilih = i;
+        }
+        android.widget.Spinner temaPilih = new android.widget.Spinner(this);
+        temaPilih.setAdapter(new android.widget.ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_dropdown_item, namaTema));
+        temaPilih.setSelection(terpilih, false);
+        fields.addView(temaPilih);
+        TextView temaInfo = new TextView(this);
+        temaInfo.setText(TEMA_DAFTAR[terpilih][2]);
+        fields.addView(temaInfo);
+        temaPilih.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int posisi, long id) {
+                String baru = TEMA_DAFTAR[posisi][0];
+                temaInfo.setText(TEMA_DAFTAR[posisi][2]);
+                if (baru.equals(preferences.getString(TEMA, TEMA_BENING))) return;
+                preferences.edit().putString(TEMA, baru).apply();
+                susunUlang();
+            }
+
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+        });
 
         TextView version = new TextView(this);
         String suara = ttsReady ? "TTS perangkat (Bahasa Indonesia)"

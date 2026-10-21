@@ -722,6 +722,7 @@ class MainWindow(QMainWindow):
                     self.settings_service,
                     self.auth,
                     note=self.note_service,
+                    ticket=self.ticket_service,
                 ),
             ),
             # Keadaan meja sendiri: nomor, antrean, dan riwayat hari ini.

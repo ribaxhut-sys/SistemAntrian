@@ -30,6 +30,7 @@ from app.services.note_service import NoteService
 from app.services.queue_service import QueueInfo, QueueService
 from app.services.settings_service import SettingsService
 from app.services.survey_service import SurveyService
+from app.services.ticket_service import TicketService
 from app.ui.common import (
     PekerjaLatar,
     jalankan_aman,
@@ -45,6 +46,7 @@ from app.ui.efek import pasang_efek
 from app.ui.kilau import KilauTombol
 from app.ui.queue.note_panel import NotePanel
 from app.services.urutan_prioritas import MODE_BIASA, MODE_OTOMATIS, MODE_PRIORITAS
+from app.ui.queue.dialog_cabut_prioritas import DialogCabutPrioritas
 from app.ui.queue.kartu_berikutnya import KartuBerikutnya
 from app.ui.queue.papan_tunggu import PapanTunggu
 from app.ui.queue.pelapor_form import PelaporForm
@@ -139,6 +141,7 @@ class ServicePage(QWidget):
         parent: QWidget | None = None,
         *,
         note: NoteService | None = None,
+        ticket: TicketService | None = None,
         otomatis: bool = True,
     ) -> None:
         super().__init__(parent)
@@ -146,6 +149,9 @@ class ServicePage(QWidget):
         self.master = master
         self.survey = survey
         self.settings = settings
+        #: Pencetak tiket mesin ini. Boleh None (mesin tanpa printer tiket):
+        #: tombol "Cetak ulang tiket" lalu tidak tampil.
+        self.ticket = ticket
         #: Ruang kerja pengaduan/catatan. Boleh None: panel kanan lalu
         #: hanya berisi Menunggu Dilayani, dipakai test yang hanya menguji
         #: alur pelayanan. Pemasangan sungguhan selalu mengirimkannya.
@@ -424,6 +430,20 @@ class ServicePage(QWidget):
         )
         self.tombol_ubah_prioritas.setVisible(False)
         baris_atas.addWidget(self.tombol_ubah_prioritas)
+        # Cetak ulang tiket nomor yang sedang dipegang, mis. setelah prioritasnya
+        # dicabut (tiket lama masih bertuliskan "Prioritas") atau kertas tersangkut.
+        self.tombol_cetak_ulang = QPushButton("Cetak ulang tiket")
+        self.tombol_cetak_ulang.setFlat(True)
+        self.tombol_cetak_ulang.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tombol_cetak_ulang.clicked.connect(
+            lambda: self._cetak_ulang_tiket(self.antrian)
+        )
+        self.tombol_cetak_ulang.setVisible(False)
+        baris_atas.addWidget(self.tombol_cetak_ulang)
+        self.label_cetak = QLabel("")
+        self.label_cetak.setStyleSheet(f"color: {TEXT_MUTED};")
+        self.label_cetak.setVisible(False)
+        baris_atas.addWidget(self.label_cetak)
         baris_atas.addStretch()
 
         self.label_durasi = QLabel("")
@@ -1639,6 +1659,11 @@ class ServicePage(QWidget):
         ada = antrian is not None and antrian.prioritas is not None
         self.pil_prioritas.setVisible(ada)
         self.tombol_ubah_prioritas.setVisible(ada)
+        self.tombol_cetak_ulang.setVisible(
+            antrian is not None and self.ticket is not None
+        )
+        if antrian is None:
+            self.label_cetak.setVisible(False)
         if not ada:
             return
         teks = f"★ PRIORITAS · {antrian.label_prioritas}"
@@ -1663,10 +1688,49 @@ class ServicePage(QWidget):
         if target is None or target.prioritas is None:
             return
         antrian_id = target.id
+        if target.status is QueueStatus.CALLED:
+            # Pengunjung sudah di loket: petugas memilih mengembalikannya ke antrian
+            # (loket bebas memanggil berikutnya) atau tetap melayaninya.
+            dialog = DialogCabutPrioritas(self, target)
+            if dialog.exec() != DialogCabutPrioritas.DialogCode.Accepted:
+                return
+            kembalikan, alasan = dialog.kembalikan, dialog.alasan
+            cetak = dialog.cetak_ulang and self.ticket is not None
+            self._jalankan(
+                lambda: self.queue.cabut_prioritas(
+                    antrian_id, kembalikan=kembalikan, alasan=alasan
+                ),
+                "Gagal mencabut prioritas",
+                setelah=(lambda hasil: self._cetak_ulang_tiket(hasil)) if cetak else None,
+            )
+            return
         self._jalankan(
             lambda: self.queue.cabut_prioritas(antrian_id),
             "Gagal mencabut prioritas",
         )
+
+    def _cetak_ulang_tiket(self, target: QueueInfo | None) -> None:
+        """
+        Cetak ulang tiket sebuah nomor dari keadaannya SAAT INI.
+
+        Keadaan dibaca ulang dari database (bukan dari salinan layar), supaya
+        tiket yang tercetak mengikuti pencabutan prioritas yang baru terjadi.
+        Kegagalan cetak tidak membatalkan apa pun; cukup dilaporkan sebaris.
+        """
+        if target is None or self.ticket is None:
+            return
+        antrian_id = target.id
+
+        def cetak():
+            return self.ticket.cetak(self.queue.get_queue(antrian_id))
+
+        berhasil, hasil = jalankan_aman(self, cetak, "Gagal mencetak tiket")
+        if not berhasil or hasil is None:
+            return
+        # Pesan pencetaknya sendiri: mesin tanpa printer menjawab "Printer tidak digunakan."
+        # dan tidak boleh tampak seolah tiketnya tercetak.
+        self.label_cetak.setText(hasil.pesan or ("Tiket tercetak." if hasil.berhasil else "Gagal mencetak."))
+        self.label_cetak.setVisible(True)
 
     def _saring_menunggu(self, _kategori_id=None) -> None:
         """Pilihan kartu berubah: gambar ulang daftar dari data terakhir."""

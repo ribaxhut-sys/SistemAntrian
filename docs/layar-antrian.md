@@ -91,6 +91,24 @@ ada. Nilainya ada di konstanta warna `MainActivity.java` modul `layar`.
   dengan bintang.
 - **Teks:** tanggal memakai nama bulan lengkap ("Rabu, 21 Oktober 2026").
 
+## Memilih tema tampilan
+
+Tema dipilih **per perangkat** di pengaturan layar (tahan judul 3 detik, lalu
+"Tema tampilan"); pilihannya tersimpan di perangkat itu saja dan berlaku
+seketika. Judul, jam, banner, polling, suara, dan pembaruan sama di semua tema.
+
+| Tema | Susunan |
+|---|---|
+| **Bening** (bawaan) | Strip loket, 3 nomor "AKAN DIPANGGIL", daftar "MENUNGGU" (lihat di atas). |
+| **Dinding** | Baris kotak loket (nama, nomor, status; MEMANGGIL saat memanggil), blok "SEDANG DIPANGGIL" satu baris per nomor, lalu dinding nomor menunggu (maksimal 15 baris, kartu dibalik tiap 30 detik, nomor yang baru dilayani memudar 20 detik, prioritas ungu). |
+
+Tema lain (Panggung, Papan, Lajur) pernah dibuat lalu dihapus; perangkat yang
+menyimpan pilihan itu kembali ke Bening.
+
+Tema berada di `MainActivity.java` modul `layar` sebagai kelas dalam
+(`TemaLayar` dan turunannya); menambah tema berarti satu kelas baru, satu
+baris di `buatTema`, dan satu baris di `TEMA_DAFTAR`.
+
 ## Yang ditampilkan
 
 - Satu kartu per loket: nomor yang sedang dipanggil/dilayani, atau

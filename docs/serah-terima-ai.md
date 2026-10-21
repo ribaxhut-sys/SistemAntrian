@@ -41,6 +41,24 @@ dilihat di BlueStacks (ADB `error: closed`; seret manual) dan versi layar tidak
 dinaikkan, jadi rilis ke `apk\` menunggu keputusan pemilik. Server kerja sudah
 dimulai ulang agar batas baru berlaku.
 
+**Tema layar dapat dipilih per perangkat (21 Oktober 2026, Claude):**
+`MainActivity` layar kini punya pilihan "Tema tampilan" di pengaturan
+(tinggal Bening dan Dinding; tema lain dihapus), disimpan lokal di perangkat. Isi
+layar digambar kelas `TemaLayar`; polling, suara, dan pembaruan tidak berubah.
+Daftar menunggu Bening dikecilkan (NEXT_SP 30). Sudah di-commit tetapi **belum
+dilihat di BlueStacks**; APK debug `android-kiosk/layar/build/outputs/apk/debug/layar-debug.apk`
+(versi tidak dinaikkan). Detail di [layar-antrian.md](layar-antrian.md).
+
+**Cabut prioritas + cetak ulang tiket + ikon layar (21 Oktober 2026, Claude):**
+`QueueService.cabut_prioritas(..., kembalikan=, alasan=)` mengembalikan nomor yang
+baru DIPANGGIL ke daftar Menunggu (loket bebas, audit `CLEAR_PRIORITY` memuat
+`alasan_cabut` dan `dikembalikan`); dialog `DialogCabutPrioritas` dan tombol
+**Cetak ulang tiket** ada di layar Pelayanan. Tes terarah lolos di PostgreSQL uji
+(prioritas, queue_service, report_service, test_ui bagian cabut/cetak ulang);
+suite penuh belum dijalankan. Hati-hati: proses `pytest` yang kena batas waktu
+bisa tertinggal dan membuat tes berikutnya bentrok di `antrian_uji`. Ikon
+layar Android baru (papan "A-12", teal) belum dilihat di launcher.
+
 **Audit ulang 21 Oktober 2026 (Codex):** `ruff check app tests alembic alat`
 tetap bersih. Tes terarah identitas, migrasi, pembaruan Windows, API
 anjungan, dan layar: **242 lulus, 0 gagal** (database `antrian_uji` kembali

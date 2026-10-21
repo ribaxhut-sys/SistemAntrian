@@ -423,6 +423,8 @@ def test_layar_boleh_meminta_banyak_nomor_dan_menerima_nama_layanan(
     assert banyak["total_waiting"] == 15
     # Peta prefiks -> nama layanan untuk judul kelompok di layar.
     assert "A" in banyak["service_labels"]
+    # Riwayat nomor yang sudah dipanggil hari ini (belum ada yang dipanggil di sini).
+    assert banyak["called"] == []
 
 
 # ---------------------------------------------------------------------

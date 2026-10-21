@@ -628,7 +628,7 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         if next is not None:
             jumlah = max(jumlah, min(int(next), 300))
         state = services.queue.display_state(
-            jumlah_berikutnya=jumlah, jumlah_per_layanan=1
+            jumlah_berikutnya=jumlah, jumlah_per_layanan=1, riwayat_dipanggil=300
         )
         apk = info_apk(folder_apk(base_dir()), "layar")
         paket = info_paket(folder_paket(base_dir()))
@@ -642,6 +642,9 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 q.queue_number for q in state.berikutnya if q.prioritas
             ],
             "total_waiting": state.total_menunggu,
+            # Semua nomor yang sudah dipanggil hari ini (terbaru dulu): hanya nomor
+            # dan label status, untuk dinding nomor.
+            "called": [{"n": n, "s": st} for n, st in state.dipanggil],
             # Prefiks nomor -> nama layanan, untuk judul kelompok di layar.
             "service_labels": {
                 k.category_prefix: k.category_name for k in state.layanan

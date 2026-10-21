@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Ikon layar antrian: papan putih bernomor "A-12" dengan dua garis daftar
+    menunggu di bawahnya. Nomor digambar dengan garis supaya tidak bergantung
+    pada font. Seluruh isi berada di zona aman ikon adaptif (lingkaran 66 dp).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#0F766E"
+        android:strokeWidth="3"
+        android:pathData="M38,32 H70 A8,8 0 0 1 78,40 V56 A8,8 0 0 1 70,64 H38 A8,8 0 0 1 30,56 V40 A8,8 0 0 1 38,32 Z" />
+    <group android:translateX="-3">
+        <path
+            android:strokeColor="#0F766E"
+            android:strokeWidth="3.4"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M37,56 L42,40 L47,56 M38.8,51.5 H45.2 M50,50 H54 M58,44 L62,40 V56 M66,44 C66,41 68.5,40 71,40 C74,40 76,42 76,44.5 C76,48 70,51 66,56 H77" />
+    </group>
+    <path
+        android:strokeColor="#0F766E"
+        android:strokeAlpha="0.55"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:pathData="M40,74 H68" />
+    <path
+        android:strokeColor="#0F766E"
+        android:strokeAlpha="0.3"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:pathData="M46,83 H62" />
+</vector>
