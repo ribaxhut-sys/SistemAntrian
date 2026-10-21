@@ -491,6 +491,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         }
 
         private void terapkan(int baru, boolean tandaiPrioritas) {
+            // Prioritas satu warna di semua tema dan di anjungan: ungu lembut.
+            if (baru == 2) baru = 13;
             prioritas = tandaiPrioritas;
             if (baru == gaya) return;
             gaya = baru;

@@ -14,7 +14,7 @@ final class NomorBerbintang extends TextView {
 
     NomorBerbintang(Context context) {
         super(context);
-        bintang.setColor(Color.rgb(217, 119, 6));
+        bintang.setColor(Color.rgb(126, 34, 206));
     }
 
     @Override

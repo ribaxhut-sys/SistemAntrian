@@ -59,6 +59,18 @@ suite penuh belum dijalankan. Hati-hati: proses `pytest` yang kena batas waktu
 bisa tertinggal dan membuat tes berikutnya bentrok di `antrian_uji`. Ikon
 layar Android baru (papan "A-12", teal) belum dilihat di launcher.
 
+**Versi naik, ikon baru, warna prioritas seragam (21 Oktober 2026, Claude):** atas
+permintaan pemilik semua aplikasi naik: **Windows 1.3** (`app/__init__.py`,
+`installer.iss`, `build-installer.ps1`), **anjungan 2.5.4 (kode 58)**, **layar 1.8
+(kode 9)**. Ikon baru: layar (papan "A-12", teal) dan anjungan (mesin tiket, teal);
+ikon Windows (tiket "01", indigo) sengaja tidak diubah, tiap aplikasi berbeda.
+Prioritas kini **ungu lembut** di layar antrian (Bening dan Dinding) dan anjungan.
+Pillow naik 12.3.0 -> 13.0.0 karena `pip-audit` CI (8 GHSA). `apk\` diisi ulang
+(cadangan lama di `backup\apk-sebelum-2.5.4`); `dist\AntrianCRO-Setup-1.3.exe`
+dibangun dengan `-SkipTests` (suite penuh lulus hari itu: 2067 lulus, 8 dilewati)
+dan **belum ditandatangani** (67.579.227 byte, sha256 D2DB65E43F19475D260340F04DB6F0AFF3D85D8EDE80385198AE9525B2243BAE, selesai 11:45). Tablet yang sudah menerima 2.5.4/1.8 sebelum ikon dan
+warna ini tidak memperbarui diri karena kode versi tetap; naikkan kode bila perlu.
+
 **Audit ulang 21 Oktober 2026 (Codex):** `ruff check app tests alembic alat`
 tetap bersih. Tes terarah identitas, migrasi, pembaruan Windows, API
 anjungan, dan layar: **242 lulus, 0 gagal** (database `antrian_uji` kembali

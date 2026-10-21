@@ -3156,7 +3156,7 @@ public final class MainActivity extends Activity {
             // seluruh ubin.
             nomor.setPadding(dp(4), dp(4), dp(4), dp(4) + dp(1));
             nomor.setBackground(ubinTimbul(milikSaya ? UTAMA
-                    : prioritasIni ? Color.rgb(254, 243, 199) : LEMBUT, dp(16)));
+                    : prioritasIni ? Color.rgb(243, 232, 255) : LEMBUT, dp(16)));
             nomor.setCameraDistance(kamera);
             pasangSatuBaris(nomor, 10, 20);
             baris.addView(nomor, selNomorMenunggu());
@@ -3557,10 +3557,11 @@ public final class MainActivity extends Activity {
         // Penanda saja: kotaknya dicentang di menu awal.
         if (prioritasAktifServer && prioritasDipilih) {
             TextView tandaPrioritas = text(
-                    "★ Prioritas: lansia / disabilitas / ibu hamil", 14, TEKS_TOMBOL, true);
+                    "★ Prioritas: lansia / disabilitas / ibu hamil", 14, Color.rgb(120, 60, 170), true);
             tandaPrioritas.setGravity(Gravity.CENTER);
             tandaPrioritas.setPadding(dp(14), dp(8), dp(14), dp(8));
-            tandaPrioritas.setBackground(rounded(UTAMA, dp(18)));
+            tandaPrioritas.setBackground(roundedOutline(
+                    Color.rgb(243, 232, 255), Color.rgb(216, 180, 254), dp(18), dp(1)));
             LinearLayout.LayoutParams tandaParams = new LinearLayout.LayoutParams(-1, -2);
             tandaParams.topMargin = dp(10);
             page.addView(tandaPrioritas, tandaParams);
@@ -3734,9 +3735,10 @@ public final class MainActivity extends Activity {
         Runnable gambar = () -> {
             prioritas.setText((prioritasDipilih ? "☑  " : "☐  ")
                     + "Saya lansia / disabilitas / ibu hamil");
-            prioritas.setTextColor(prioritasDipilih ? TEKS_TOMBOL : INK);
+            // Prioritas satu warna di semua layar: ungu lembut saat dicentang.
+            prioritas.setTextColor(prioritasDipilih ? Color.rgb(120, 60, 170) : INK);
             prioritas.setBackground(prioritasDipilih
-                    ? rounded(UTAMA, dp(18))
+                    ? roundedOutline(Color.rgb(243, 232, 255), Color.rgb(216, 180, 254), dp(18), dp(2))
                     : roundedOutline(KARTU, GARIS, dp(18), dp(2)));
         };
         gambar.run();

@@ -76,6 +76,7 @@ pratinjau di layar petugas:
 - Pita **★ PRIORITAS** pada kartu nomor aktif; untuk pilihan anjungan memuat
   "dipilih pengunjung, mohon periksa".
 - Tiket mencetak "· Prioritas" pada baris jenis layanan.
+- Di layar antrian dan anjungan Android, prioritas selalu **ungu lembut** (latar `#F3E8FF`, garis `#D8B4FE`, teks `#783CAA`, bintang `#7E22CE`), satu warna dengan satu makna. Amber dipakai status "Dipanggil", jadi tidak dipakai lagi untuk prioritas.
 
 ## Batasan
 
