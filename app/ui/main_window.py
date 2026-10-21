@@ -25,7 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import APP_NAME, get_config, teks_status_database
+from app.core.config import get_config, teks_status_database
+from app.core.identitas import JUDUL_TIKET, NAMA_TAMPIL
 from app.core.errors import AppError
 from app.core.logger import get_logger
 from app.models.enums import UserRole
@@ -46,12 +47,14 @@ from app.services.survey_service import SurveyService
 from app.services.ticket_service import TicketService, buat_printer, mode_pencetak
 from app.services.user_service import UserService
 from app.ui.common import (
+    PekerjaLatar,
     judul,
     keterangan,
     konfirmasi,
     tampilkan_error,
     tampilkan_peringatan,
     tombol,
+    lepaskan_pekerja,
 )
 from app.ui.dashboard.dashboard_page import DashboardPage
 from app.ui.dashboard.petugas_page import (
@@ -116,6 +119,10 @@ TUNDA_PERIKSA_ANJUNGAN_AWAL_MS = 1_500
 # Pembaruan bukan keadaan darurat. Sekali saat aplikasi mulai dan dua kali
 # per jam cukup untuk memberi tahu petugas tanpa membebani API server.
 TUNDA_PERIKSA_PEMBARUAN_AWAL_MS = 3_000
+
+# Laporan mingguan dibuat sesudah layar kerja tenang, bukan bersaing dengan
+# pemuatan pertama dasbor.
+TUNDA_LAPORAN_MINGGUAN_MS = 20_000
 SELANG_PERIKSA_PEMBARUAN_MS = 30 * 60 * 1_000
 
 #: Judul menu halaman Layanan Anjungan; juga dipakai pita peringatan untuk
@@ -507,9 +514,9 @@ class MainWindow(QMainWindow):
             # Nama petugas tidak ikut ditampilkan. Judul jendela terbaca
             # pada bilah tugas dan pengalih jendela, yang keduanya berada di
             # depan mata pengunjung.
-            self.setWindowTitle(APP_NAME)
+            self.setWindowTitle(NAMA_TAMPIL)
         else:
-            self.setWindowTitle(f"{APP_NAME} — {sesi.full_name}")
+            self.setWindowTitle(f"{NAMA_TAMPIL} — {sesi.full_name}")
         # Ukuran awal mengikuti area kerja dalam piksel logis Qt, sehingga
         # skala Windows 125%/150% ikut diperhitungkan. Batas preferensi
         # mencegah jendela terlalu melebar pada monitor 2K/4K.
@@ -595,6 +602,35 @@ class MainWindow(QMainWindow):
         if not self.mode_kios:
             self._pasang_bilah_database()
             self._pasang_pemeriksa_pembaruan()
+            self._pasang_laporan_mingguan()
+
+    def _pasang_laporan_mingguan(self) -> None:
+        """Jadwalkan pembuatan laporan minggu lalu bagi pemegang REPORT_VIEW."""
+        self._pekerja_laporan: PekerjaLatar | None = None
+        self._pewaktu_laporan_awal = QTimer(self)
+        self._pewaktu_laporan_awal.setSingleShot(True)
+        self._pewaktu_laporan_awal.setInterval(TUNDA_LAPORAN_MINGGUAN_MS)
+        self._pewaktu_laporan_awal.timeout.connect(self._buat_laporan_mingguan)
+        if self.auth.has_permission(Permission.REPORT_VIEW):
+            self._pewaktu_laporan_awal.start()
+
+    def _buat_laporan_mingguan(self) -> None:
+        from app.services.laporan_terjadwal import buat_laporan_mingguan_bila_perlu
+
+        if self._ditutup or self._pekerja_laporan is not None:
+            return
+        pekerja = PekerjaLatar(
+            lambda: buat_laporan_mingguan_bila_perlu(self.auth), self
+        )
+        pekerja.finished.connect(self._laporan_mingguan_selesai)
+        self._pekerja_laporan = pekerja
+        pekerja.start()
+
+    def _laporan_mingguan_selesai(self) -> None:
+        pekerja = self._pekerja_laporan
+        self._pekerja_laporan = None
+        if pekerja is not None:
+            pekerja.deleteLater()
 
     def _bangun_kepala(self) -> QWidget:
         kepala = QFrame()
@@ -621,7 +657,7 @@ class MainWindow(QMainWindow):
         tanda.setFixedSize(32, 32)
         susunan_merek.addWidget(tanda)
 
-        nama = QLabel(APP_NAME)
+        nama = QLabel(NAMA_TAMPIL)
         nama.setObjectName("judulMerek")
         susunan_merek.addWidget(nama)
         baris_atas.addWidget(merek)
@@ -686,6 +722,7 @@ class MainWindow(QMainWindow):
                     self.settings_service,
                     self.auth,
                     note=self.note_service,
+                    ticket=self.ticket_service,
                 ),
             ),
             # Keadaan meja sendiri: nomor, antrean, dan riwayat hari ini.
@@ -797,7 +834,7 @@ class MainWindow(QMainWindow):
                 Permission.QUEUE_CALL,
                 lambda: LaporanPage(
                     ReportService(self.auth),
-                    self.settings_service.get("ticket.header", ""),
+                    JUDUL_TIKET,
                     pribadi=True,
                 ),
             ),
@@ -808,7 +845,7 @@ class MainWindow(QMainWindow):
                 Permission.REPORT_VIEW,
                 lambda: LaporanPage(
                     ReportService(self.auth),
-                    self.settings_service.get("ticket.header", ""),
+                    JUDUL_TIKET,
                 ),
             ),
             # Terpisah dari ringkasan harian karena isinya berbeda jenis:
@@ -1609,6 +1646,7 @@ class MainWindow(QMainWindow):
             "_pewaktu_api",
             "_pewaktu_pembaruan_awal",
             "_pewaktu_pembaruan",
+            "_pewaktu_laporan_awal",
         ):
             pewaktu_api = getattr(self, nama, None)
             if pewaktu_api is not None:
@@ -1617,6 +1655,10 @@ class MainWindow(QMainWindow):
         if pewaktu is not None:
             pewaktu.stop()
         self._hentikan_tanda_hadir()
+        pekerja_laporan = getattr(self, "_pekerja_laporan", None)
+        if pekerja_laporan is not None:
+            lepaskan_pekerja(pekerja_laporan)
+            self._pekerja_laporan = None
         for nama, batas_ms in (
             ("_pemeriksa_db", 400),
             ("_pemeriksa_anjungan", 3000),

@@ -104,6 +104,14 @@ def transisi_sah(dari: QueueStatus, ke: QueueStatus) -> bool:
     return ke in TRANSISI_SAH.get(dari, frozenset())
 
 
+#: Alasan petugas mencabut prioritas, dicatat di audit.
+ALASAN_CABUT_PRIORITAS: dict[str, str] = {
+    "TIDAK_MEMENUHI_SYARAT": "Tidak memenuhi syarat",
+    "SALAH_PILIH": "Salah pilih di anjungan",
+    "LAINNYA": "Lainnya",
+}
+
+
 @dataclass(frozen=True)
 class QueueInfo:
     """Data antrian yang aman dibawa ke UI, lepas dari session database."""
@@ -404,6 +412,9 @@ class DisplayState:
     #: tidak mengulang query antrian yang sama dua kali pada setiap polling.
     nomor_menunggu: list[str] = field(default_factory=list)
     nomor_prioritas: list[str] = field(default_factory=list)
+    #: Nomor yang sudah dipanggil hari ini (yang terbaru lebih dulu) beserta
+    #: label statusnya. Hanya nomor dan status; kosong bila layar tidak memintanya.
+    dipanggil: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -974,6 +985,7 @@ class QueueService:
         rasio_prioritas: int | None = None,
         loket_tampil: str | None = None,
         sertakan_terkini: bool = True,
+        riwayat_dipanggil: int = 0,
     ) -> DisplayState:
         """
         Keadaan layar antrian untuk pengunjung.
@@ -1026,6 +1038,17 @@ class QueueService:
                 if antrian.counter_id is not None and antrian.counter_id not in per_loket:
                     per_loket[antrian.counter_id] = antrian
 
+            dipanggil = (
+                [
+                    (q.queue_number, LABEL_STATUS.get(q.status, q.status.value))
+                    for q in repo.terakhir_dipanggil(
+                        sesi.branch_id, hari, batas=riwayat_dipanggil
+                    )
+                ]
+                if riwayat_dipanggil > 0
+                else []
+            )
+
             nilai_loket = loket_tampil
             if nilai_loket is None:
                 nilai_loket = self.settings.get(
@@ -1070,6 +1093,7 @@ class QueueService:
             layanan=layanan,
             nomor_menunggu=[q.queue_number for q in menunggu],
             nomor_prioritas=[q.queue_number for q in menunggu if q.prioritas],
+            dipanggil=dipanggil,
         )
 
     def panggilan_sejak(self, setelah_id: int | None, batas: int = 20) -> tuple[int, list[Panggilan]]:
@@ -1367,7 +1391,13 @@ class QueueService:
                 antrian, repo.jumlah_pemanggilan(antrian.id), self.batas_panggilan()
             )
 
-    def cabut_prioritas(self, queue_id: int) -> QueueInfo:
+    def cabut_prioritas(
+        self,
+        queue_id: int,
+        *,
+        kembalikan: bool = False,
+        alasan: str | None = None,
+    ) -> QueueInfo:
         """
         Cabut prioritas dari nomor yang belum selesai.
 
@@ -1375,8 +1405,18 @@ class QueueService:
         petugas pendaftaran menerbitkan nomor. Petugas pelayanan hanya boleh
         MENCABUT: pengunjung yang mencentang tetapi ternyata tidak berhak
         kembali ke antrian biasa, dengan urutan datangnya tetap.
+
+        `kembalikan`: nomor yang baru DIPANGGIL (belum mulai dilayani) ikut
+        dikembalikan ke daftar menunggu dengan urutan datang semula, dan
+        loketnya bebas memanggil nomor berikutnya. Pengunjungnya duduk
+        kembali dan dipanggil pada gilirannya. Nomor yang sudah dilayani
+        tidak dapat dikembalikan; hanya prioritasnya yang dicabut.
+
+        `alasan` (kunci ALASAN_CABUT_PRIORITAS) dicatat di audit.
         """
         sesi = self.auth.require_permission(Permission.QUEUE_CALL)
+        if alasan is not None and alasan not in ALASAN_CABUT_PRIORITAS:
+            raise ValidationError("Alasan pencabutan prioritas tidak dikenal.")
 
         with session_scope() as session:
             repo = QueueRepository(session)
@@ -1390,10 +1430,27 @@ class QueueService:
                 )
             if antrian.prioritas is None:
                 return _as_info(antrian, repo.jumlah_pemanggilan(antrian.id))
+            if kembalikan:
+                self._pastikan_penanggung_jawab(antrian, sesi.user_id)
+                if antrian.status is not QueueStatus.CALLED:
+                    raise BusinessRuleError(
+                        f"{antrian.queue_number} berstatus "
+                        f"{LABEL_STATUS[antrian.status]}. Hanya nomor yang baru "
+                        "dipanggil dan belum dilayani yang dapat dikembalikan "
+                        "ke antrian."
+                    )
             lama = antrian.prioritas
             asal = antrian.prioritas_asal
             antrian.prioritas = None
             antrian.prioritas_asal = None
+            if kembalikan:
+                # Bukan perpindahan status biasa (tidak ada di TRANSISI_SAH):
+                # nomor kembali ke daftar menunggu seperti belum pernah dipanggil
+                # oleh loket ini. Riwayat pemanggilannya (queue_call) tetap.
+                antrian.status = QueueStatus.WAITING
+                antrian.counter_id = None
+                antrian.served_by_user_id = None
+                antrian.called_at = None
             audit_service.record(
                 session,
                 AuditAction.CLEAR_PRIORITY,
@@ -1403,8 +1460,15 @@ class QueueService:
                 nomor=antrian.queue_number,
                 alasan=lama,
                 asal=asal,
+                alasan_cabut=alasan,
+                dikembalikan=kembalikan,
             )
-            logger.info("Prioritas %s dicabut (%s)", antrian.queue_number, lama)
+            logger.info(
+                "Prioritas %s dicabut (%s)%s",
+                antrian.queue_number,
+                lama,
+                ", dikembalikan ke antrian" if kembalikan else "",
+            )
             return _as_info(antrian, repo.jumlah_pemanggilan(antrian.id))
 
     def recall(self, queue_id: int) -> QueueInfo:

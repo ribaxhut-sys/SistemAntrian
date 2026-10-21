@@ -1,5 +1,20 @@
 package id.sistemantrian.kiosk;
 
+import static id.sistemantrian.kiosk.BantuGambar.huruf;
+import static id.sistemantrian.kiosk.BantuGambar.rounded;
+import static id.sistemantrian.kiosk.BantuGambar.roundedGradient;
+import static id.sistemantrian.kiosk.BantuGambar.roundedOutline;
+import static id.sistemantrian.kiosk.BantuGambar.stateBackground;
+import static id.sistemantrian.kiosk.BantuTeks.awalanLayanan;
+import static id.sistemantrian.kiosk.BantuTeks.heks;
+import static id.sistemantrian.kiosk.BantuTeks.isMediaKind;
+import static id.sistemantrian.kiosk.BantuTeks.labelTempatLokal;
+import static id.sistemantrian.kiosk.BantuTeks.tempatBerikutnya;
+import static id.sistemantrian.kiosk.BantuTeks.zoneLabel;
+import static id.sistemantrian.kiosk.BantuWarna.campur;
+import static id.sistemantrian.kiosk.BantuWarna.darker;
+import static id.sistemantrian.kiosk.BantuWarna.luminansWarna;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.PendingIntent;
@@ -197,11 +212,14 @@ public final class MainActivity extends Activity {
         WARNA_LAYANAN = t.chip;
     }
 
-    /** Judul tablet ini bila diisi, lalu judul server, lalu bawaan. */
+    /**
+     * Identitas tetap aplikasi. Tidak dapat diubah dari server maupun dari
+     * pengaturan tablet; ubah hanya di sini (dan di app/core/identitas.py).
+     */
+    static final String NAMA_TAMPIL = "Bapenda DKI Jakarta";
+
     private String judulBerlaku() {
-        String tablet = preferences == null ? "" : preferences.getString(JUDUL_TABLET, "").trim();
-        if (!tablet.isEmpty()) return tablet;
-        return judulServer.isEmpty() ? "ANTRIAN PELAYANAN CRO" : judulServer;
+        return NAMA_TAMPIL;
     }
 
     private void perbaruiJudul() {
@@ -567,6 +585,9 @@ public final class MainActivity extends Activity {
     private static final String MEDIA_SEGARKAN_DITANGANI = "media_segarkan_ditangani";
     /** Status salinan media terakhir yang dilaporkan: {total, tersalin}. */
     private int[] statusMediaTerakhir;
+    private int bateraiTerakhirPersen = -1;
+    private boolean bateraiTerakhirMengisi;
+    private long bateraiTerakhirWaktu;
     private long statusMediaWaktu;
     /** Video yang sedang diputar langsung dari server, belum dari salinan. */
     private String videoLewatJaringan;
@@ -677,45 +698,6 @@ public final class MainActivity extends Activity {
     private final Map<String, Boolean> terakhirGagal = new HashMap<>();
     private boolean laporanTayangTerkirim;
 
-    private static final class Loket {
-        final String nama;
-        final String nomor;
-        final String layanan;
-        final String status;
-        /** Bertambah tiap panggilan dan panggilan ulang. */
-        final int panggilan;
-
-        Loket(JSONObject json) {
-            nama = json.optString("name", "");
-            nomor = json.isNull("queue_number") ? "" : json.optString("queue_number", "");
-            layanan = json.isNull("category") ? "" : json.optString("category", "");
-            status = json.optString("status", "KOSONG");
-            panggilan = json.optInt("call_count", 0);
-        }
-
-        String tanda() {
-            return nama + "=" + nomor + "/" + layanan + "/" + status;
-        }
-    }
-
-    private static final class Category {
-        final int id;
-        final String name;
-        final String prefix;
-        final String info;
-        final Integer parentId;
-        final boolean group;
-
-        Category(JSONObject json) {
-            id = json.optInt("id");
-            name = json.optString("name");
-            prefix = json.optString("prefix");
-            info = json.optString("info");
-            parentId = json.isNull("parent_id") ? null : json.optInt("parent_id");
-            group = json.optBoolean("is_group");
-        }
-    }
-
     private interface Success {
         void accept(JSONObject json) throws Exception;
     }
@@ -775,12 +757,6 @@ public final class MainActivity extends Activity {
         }
     };
     private long serverOffsetMillis = 0L;
-
-    private static String zoneLabel(String zone) {
-        if ("Asia/Makassar".equals(zone)) return "WITA";
-        if ("Asia/Jayapura".equals(zone)) return "WIT";
-        return "WIB";
-    }
 
     private final Runnable clock = new Runnable() {
         @Override
@@ -1214,6 +1190,7 @@ public final class MainActivity extends Activity {
                 unduhGagalPada.clear();
                 statusMediaTerakhir = null;
             }
+            laporkanBaterai();
             if (!sumberTablet()) {
                 sinkronkanSalinan();
                 laporkanStatusMedia();
@@ -1423,10 +1400,6 @@ public final class MainActivity extends Activity {
         findParams.topMargin = dp(8);
         placeholder.addView(findServer, findParams);
         contentSlot.addView(placeholder);
-    }
-
-    private static boolean isMediaKind(String kind) {
-        return "media".equals(kind) || "gambar".equals(kind) || "video".equals(kind);
     }
 
     private void applyWelcomeText(String value) {
@@ -1887,16 +1860,6 @@ public final class MainActivity extends Activity {
             ajakanIklanPenuh.setScaleY(1f + 0.04f * f);
         });
         animatorDenyutAjakan.start();
-    }
-
-    /** Luminans relatif WCAG 0..1 (sama dengan app/services/warna_iklan.py). */
-    private static double luminansWarna(int warna) {
-        double[] c = {Color.red(warna) / 255.0, Color.green(warna) / 255.0,
-                Color.blue(warna) / 255.0};
-        for (int i = 0; i < 3; i++) {
-            c[i] = c[i] <= 0.03928 ? c[i] / 12.92 : Math.pow((c[i] + 0.055) / 1.055, 2.4);
-        }
-        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
     }
 
     /** `#RRGGBB` yang sah dan tidak terlalu terang, atau null. */
@@ -2557,6 +2520,42 @@ public final class MainActivity extends Activity {
     }
 
     /**
+     * Lapor tingkat baterai ke server untuk Kesehatan Sistem. Hanya bila
+     * berubah 5 poin atau lebih, status pengisian berganti, atau sudah lima
+     * menit; baterai tablet anjungan yang habis di tengah jam layanan adalah
+     * gangguan yang paling mudah dicegah bila terlihat lebih dulu.
+     */
+    private void laporkanBaterai() {
+        if (!hasServerConfig()) return;
+        Intent baterai = registerReceiver(null,
+                new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (baterai == null) return;
+        int level = baterai.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
+        int skala = baterai.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1);
+        if (level < 0 || skala <= 0) return;
+        int persen = Math.round(level * 100f / skala);
+        int status = baterai.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1);
+        boolean mengisi = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING
+                || status == android.os.BatteryManager.BATTERY_STATUS_FULL;
+        long sekarang = System.currentTimeMillis();
+        if (bateraiTerakhirPersen >= 0
+                && Math.abs(persen - bateraiTerakhirPersen) < 5
+                && mengisi == bateraiTerakhirMengisi
+                && sekarang - bateraiTerakhirWaktu < 300_000L) {
+            return;
+        }
+        bateraiTerakhirPersen = persen;
+        bateraiTerakhirMengisi = mengisi;
+        bateraiTerakhirWaktu = sekarang;
+        request("POST", "/v1/kiosk/baterai",
+                new JSONObjectBuilder()
+                        .put("percent", persen)
+                        .put("charging", mengisi)
+                        .build(),
+                json -> { }, error -> { });
+    }
+
+    /**
      * Lapor ke server berapa berkas daftar putar yang sudah tersalin utuh.
      * Hanya bila angkanya berubah atau sudah lima menit, supaya tidak
      * membebani jaringan; server menampilkannya di kartu perangkat.
@@ -3157,7 +3156,7 @@ public final class MainActivity extends Activity {
             // seluruh ubin.
             nomor.setPadding(dp(4), dp(4), dp(4), dp(4) + dp(1));
             nomor.setBackground(ubinTimbul(milikSaya ? UTAMA
-                    : prioritasIni ? Color.rgb(254, 243, 199) : LEMBUT, dp(16)));
+                    : prioritasIni ? Color.rgb(243, 232, 255) : LEMBUT, dp(16)));
             nomor.setCameraDistance(kamera);
             pasangSatuBaris(nomor, 10, 20);
             baris.addView(nomor, selNomorMenunggu());
@@ -3338,11 +3337,6 @@ public final class MainActivity extends Activity {
         return WARNA_LAYANAN[Math.floorMod(indeks, WARNA_LAYANAN.length)];
     }
 
-    private static String awalanLayanan(Category item) {
-        if (!item.prefix.isEmpty()) return item.prefix;
-        return item.name.isEmpty() ? "•" : item.name.substring(0, 1).toUpperCase(Locale.ROOT);
-    }
-
     private View buatKartuLayanan(Category item, int tinggiKartu) {
         return buatKartu(item.group ? "›" : awalanLayanan(item), item.name,
                 item.group ? "Lihat pilihan layanan" : null,
@@ -3477,14 +3471,6 @@ public final class MainActivity extends Activity {
         return card;
     }
 
-    /** Campuran dua warna; `porsi` 0 = warna pertama, 1 = warna kedua. */
-    private static int campur(int satu, int dua, float porsi) {
-        return Color.rgb(
-                Math.round(Color.red(satu) + (Color.red(dua) - Color.red(satu)) * porsi),
-                Math.round(Color.green(satu) + (Color.green(dua) - Color.green(satu)) * porsi),
-                Math.round(Color.blue(satu) + (Color.blue(dua) - Color.blue(satu)) * porsi));
-    }
-
     private StateListDrawable latarKartu(int latar) {
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[]{android.R.attr.state_pressed},
@@ -3571,10 +3557,11 @@ public final class MainActivity extends Activity {
         // Penanda saja: kotaknya dicentang di menu awal.
         if (prioritasAktifServer && prioritasDipilih) {
             TextView tandaPrioritas = text(
-                    "★ Prioritas: lansia / disabilitas / ibu hamil", 14, TEKS_TOMBOL, true);
+                    "★ Prioritas: lansia / disabilitas / ibu hamil", 14, Color.rgb(120, 60, 170), true);
             tandaPrioritas.setGravity(Gravity.CENTER);
             tandaPrioritas.setPadding(dp(14), dp(8), dp(14), dp(8));
-            tandaPrioritas.setBackground(rounded(UTAMA, dp(18)));
+            tandaPrioritas.setBackground(roundedOutline(
+                    Color.rgb(243, 232, 255), Color.rgb(216, 180, 254), dp(18), dp(1)));
             LinearLayout.LayoutParams tandaParams = new LinearLayout.LayoutParams(-1, -2);
             tandaParams.topMargin = dp(10);
             page.addView(tandaPrioritas, tandaParams);
@@ -3748,9 +3735,10 @@ public final class MainActivity extends Activity {
         Runnable gambar = () -> {
             prioritas.setText((prioritasDipilih ? "☑  " : "☐  ")
                     + "Saya lansia / disabilitas / ibu hamil");
-            prioritas.setTextColor(prioritasDipilih ? TEKS_TOMBOL : INK);
+            // Prioritas satu warna di semua layar: ungu lembut saat dicentang.
+            prioritas.setTextColor(prioritasDipilih ? Color.rgb(120, 60, 170) : INK);
             prioritas.setBackground(prioritasDipilih
-                    ? rounded(UTAMA, dp(18))
+                    ? roundedOutline(Color.rgb(243, 232, 255), Color.rgb(216, 180, 254), dp(18), dp(2))
                     : roundedOutline(KARTU, GARIS, dp(18), dp(2)));
         };
         gambar.run();
@@ -4813,14 +4801,6 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private static byte[] heks(String teks) {
-        byte[] hasil = new byte[teks.length() / 2];
-        for (int i = 0; i < hasil.length; i++) {
-            hasil[i] = (byte) Integer.parseInt(teks.substring(2 * i, 2 * i + 2), 16);
-        }
-        return hasil;
-    }
-
     /**
      * Seluruh dialog pengaturan berbagi SATU timer diam: sentuhan di dialog
      * mana pun menyetelnya ulang, sepuluh detik terakhir diberi peringatan, dan
@@ -5081,16 +5061,6 @@ public final class MainActivity extends Activity {
         return penuh ? "penuh".equals(tempat) : "panel".equals(tempat);
     }
 
-    private static String tempatBerikutnya(String sekarang) {
-        if ("keduanya".equals(sekarang)) return "panel";
-        return "panel".equals(sekarang) ? "penuh" : "keduanya";
-    }
-
-    private static String labelTempatLokal(String tempat) {
-        if ("panel".equals(tempat)) return "Panel atas";
-        return "penuh".equals(tempat) ? "Layar penuh" : "Keduanya";
-    }
-
     private void showSettings() {
         LinearLayout fields = new LinearLayout(this);
         fields.setPadding(dp(16), 0, dp(16), dp(8));
@@ -5152,24 +5122,6 @@ public final class MainActivity extends Activity {
 
         LinearLayout tampilan = bagianPengaturan(fields, "Tampilan anjungan",
                 "Berlaku seketika untuk tablet ini, tanpa tombol Simpan.");
-        EditText judulTablet = isianPengaturan(tampilan, "Judul tablet ini",
-                "Kosongkan untuk mengikuti judul dari server");
-        judulTablet.setText(preferences.getString(JUDUL_TABLET, ""));
-        judulTablet.addTextChangedListener(new android.text.TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence teks, int awal, int jumlah, int sesudah) {
-            }
-
-            @Override
-            public void onTextChanged(CharSequence teks, int awal, int sebelum, int jumlah) {
-            }
-
-            @Override
-            public void afterTextChanged(android.text.Editable teks) {
-                preferences.edit().putString(JUDUL_TABLET, teks.toString().trim()).apply();
-                perbaruiJudul();
-            }
-        });
         tampilan.addView(labelPengaturan("Sumber media sambutan"));
         RadioGroup sumber = new RadioGroup(this);
         RadioButton dariServer = radioPengaturan("Daftar putar server (disalin ke tablet)");
@@ -6494,17 +6446,6 @@ public final class MainActivity extends Activity {
         return view;
     }
 
-    /**
-     * Satu-satunya tempat memilih huruf. Bila huruf merek (mis. Plus Jakarta
-     * Sans) dibundel di assets, cukup ganti isi fungsi ini.
-     */
-    private static Typeface huruf(int tebal) {
-        if (tebal >= 800) return Typeface.create("sans-serif-black", Typeface.NORMAL);
-        if (tebal >= 700) return Typeface.create("sans-serif", Typeface.BOLD);
-        if (tebal >= 500) return Typeface.create("sans-serif-medium", Typeface.NORMAL);
-        return Typeface.create("sans-serif", Typeface.NORMAL);
-    }
-
     private int dp(int value) {
         return Math.round(value * uiScale * getResources().getDisplayMetrics().density);
     }
@@ -6528,51 +6469,12 @@ public final class MainActivity extends Activity {
         return lapis;
     }
 
-    private static GradientDrawable rounded(int color, int radius) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setColor(color);
-        shape.setCornerRadius(radius);
-        return shape;
-    }
-
-    private static GradientDrawable roundedOutline(
-            int color, int stroke, int radius, int strokeWidth) {
-        GradientDrawable shape = rounded(color, radius);
-        shape.setStroke(strokeWidth, stroke);
-        return shape;
-    }
-
-    private static GradientDrawable roundedGradient(
-            int top, int bottom, int radius, int border, int borderWidth) {
-        GradientDrawable shape = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, bottom});
-        shape.setCornerRadius(radius);
-        shape.setStroke(borderWidth, border);
-        return shape;
-    }
-
     private StateListDrawable stateOutline(int normal, int pressed, int radius) {
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[]{android.R.attr.state_pressed},
                 roundedOutline(pressed, UTAMA, radius, dp(2)));
         states.addState(new int[]{}, roundedOutline(normal, GARIS, radius, dp(2)));
         return states;
-    }
-
-    private static StateListDrawable stateBackground(
-            int normal, int pressed, int radius) {
-        StateListDrawable states = new StateListDrawable();
-        states.addState(new int[]{android.R.attr.state_pressed},
-                rounded(pressed, radius));
-        states.addState(new int[]{}, rounded(normal, radius));
-        return states;
-    }
-
-    private static int darker(int color) {
-        return Color.rgb(
-                Math.max(0, (int) (Color.red(color) * 0.82)),
-                Math.max(0, (int) (Color.green(color) * 0.82)),
-                Math.max(0, (int) (Color.blue(color) * 0.82)));
     }
 
     @Override

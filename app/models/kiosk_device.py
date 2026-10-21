@@ -57,6 +57,10 @@ class KioskDevice(TimestampMixin, Base):
     media_tersalin: Mapped[int | None] = mapped_column(sa.Integer)
     media_byte: Mapped[int | None] = mapped_column(sa.BigInteger)
     media_waktu: Mapped[datetime | None] = mapped_column(sa.DateTime)
+    #: Baterai tablet pada laporan terakhir; None bila tablet belum melapor.
+    baterai_persen: Mapped[int | None] = mapped_column(sa.Integer)
+    baterai_mengisi: Mapped[bool | None] = mapped_column(sa.Boolean)
+    baterai_waktu: Mapped[datetime | None] = mapped_column(sa.DateTime)
     # Admin meminta tablet menyegarkan salinan media sekarang. Tablet
     # membandingkan nilainya dengan yang terakhir ia tangani.
     media_segarkan: Mapped[datetime | None] = mapped_column(sa.DateTime)

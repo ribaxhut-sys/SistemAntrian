@@ -177,6 +177,45 @@ def test_nilai_perangkat():
     assert cadangan.tingkat == ks.INFO
 
 
+def test_nilai_perangkat_baterai():
+    def nilai(persen, mengisi=False, umur=timedelta(minutes=2)):
+        return ks.nilai_perangkat(
+            _perangkat(
+                baterai_persen=persen,
+                baterai_mengisi=mengisi,
+                baterai_waktu=SEKARANG - umur,
+            ),
+            {},
+            SEKARANG,
+        )
+
+    aman = nilai(80)
+    assert aman.tingkat == NORMAL and "baterai 80%" in aman.ringkasan
+
+    assert nilai(18).tingkat == PERINGATAN
+    assert "charger" in nilai(18).saran[-1]
+    assert nilai(8).tingkat == MASALAH
+    # Sedang diisi: rendah pun bukan masalah.
+    diisi = nilai(8, mengisi=True)
+    assert diisi.tingkat == NORMAL and "(diisi)" in diisi.ringkasan
+    # Laporan basi tidak dipercaya dan tidak ditampilkan.
+    basi = nilai(5, umur=timedelta(hours=3))
+    assert basi.tingkat == NORMAL and "baterai" not in basi.ringkasan
+
+    # Tablet terputus + baterai kritis: tetap MASALAH, tidak ditimpa koneksi.
+    terputus = ks.nilai_perangkat(
+        _perangkat(
+            terakhir_terlihat=SEKARANG - timedelta(minutes=30),
+            baterai_persen=5,
+            baterai_mengisi=False,
+            baterai_waktu=SEKARANG - timedelta(minutes=29),
+        ),
+        {},
+        SEKARANG,
+    )
+    assert terputus.tingkat == MASALAH
+
+
 # ---------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------

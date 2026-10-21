@@ -573,6 +573,17 @@ pada baris **APK anjungan** di Layanan Anjungan.
 - Naikkan `versionCode`/`versionName` di `android-kiosk/app/build.gradle`
   setiap rilis, dan naikkan `VERSI_MINIMAL` bila jawaban API berubah.
 
+## Laporan baterai tablet
+
+Anjungan melapor tingkat baterai dan status pengisian ke `POST /v1/kiosk/baterai`
+(`{"percent": 0-100, "charging": bool}`) setiap kali menerima `/v1/kiosk/display`,
+tetapi hanya dikirim bila berubah 5 poin atau lebih, status pengisian berganti,
+atau sudah 5 menit (`laporkanBaterai` di `MainActivity`). Server menyimpannya di
+`kiosk_device.baterai_*` (migrasi `a7e3c9d5b214`). Kesehatan Sistem menampilkannya
+pada baris tablet; laporan lebih tua dari 30 menit diabaikan. Baterai <= 20% tanpa
+charger = PERINGATAN, <= 10% = MASALAH. Layar antrian (APK layar) belum melapor.
+Belum diuji di perangkat.
+
 ## Android tablet and USB printer
 
 Install `antrianCRO-<versi>.apk`, connect the tablet to the same Wi-Fi, and

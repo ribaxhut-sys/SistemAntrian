@@ -16,7 +16,144 @@ jebakan; bagian riwayat commit-nya sudah lama), [istilah.md](istilah.md),
 [layar-antrian.md](layar-antrian.md), [prioritas-antrian.md](prioritas-antrian.md),
 [keamanan-sesi.md](keamanan-sesi.md).
 
-Terakhir diperbarui: **20 Oktober 2026**, oleh Codex.
+Terakhir diperbarui: **21 Oktober 2026**, oleh Codex.
+
+**Audit produksi 21 Oktober 2026 (Codex):** keputusan **belum siap
+produksi**. `ruff check app tests alembic alat` bersih. Tes terarah yang
+dijalankan menghasilkan **341 lulus, 3 dilewati, 1 gagal setup** karena
+`antrian_uji` mengalami timeout koneksi PostgreSQL pada satu tes layar; ini
+perlu diulang setelah database uji pulih. Artefak `dist` saat ini bertanggal
+20 Oktober 20:48, sedangkan tanda tangan pembaruan bertanggal 20:13, jadi
+signature harus diverifikasi ulang terhadap EXE final sebelum publikasi.
+Pemasangan PC bersih, uji APK/layar pada perangkat nyata, Maxtor, DPI
+125/150%, dan uji lima loket tetap belum terbukti.
+
+**Layar antrian tema Bening (21 Oktober 2026, Claude):** tampilan layar
+Android didesain ulang dan diberi nama **Bening** (lihat bagian "Tema Bening"
+di [layar-antrian.md](layar-antrian.md)): latar putih, strip loket tegak
+dengan status di ujung kanan, 3 nomor "AKAN DIPANGGIL" dipisah di atas daftar
+"MENUNGGU" (10 baris, halaman bergantian 8 detik), kedip saat memanggil, bulan
+penuh. Server: batas `?next=` naik ke 300 dan `/v1/layar/state` mengirim
+`service_labels` (belum dipakai layar). Tes `tests/test_device_service.py`
+lulus (48) di PostgreSQL uji. APK debug
+`android-kiosk/layar/build/outputs/apk/debug/layar-debug.apk` belum
+dilihat di BlueStacks (ADB `error: closed`; seret manual) dan versi layar tidak
+dinaikkan, jadi rilis ke `apk\` menunggu keputusan pemilik. Server kerja sudah
+dimulai ulang agar batas baru berlaku.
+
+**Tema layar dapat dipilih per perangkat (21 Oktober 2026, Claude):**
+`MainActivity` layar kini punya pilihan "Tema tampilan" di pengaturan
+(tinggal Bening dan Dinding; tema lain dihapus), disimpan lokal di perangkat. Isi
+layar digambar kelas `TemaLayar`; polling, suara, dan pembaruan tidak berubah.
+Daftar menunggu Bening dikecilkan (NEXT_SP 30). Sudah di-commit tetapi **belum
+dilihat di BlueStacks**; APK debug `android-kiosk/layar/build/outputs/apk/debug/layar-debug.apk`
+(versi tidak dinaikkan). Detail di [layar-antrian.md](layar-antrian.md).
+
+**Cabut prioritas + cetak ulang tiket + ikon layar (21 Oktober 2026, Claude):**
+`QueueService.cabut_prioritas(..., kembalikan=, alasan=)` mengembalikan nomor yang
+baru DIPANGGIL ke daftar Menunggu (loket bebas, audit `CLEAR_PRIORITY` memuat
+`alasan_cabut` dan `dikembalikan`); dialog `DialogCabutPrioritas` dan tombol
+**Cetak ulang tiket** ada di layar Pelayanan. Tes terarah lolos di PostgreSQL uji
+(prioritas, queue_service, report_service, test_ui bagian cabut/cetak ulang);
+suite penuh belum dijalankan. Hati-hati: proses `pytest` yang kena batas waktu
+bisa tertinggal dan membuat tes berikutnya bentrok di `antrian_uji`. Ikon
+layar Android baru (papan "A-12", teal) belum dilihat di launcher.
+
+**Versi naik, ikon baru, warna prioritas seragam (21 Oktober 2026, Claude):** atas
+permintaan pemilik semua aplikasi naik: **Windows 1.3** (`app/__init__.py`,
+`installer.iss`, `build-installer.ps1`), **anjungan 2.5.4 (kode 58)**, **layar 1.8
+(kode 9)**. Ikon baru: layar (papan "A-12", teal) dan anjungan (mesin tiket, teal);
+ikon Windows (tiket "01", indigo) sengaja tidak diubah, tiap aplikasi berbeda.
+Prioritas kini **ungu lembut** di layar antrian (Bening dan Dinding) dan anjungan.
+Pillow naik 12.3.0 -> 13.0.0 karena `pip-audit` CI (8 GHSA). `apk\` diisi ulang
+(cadangan lama di `backup\apk-sebelum-2.5.4`); `dist\AntrianCRO-Setup-1.3.exe`
+dibangun dengan `-SkipTests` (suite penuh lulus hari itu: 2067 lulus, 8 dilewati)
+dan **belum ditandatangani** (67.579.227 byte, sha256 D2DB65E43F19475D260340F04DB6F0AFF3D85D8EDE80385198AE9525B2243BAE, selesai 11:45). Tablet yang sudah menerima 2.5.4/1.8 sebelum ikon dan
+warna ini tidak memperbarui diri karena kode versi tetap; naikkan kode bila perlu.
+
+**Audit ulang 21 Oktober 2026 (Codex):** `ruff check app tests alembic alat`
+tetap bersih. Tes terarah identitas, migrasi, pembaruan Windows, API
+anjungan, dan layar: **242 lulus, 0 gagal** (database `antrian_uji` kembali
+normal). Keputusan tetap **belum siap produksi** karena signature harus
+diverifikasi ulang terhadap EXE final dan validasi PC/perangkat nyata belum
+selesai.
+
+**Peningkatan layar antrian (20 Oktober 2026, Claude, cabang `fitur/identitas-bapenda`):**
+penyegaran berkala `DisplayPage` kini lewat `muat_ulang_latar` (`PekerjaLatar`,
+tidak menumpuk, kegagalan hanya dicatat tanpa dialog); `muat_ulang()` sinkron
+tetap dipakai saat dibuat dan oleh tes. `test_display.py`: 168 lulus, lint
+bersih. Pemeriksaan dugaan lain: `time.sleep(0.5)` di `layanan_anjungan_page.py`
+**aman** (berjalan di pekerja latar `_jalankan`); peringatan tanda tangan
+pembaruan, backup otomatis dengan salinan kedua, prosedur cadangan kunci
+(`keamanan-sesi.md`), dan batas hadir 90 detik **sudah ada**, jadi tidak diubah.
+Peringatan Starlette (`httpx` di `TestClient`) berasal dari dependensi; perbaikannya
+`httpx2`, belum dilakukan karena mengubah dependensi. **Masih butuh pemilik/perangkat:**
+bangun ulang + tanda tangan installer 1.2 (`build-installer.ps1`, lalu
+`publikasikan-pembaruan.ps1` dengan kunci pemilik), uji PC bersih, uji APK 2.5.1
+dan Maxtor, DPI 125/150%, uji lima loket. **Belum dikerjakan (besar, perlu
+perangkat atau keputusan):** pemecahan `MainActivity.java`, ganti monkeypatch
+tema, fitur baru (filter audit, laporan terjadwal, kesehatan tablet).
+
+**Installer 1.2 dibangun (20 Oktober 2026, Claude):** `.\build-installer.ps1` tanpa `-SkipTests`, kode keluar 0; pytest 2054 lulus, 8 dilewati, 0 gagal (31 mnt 13 dtk). `dist\AntrianCRO-Setup-1.2.exe` 67.526.579 byte, sha256 `7d4f7bba3ea58d4caf4dda8858cfcdfb55a1cb46ebb56283798d597e4eb3cc87`; `dist\Pembaruan-AntrianCRO.exe` sha256 `7d4f7bba3ea58d4caf4dda8858cfcdfb55a1cb46ebb56283798d597e4eb3cc87`. **Ditandatangani pemilik 20 Okt 20:13** (`publikasikan-pembaruan.ps1`); `.sig` terverifikasi sah terhadap kunci publik tertanam untuk `dist` dan `dist\siap-publikasi\1.2` (sha256 `7d4f7bba...cc87`). **Belum disalin ke folder `pembaruan` server** dan **belum dipasang** di PC mana pun. Penomoran MainActivity: tahap 9 (`BantuGambar`) dan 10 (`BantuTeks`), kini 6499 baris. ADB BlueStacks: instal/push gagal `error: closed`; APK debug 2.5.1 harus diseret manual ke jendela BlueStacks (terpasang masih 2.5).
+
+**Rilis APK 2.5.3 / layar 1.7 dan installer 1.2 final (20 Oktober 2026, 20:49, Claude):** judul Android 'Bapenda DKI Jakarta' kini dirilis. `apk\` berisi anjungan **2.5.3 (kode 57)** dan layar antrian **1.7 (kode 8)** (layar ikut dinaikkan karena judulnya berubah; tanpa itu tablet layar tidak memperbarui diri); `apk\` lama (2.5.2 dan 1.6) ada di `backup\apk-sebelum-2.5.3`. Terverifikasi `aapt2` dan isi dex: versi benar, judul lama hilang, anjungan masih memuat `/v1/kiosk/baterai`. Belum dipasang di perangkat. Kalimat 'apk\ masih 2.5.2 dengan judul lama, versi tidak dinaikkan' pada catatan di bawah sudah usang. Installer: `.\build-installer.ps1 -SkipTests`, kode keluar 0, log memuat 'APK anjungan ikut dalam installer'; `dist\AntrianCRO-Setup-1.2.exe` = `dist\Pembaruan-AntrianCRO.exe`, 67.513.096 byte, sha256 `fdf281677d42ad0a21cec10bd92f37dffc71f38010a3c64918a046bd7370a6dd` (menggantikan sha256 `9c8c8db3...` dan `8a5206a3...` di catatan bawah). **`.sig` di `dist` tidak sah untuk berkas ini; belum ditandatangani ulang.** Tanda tangan hanya perlu untuk pembaruan lewat server; pemasangan manual dari `AntrianCRO-Setup-1.2.exe` tidak memerlukannya.
+
+**Judul Android diganti (20 Oktober 2026, Claude):** atas permintaan pemilik, judul di layar anjungan dan layar antrian Android kini hanya **"Bapenda DKI Jakarta"** (`NAMA_TAMPIL` di `MainActivity` kedua modul; sama dengan `identitas.INSTANSI`). Windows, tiket, laporan, dan label ikon peluncur (`android:label`) tidak berubah. Tes `tests/test_identitas.py::test_android_memakai_nama_instansi_saja`. Kedua modul terkompilasi (debug); **belum dirilis**: `apk\` masih 2.5.2 dengan judul lama, dan versi tidak dinaikkan. Tablet baru menampilkan judul ini setelah APK berikutnya (2.5.3 atas permintaan pemilik) dibagikan.
+
+**APK anjungan 2.5.2 (kode 56) dirilis ke `apk\` dan installer 1.2 dibangun ulang (20 Oktober 2026, 20:39, Claude):** atas permintaan pemilik, versi dinaikkan 2.5.1 -> 2.5.2 (`android-kiosk/app/build.gradle`) agar tablet berkode 55 menerima kode terbaru (laporan baterai + tahap 8-10 `MainActivity`). `apk\` lama dicadangkan ke `backup\apk-sebelum-2.5.2` (anjungan 2.5.1 build 13:02 dan layar 1.6). `build-android-kiosk.ps1` sukses; `apk\anjungan.apk` (141.969 byte) terverifikasi `aapt2`: versionCode 56 / 2.5.2, memuat `/v1/kiosk/baterai` dan judul Bapenda; layar tetap 1.6 (kode 7, dibangun ulang tanpa perubahan kode sehingga tablet layar tidak memperbarui diri). Server membagikannya, jadi tablet tersambung kini ditawari pembaruan ke 2.5.2. APK rilis ini belum dipasang di perangkat (yang diuji di BlueStacks adalah build debug 2.5.1 dengan kode yang sama). Installer: `.\build-installer.ps1 -SkipTests`, kode keluar 0, log memuat 'APK anjungan ikut dalam installer'; `dist\AntrianCRO-Setup-1.2.exe` = `dist\Pembaruan-AntrianCRO.exe`, 67.525.468 byte, sha256 `9c8c8db324380f972151a657e30ccdbc70130d2058178b494e28b649e533024a` (menggantikan sha256 `8a5206a3...` di catatan bawah). **`.sig` di `dist` tidak sah untuk berkas ini; BELUM ditandatangani ulang** (`publikasikan-pembaruan.ps1`, kata sandi diketik pemilik).
+
+**Installer 1.2 dibangun ulang tanpa pytest (20 Oktober 2026, 20:30, Claude):** `.\build-installer.ps1 -SkipTests`, kode keluar 0 (uji bundel di folder bersih tetap jalan; hanya pytest dilewati, karena suite penuh 2054 lulus pada kode yang hampir sama dan tes terarah penjaga migrasi lulus). Memuat perbaikan `AplikasiLebihLamaError`. `dist\AntrianCRO-Setup-1.2.exe` = `dist\Pembaruan-AntrianCRO.exe`, 67.525.378 byte, sha256 `8a5206a319ae78ce865d2c6212122e33ad578a976be04659d4088d3cef6b82a2`. **`.sig` lama tidak sah untuk berkas ini; BELUM ditandatangani ulang** (jalankan `publikasikan-pembaruan.ps1`, kata sandi kunci diketik pemilik; folder `dist\siap-publikasi\1.2` yang ada masih berisi build lama dan akan tertimpa). Build lama yang sudah ditandatangani: `dist\AntrianCRO-Setup-1.2.sebelum-perbaikan.exe.bak`. **Skenario pemasangan ulang diuji nyata** pada database sementara `antrian_skenario` (dibuat lalu dihapus; skrip: aplikasi `--init-only` sungguhan): (1) DB kosong -> revisi terbaru; (2) DB lama pada `f6d2a8c41b07` dan `e9c3b5a7d281` berisi data -> naik ke `a7e3c9d5b214` tanpa baris berkurang; (3) DB sudah terbaru, dibuka berulang -> tanpa perubahan; (4) DB lebih baru dari aplikasi -> keluar kode 1, pesan 'perbarui aplikasi', data dan revisi utuh. `mesin.json` lama berperan `sendiri`, rusak, atau tak dikenal sudah diuji di `tests/test_mesin.py` (diperlakukan belum ditetapkan, muncul dialog koneksi). Belum dibuktikan: menjalankan installer itu sendiri di PC bersih/PC berisi 1.0.x (tidak ada Sandbox, dan komputer ini punya pemasangan nyata 1.0.2).
+
+**Pemeriksaan pemasangan 1.2 di PC lain (20 Oktober 2026, Claude):** Windows Sandbox tidak tersedia dan komputer ini sudah punya pemasangan nyata 1.0.2 (AppId sama, `%LOCALAPPDATA%\Programs\AntrianCRO`), jadi installer 1.2 sengaja TIDAK dijalankan di sini; uji pemasangan di PC bersih tetap harus dilakukan manusia. Terbukti dari kode dan build: installer hanya menimpa berkas program + `_internal` (`data`, `backup`, `logs` tidak disentuh), menolak menurunkan versi, uji bundel di folder bersih lulus. **Temuan:** aplikasi LEBIH LAMA daripada database gagal start (1.0.2 terhadap revisi `a7e3c9d5b214`: `Can't locate revision`, pesan menyesatkan 'tidak dapat menghubungi database'); database kerja `antrian` sudah di revisi itu, jadi PC berversi lama harus dipasang 1.2 dulu. **Perbaikan di kode (belum ada di installer 1.2 yang sudah ditandatangani):** `AplikasiLebihLamaError` di `app/core/migrations.py` (penjaga `_revisi_dikenal`) dan `_laporkan_aplikasi_lebih_lama` di `app/main.py` (pesan 'perbarui aplikasi', keluar kode 1, tanpa tombol ubah koneksi); tes di `tests/test_migration.py` dan `tests/test_ui.py`, dan alur `--init-only` nyata diuji terhadap `antrian_uji` dengan revisi dipalsukan lalu dipulihkan. Agar PC 1.2 kelak mendapat pesan ini bila databasenya naik ke versi lebih baru, **bangun ulang dan tanda tangani ulang 1.2 sebelum dibagikan** (belum dibagikan ke PC mana pun). **APK:** `apk\anjungan.apk` (2.5.1, kode 55) adalah build rilis jam 13:02 dari sesi lain (backup `backup\apk-sebelum-2.5.1`), SEBELUM laporan baterai dan tahap 8-10 `MainActivity`; installer 1.2 membawanya. Tablet berkode 55 tidak akan memperbarui diri ke build debug yang saya uji; membagikan kode terbaru butuh versi dinaikkan (2.5.2) atas permintaan pemilik.
+
+**Server kerja dimigrasi dan diuji di BlueStacks (20 Oktober 2026, Claude):** dump `backup/antrian-20261020-201700-sebelum-migrasi-baterai.dump` (+ `.sha256`), lalu `antrian` naik `f1b4c8d2a6e9` -> `a7e3c9d5b214` (jumlah baris tetap: queue 95, app_user 3, audit_log 473, kiosk_device 2, service_category 12). Tugas terjadwal `AntrianCRO API Anjungan` dimulai ulang tanpa elevasi (Running, `/health` 200), jadi kode baru (termasuk `/v1/kiosk/baterai`) aktif. APK debug 2.5.1 (kode 55) diseret pemilik ke BlueStacks (ADB `install`/`push` gagal `error: closed`); terverifikasi: judul Bapenda, 'Terhubung ke server', tanpa crash, dan baterai 100% tidak diisi tercatat di `kiosk_device` lalu tampil di Kesehatan Sistem ('baterai 100%'; peringatan yang muncul berasal dari printer, emulator tidak punya). Migrasi berjalan otomatis di setiap start aplikasi (`siapkan_database`), termasuk `--kios-api` dan `--init-only`; PC dengan aplikasi LEBIH LAMA dari database dapat gagal inisialisasi (revisi tak dikenal), jadi perbarui semua loket ke 1.2 setelah server naik. Belum diuji: papan PIN, panggilan menghentikan iklan, Maxtor asli.
+
+**Peningkatan lanjutan (20 Oktober 2026, Claude, cabang `fitur/identitas-bapenda`, belum di-push):**
+backup lebih dulu: `backup/antrian-20261020-184421-sebelum-peningkatan.dump` (+ `.sha256`,
+196 entri terbaca `pg_restore -l`) dan `backup/repo-20261020-184421.bundle`. Lalu:
+(1) `httpx2==2.15.1` menggantikan `httpx` di `requirements-dev.txt` (peringatan Starlette hilang);
+(2) **Jejak Aktivitas** (menu Backup) punya filter tindakan, pelaku ("sistem" = tanpa
+pengguna), dan rentang tanggal: `audit_service.list_terakhir(aksi, pelaku, sejak, sampai)`,
+`daftar_aksi()`, `tests/test_filter_audit.py`; (3) **laporan mingguan otomatis**
+(`app/services/laporan_terjadwal.py`, pengaturan `laporan.mingguan_aktif` (bawaan **mati**)
+dan `laporan.mingguan_folder`): karena laporan menuntut `REPORT_VIEW`, PDF minggu lalu
+(Senin-Minggu) dibuat 20 dtk setelah admin/supervisor membuka aplikasi bila berkasnya
+belum ada (berkas = penanda), tercatat `EXPORT_REPORT`; `tests/test_laporan_terjadwal.py`;
+(4) **baterai tablet**: migrasi **`a7e3c9d5b214`** (head baru; 3 kolom nullable di
+`kiosk_device`), `POST /v1/kiosk/baterai`, anjungan Android melapor tiap 5 menit/saat
+berubah ≥5 poin (`laporkanBaterai`), Kesehatan Sistem: <=20% tanpa charger PERINGATAN,
+<=10% MASALAH, laporan >30 menit diabaikan; **database kerja `antrian` belum di-migrasi**
+(berjalan otomatis saat aplikasi dibuka; backup sudah ada), APK hanya dikompilasi
+(versi tidak dinaikkan, `apk/` tidak disentuh); (5) `MainActivity` tahap 8:
+`BantuWarna`, `Loket`, `Category` berkas sendiri (6564 baris). **Sengaja tidak
+dikerjakan:** penggantian monkeypatch tema (ratusan titik gaya, tanpa uji visual
+risikonya lebih besar dari manfaatnya; ketergantungan urutan tes sudah dijaga fixture
+`tema_dan_gaya_pulih`) dan pemecahan `MainActivity` per layar (butuh uji perangkat tiap
+tahap). Suite penuh setelah semua perubahan ini: **2054 lulus, 8 dilewati, 0 gagal** (30 mnt 42 dtk), lint bersih. Yang tetap menunggu manusia: bangun ulang + tanda tangan installer 1.2, uji PC
+bersih, uji APK 2.5.1/Maxtor/baterai di perangkat, DPI 125/150%, uji lima loket.
+
+**Peningkatan layar antrian (20 Oktober 2026, Claude, cabang `fitur/identitas-bapenda`):**
+keputusan pemilik: tampil **"Sistem Antrian CRO - Bapenda DKI Jakarta"**, tidak
+dapat diubah admin; nama produk teknis (`APP_NAME`, jalur data, tugas
+terjadwal) tetap `Sistem Antrian CRO` supaya pembaruan PC lama tidak putus.
+Konstanta ada di `app/core/identitas.py` (`NAMA_TAMPIL`, `JUDUL_TIKET`). Dipakai
+di judul jendela, layar masuk, dialog, kepala aplikasi, layar antrian, tiket,
+kop laporan, `/v1/kiosk/display` dan `/v1/display` (`title` selalu identitas),
+publisher installer. Pengaturan `ticket.header`, `display.title`, `kiosk.judul`
+**dihapus** dari skema, bawaan, dan seed (baris lama di database diabaikan).
+Android: judul anjungan dan layar terkunci di kode (`NAMA_TAMPIL`), kolom
+"Judul tablet ini" dihapus, `android:label` memuat "Bapenda DKI Jakarta"; kedua
+modul terkompilasi, **belum diuji di perangkat**. Tes penjaga:
+`tests/test_identitas.py`. **Versi dinaikkan atas permintaan pemilik:**
+Windows `1.2` (`app/__init__.py`, `installer.iss`, `build-installer.ps1`,
+README), APK anjungan `2.5.1` (kode 55); APK layar tetap 1.6 (kode 7). Suite
+penuh: 2023 lulus, 7 gagal karena tes memakai pengaturan judul lama; tujuh tes
+itu diperbarui dan modul terkait lulus (166). **Installer 1.2 dan APK 2.5.1
+belum dibangun**; `dist\AntrianCRO-Setup-1.0.11.exe` dan tanda tangannya
+(`.sig`) milik 1.0.11, jadi rilis 1.2 harus dibangun ulang dan ditandatangani
+ulang (`publikasikan-pembaruan.ps1`). Catatan perubahan lain hari ini: PR #4
+(audit produksi), build bertes 1.0.11 lulus, skrip `publikasikan-pembaruan.ps1`
+menyiapkan folder siap salin untuk server.
 
 **Audit 20 Oktober 2026 (Codex):** lint `ruff check app tests alembic alat`
 bersih. Tes terarah untuk keluar/ambil alih, Pelayanan Aktif, pembaruan
@@ -56,7 +193,7 @@ Temuan dan perbaikan (semuanya di service/UI, dengan tes regresi di `tests/test_
 
 Pemeriksaan: `ruff check app tests alembic alat` bersih. Suite penuh (satu proses, `antrian_uji`, pada commit `b2d5ae4`): **2030 lulus, 8 dilewati, 0 gagal** (25 mnt 44 dtk). Ronde sebelumnya (sebelum perbaikan menu dan tombol Pelayanan Aktif) 2028 lulus dan 2 gagal di `test_ui.py`; keduanya sudah diperbaiki. Migrasi diuji pada salinan dump `backup/antrian-20261019-073311.dump` (checksum cocok, `pg_restore` ke DB sementara, `e9c3b5a7d281` naik ke `f1b4c8d2a6e9`, jumlah baris queue/app_user/audit_log tetap 90/3/397; DB sementara dihapus, `antrian` tidak disentuh). Pairing anjungan: pembatas tebakan per IP dan global sudah ada.
 
-Installer: `dist\AntrianCRO-Setup-1.0.11.exe` dibangun ulang 19 Okt 20:45 dengan `-SkipTests` (sha256 `05ae6e2c...ac7de`, 67.123.826 byte; belum ditandatangani, belum dipasang) agar memuat perbaikan audit; versi tetap 1.0.11. Salinan lama di `backup/installer-1.0.11-sebelum-audit/`. Build bertes pertama membuat pytest keluar non-nol walau 2030 lulus (utas `_PemeriksaAnjungan` yang dilepas `_lepas_utas_berjalan` masih hidup saat proses keluar, lalu `Logging error: I/O operation on closed file`); `tests/conftest.py` kini menunggu `_UTAS_TERTINGGAL` di akhir sesi dan `build-installer.ps1` mencetak kode keluar pytest. **Belum terbukti** memperbaikinya: build bertes belum diulang sampai selesai; jalankan `.uild-installer.ps1` tanpa `-SkipTests` sebelum rilis resmi.
+Installer: `dist\AntrianCRO-Setup-1.0.11.exe` dibangun ulang 19 Okt 20:45 dengan `-SkipTests` (sha256 `05ae6e2c...ac7de`, 67.123.826 byte; belum ditandatangani, belum dipasang) agar memuat perbaikan audit; versi tetap 1.0.11. Salinan lama di `backup/installer-1.0.11-sebelum-audit/`. Build bertes pertama membuat pytest keluar non-nol walau 2030 lulus (utas `_PemeriksaAnjungan` yang dilepas `_lepas_utas_berjalan` masih hidup saat proses keluar, lalu `Logging error: I/O operation on closed file`); `tests/conftest.py` kini menunggu `_UTAS_TERTINGGAL` di akhir sesi dan `build-installer.ps1` mencetak kode keluar pytest. **Belum terbukti** memperbaikinya: build bertes belum diulang sampai selesai; jalankan `.\build-installer.ps1` tanpa `-SkipTests` sebelum rilis resmi.
 
 Sisa risiko: (a) APK dan panel Maxtor belum diuji di perangkat; (b) installer 1.0.11 belum diuji di PC bersih dan belum ditandatangani; (c) API server dan database kerja belum memakai kode/migrasi baru; (d) tes backup/restore memakai alat PostgreSQL di PATH, bila tidak ada tes dilewati; (e) DPI Windows 125/150% belum diuji nyata; (f) pemilik yang komputernya mati baru dapat diambil alih setelah tanda hadir basi (`BATAS_HADIR_PETUGAS_DETIK`); sebelum itu hanya admin yang dapat mengalihkan.
 
@@ -636,6 +773,8 @@ menyeret APK ke jendela BlueStacks. Tangkapan layar:
 | 2026-10-20 | Claude | Backup penuh, build installer bertes lulus (2030 lulus, kode keluar 0), dugaan bottleneck layar antrian (bagian atas). |
 | 2026-10-19 | Claude | Audit kesiapan produksi: keluar aplikasi untuk peran tanpa QUEUE_CALL, akses admin ke Pelayanan Aktif, ambil alih tidak merebut dari pemilik yang masih hadir, 24 tes baru (lihat bagian atas). Status Siap staging/UAT. |
 | 2026-10-20 | Codex | Audit ulang: lint bersih dan 117 tes terarah lulus; status tetap Siap staging/UAT, dengan build installer tanpa `-SkipTests` dan validasi perangkat/PC bersih sebagai sisa risiko. |
+| 2026-10-21 | Codex | Audit produksi: lint bersih; tes terarah 341 lulus, 3 dilewati, 1 gagal setup karena timeout PostgreSQL `antrian_uji`. Artefak EXE lebih baru daripada signature yang ada; status tetap belum siap produksi sampai signature diverifikasi ulang dan validasi perangkat/PC selesai. |
+| 2026-10-21 | Codex | Audit ulang: lint bersih dan 242 tes terarah lulus setelah database uji pulih; status tetap belum siap produksi karena signature/validasi perangkat dan PC bersih belum selesai. |
 
 Saat menutup sesi: perbarui bagian 3 (keadaan, commit, versi), 6 (belum
 selesai), dan tabel di atas.

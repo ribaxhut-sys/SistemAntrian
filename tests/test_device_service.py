@@ -406,7 +406,9 @@ def test_layar_mengunduh_paket_suara_dan_apk(layanan, antrian_siap, tmp_path, mo
     assert klien.get("/v1/layar/app/apk", headers=kepala).content == b"PK-layar"
 
 
-def test_layar_boleh_meminta_sampai_dua_belas_nomor(layanan, antrian_siap, terbitkan):
+def test_layar_boleh_meminta_banyak_nomor_dan_menerima_nama_layanan(
+    layanan, antrian_siap, terbitkan
+):
     klien = _klien()
     tv = _pasang(klien, layanan, "tv-0000-0000-0010", "layar_antrian")
     kepala = {"Authorization": f"Bearer {tv}"}
@@ -416,8 +418,13 @@ def test_layar_boleh_meminta_sampai_dua_belas_nomor(layanan, antrian_siap, terbi
     banyak = klien.get("/v1/layar/state", params={"next": 50}, headers=kepala).json()
 
     assert len(bawaan["next"]) == 3
-    assert len(banyak["next"]) == 12
+    # Layar memanggil sampai 300 nomor supaya daftar per layanannya lengkap.
+    assert len(banyak["next"]) == 15
     assert banyak["total_waiting"] == 15
+    # Peta prefiks -> nama layanan untuk judul kelompok di layar.
+    assert "A" in banyak["service_labels"]
+    # Riwayat nomor yang sudah dipanggil hari ini (belum ada yang dipanggil di sini).
+    assert banyak["called"] == []
 
 
 # ---------------------------------------------------------------------
@@ -638,6 +645,20 @@ def test_status_media_tidak_melebihi_total_dan_abaikan_perangkat_asing(layanan):
 
     (info,) = layanan.daftar()
     assert info.media_tersalin == 2
+
+
+def test_baterai_tercatat_dibatasi_dan_perangkat_asing_diabaikan(layanan):
+    device_service.catat_kontak(DEVICE, nama="Tablet")
+
+    device_service.catat_baterai(DEVICE, 42, True)
+    (info,) = layanan.daftar()
+    assert (info.baterai_persen, info.baterai_mengisi) == (42, True)
+    assert info.baterai_waktu is not None
+
+    device_service.catat_baterai(DEVICE, 250, False)
+    device_service.catat_baterai("tidak-dikenal", 10, False)
+    (info,) = layanan.daftar()
+    assert (info.baterai_persen, info.baterai_mengisi) == (100, False)
 
 
 def test_segarkan_media_mengubah_penanda_untuk_tablet_itu(layanan):

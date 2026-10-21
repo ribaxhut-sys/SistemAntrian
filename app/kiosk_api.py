@@ -27,6 +27,7 @@ from app import __version__
 from app.core import clock
 from app.core.config import TIMEZONE, base_dir, get_config
 from app.core.database import dispose_engine, periksa_koneksi
+from app.core.identitas import NAMA_TAMPIL
 from app.core.errors import (
     AppError,
     AuthenticationError,
@@ -136,6 +137,11 @@ class PairRequest(BaseModel):
 class PrinterReport(BaseModel):
     ok: bool
     message: str = Field(default="", max_length=200)
+
+
+class BateraiReport(BaseModel):
+    percent: int = Field(ge=0, le=100)
+    charging: bool = False
 
 
 class MediaReportItem(BaseModel):
@@ -614,18 +620,20 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         """
         Isi papan: nomor tiap loket, nomor berikutnya, dan yang menunggu.
 
-        `next` (paling banyak 12): layar meminta lebih banyak nomor
+        `next` (paling banyak 300): layar meminta lebih banyak nomor
         berikutnya supaya daftarnya dapat memanjang saat antrian ramai;
         `display.next_count` tetap menjadi jumlah paling sedikit.
         """
         jumlah = max(1, services.settings.get_int("display.next_count", 3))
         if next is not None:
-            jumlah = max(jumlah, min(int(next), 12))
-        state = services.queue.display_state(jumlah_berikutnya=jumlah)
+            jumlah = max(jumlah, min(int(next), 300))
+        state = services.queue.display_state(
+            jumlah_berikutnya=jumlah, jumlah_per_layanan=1, riwayat_dipanggil=300
+        )
         apk = info_apk(folder_apk(base_dir()), "layar")
         paket = info_paket(folder_paket(base_dir()))
         return {
-            "title": services.settings.get("display.title", "ANTRIAN PELAYANAN CRO"),
+            "title": NAMA_TAMPIL,
             "sound_enabled": services.settings.get_bool("display.sound_enabled", True),
             "counters": isi_loket(state),
             "next": [q.queue_number for q in state.berikutnya],
@@ -634,6 +642,13 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 q.queue_number for q in state.berikutnya if q.prioritas
             ],
             "total_waiting": state.total_menunggu,
+            # Semua nomor yang sudah dipanggil hari ini (terbaru dulu): hanya nomor
+            # dan label status, untuk dinding nomor.
+            "called": [{"n": n, "s": st} for n, st in state.dipanggil],
+            # Prefiks nomor -> nama layanan, untuk judul kelompok di layar.
+            "service_labels": {
+                k.category_prefix: k.category_name for k in state.layanan
+            },
             "server_time_ms": int(time.time() * 1000),
             "timezone": TIMEZONE,
             "app_min_version_code": VERSI_MINIMAL_LAYAR,
@@ -852,6 +867,21 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         logger.warning("PIN pengaturan salah dari anjungan %s", kunci)
         return {"ok": False, "locked_seconds": tunda}
 
+    @app.post("/v1/kiosk/baterai")
+    def baterai_report(
+        laporan: BateraiReport,
+        device_id: str = Depends(require_token),  # noqa: B008
+    ):
+        """Tingkat baterai tablet, untuk Kesehatan Sistem."""
+        if perangkat is not None and device_id:
+            try:
+                perangkat.catat_baterai(device_id, laporan.percent, laporan.charging)
+            except Exception:
+                logger.warning(
+                    "Status baterai %s gagal dicatat", device_id, exc_info=True
+                )
+        return {"status": "ok"}
+
     @app.post("/v1/kiosk/media-status")
     def media_status(
         laporan: MediaStatus,
@@ -945,7 +975,6 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         )
         apk = info_apk(folder_apk(base_dir()))
         paket = info_paket(folder_paket(base_dir()))
-        judul = (pengaturan.get("kiosk.judul", "") or "").strip()
         keadaan = services.queue.display_state(
             jumlah_berikutnya=0,
             rasio_prioritas=max(0, pengaturan.get_int("queue.rasio_prioritas", 3)),
@@ -953,9 +982,8 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             sertakan_terkini=False,
         )
         return {
-            # Judul anjungan sendiri; kosong berarti ikut judul layar antrian.
-            "title": judul
-            or pengaturan.get("display.title", "ANTRIAN PELAYANAN CRO"),
+            # Identitas tetap (app/core/identitas.py); tidak dapat diubah admin.
+            "title": NAMA_TAMPIL,
             "subtitle": (pengaturan.get("kiosk.subjudul", "") or "").strip(),
             "welcome_text": pengaturan.get(
                 "kiosk.welcome_text",

@@ -20,6 +20,32 @@ atau `PRIORITAS` untuk pilihan anjungan yang tidak merinci) dan asalnya pada
 `queue.prioritas_asal` (`PENDAFTARAN` atau `MANDIRI`). Penerbitan dan
 pencabutan dicatat di audit (`CREATE_QUEUE`, `CLEAR_PRIORITY`).
 
+## Mencabut prioritas dari nomor yang sudah dipanggil
+
+Bila pengunjung memilih prioritas sendiri di anjungan, loket memanggilnya, lalu
+petugas melihat ia tidak berhak, tombol **Cabut prioritas** pada pita nomor aktif
+membuka dialog dengan dua tindak lanjut:
+
+- **Kembalikan ke antrian dan panggil berikutnya** (bawaan): prioritas dicabut,
+  nomor kembali berstatus Menunggu dengan urutan datang semula, loket bebas
+  memanggil nomor berikutnya. Pengunjung duduk kembali dan dipanggil pada
+  gilirannya. Riwayat pemanggilannya tidak dihapus.
+- **Tetap layani sebagai nomor biasa**: hanya prioritasnya yang dicabut; nomor
+  tetap Dipanggil di loket yang sama.
+
+Alasan wajib (Tidak memenuhi syarat, Salah pilih di anjungan, Lainnya) dan
+dicatat di audit `CLEAR_PRIORITY` bersama `alasan_cabut` dan `dikembalikan`.
+Hanya nomor berstatus **Dipanggil** yang dapat dikembalikan; nomor yang sudah
+dilayani ditolak (`QueueService.cabut_prioritas(..., kembalikan=True)`).
+Dialog juga punya kotak **Cetak ulang tiket tanpa tanda prioritas** (bawaan
+tercentang), dan kartu nomor aktif punya tombol **Cetak ulang tiket** yang membaca
+keadaan nomor saat itu. Hasilnya mengikuti pencetak mesin ini: komputer petugas
+tanpa printer menjawab "Printer tidak digunakan." (peran petugas bawaannya tidak
+mencetak). Pencabutan dari daftar Menunggu tetap tanpa dialog. Layar antrian Android
+menyaring nomor yang sudah dipanggil dari daftar menunggu dan menyegarkan diri
+seketika, sehingga nomor yang dikembalikan hilang dari kotak loket dan muncul
+lagi di daftar menunggu. Tiket yang sudah dicetak tetap bertuliskan "· Prioritas".
+
 ## Pengaturan
 
 - **`kiosk.prioritas_aktif`** (Pengaturan › Antrian): menampilkan kotak di
@@ -50,6 +76,7 @@ pratinjau di layar petugas:
 - Pita **★ PRIORITAS** pada kartu nomor aktif; untuk pilihan anjungan memuat
   "dipilih pengunjung, mohon periksa".
 - Tiket mencetak "· Prioritas" pada baris jenis layanan.
+- Di layar antrian dan anjungan Android, prioritas selalu **ungu lembut** (latar `#F3E8FF`, garis `#D8B4FE`, teks `#783CAA`, bintang `#7E22CE`), satu warna dengan satu makna. Amber dipakai status "Dipanggil", jadi tidak dipakai lagi untuk prioritas.
 
 ## Batasan
 

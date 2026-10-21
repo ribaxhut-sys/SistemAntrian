@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Ikon anjungan antrian: mesin tiket teal dengan layar kecil dan selembar tiket
+    yang keluar dari celahnya. Seluruh isi berada di zona aman ikon adaptif
+    (lingkaran 66 dp di tengah kanvas 108 dp).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- badan mesin -->
+    <path
+        android:fillColor="#0F766E"
+        android:pathData="M38.6,28.8 H69.4 A5,5 0 0 1 74.4,33.8 V44.2 A5,5 0 0 1 69.4,49.2 H38.6 A5,5 0 0 1 33.6,44.2 V33.8 A5,5 0 0 1 38.6,28.8 Z" />
+    <!-- layar -->
+    <path
+        android:fillColor="#CCFBF1"
+        android:pathData="M40.4,33.6 H54.4 A2,2 0 0 1 56.4,35.6 V42.4 A2,2 0 0 1 54.4,44.4 H40.4 A2,2 0 0 1 38.4,42.4 V35.6 A2,2 0 0 1 40.4,33.6 Z" />
+    <!-- lampu -->
+    <path
+        android:fillColor="#FDE68A"
+        android:pathData="M64.8,36 A3,3 0 1 1 64.8,42 A3,3 0 1 1 64.8,36 Z" />
+    <!-- celah tiket -->
+    <path
+        android:fillColor="#0F766E"
+        android:pathData="M42,49.2 H66 A1.2,1.2 0 0 1 67.2,50.4 V51.6 H40.8 V50.4 A1.2,1.2 0 0 1 42,49.2 Z" />
+    <!-- tiket -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#0F766E"
+        android:strokeWidth="1.6"
+        android:pathData="M45.2,51.6 H62.8 A2,2 0 0 1 64.8,53.6 V77.2 A2,2 0 0 1 62.8,79.2 H45.2 A2,2 0 0 1 43.2,77.2 V53.6 A2,2 0 0 1 45.2,51.6 Z" />
+    <path
+        android:strokeColor="#0F766E"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M48,60 H60" />
+    <path
+        android:strokeColor="#0F766E"
+        android:strokeAlpha="0.5"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M48,66 H60" />
+</vector>

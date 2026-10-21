@@ -25,6 +25,7 @@ from typing import Protocol
 
 from app.core import clock
 from app.core.config import get_config
+from app.core.identitas import JUDUL_TIKET
 from app.core.logger import get_logger
 from app.services.queue_service import QueueInfo
 from app.utils.formatting import tanggal_panjang
@@ -924,7 +925,7 @@ class TicketService:
             office_name=nama_kantor,
             issued_at=antrian.created_at or clock.now(),
             footer=self.settings.get("ticket.footer", ""),
-            header=self.settings.get("ticket.header"),
+            header=JUDUL_TIKET,
             counter_name=antrian.counter_name,
             sisa_antrian=ringkasan.sisa_antrian if ringkasan else None,
             perkiraan_tunggu_detik=self._perkiraan(antrian),

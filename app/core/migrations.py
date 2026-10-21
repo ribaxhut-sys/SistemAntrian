@@ -12,12 +12,31 @@ from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from alembic.script.revision import ResolutionError
+from alembic.util import CommandError
 
 from app.core.config import get_config, resource_dir
 from app.core.database import get_engine
 from app.core.logger import get_logger, setup_logging
 
 logger = get_logger("migrations")
+
+
+class AplikasiLebihLamaError(RuntimeError):
+    """
+    Database sudah dimigrasi oleh versi aplikasi yang lebih baru.
+
+    Tanpa galat tersendiri, Alembic hanya mengeluh "Can't locate revision"
+    dan petugas melihat "tidak dapat menghubungi database" — padahal
+    databasenya sehat dan yang perlu dilakukan hanyalah memperbarui aplikasi.
+    """
+
+    def __init__(self, revisi: str) -> None:
+        super().__init__(
+            f"Database berada pada revisi {revisi} yang tidak dikenal versi "
+            "aplikasi ini; aplikasi ini lebih lama daripada databasenya."
+        )
+        self.revisi = revisi
 
 
 def alembic_config() -> Config:
@@ -44,6 +63,14 @@ def is_up_to_date() -> bool:
     return current_revision() == head_revision()
 
 
+def _revisi_dikenal(revisi: str) -> bool:
+    """False bila folder migration aplikasi ini tidak punya revisi tersebut."""
+    try:
+        return ScriptDirectory.from_config(alembic_config()).get_revision(revisi) is not None
+    except (CommandError, ResolutionError):
+        return False
+
+
 def upgrade_to_head() -> None:
     """
     Naikkan skema database ke revisi terbaru.
@@ -53,6 +80,10 @@ def upgrade_to_head() -> None:
     if is_up_to_date():
         logger.debug("Skema database sudah terbaru (%s)", current_revision())
         return
+
+    sekarang = current_revision()
+    if sekarang is not None and not _revisi_dikenal(sekarang):
+        raise AplikasiLebihLamaError(sekarang)
 
     logger.info("Migrasi skema: %s -> %s", current_revision(), head_revision())
     command.upgrade(alembic_config(), "head")

@@ -41,7 +41,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import APP_NAME, get_config
+from app.core.config import get_config
+from app.core.identitas import NAMA_TAMPIL
 from app.core.mesin import (
     DATABASE_BAWAAN,
     KLIEN,
@@ -149,7 +150,7 @@ def _tiket_contoh() -> "TicketData":
     return TicketData(
         queue_number="UJI-000",
         category_name="Uji Cetak",
-        office_name=APP_NAME,
+        office_name=NAMA_TAMPIL,
         issued_at=clock.now(),
         footer="Tiket contoh untuk menguji pencetak. Bukan nomor antrian.",
     )
@@ -161,7 +162,7 @@ class SetupMesinDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("dialogMesin")
-        self.setWindowTitle(f"{APP_NAME} — Komputer ini")
+        self.setWindowTitle(f"{NAMA_TAMPIL} — Komputer ini")
         # Lebar dikunci supaya penjelasan yang dibungkus tidak berubah
         # tinggi setiap kali jendela ditarik. Tingginya mengikuti isi,
         # dan isi itu disusun dua kolom agar muat di layar loket yang pendek.

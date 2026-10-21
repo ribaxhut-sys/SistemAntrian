@@ -344,6 +344,52 @@ def test_penyegaran_otomatis_berjalan(qtbot, auth, antrian_siap, terbitkan):
     assert not halaman.pewaktu.isActive()
 
 
+def test_penyegaran_berkala_berjalan_di_utas_lain(qtbot, halaman_layar, monkeypatch):
+    """Kueri yang lambat tidak boleh menahan utas UI, dan hasilnya tetap tampil."""
+    import threading
+
+    utas_kueri: list[int] = []
+    asli = halaman_layar.queue.display_state
+
+    def display_state(*args, **kwargs):
+        utas_kueri.append(threading.get_ident())
+        return asli(*args, **kwargs)
+
+    monkeypatch.setattr(halaman_layar.queue, "display_state", display_state)
+    diterapkan: list[object] = []
+    asli_terapkan = halaman_layar._terapkan_keadaan
+    monkeypatch.setattr(
+        halaman_layar,
+        "_terapkan_keadaan",
+        lambda keadaan: (diterapkan.append(keadaan), asli_terapkan(keadaan)),
+    )
+
+    halaman_layar.muat_ulang_latar()
+    qtbot.waitUntil(lambda: bool(diterapkan), timeout=10000)
+
+    assert utas_kueri and utas_kueri[0] != threading.get_ident()
+    qtbot.waitUntil(lambda: halaman_layar._pekerja_data is None, timeout=10000)
+
+
+def test_penyegaran_berkala_gagal_tidak_membuka_dialog(
+    qtbot, halaman_layar, monkeypatch
+):
+    """Database putus: papan tetap hidup, tidak ada dialog galat di layar publik."""
+    from app.ui import common
+
+    dialog: list[object] = []
+    monkeypatch.setattr(common, "tampilkan_error", lambda *a, **k: dialog.append(a))
+
+    def putus(*args, **kwargs):
+        raise RuntimeError("database putus")
+
+    monkeypatch.setattr(halaman_layar.queue, "display_state", putus)
+    halaman_layar.muat_ulang_latar()
+    qtbot.waitUntil(lambda: halaman_layar._pekerja_data is None, timeout=10000)
+
+    assert dialog == []
+
+
 # ---------------------------------------------------------------------
 # Gaya tampilan
 # ---------------------------------------------------------------------

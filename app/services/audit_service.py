@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 import sqlalchemy as sa
@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import session_scope
 from app.core.logger import get_logger
-from app.models import AuditAction, AuditLog
+from app.models import AuditAction, AuditLog, User
 
 logger = get_logger("audit")
 
@@ -86,13 +86,24 @@ class AuditEntry:
         return self.username or "sistem"
 
 
-def list_terakhir(*, batas: int = 100, aksi: str | None = None) -> list[AuditEntry]:
+def list_terakhir(
+    *,
+    batas: int = 100,
+    aksi: str | None = None,
+    pelaku: str | None = None,
+    sejak: date | None = None,
+    sampai: date | None = None,
+) -> list[AuditEntry]:
     """
     Aktivitas terakhir, terbaru lebih dahulu.
 
     Tidak menuntut hak akses di sini karena audit log tidak pernah memuat
     kredensial — `record()` sudah menyaringnya. Pembatasan siapa yang boleh
     melihatnya dilakukan pemanggil, yaitu layar administrasi.
+
+    `pelaku` mencocokkan nama pengguna (tanpa membedakan huruf besar-kecil;
+    "sistem" berarti aktivitas tanpa pengguna). `sejak` dan `sampai` adalah
+    tanggal, keduanya termasuk.
     """
     with session_scope() as session:
         stmt = (
@@ -103,6 +114,22 @@ def list_terakhir(*, batas: int = 100, aksi: str | None = None) -> list[AuditEnt
         )
         if aksi is not None:
             stmt = stmt.where(AuditLog.action == aksi)
+        if pelaku:
+            nama = pelaku.strip().lower()
+            if nama == "sistem":
+                stmt = stmt.where(AuditLog.user_id.is_(None))
+            else:
+                stmt = stmt.where(
+                    AuditLog.user_id.in_(
+                        sa.select(User.id).where(sa.func.lower(User.username) == nama)
+                    )
+                )
+        if sejak is not None:
+            stmt = stmt.where(AuditLog.created_at >= datetime.combine(sejak, time.min))
+        if sampai is not None:
+            stmt = stmt.where(
+                AuditLog.created_at < datetime.combine(sampai + timedelta(days=1), time.min)
+            )
 
         return [
             AuditEntry(
@@ -116,3 +143,13 @@ def list_terakhir(*, batas: int = 100, aksi: str | None = None) -> list[AuditEnt
             )
             for row in session.scalars(stmt)
         ]
+
+
+def daftar_aksi() -> list[str]:
+    """Nama tindakan yang pernah tercatat, untuk pilihan filter."""
+    with session_scope() as session:
+        return list(
+            session.scalars(
+                sa.select(AuditLog.action).distinct().order_by(AuditLog.action)
+            )
+        )

@@ -78,10 +78,10 @@ def test_pengaturan_tersembunyi_tetap_dikenali_service(settings):
 # ---------------------------------------------------------------------
 
 def test_membaca_pengaturan_tidak_menuntut_hak_akses(auth, seeded):
-    """Judul layar dan teks tiket dibutuhkan hampir semua peran."""
+    """Teks tiket dibutuhkan hampir semua peran."""
     auth.logout()
 
-    assert SettingsService().get("display.title")
+    assert SettingsService().get("ticket.footer")
 
 
 def test_pengaturan_yang_belum_ada_memakai_bawaan(database):
@@ -99,9 +99,9 @@ def test_pengaturan_tidak_dikenal_ditolak(settings):
 # ---------------------------------------------------------------------
 
 def test_perubahan_tersimpan_dan_terbaca(settings):
-    settings.set("display.title", "ANTRIAN KANTOR PUSAT")
+    settings.set("ticket.footer", "TERIMA KASIH PUSAT")
 
-    assert settings.get("display.title") == "ANTRIAN KANTOR PUSAT"
+    assert settings.get("ticket.footer") == "TERIMA KASIH PUSAT"
 
 
 def test_perubahan_tercatat_di_audit(settings):
@@ -110,7 +110,7 @@ def test_perubahan_tercatat_di_audit(settings):
     from app.core.database import session_scope
     from app.models import AuditLog
 
-    settings.set("display.title", "JUDUL BARU")
+    settings.set("ticket.footer", "PENUTUP BARU")
 
     with session_scope() as session:
         aksi = list(
@@ -196,7 +196,7 @@ def test_retensi_nol_tetap_diterima(settings):
 
 def test_teks_kosong_ditolak(settings):
     with pytest.raises(ValidationError) as info:
-        settings.set("display.title", "   ")
+        settings.set("ticket.footer", "   ")
 
     assert "tidak boleh dikosongkan" in info.value.user_message
 
@@ -236,12 +236,12 @@ def test_hanya_admin_yang_boleh_mengubah_pengaturan(auth, users, peran):
     auth.login(peran, TEST_PASSWORD)
 
     with pytest.raises(AuthorizationError):
-        SettingsService(auth).set("display.title", "COBA")
+        SettingsService(auth).set("ticket.footer", "COBA")
 
 
 def test_tanpa_sesi_tidak_dapat_mengubah_pengaturan(seeded):
     with pytest.raises(NotFoundError):
-        SettingsService().set("display.title", "COBA")
+        SettingsService().set("ticket.footer", "COBA")
 
 
 def test_batas_angka_konsisten(settings):

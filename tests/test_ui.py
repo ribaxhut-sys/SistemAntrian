@@ -1764,6 +1764,150 @@ def test_pita_prioritas_tampil_pada_nomor_aktif(
     assert halaman_layanan.tombol_ubah_prioritas.isVisibleTo(halaman_layanan)
 
 
+def test_dialog_cabut_prioritas_bawaan_mengembalikan_ke_antrian(qtbot):
+    from datetime import date, datetime
+
+    from app.models import QueueStatus
+    from app.services.queue_service import QueueInfo
+    from app.ui.queue.dialog_cabut_prioritas import DialogCabutPrioritas
+
+    info = QueueInfo(
+        id=1, queue_number="A-001", sequence_number=1, queue_date=date.today(),
+        status=QueueStatus.CALLED, category_id=1, category_name="A",
+        category_prefix="A", counter_id=1, counter_name="Loket 1",
+        served_by_id=1, served_by_name="CRO", created_at=datetime.now(),
+        called_at=datetime.now(), serving_at=None, completed_at=None,
+        prioritas="PRIORITAS", prioritas_asal="MANDIRI",
+    )
+    dialog = DialogCabutPrioritas(None, info)
+    qtbot.addWidget(dialog)
+
+    assert dialog.kembalikan is True
+    assert dialog.alasan == "TIDAK_MEMENUHI_SYARAT"
+    dialog.pilihan_layani.setChecked(True)
+    assert dialog.kembalikan is False
+
+
+def test_cabut_prioritas_nomor_dipanggil_lewat_dialog_mengembalikan_nomor(
+    halaman_layanan, auth, antrian_siap, monkeypatch
+):
+    _terbit_mandiri(auth, antrian_siap, "tab-ui-3")
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+    halaman_layanan.panggil_berikutnya()
+    assert halaman_layanan.antrian.prioritas is not None
+
+    class DialogPalsu:
+        class DialogCode:
+            Accepted = 1
+
+        kembalikan = True
+        cetak_ulang = False
+        alasan = "TIDAK_MEMENUHI_SYARAT"
+
+        def __init__(self, *_):
+            pass
+
+        def exec(self):
+            return 1
+
+    monkeypatch.setattr(
+        "app.ui.queue.service_page.DialogCabutPrioritas", DialogPalsu
+    )
+    halaman_layanan._cabut_prioritas(halaman_layanan.antrian)
+
+    # Loket bebas lagi dan nomor kembali ke daftar menunggu sebagai nomor biasa.
+    assert halaman_layanan.antrian is None
+    assert halaman_layanan.tabel.rowCount() == 1
+    assert not halaman_layanan.tabel.item(0, 0).text().startswith("★")
+
+
+class _TiketPalsu:
+    """Mencatat nomor yang dicetak; tidak menyentuh printer."""
+
+    def __init__(self):
+        self.dicetak = []
+
+    def cetak(self, antrian):
+        from types import SimpleNamespace
+
+        self.dicetak.append(antrian)
+        return SimpleNamespace(berhasil=True, pesan="")
+
+
+def test_tombol_cetak_ulang_tiket_tersembunyi_tanpa_printer(
+    halaman_layanan, terbitkan, auth
+):
+    terbitkan("A", 1)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    halaman_layanan.muat_ulang()
+    halaman_layanan.panggil_berikutnya()
+
+    assert halaman_layanan.ticket is None
+    assert not halaman_layanan.tombol_cetak_ulang.isVisibleTo(halaman_layanan)
+
+
+def test_cetak_ulang_tiket_memakai_keadaan_terbaru_tanpa_prioritas(
+    halaman_layanan, auth, antrian_siap
+):
+    from app.services.queue_service import QueueService
+
+    _terbit_mandiri(auth, antrian_siap, "tab-ui-4")
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    tiket = _TiketPalsu()
+    halaman_layanan.ticket = tiket
+    halaman_layanan.muat_ulang()
+    halaman_layanan.panggil_berikutnya()
+    assert halaman_layanan.tombol_cetak_ulang.isVisibleTo(halaman_layanan)
+
+    # Prioritas dicabut di belakang layar; salinan di layar masih berprioritas.
+    QueueService(auth).cabut_prioritas(halaman_layanan.antrian.id)
+    assert halaman_layanan.antrian.prioritas is not None
+    halaman_layanan.tombol_cetak_ulang.click()
+
+    assert len(tiket.dicetak) == 1
+    assert tiket.dicetak[0].prioritas is None
+    assert halaman_layanan.label_cetak.text() == "Tiket tercetak."
+
+
+def test_cabut_lewat_dialog_dengan_centang_mencetak_ulang_nomor_yang_dikembalikan(
+    halaman_layanan, auth, antrian_siap, monkeypatch
+):
+    _terbit_mandiri(auth, antrian_siap, "tab-ui-5")
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    tiket = _TiketPalsu()
+    halaman_layanan.ticket = tiket
+    halaman_layanan.muat_ulang()
+    halaman_layanan.panggil_berikutnya()
+
+    class DialogPalsu:
+        class DialogCode:
+            Accepted = 1
+
+        kembalikan = True
+        cetak_ulang = True
+        alasan = "SALAH_PILIH"
+
+        def __init__(self, *_):
+            pass
+
+        def exec(self):
+            return 1
+
+    monkeypatch.setattr(
+        "app.ui.queue.service_page.DialogCabutPrioritas", DialogPalsu
+    )
+    halaman_layanan._cabut_prioritas(halaman_layanan.antrian)
+
+    assert len(tiket.dicetak) == 1
+    assert tiket.dicetak[0].prioritas is None
+    assert tiket.dicetak[0].status.value == "WAITING"
+
+
 def test_tabel_menyusut_setelah_dipanggil(halaman_layanan, terbitkan, auth):
     terbitkan("A", 3)
     auth.logout()
@@ -3430,3 +3574,16 @@ def test_layar_backup_menampilkan_status_gagal_dan_checksum(
 
     assert "GAGAL" in halaman.label_status.text()
     assert "tidak dapat ditulis" in halaman.label_status.text()
+
+
+def test_aplikasi_lebih_lama_daripada_database_tidak_dilaporkan_sebagai_koneksi(capsys):
+    """Pesannya menyuruh memperbarui aplikasi, bukan memeriksa jaringan/server."""
+    from app.main import _laporkan_aplikasi_lebih_lama
+
+    _laporkan_aplikasi_lebih_lama(berjendela=False)
+
+    pesan = capsys.readouterr().err
+    assert "versi aplikasi yang lebih baru" in pesan
+    assert "Pasang versi terbaru" in pesan
+    assert "jaringan" not in pesan
+    assert "menghubungi database" not in pesan

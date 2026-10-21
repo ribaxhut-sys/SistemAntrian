@@ -81,6 +81,9 @@ class PerangkatInfo:
     media_tersalin: int | None = None
     media_byte: int | None = None
     media_waktu: datetime | None = None
+    baterai_persen: int | None = None
+    baterai_mengisi: bool | None = None
+    baterai_waktu: datetime | None = None
 
     @property
     def teks_media(self) -> str:
@@ -133,6 +136,9 @@ def _info(baris: KioskDevice) -> PerangkatInfo:
         media_tersalin=baris.media_tersalin,
         media_byte=baris.media_byte,
         media_waktu=baris.media_waktu,
+        baterai_persen=baris.baterai_persen,
+        baterai_mengisi=baris.baterai_mengisi,
+        baterai_waktu=baris.baterai_waktu,
     )
 
 
@@ -306,6 +312,17 @@ def catat_printer(device_id: str, ok: bool, pesan: str = "") -> None:
         baris.printer_ok = bool(ok)
         baris.printer_pesan = (pesan or "")[:200]
         baris.printer_waktu = clock.now()
+
+
+def catat_baterai(device_id: str, persen: int, mengisi: bool) -> None:
+    """Tingkat baterai dari tablet (0-100) dan apakah sedang diisi."""
+    with session_scope() as session:
+        baris = session.scalar(sa.select(KioskDevice).where(KioskDevice.device_id == device_id))
+        if baris is None:
+            return
+        baris.baterai_persen = max(0, min(int(persen), 100))
+        baris.baterai_mengisi = bool(mengisi)
+        baris.baterai_waktu = clock.now()
 
 
 def catat_media(device_id: str, total: int, tersalin: int, byte: int = 0) -> None:

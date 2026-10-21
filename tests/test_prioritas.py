@@ -344,3 +344,102 @@ def test_pencabutan_prioritas_dicatat_di_audit(auth, antrian_siap):
             .where(AuditLog.action == AuditAction.CLEAR_PRIORITY.value)
         )
     assert jumlah == 1
+
+
+# ---------------------------------------------------------------------
+# Cabut prioritas dari nomor yang sudah dipanggil: kembalikan ke antrian
+# ---------------------------------------------------------------------
+
+
+def _mandiri_dipanggil(auth, antrian_siap, perangkat):
+    """Satu nomor biasa lalu satu nomor mandiri; mandiri dipanggil lebih dulu."""
+    biasa, = _terbit(auth, antrian_siap, [("A", None)])
+    layanan = _anjungan(auth)
+    mandiri = layanan.create_queue(
+        antrian_siap["kategori"]["A"], perangkat=perangkat, prioritas_mandiri=True
+    )
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    layanan = QueueService(auth)
+    loket = antrian_siap["loket"][0]
+    dipanggil = layanan.call_next(loket)
+    assert dipanggil.id == mandiri.id
+    return layanan, loket, biasa, mandiri
+
+
+def test_cabut_dan_kembalikan_membebaskan_loket(auth, antrian_siap):
+    layanan, loket, biasa, mandiri = _mandiri_dipanggil(auth, antrian_siap, "tab-k1")
+
+    hasil = layanan.cabut_prioritas(
+        mandiri.id, kembalikan=True, alasan="TIDAK_MEMENUHI_SYARAT"
+    )
+
+    assert hasil.prioritas is None
+    assert hasil.prioritas_asal is None
+    assert hasil.status.value == "WAITING"
+    assert hasil.counter_id is None
+    assert hasil.called_at is None
+    # Kembali ke urutan datang: yang lebih dulu datang tetap lebih dulu.
+    assert [q.queue_number for q in layanan.list_waiting()] == [
+        biasa.queue_number,
+        mandiri.queue_number,
+    ]
+    # Loket bebas: tombol "Panggil berikutnya" langsung dapat dipakai.
+    berikutnya = layanan.call_next(loket)
+    assert berikutnya.queue_number == biasa.queue_number
+
+
+def test_cabut_tanpa_kembalikan_nomor_tetap_dipanggil(auth, antrian_siap):
+    layanan, loket, _, mandiri = _mandiri_dipanggil(auth, antrian_siap, "tab-k2")
+
+    hasil = layanan.cabut_prioritas(mandiri.id, alasan="SALAH_PILIH")
+
+    assert hasil.prioritas is None
+    assert hasil.status.value == "CALLED"
+    assert hasil.counter_id == loket
+    # Loket masih memegang nomornya, jadi belum boleh memanggil yang lain.
+    with pytest.raises(BusinessRuleError):
+        layanan.call_next(loket)
+
+
+def test_nomor_yang_sudah_dilayani_tidak_dapat_dikembalikan(auth, antrian_siap):
+    layanan, _, _, mandiri = _mandiri_dipanggil(auth, antrian_siap, "tab-k3")
+    layanan.start_service(mandiri.id)
+
+    with pytest.raises(BusinessRuleError, match="belum dilayani"):
+        layanan.cabut_prioritas(mandiri.id, kembalikan=True, alasan="LAINNYA")
+
+    # Gagal seluruhnya: prioritas tidak ikut tercabut.
+    assert layanan.get_queue(mandiri.id).prioritas == "PRIORITAS"
+
+
+def test_alasan_pencabutan_tidak_dikenal_ditolak(auth, antrian_siap):
+    layanan, _, _, mandiri = _mandiri_dipanggil(auth, antrian_siap, "tab-k4")
+
+    with pytest.raises(ValidationError):
+        layanan.cabut_prioritas(mandiri.id, kembalikan=True, alasan="ASAL")
+
+
+def test_kembalikan_dicatat_di_audit_dengan_alasan(auth, antrian_siap):
+    import json
+
+    import sqlalchemy as sa
+
+    from app.core.database import session_scope
+    from app.models import AuditAction
+    from app.models.audit_log import AuditLog
+
+    layanan, _, _, mandiri = _mandiri_dipanggil(auth, antrian_siap, "tab-k5")
+    layanan.cabut_prioritas(mandiri.id, kembalikan=True, alasan="TIDAK_MEMENUHI_SYARAT")
+
+    with session_scope() as s:
+        baris = s.scalars(
+            sa.select(AuditLog).where(
+                AuditLog.action == AuditAction.CLEAR_PRIORITY.value
+            )
+        ).all()
+    assert len(baris) == 1
+    meta = json.loads(baris[0].meta)
+    assert meta["dikembalikan"] is True
+    assert meta["alasan_cabut"] == "TIDAK_MEMENUHI_SYARAT"
+    assert meta["asal"] == "MANDIRI"

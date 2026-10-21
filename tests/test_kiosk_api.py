@@ -296,7 +296,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
     assert abs(isi.pop("server_time_ms") - time.time() * 1000) < 5000
     assert len(isi.pop("categories_version")) == 16
     assert isi == {
-        "title": "KANTOR PELAYANAN",
+        "title": "Sistem Antrian CRO - Bapenda DKI Jakarta",
         "subtitle": "",
         "welcome_text": "Selamat datang",
         "welcome_kind": "teks",
@@ -367,7 +367,7 @@ def test_display_sends_counter_position(tersimpan, dikirim):
     assert isi["counter_position"] == dikirim
 
 
-def test_display_memakai_judul_anjungan_sendiri():
+def test_display_selalu_memakai_identitas_tetap():
     from app.kiosk_api import create_app
 
     services = _Services()
@@ -378,7 +378,7 @@ def test_display_memakai_judul_anjungan_sendiri():
         "/v1/kiosk/display", headers={"Authorization": f"Bearer {TOKEN}"}
     ).json()
 
-    assert isi["title"] == "Selamat datang di Bapenda"
+    assert isi["title"] == "Sistem Antrian CRO - Bapenda DKI Jakarta"
     assert isi["subtitle"] == "UPPRD Menteng · 08.00–15.00"
 
 
@@ -771,6 +771,21 @@ def test_media_status_diterima_tanpa_mengganggu_tablet():
 
     assert ok.status_code == 200 and ok.json() == {"status": "ok"}
     assert salah.status_code == 422
+
+
+def test_laporan_baterai_diterima_dan_nilai_liar_ditolak():
+    from app.kiosk_api import create_app
+
+    client = TestClient(create_app(TOKEN, _Services()))
+    headers = {"Authorization": f"Bearer {TOKEN}", **VERSI_APK}
+
+    ok = client.post(
+        "/v1/kiosk/baterai", headers=headers, json={"percent": 55, "charging": True}
+    )
+    liar = client.post("/v1/kiosk/baterai", headers=headers, json={"percent": 500})
+
+    assert ok.status_code == 200 and ok.json() == {"status": "ok"}
+    assert liar.status_code == 422
 
 
 def test_pustaka_media_memuat_semua_berkas_bukan_hanya_daftar_putar(
