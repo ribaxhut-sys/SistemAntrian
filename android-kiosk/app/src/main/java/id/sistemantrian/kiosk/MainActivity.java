@@ -480,6 +480,7 @@ public final class MainActivity extends Activity {
     private static final String VERSI_PAKET_SUARA = "sound_pack_version";
     private static final String TOKEN_JEDA = "_jeda";
     private static final long SELANG_PANGGILAN_MS = 2000L;
+    private static final long SELANG_CETAK_ULANG_MS = 3000L;
     private static final long COBA_PAKET_LAGI_MS = 120_000L;
     /**
      * Panggilan yang lebih tua dari ini tidak diucapkan lagi: tablet yang
@@ -1035,6 +1036,7 @@ public final class MainActivity extends Activity {
         handler.postDelayed(displayRefresh, 5000);
         muatPaketSuara();
         handler.post(pollingPanggilan);
+        handler.postDelayed(pollingCetakUlang, SELANG_CETAK_ULANG_MS);
         handler.removeCallbacks(waitingPageRotation);
         handler.postDelayed(waitingPageRotation, LAMA_HALAMAN_MENUNGGU_MS);
         handler.removeCallbacks(kirimLaporanTayang);
@@ -3801,13 +3803,7 @@ public final class MainActivity extends Activity {
                     sorotDitunjukkan = false;
                     showResult(number, issued == null ? "" : issued.name);
                     updateAvailability();
-                    UsbEscPosPrinter.print(this, number, receipt, layout, raster, message -> {
-                        boolean printed = message.contains("tercetak");
-                        reportPrinter(printed, message);
-                        if (hint != null && showingResult) {
-                            setHint(message, printed ? "hasil" : "gagal");
-                        }
-                    });
+                    cetakTiketPengunjung(number, receipt, layout, raster);
                     loadDisplay();
                 },
                 message -> {
@@ -3899,6 +3895,8 @@ public final class MainActivity extends Activity {
         LinearLayout result = new LinearLayout(this);
         result.setOrientation(LinearLayout.VERTICAL);
         result.setGravity(Gravity.CENTER);
+        kolomHasil = result;
+        tombolCetakUlang = null;
         LinearLayout tiket = new LinearLayout(this);
         tiket.setOrientation(LinearLayout.VERTICAL);
         tiket.setGravity(Gravity.CENTER);
@@ -3949,6 +3947,48 @@ public final class MainActivity extends Activity {
         setHint("Nomor sudah terbit. Tiket sedang dicetak…", "hasil");
         handler.removeCallbacks(resultTimeout);
         handler.postDelayed(resultTimeout, LAMA_HASIL_MS);
+    }
+
+    /** Kolom hasil yang sedang tampil; tombol Cetak ulang ditambahkan ke sini bila cetak gagal. */
+    private LinearLayout kolomHasil;
+    private View tombolCetakUlang;
+    private static final long LAMA_HASIL_GAGAL_CETAK_MS = 45_000L;
+
+    /**
+     * Cetak tiket pengunjung. Bila gagal (kertas habis, kertas macet, kabel
+     * lepas), nomor tetap sah: pengunjung diberi saran dan tombol Cetak ulang,
+     * dan layar hasil bertahan lebih lama supaya ia sempat mencatat nomornya.
+     */
+    private void cetakTiketPengunjung(String number, List<String> receipt,
+                                      JSONObject layout, JSONObject raster) {
+        UsbEscPosPrinter.print(this, number, receipt, layout, raster, message -> {
+            boolean printed = message.contains("tercetak");
+            reportPrinter(printed, message);
+            if (!showingResult || hint == null) return;
+            if (printed) {
+                setHint(message, "hasil");
+                if (tombolCetakUlang != null && kolomHasil != null) {
+                    kolomHasil.removeView(tombolCetakUlang);
+                    tombolCetakUlang = null;
+                }
+                return;
+            }
+            setHint("Tiket belum tercetak (mungkin kertas habis). Sentuh Cetak ulang, "
+                    + "atau catat nomor Anda dan sampaikan ke petugas.", "gagal");
+            if (kolomHasil != null && tombolCetakUlang == null) {
+                Button ulang = actionButton("Cetak ulang tiket", true);
+                ulang.setOnClickListener(v -> {
+                    v.setEnabled(false);
+                    setHint("Mencetak ulang tiket…", "tunggu");
+                    cetakTiketPengunjung(number, receipt, layout, raster);
+                    handler.postDelayed(() -> v.setEnabled(true), 3000);
+                });
+                tombolCetakUlang = ulang;
+                kolomHasil.addView(ulang, new LinearLayout.LayoutParams(-1, dp(56)));
+            }
+            handler.removeCallbacks(resultTimeout);
+            handler.postDelayed(resultTimeout, LAMA_HASIL_GAGAL_CETAK_MS);
+        });
     }
 
     private final Runnable resultTimeout = () -> {
@@ -4135,6 +4175,62 @@ public final class MainActivity extends Activity {
         if (kilauAjakan != null) kilauAjakan.aturPosisi(-1f);
     }
 
+
+    // =================================================================
+    // Cetak ulang tiket atas permintaan petugas
+    // =================================================================
+
+    private boolean cetakUlangDiminta;
+
+    /**
+     * Tanya server tiap beberapa detik apakah petugas meminta tiket dicetak
+     * ulang di tablet ini (mis. sesudah prioritas dicabut). Server hanya
+     * mengirim tiap perintah sekali, jadi tidak ada cetak ganda; hasilnya
+     * dilaporkan balik. Tidak menyentuh layar pengunjung.
+     */
+    private final Runnable pollingCetakUlang = new Runnable() {
+        @Override
+        public void run() {
+            handler.postDelayed(this, SELANG_CETAK_ULANG_MS);
+            if (!hasServerConfig() || cetakUlangDiminta) return;
+            cetakUlangDiminta = true;
+            request(pemanggil, "GET", "/v1/kiosk/cetak-ulang", null, json -> {
+                cetakUlangDiminta = false;
+                JSONArray tugas = json.getJSONObject("data").optJSONArray("jobs");
+                if (tugas == null) return;
+                for (int i = 0; i < tugas.length(); i++) {
+                    JSONObject tugasIni = tugas.optJSONObject(i);
+                    if (tugasIni != null) cetakUlangTiket(tugasIni);
+                }
+            }, message -> cetakUlangDiminta = false);
+        }
+    };
+
+    private void cetakUlangTiket(JSONObject tugas) {
+        final long id = tugas.optLong("id", -1);
+        if (id < 0) return;
+        String nomor = tugas.optString("queue_number", "");
+        List<String> baris = new ArrayList<>();
+        JSONArray teks = tugas.optJSONArray("ticket_lines");
+        if (teks != null) {
+            for (int i = 0; i < teks.length(); i++) baris.add(teks.optString(i));
+        }
+        UsbEscPosPrinter.print(this, nomor, baris,
+                tugas.optJSONObject("ticket_layout"), tugas.optJSONObject("ticket_raster"),
+                message -> {
+                    boolean tercetak = message.contains("tercetak");
+                    try {
+                        JSONObject hasil = new JSONObject()
+                                .put("ok", tercetak)
+                                .put("message", message.length() > 190
+                                        ? message.substring(0, 190) : message);
+                        request(pemanggil, "POST", "/v1/kiosk/cetak-ulang/" + id + "/hasil",
+                                hasil, json -> { }, error -> { });
+                    } catch (Exception ignored) {
+                        // Laporan hasil hanya keterangan bagi petugas.
+                    }
+                });
+    }
 
     // =================================================================
     // Suara panggilan

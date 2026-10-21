@@ -10,7 +10,12 @@ from app.models.base import Base
 from app.models.branch import Branch
 from app.models.counter import Counter
 from app.models.enums import AuditAction, QueueStatus, RecordStatus, UserRole
-from app.models.kiosk_device import KioskDevice, KioskPairingCode, KioskTicketRequest
+from app.models.kiosk_device import (
+    KioskCetakUlang,
+    KioskDevice,
+    KioskPairingCode,
+    KioskTicketRequest,
+)
 from app.models.media_tayang import KioskMediaTayang
 from app.models.queue import Queue, QueueSequence
 from app.models.queue_call import QueueCall
@@ -28,6 +33,7 @@ __all__ = [
     "Base",
     "Branch",
     "Counter",
+    "KioskCetakUlang",
     "KioskDevice",
     "KioskMediaTayang",
     "KioskPairingCode",

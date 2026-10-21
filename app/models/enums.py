@@ -135,6 +135,8 @@ class AuditAction(str, Enum):
     DELETE_USER = "DELETE_USER"
     ARCHIVE_USER = "ARCHIVE_USER"
     CLEAR_PRIORITY = "CLEAR_PRIORITY"
+    #: Petugas meminta tiket dicetak ulang di anjungan asalnya.
+    REPRINT_TICKET_KIOSK = "REPRINT_TICKET_KIOSK"
     WINDOWS_UPDATE_RESULT = "WINDOWS_UPDATE_RESULT"
     #: PC Windows yang membuka aplikasi dan menanyakan pembaruan; dipakai
     #: Kesehatan Sistem untuk melihat PC yang belum login dengan versi baru.

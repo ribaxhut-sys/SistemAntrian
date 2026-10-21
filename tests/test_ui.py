@@ -1804,6 +1804,7 @@ def test_cabut_prioritas_nomor_dipanggil_lewat_dialog_mengembalikan_nomor(
 
         kembalikan = True
         cetak_ulang = False
+        cetak_ulang_anjungan = False
         alasan = "TIDAK_MEMENUHI_SYARAT"
 
         def __init__(self, *_):
@@ -1890,6 +1891,7 @@ def test_cabut_lewat_dialog_dengan_centang_mencetak_ulang_nomor_yang_dikembalika
 
         kembalikan = True
         cetak_ulang = True
+        cetak_ulang_anjungan = False
         alasan = "SALAH_PILIH"
 
         def __init__(self, *_):

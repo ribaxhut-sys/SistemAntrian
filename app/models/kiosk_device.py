@@ -112,3 +112,34 @@ class KioskTicketRequest(TimestampMixin, Base):
     queue_id: Mapped[int] = mapped_column(
         sa.ForeignKey("queue.id", ondelete="CASCADE"), nullable=False, index=True
     )
+
+
+class KioskCetakUlang(TimestampMixin, Base):
+    """
+    Perintah cetak ulang tiket di anjungan tempat nomor itu diambil.
+
+    Petugas loket dan tablet anjungan adalah dua perangkat berbeda yang hanya
+    bertemu di database, jadi perintahnya diantrikan di sini dan diambil
+    tablet pada penyegaran berikutnya. Isi tiket TIDAK disimpan: disusun saat
+    tablet mengambilnya, supaya mengikuti keadaan nomor saat itu (misalnya
+    prioritas yang baru dicabut).
+
+    Status: MENUNGGU (belum diambil tablet), DIAMBIL (sudah dikirim ke tablet,
+    hasil cetak belum dilaporkan), SELESAI, GAGAL, KEDALUWARSA (tablet tidak
+    mengambilnya tepat waktu; pengunjung kemungkinan sudah pergi).
+    """
+
+    __tablename__ = "kiosk_cetak_ulang"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    queue_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("queue.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    diminta_oleh_user_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("app_user.id", ondelete="SET NULL")
+    )
+    status: Mapped[str] = mapped_column(sa.String(16), nullable=False, default="MENUNGGU")
+    diambil_pada: Mapped[datetime | None] = mapped_column(sa.DateTime)
+    selesai_pada: Mapped[datetime | None] = mapped_column(sa.DateTime)
+    pesan: Mapped[str | None] = mapped_column(sa.String(200))

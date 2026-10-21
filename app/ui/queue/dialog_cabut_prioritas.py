@@ -26,7 +26,12 @@ class DialogCabutPrioritas(QDialog):
     nomor biasa. Alasan pencabutan wajib dan dicatat di audit.
     """
 
-    def __init__(self, parent: QWidget | None, antrian: QueueInfo) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None,
+        antrian: QueueInfo,
+        anjungan: str | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Cabut prioritas")
         self.setMinimumWidth(460)
@@ -69,6 +74,27 @@ class DialogCabutPrioritas(QDialog):
         self.kotak_cetak_ulang.setChecked(True)
         susunan.addWidget(self.kotak_cetak_ulang)
 
+        # Tiketnya keluar di anjungan tempat nomor diambil, bukan di printer
+        # PC ini. Tanpa anjungan yang dapat dihubungi, pilihannya dimatikan.
+        self.kotak_cetak_anjungan = QCheckBox(
+            f"Cetak ulang di anjungan tiket ({anjungan})"
+            if anjungan
+            else "Cetak ulang di anjungan tiket"
+        )
+        self.kotak_cetak_anjungan.setEnabled(anjungan is not None)
+        if anjungan is None:
+            self.kotak_cetak_anjungan.setToolTip(
+                "Nomor ini tidak berasal dari anjungan yang dapat dihubungi."
+            )
+        susunan.addWidget(self.kotak_cetak_anjungan)
+        if anjungan is not None:
+            susunan.addWidget(
+                keterangan(
+                    "Saran: bila kertas anjungan habis atau tabletnya mati, "
+                    "centang cetak di printer PC ini saja."
+                )
+            )
+
         baris = QHBoxLayout()
         baris.addStretch()
         batal = tombol("Batal")
@@ -86,6 +112,10 @@ class DialogCabutPrioritas(QDialog):
     @property
     def cetak_ulang(self) -> bool:
         return self.kotak_cetak_ulang.isChecked()
+
+    @property
+    def cetak_ulang_anjungan(self) -> bool:
+        return self.kotak_cetak_anjungan.isEnabled() and self.kotak_cetak_anjungan.isChecked()
 
     @property
     def alasan(self) -> str:

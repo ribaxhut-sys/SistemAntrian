@@ -52,7 +52,7 @@ from app.services.pembaruan_windows import (
     folder_pembaruan,
     info_pembaruan,
 )
-from app.services import daftar_putar, pin_anjungan
+from app.services import cetak_ulang_anjungan, daftar_putar, pin_anjungan
 from app.services.auth_service import AuthService
 from app.services.master_data_service import MasterDataService
 from app.services.paket_suara import folder_paket, info_paket, token_pengumuman
@@ -135,6 +135,11 @@ class PairRequest(BaseModel):
 
 
 class PrinterReport(BaseModel):
+    ok: bool
+    message: str = Field(default="", max_length=200)
+
+
+class HasilCetakUlang(BaseModel):
     ok: bool
     message: str = Field(default="", max_length=200)
 
@@ -1119,6 +1124,66 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
             "ticket_layout": tata_letak_tiket_anjungan(ticket),
             "ticket_raster": raster_tiket_anjungan(ticket),
         }
+
+    @app.get("/v1/kiosk/cetak-ulang")
+    def cetak_ulang_menunggu(
+        device_id: str = Depends(perangkat_terpercaya),  # noqa: B008
+    ):
+        """
+        Tiket yang diminta petugas dicetak ulang di tablet ini.
+
+        Hanya tablet berpasangan: token bersama mengisi X-Device-Id sendiri,
+        sehingga tidak boleh mengambil perintah milik tablet lain. Isi tiket
+        disusun sekarang dari keadaan nomor (prioritas yang sudah dicabut
+        tidak tercetak lagi). Perintah yang diambil tidak dikirim dua kali.
+        """
+        if not device_id:
+            return {"jobs": []}
+        tugas = []
+        for perintah_id, queue_id in cetak_ulang_anjungan.ambil_untuk_perangkat(device_id):
+            try:
+                info = services.queue.nomor_untuk_cetak_ulang(queue_id)
+                ticket = replace(services.ticket.susun(info), sisa_antrian=None)
+                raster = None
+                try:
+                    raster = raster_tiket_anjungan(ticket)
+                except Exception:
+                    logger.exception("Gambar tiket cetak ulang %s gagal", info.queue_number)
+                tugas.append(
+                    {
+                        "id": perintah_id,
+                        "queue_number": info.queue_number,
+                        "ticket_lines": ticket.baris_teks(),
+                        "ticket_layout": tata_letak_tiket_anjungan(ticket),
+                        "ticket_raster": raster,
+                    }
+                )
+            except Exception:
+                logger.exception("Perintah cetak ulang %s gagal disusun", perintah_id)
+                cetak_ulang_anjungan.catat_hasil(
+                    perintah_id, device_id, False, "Isi tiket gagal disusun di server."
+                )
+        return {"jobs": tugas}
+
+    @app.post("/v1/kiosk/cetak-ulang/{perintah_id}/hasil")
+    def cetak_ulang_hasil(
+        perintah_id: int,
+        hasil: HasilCetakUlang,
+        device_id: str = Depends(perangkat_terpercaya),  # noqa: B008
+    ):
+        """Hasil cetak satu perintah, dilaporkan tablet sesudah mencoba mencetak."""
+        if not device_id or not cetak_ulang_anjungan.catat_hasil(
+            perintah_id, device_id, hasil.ok, hasil.message
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Perintah tidak ditemukan."
+            )
+        if perangkat is not None:
+            try:
+                perangkat.catat_printer(device_id, hasil.ok, hasil.message)
+            except Exception:
+                logger.warning("Status printer %s gagal dicatat", device_id, exc_info=True)
+        return {"status": "ok"}
 
     @app.post("/v1/kiosk/restart-api")
     def restart_api(device_id: str = Depends(perangkat_terpercaya)):  # noqa: B008

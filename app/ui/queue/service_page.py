@@ -1691,23 +1691,72 @@ class ServicePage(QWidget):
         if target.status is QueueStatus.CALLED:
             # Pengunjung sudah di loket: petugas memilih mengembalikannya ke antrian
             # (loket bebas memanggil berikutnya) atau tetap melayaninya.
-            dialog = DialogCabutPrioritas(self, target)
+            try:
+                anjungan = self.queue.anjungan_penerbit(antrian_id)
+            except Exception:
+                anjungan = None
+            dialog = DialogCabutPrioritas(self, target, anjungan)
             if dialog.exec() != DialogCabutPrioritas.DialogCode.Accepted:
                 return
             kembalikan, alasan = dialog.kembalikan, dialog.alasan
             cetak = dialog.cetak_ulang and self.ticket is not None
-            self._jalankan(
-                lambda: self.queue.cabut_prioritas(
+            cetak_anjungan = dialog.cetak_ulang_anjungan
+
+            def aksi():
+                hasil = self.queue.cabut_prioritas(
                     antrian_id, kembalikan=kembalikan, alasan=alasan
-                ),
-                "Gagal mencabut prioritas",
-                setelah=(lambda hasil: self._cetak_ulang_tiket(hasil)) if cetak else None,
-            )
+                )
+                # Dicabut dulu: tiket di anjungan disusun dari keadaan terbaru.
+                # Kegagalan mengantrikan tidak membatalkan pencabutan.
+                pesan = None
+                if cetak_anjungan:
+                    try:
+                        nama = self.queue.minta_cetak_ulang_anjungan(antrian_id)
+                        pesan = f"Tiket dikirim ke {nama}; akan tercetak dalam beberapa detik."
+                    except Exception as exc:
+                        pesan = f"Prioritas dicabut, tetapi tiket di anjungan tidak dapat diminta: {exc}"
+                return hasil, pesan
+
+            def sesudah(keluaran):
+                hasil, pesan = keluaran
+                if cetak:
+                    self._cetak_ulang_tiket(hasil)
+                if pesan:
+                    self.label_cetak.setText(pesan)
+                    self.label_cetak.setVisible(True)
+                    if cetak_anjungan:
+                        self._periksa_cetak_anjungan_nanti(antrian_id)
+
+            self._jalankan(aksi, "Gagal mencabut prioritas", setelah=sesudah)
             return
         self._jalankan(
             lambda: self.queue.cabut_prioritas(antrian_id),
             "Gagal mencabut prioritas",
         )
+
+    def _periksa_cetak_anjungan_nanti(self, antrian_id: int) -> None:
+        """Beberapa detik sesudah meminta, tanyakan apakah tablet berhasil mencetak."""
+        self._antrian_cetak_anjungan = antrian_id
+        timer = getattr(self, "_timer_cetak_anjungan", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._tampilkan_saran_cetak_anjungan)
+            self._timer_cetak_anjungan = timer
+        timer.start(12000)
+
+    def _tampilkan_saran_cetak_anjungan(self) -> None:
+        berhasil, saran = jalankan_aman(
+            self,
+            lambda: self.queue.saran_cetak_ulang_anjungan(self._antrian_cetak_anjungan),
+            "Gagal memeriksa cetak di anjungan",
+        )
+        if berhasil and saran:
+            self.label_cetak.setText(saran)
+            self.label_cetak.setVisible(True)
+        elif berhasil:
+            self.label_cetak.setText("Tiket tercetak di anjungan.")
+            self.label_cetak.setVisible(True)
 
     def _cetak_ulang_tiket(self, target: QueueInfo | None) -> None:
         """
@@ -1729,7 +1778,14 @@ class ServicePage(QWidget):
             return
         # Pesan pencetaknya sendiri: mesin tanpa printer menjawab "Printer tidak digunakan."
         # dan tidak boleh tampak seolah tiketnya tercetak.
-        self.label_cetak.setText(hasil.pesan or ("Tiket tercetak." if hasil.berhasil else "Gagal mencetak."))
+        if hasil.berhasil:
+            self.label_cetak.setText(hasil.pesan or "Tiket tercetak.")
+        else:
+            self.label_cetak.setText(
+                (hasil.pesan or "Gagal mencetak.")
+                + " Periksa kertas dan kabel printer, lalu klik Cetak ulang tiket; "
+                "atau minta cetak di anjungan lewat Cabut prioritas."
+            )
         self.label_cetak.setVisible(True)
 
     def _saring_menunggu(self, _kategori_id=None) -> None:

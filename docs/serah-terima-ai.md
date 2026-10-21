@@ -28,6 +28,25 @@ signature harus diverifikasi ulang terhadap EXE final sebelum publikasi.
 Pemasangan PC bersih, uji APK/layar pada perangkat nyata, Maxtor, DPI
 125/150%, dan uji lima loket tetap belum terbukti.
 
+**Cetak ulang tiket di anjungan + saran bila cetak gagal (21 Oktober 2026, Claude):**
+dialog Cabut prioritas punya opsi **Cetak ulang di anjungan tiket** (mati bila nomor
+bukan dari anjungan berpasangan). Antrean perintah ada di tabel baru
+`kiosk_cetak_ulang` (migrasi **`b8d4e1f6a923`**, head baru; **database kerja `antrian`
+belum dimigrasi**, backup dulu). Petugas: `QueueService.minta_cetak_ulang_anjungan`
+(audit `REPRINT_TICKET_KIOSK`) dan `saran_cetak_ulang_anjungan`; tablet:
+`GET /v1/kiosk/cetak-ulang` (perintah dikirim sekali, kedaluwarsa 10 menit, hanya token
+perangkat berpasangan) dan `POST /v1/kiosk/cetak-ulang/{id}/hasil`; logika di
+`app/services/cetak_ulang_anjungan.py`. Isi tiket disusun saat tablet mengambil, jadi
+tanpa tanda prioritas. Android (`MainActivity`): polling 3 detik; bila tiket pengunjung
+gagal tercetak (mis. kertas habis) muncul saran + tombol **Cetak ulang tiket**, layar
+hasil bertahan 45 dtk. Windows: 12 dtk sesudah meminta, label menampilkan hasil/saran
+(gagal, belum dijawab, kedaluwarsa); kegagalan cetak PC juga memberi saran. Tes baru
+`tests/test_cetak_ulang_anjungan.py` (8), tes terarah dan lint lulus; suite penuh belum.
+**Perhatian:** menjalankan `build-android-kiosk.ps1` MENIMPA `apk\` (anjungan 2.5.4 kode 58
+kini memuat fitur ini, tanpa kenaikan versi, tanpa cadangan APK sebelumnya); tablet
+berkode 58 tidak memperbarui diri. API server harus dimulai ulang. Belum diuji di
+perangkat/BlueStacks.
+
 **Layar antrian tema Bening (21 Oktober 2026, Claude):** tampilan layar
 Android didesain ulang dan diberi nama **Bening** (lihat bagian "Tema Bening"
 di [layar-antrian.md](layar-antrian.md)): latar putih, strip loket tegak

@@ -47,7 +47,7 @@ from app.models.enums import (
     LABEL_PRIORITAS,
     AlasanPrioritas,
 )
-from app.services import audit_service
+from app.services import audit_service, cetak_ulang_anjungan
 from app.services.urutan_prioritas import MODE_OTOMATIS, MODE_SAH, susun
 from app.services.auth_service import AuthService
 from app.services.note_service import PESAN_CATATAN_KURANG, catatan_memadai
@@ -1470,6 +1470,99 @@ class QueueService:
                 ", dikembalikan ke antrian" if kembalikan else "",
             )
             return _as_info(antrian, repo.jumlah_pemanggilan(antrian.id))
+
+    def nomor_untuk_cetak_ulang(self, queue_id: int) -> QueueInfo:
+        """
+        Keadaan nomor untuk tiket yang dicetak ulang tablet anjungan.
+
+        Dipakai sesi kios (hak TICKET_PRINT), yang sengaja tidak boleh
+        membaca antrian secara umum; hanya satu nomor yang diminta petugas.
+        """
+        self.auth.require_permission(Permission.TICKET_PRINT)
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            return _as_info(
+                self._ambil(repo, queue_id),
+                0,
+                self.batas_panggilan(),
+            )
+
+    def anjungan_penerbit(self, queue_id: int) -> str | None:
+        """Nama anjungan yang menerbitkan nomor ini, None bila tidak dapat ditunjuk."""
+        self.auth.require_permission(Permission.QUEUE_VIEW)
+        penerbit = cetak_ulang_anjungan.perangkat_penerbit(queue_id)
+        return (penerbit[1] or "Anjungan") if penerbit else None
+
+    def saran_cetak_ulang_anjungan(self, queue_id: int) -> str | None:
+        """
+        Saran untuk petugas bila cetak ulang di anjungan belum berhasil.
+
+        None bila tiket sudah tercetak atau tidak ada permintaan. Dibaca
+        petugas beberapa detik sesudah meminta, ketika tablet sudah (atau
+        belum) menjawab.
+        """
+        self.auth.require_permission(Permission.QUEUE_VIEW)
+        keadaan = cetak_ulang_anjungan.status_terakhir(queue_id)
+        if keadaan is None or keadaan[0] == cetak_ulang_anjungan.SELESAI:
+            return None
+        status, pesan = keadaan
+        if status == cetak_ulang_anjungan.GAGAL:
+            return (
+                f"Tiket gagal dicetak di anjungan ({pesan or 'sebab tidak diketahui'}). "
+                "Periksa kertas dan kabel printer anjungan, atau gunakan "
+                "'Cetak ulang tiket' untuk mencetak di printer PC ini."
+            )
+        if status == cetak_ulang_anjungan.KEDALUWARSA:
+            return (
+                "Anjungan tidak mengambil perintah cetak. Pastikan tablet menyala "
+                "dan tersambung ke jaringan, atau cetak di printer PC ini."
+            )
+        return (
+            "Anjungan belum menjawab. Bila tiket tidak keluar, periksa tablet "
+            "dan printernya, atau cetak di printer PC ini."
+        )
+
+    def minta_cetak_ulang_anjungan(self, queue_id: int) -> str:
+        """
+        Minta tiket nomor ini dicetak ulang di anjungan tempat ia diambil.
+
+        Perintah diantrikan; tablet mengambilnya pada penyegaran berikutnya
+        (beberapa detik) dan mencetak tiket dari keadaan nomor SAAT ITU.
+        Mengembalikan nama anjungan tujuan.
+        """
+        sesi = self.auth.require_permission(Permission.QUEUE_CALL)
+        penerbit = cetak_ulang_anjungan.perangkat_penerbit(queue_id)
+        if penerbit is None:
+            raise BusinessRuleError(
+                "Nomor ini tidak berasal dari anjungan yang dapat dihubungi "
+                "(diterbitkan dari Windows, atau anjungannya sudah dicabut)."
+            )
+        device_id, nama = penerbit
+        with session_scope() as session:
+            repo = QueueRepository(session)
+            antrian = self._ambil(repo, queue_id)
+            if antrian.branch_id != sesi.branch_id:
+                raise NotFoundError("Antrian tidak ditemukan.")
+            if antrian.status.is_final:
+                raise BusinessRuleError(
+                    f"{antrian.queue_number} sudah selesai; tiketnya tidak "
+                    "perlu dicetak ulang."
+                )
+            perintah = cetak_ulang_anjungan.antrikan(
+                session, queue_id, device_id, sesi.user_id
+            )
+            audit_service.record(
+                session,
+                AuditAction.REPRINT_TICKET_KIOSK,
+                user_id=sesi.user_id,
+                entity_type="queue",
+                entity_id=antrian.id,
+                nomor=antrian.queue_number,
+                perangkat=nama,
+                perintah_id=perintah.id,
+            )
+            logger.info("Cetak ulang %s diminta ke anjungan %s", antrian.queue_number, nama)
+        return nama or "Anjungan"
 
     def recall(self, queue_id: int) -> QueueInfo:
         """
