@@ -16,7 +16,37 @@ jebakan; bagian riwayat commit-nya sudah lama), [istilah.md](istilah.md),
 [layar-antrian.md](layar-antrian.md), [prioritas-antrian.md](prioritas-antrian.md),
 [keamanan-sesi.md](keamanan-sesi.md).
 
-Terakhir diperbarui: **20 Oktober 2026**, oleh Claude.
+Terakhir diperbarui: **21 Oktober 2026**, oleh Codex.
+
+**Audit produksi 21 Oktober 2026 (Codex):** keputusan **belum siap
+produksi**. `ruff check app tests alembic alat` bersih. Tes terarah yang
+dijalankan menghasilkan **341 lulus, 3 dilewati, 1 gagal setup** karena
+`antrian_uji` mengalami timeout koneksi PostgreSQL pada satu tes layar; ini
+perlu diulang setelah database uji pulih. Artefak `dist` saat ini bertanggal
+20 Oktober 20:48, sedangkan tanda tangan pembaruan bertanggal 20:13, jadi
+signature harus diverifikasi ulang terhadap EXE final sebelum publikasi.
+Pemasangan PC bersih, uji APK/layar pada perangkat nyata, Maxtor, DPI
+125/150%, dan uji lima loket tetap belum terbukti.
+
+**Layar antrian tema Bening (21 Oktober 2026, Claude):** tampilan layar
+Android didesain ulang dan diberi nama **Bening** (lihat bagian "Tema Bening"
+di [layar-antrian.md](layar-antrian.md)): latar putih, strip loket tegak
+dengan status di ujung kanan, 3 nomor "AKAN DIPANGGIL" dipisah di atas daftar
+"MENUNGGU" (10 baris, halaman bergantian 8 detik), kedip saat memanggil, bulan
+penuh. Server: batas `?next=` naik ke 300 dan `/v1/layar/state` mengirim
+`service_labels` (belum dipakai layar). Tes `tests/test_device_service.py`
+lulus (48) di PostgreSQL uji. APK debug
+`android-kiosk/layar/build/outputs/apk/debug/layar-debug.apk` belum
+dilihat di BlueStacks (ADB `error: closed`; seret manual) dan versi layar tidak
+dinaikkan, jadi rilis ke `apk\` menunggu keputusan pemilik. Server kerja sudah
+dimulai ulang agar batas baru berlaku.
+
+**Audit ulang 21 Oktober 2026 (Codex):** `ruff check app tests alembic alat`
+tetap bersih. Tes terarah identitas, migrasi, pembaruan Windows, API
+anjungan, dan layar: **242 lulus, 0 gagal** (database `antrian_uji` kembali
+normal). Keputusan tetap **belum siap produksi** karena signature harus
+diverifikasi ulang terhadap EXE final dan validasi PC/perangkat nyata belum
+selesai.
 
 **Peningkatan layar antrian (20 Oktober 2026, Claude, cabang `fitur/identitas-bapenda`):**
 penyegaran berkala `DisplayPage` kini lewat `muat_ulang_latar` (`PekerjaLatar`,
@@ -713,6 +743,8 @@ menyeret APK ke jendela BlueStacks. Tangkapan layar:
 | 2026-10-20 | Claude | Backup penuh, build installer bertes lulus (2030 lulus, kode keluar 0), dugaan bottleneck layar antrian (bagian atas). |
 | 2026-10-19 | Claude | Audit kesiapan produksi: keluar aplikasi untuk peran tanpa QUEUE_CALL, akses admin ke Pelayanan Aktif, ambil alih tidak merebut dari pemilik yang masih hadir, 24 tes baru (lihat bagian atas). Status Siap staging/UAT. |
 | 2026-10-20 | Codex | Audit ulang: lint bersih dan 117 tes terarah lulus; status tetap Siap staging/UAT, dengan build installer tanpa `-SkipTests` dan validasi perangkat/PC bersih sebagai sisa risiko. |
+| 2026-10-21 | Codex | Audit produksi: lint bersih; tes terarah 341 lulus, 3 dilewati, 1 gagal setup karena timeout PostgreSQL `antrian_uji`. Artefak EXE lebih baru daripada signature yang ada; status tetap belum siap produksi sampai signature diverifikasi ulang dan validasi perangkat/PC selesai. |
+| 2026-10-21 | Codex | Audit ulang: lint bersih dan 242 tes terarah lulus setelah database uji pulih; status tetap belum siap produksi karena signature/validasi perangkat dan PC bersih belum selesai. |
 
 Saat menutup sesi: perbarui bagian 3 (keadaan, commit, versi), 6 (belum
 selesai), dan tabel di atas.

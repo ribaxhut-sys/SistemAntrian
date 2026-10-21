@@ -115,13 +115,15 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private static final String ACTION_INSTALL_STATUS = "id.sistemantrian.layar.INSTALL_STATUS";
     private static final String JEDA = "_jeda";
 
-    private static final int BG_TOP = Color.rgb(7, 20, 34);
-    private static final int BG_BOTTOM = Color.rgb(11, 42, 74);
+    // Tema Bening (latar putih, aksen teal); lihat docs/layar-antrian.md.
+    private static final int BG_TOP = Color.WHITE;
+    private static final int BG_BOTTOM = Color.WHITE;
     private static final int TEAL = Color.rgb(15, 118, 110);
-    private static final int ACCENT = Color.rgb(34, 211, 238);
+    private static final int ACCENT = Color.rgb(8, 145, 178);
     private static final int INK = Color.rgb(15, 23, 42);
-    private static final int MUTED = Color.rgb(148, 163, 184);
-    private static final int LIGHT = Color.rgb(226, 232, 240);
+    private static final int MUTED = Color.rgb(100, 116, 139);
+    private static final int LIGHT = Color.rgb(51, 65, 85);
+    private static final int GARIS = Color.rgb(203, 213, 225);
     private static final int AMBER = Color.rgb(180, 83, 9);
 
     private static final long STATE_INTERVAL_MS = 2000;
@@ -140,10 +142,21 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     // Daftar "Berikutnya": paling banyak 12 nomor, maksimal 45% tinggi papan,
     // dan kartu loket tidak pernah lebih pendek dari 1/8 tinggi layar.
-    private static final int NEXT_MAX = 12;
-    private static final float NEXT_SHARE_MAX = 0.45f;
-    private static final int CARD_MIN_FRACTION = 8;
+    /** Baris nomor "Berikutnya" yang selalu disediakan; huruf menyesuaikan tinggi layar. */
+    private static final int NEXT_BARIS = 10;
+    private static final int NEXT_MAX = 300;
+    /** Lama satu halaman nomor menunggu sebelum berganti, bila nomornya lebih dari satu halaman. */
+    private static final long HALAMAN_MS = 8000;
+    /** Tinggi strip loket pada layar tegak. */
+    private static final int CARD_TEGAK_DP = 84;
+    /** Lebar kolom status di ujung kanan kartu loket. */
+    private static final int STATUS_KOLOM_DP = 112;
     private static final float NEXT_SP = 34;
+    /** Nomor teratas yang dipisah di atas daftar: yang akan dipanggil berikutnya. */
+    private static final int AKAN_JUMLAH = 3;
+    /** Tinggi bagian "AKAN DIPANGGIL" (label + pil) dan judul daftar, untuk hitungan baris. */
+    private static final int AKAN_DP = 84;
+    private static final float NEXT_SP_MIN = 16;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newFixedThreadPool(2);
@@ -151,6 +164,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private final ArrayDeque<JSONObject> speechQueue = new ArrayDeque<>();
     private final Map<String, LinearLayout> cardsByCounter = new HashMap<>();
     private final Map<String, Long> highlightUntil = new HashMap<>();
+    /** Denyut pil status loket yang sedang memanggil, per nama loket. */
+    private final Map<String, android.animation.ObjectAnimator> denyut = new HashMap<>();
     private final Map<String, String> packClips = new HashMap<>();
 
     private SharedPreferences preferences;
@@ -169,7 +184,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private GridLayout grid;
     private LinearLayout side;
     private TextView nextHeader;
+    private LinearLayout akanRow;
+    private TextView listHeader;
     private LinearLayout nextList;
+    private final NomorMenunggu[] akanPil = new NomorMenunggu[AKAN_JUMLAH];
     private TextView moreLabel;
     private TextView footerName;
     private TextView banner;
@@ -185,6 +203,12 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private long disconnectedSince;
     private String countersSignature = "";
     private int nextRowsShown = -1;
+    /** Ukuran huruf nomor "Berikutnya" saat ini (mengecil agar 10 baris muat). */
+    private float nextSp = NEXT_SP;
+    private float nextSpDibangun = -1;
+    /** Halaman nomor "Berikutnya" yang sedang tampil (mulai 0) dan jumlah halamannya. */
+    private int halaman = 0;
+    private int halamanTotal = 1;
     private int shiftStep;
     private boolean stateInFlight;
     private boolean callsInFlight;
@@ -244,6 +268,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             registerReceiver(installReceiver, installFilter);
         }
         handler.post(clockTick);
+        handler.postDelayed(putarHalaman, HALAMAN_MS);
         handler.postDelayed(burnInShift, 5 * 60 * 1000L);
         if (!isPaired()) {
             showBanner("Layar belum dipasangkan. Tahan judul 3 detik untuk membuka pengaturan.");
@@ -261,6 +286,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     @Override
     protected void onDestroy() {
+        for (android.animation.ObjectAnimator a : denyut.values()) a.cancel();
         handler.removeCallbacksAndMessages(null);
         worker.shutdownNow();
         downloader.shutdownNow();
@@ -417,18 +443,46 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             bintang.setColor(AMBER);
         }
 
-        void setPrioritas(boolean nilai) {
-            if (prioritas == nilai) return;
-            prioritas = nilai;
-            if (nilai) {
-                GradientDrawable latar = new GradientDrawable();
-                // Latar tipis dan sudut kecil: nomor menunggu tidak boleh
-                // terbaca seperti tombol timbul.
-                latar.setColor(Color.argb(32, 245, 158, 11));
-                latar.setCornerRadius(8 * getResources().getDisplayMetrics().density);
-                setBackground(latar);
-            } else {
+        private int gaya = -1;
+
+        /**
+         * Pil nomor: abu muda untuk nomor biasa, amber muda untuk prioritas,
+         * teal muda untuk nomor yang paling dekat dipanggil. Sel kosong tanpa latar.
+         */
+        void setGaya(boolean ada, boolean nilaiPrioritas, boolean pertama, boolean disorot) {
+            terapkan(!ada ? 0 : nilaiPrioritas ? 2 : pertama ? 3 : disorot ? 4 : 1,
+                    ada && nilaiPrioritas);
+        }
+
+        /**
+         * Pil "akan dipanggil": nomor pertama teal penuh dengan teks putih,
+         * nomor berikutnya teal muda; slot tanpa nomor abu redup.
+         */
+        void setGayaAkan(boolean ada, boolean nilaiPrioritas, boolean pertama) {
+            terapkan(!ada ? 6 : nilaiPrioritas ? 2 : pertama ? 5 : 3, ada && nilaiPrioritas);
+        }
+
+        private void terapkan(int baru, boolean tandaiPrioritas) {
+            prioritas = tandaiPrioritas;
+            if (baru == gaya) return;
+            gaya = baru;
+            if (baru == 0) {
                 setBackground(null);
+            } else {
+                float density = getResources().getDisplayMetrics().density;
+                GradientDrawable latar = new GradientDrawable();
+                latar.setCornerRadius(12 * density);
+                int isi = baru == 2 ? Color.rgb(254, 243, 199)
+                        : baru == 3 ? Color.rgb(204, 251, 241)
+                        : baru == 4 ? Color.WHITE
+                        : baru == 5 ? TEAL
+                        : baru == 6 ? Color.rgb(248, 250, 252) : Color.rgb(241, 245, 249);
+                int garis = baru == 2 ? AMBER : baru == 3 || baru == 4 || baru == 5 ? TEAL : GARIS;
+                latar.setColor(isi);
+                latar.setStroke(Math.round(density), garis);
+                setBackground(latar);
+                setTextColor(baru == 3 ? TEAL : baru == 5 ? Color.WHITE
+                        : baru == 6 ? MUTED : INK);
             }
             invalidate();
         }
@@ -453,6 +507,14 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         view.setTypeface(Typeface.create("sans-serif", bold ? Typeface.BOLD : Typeface.NORMAL));
         view.setSingleLine(true);
         return view;
+    }
+
+    /** Latar kartu loket: putih dengan garis tipis agar terbaca di atas layar putih. */
+    private GradientDrawable kartu(boolean sorot) {
+        GradientDrawable bg = rounded(Color.WHITE, dp(16));
+        if (sorot) bg.setStroke(dp(6), ACCENT);
+        else bg.setStroke(dp(1), GARIS);
+        return bg;
     }
 
     private GradientDrawable rounded(int color, float radius) {
@@ -492,7 +554,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         head.setOrientation(LinearLayout.VERTICAL);
         head.setGravity(Gravity.CENTER_HORIZONTAL);
         title = text(NAMA_TAMPIL,
-                30, Color.WHITE, true);
+                30, INK, true);
         title.setGravity(Gravity.CENTER);
         title.setLetterSpacing(0.04f);
         // Judul panjang dikecilkan supaya tetap satu baris di layar tegak.
@@ -515,9 +577,52 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         side = new LinearLayout(this);
         side.setOrientation(LinearLayout.VERTICAL);
         side.setPadding(dp(18), dp(12), dp(18), dp(12));
-        side.setBackground(rounded(Color.argb(20, 255, 255, 255), dp(16)));
-        nextHeader = text("BERIKUTNYA", 20, LIGHT, true);
+        GradientDrawable panel = rounded(Color.rgb(241, 245, 249), dp(16));
+        panel.setStroke(dp(1), GARIS);
+        side.setBackground(panel);
+        nextHeader = text("AKAN DIPANGGIL", 18, LIGHT, true);
         side.addView(nextHeader);
+        akanRow = new LinearLayout(this);
+        akanRow.setOrientation(LinearLayout.HORIZONTAL);
+        akanRow.setPadding(0, dp(4), 0, dp(6));
+        String[] labelAkan = {"BERIKUTNYA", "KE-2", "KE-3"};
+        float[] besarAkan = {30, 26, 26};
+        for (int i = 0; i < AKAN_JUMLAH; i++) {
+            final float besar = besarAkan[i];
+            LinearLayout slot = new LinearLayout(this);
+            slot.setOrientation(LinearLayout.VERTICAL);
+            slot.setGravity(Gravity.CENTER_HORIZONTAL);
+            TextView label = text(labelAkan[i], 11, i == 0 ? TEAL : MUTED, true);
+            label.setGravity(Gravity.CENTER);
+            slot.addView(label, new LinearLayout.LayoutParams(-1, -2));
+            NomorMenunggu pil = new NomorMenunggu(this);
+            pil.setText("\u2013");
+            pil.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(besar));
+            pil.setGravity(Gravity.CENTER);
+            pil.setSingleLine(true);
+            pil.setTypeface(Typeface.create("sans-serif-medium", i == 0 ? Typeface.BOLD : Typeface.NORMAL));
+            pil.setPadding(dp(4), dp(6), dp(4), dp(6));
+            pil.setGayaAkan(false, false, i == 0);
+            pil.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                if (r - l != or - ol) {
+                    v.post(() -> fitText((TextView) v, besar, v.getWidth() - dp(8), 0));
+                }
+            });
+            LinearLayout.LayoutParams lpPil = new LinearLayout.LayoutParams(-1, -2);
+            lpPil.topMargin = dp(2);
+            slot.addView(pil, lpPil);
+            akanPil[i] = pil;
+            LinearLayout.LayoutParams lpSlot = new LinearLayout.LayoutParams(0, -2, i == 0 ? 1.25f : 1f);
+            lpSlot.setMargins(dp(3), 0, dp(3), 0);
+            akanRow.addView(slot, lpSlot);
+        }
+        side.addView(akanRow, new LinearLayout.LayoutParams(-1, -2));
+        View garis = new View(this);
+        garis.setBackgroundColor(GARIS);
+        side.addView(garis, new LinearLayout.LayoutParams(-1, dp(1)));
+        listHeader = text("MENUNGGU", 16, LIGHT, true);
+        listHeader.setPadding(0, dp(8), 0, dp(2));
+        side.addView(listHeader);
         nextList = new LinearLayout(this);
         nextList.setOrientation(LinearLayout.VERTICAL);
         side.addView(nextList, new LinearLayout.LayoutParams(-1, -2));
@@ -526,8 +631,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         side.addView(moreLabel);
 
         if (portrait) {
-            body.addView(grid, new LinearLayout.LayoutParams(-1, 0, 1));
-            LinearLayout.LayoutParams sideParams = new LinearLayout.LayoutParams(-1, -2);
+            // Tegak: loket berupa strip ringkas setinggi isinya; sisa layar
+            // dipakai daftar "Berikutnya" supaya lebih banyak nomor terlihat.
+            body.addView(grid, new LinearLayout.LayoutParams(-1, -2));
+            LinearLayout.LayoutParams sideParams = new LinearLayout.LayoutParams(-1, 0, 1);
             sideParams.topMargin = dp(10);
             body.addView(side, sideParams);
         } else {
@@ -598,11 +705,39 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     private int columnsFor(int jumlah) {
-        if (portrait) return jumlah <= 1 ? 1 : 2;
+        if (portrait) return 1;
         return jumlah <= 2 ? jumlah : jumlah <= 4 ? 2 : jumlah <= 6 ? 3 : 4;
     }
 
+    /** Pil berdenyut selama dipanggil; dihentikan (dan dipulihkan) bila tidak. */
+    private void aturDenyut(String loket, TextView pil, boolean aktif) {
+        android.animation.ObjectAnimator animasi = denyut.get(loket);
+        if (!aktif) {
+            if (animasi != null) {
+                animasi.cancel();
+                denyut.remove(loket);
+            }
+            pil.setScaleX(1f);
+            pil.setScaleY(1f);
+            pil.setAlpha(1f);
+            return;
+        }
+        if (animasi != null && animasi.getTarget() == pil) return;
+        if (animasi != null) animasi.cancel();
+        animasi = android.animation.ObjectAnimator.ofPropertyValuesHolder(pil,
+                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.08f),
+                android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.08f),
+                android.animation.PropertyValuesHolder.ofFloat(View.ALPHA, 1f, 0.8f));
+        animasi.setDuration(900);
+        animasi.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        animasi.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        animasi.start();
+        denyut.put(loket, animasi);
+    }
+
     private void buildCards(JSONArray counters) {
+        for (android.animation.ObjectAnimator a : denyut.values()) a.cancel();
+        denyut.clear();
         grid.removeAllViews();
         cardsByCounter.clear();
         int jumlah = Math.max(1, counters.length());
@@ -614,8 +749,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             JSONObject counter = counters.optJSONObject(i);
             String name = counter == null ? "" : counter.optString("name");
             LinearLayout card = new LinearLayout(this);
-            card.setOrientation(LinearLayout.VERTICAL);
-            card.setBackground(rounded(Color.WHITE, dp(16)));
+            card.setOrientation(portrait ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+            card.setBackground(kartu(false));
             card.setClipToOutline(true);
 
             TextView label = text(name.toUpperCase(Locale.ROOT), 22, Color.WHITE, true);
@@ -623,9 +758,33 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             label.setPadding(dp(6), dp(6), dp(6), dp(6));
             GradientDrawable top = new GradientDrawable();
             top.setColor(TEAL);
-            top.setCornerRadii(new float[]{dp(16), dp(16), dp(16), dp(16), 0, 0, 0, 0});
+            top.setCornerRadii(portrait
+                    ? new float[]{dp(16), dp(16), 0, 0, 0, 0, dp(16), dp(16)}
+                    : new float[]{dp(16), dp(16), dp(16), dp(16), 0, 0, 0, 0});
             label.setBackground(top);
-            card.addView(label);
+            label.setSingleLine(true);
+            // Nama loket dan jenis layanan dikecilkan sampai muat; tidak pernah terpotong.
+            label.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                if (r - l != or - ol) {
+                    v.post(() -> fitText((TextView) v, 22, v.getWidth() - v.getPaddingLeft() - v.getPaddingRight(), 0));
+                }
+            });
+            // Tegak: blok teal (nama loket) di kiri, isi di kanan.
+            card.addView(label, portrait
+                    ? new LinearLayout.LayoutParams(0, -1, 1)
+                    : new LinearLayout.LayoutParams(-1, -2));
+
+            // Isi kartu: nomor + jenis layanan di tengah, status di ujung
+            // kanan pada kolom selebar tetap. Lebar tetap itu menjaga nomor
+            // dan nama layanan tetap rata tengah, apa pun statusnya.
+            LinearLayout isi = new LinearLayout(this);
+            isi.setOrientation(LinearLayout.HORIZONTAL);
+            card.addView(isi, portrait
+                    ? new LinearLayout.LayoutParams(0, -1, 2)
+                    : new LinearLayout.LayoutParams(-1, 0, 1));
+            LinearLayout tengah = new LinearLayout(this);
+            tengah.setOrientation(LinearLayout.VERTICAL);
+            isi.addView(tengah, new LinearLayout.LayoutParams(0, -1, 1));
 
             TextView number = text("", 72, INK, true);
             number.setGravity(Gravity.CENTER);
@@ -639,19 +798,37 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                     v.post(() -> fitNumber((TextView) v));
                 }
             });
-            card.addView(number, new LinearLayout.LayoutParams(-1, 0, 1));
+            tengah.addView(number, new LinearLayout.LayoutParams(-1, 0, 1));
 
             TextView category = text("", 16, Color.rgb(71, 85, 105), false);
             category.setGravity(Gravity.CENTER);
-            category.setPadding(0, 0, 0, dp(8));
+            category.setPadding(0, 0, 0, dp(portrait ? 4 : 8));
             category.setTag("category");
-            card.addView(category);
+            category.setSingleLine(true);
+            category.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                if (r - l != or - ol) v.post(() -> fitText((TextView) v, 16, v.getWidth(), 0));
+            });
+            tengah.addView(category, new LinearLayout.LayoutParams(-1, -2));
+
+            // Status (Dilayani / Dipanggil); hanya terlihat bila loket memegang nomor.
+            TextView status = text("", 17, Color.WHITE, true);
+            status.setGravity(Gravity.CENTER);
+            status.setSingleLine(true);
+            status.setPadding(dp(5), dp(3), dp(5), dp(3));
+            status.setTag("status");
+            status.setVisibility(View.INVISIBLE);
+            LinearLayout kolomStatus = new LinearLayout(this);
+            kolomStatus.setGravity(Gravity.CENTER);
+            kolomStatus.setPadding(0, 0, dp(8), 0);
+            kolomStatus.addView(status, new LinearLayout.LayoutParams(-2, -2));
+            isi.addView(kolomStatus, new LinearLayout.LayoutParams(dp(STATUS_KOLOM_DP), -1));
 
             GridLayout.LayoutParams params = new GridLayout.LayoutParams(
-                    GridLayout.spec(i / kolom, 1f), GridLayout.spec(i % kolom, 1f));
+                    GridLayout.spec(i / kolom, portrait ? 0f : 1f),
+                    GridLayout.spec(i % kolom, 1f));
             params.width = 0;
-            params.height = 0;
-            params.setMargins(dp(6), dp(6), dp(6), dp(6));
+            params.height = portrait ? dp(CARD_TEGAK_DP) : 0;
+            params.setMargins(dp(6), dp(portrait ? 4 : 6), dp(6), dp(portrait ? 4 : 6));
             grid.addView(card, params);
             cardsByCounter.put(name, card);
         }
@@ -697,12 +874,23 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             number.setText(value);
             number.setTextColor(ada ? INK : MUTED);
             category.setText(ada && !counter.isNull("category") ? counter.optString("category") : " ");
+            category.post(() -> fitText(category, 16, category.getWidth(), 0));
+            TextView status = card.findViewWithTag("status");
+            String label = counter.optString("status", "");
+            status.setVisibility(ada ? View.VISIBLE : View.INVISIBLE);
+            if (ada) {
+                status.setText(label.toUpperCase(Locale.ROOT));
+                // Lebar isi pil dibatasi kolomnya; huruf dikecilkan bila "DIPANGGIL" tidak muat.
+                fitText(status, 17, (int) ((dp(STATUS_KOLOM_DP) - dp(8) - dp(10)) / 0.92f), 0);
+                boolean dilayani = "Dilayani".equalsIgnoreCase(label);
+                status.setTextColor(dilayani ? TEAL : Color.WHITE);
+                status.setBackground(rounded(dilayani ? Color.WHITE : AMBER, dp(10)));
+            }
+            aturDenyut(counter.optString("name"), status, ada && "Dipanggil".equalsIgnoreCase(label));
             if (changed) number.post(() -> fitNumber(number));
             Long until = highlightUntil.get(counter.optString("name"));
             boolean hot = until != null && until > now;
-            GradientDrawable bg = rounded(Color.WHITE, dp(16));
-            if (hot) bg.setStroke(dp(6), ACCENT);
-            card.setBackground(bg);
+            card.setBackground(kartu(hot));
         }
 
         applyNext(state);
@@ -711,7 +899,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     // -----------------------------------------------------------------
-    // "Berikutnya": tumbuh per baris, kartu loket memendek mengikutinya
+    // "Berikutnya": 10 baris, bergantian halaman bila lebih banyak
     // -----------------------------------------------------------------
 
     private int perRow() {
@@ -721,45 +909,44 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private int nextRowHeight() {
         Paint paint = new Paint();
         paint.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        paint.setTextSize(spToPx(sp(NEXT_SP)));
+        paint.setTextSize(spToPx(sp(nextSp)));
         Paint.FontMetricsInt metrics = paint.getFontMetricsInt();
-        return metrics.bottom - metrics.top + dp(10);
+        // Padding pil (10dp) dan jarak antarpil (4dp).
+        return metrics.bottom - metrics.top + dp(14);
     }
 
     private int fixedSideHeight() {
         return side.getPaddingTop() + side.getPaddingBottom()
                 + nextHeader.getLineHeight()
+                + dp(AKAN_DP) + dp(1)
+                + listHeader.getLineHeight() + listHeader.getPaddingTop() + listHeader.getPaddingBottom()
                 + moreLabel.getLineHeight() + moreLabel.getPaddingTop();
     }
 
     /**
-     * Berapa baris nomor yang boleh tampil.
-     *
-     * Tegak: tiap baris tambahan memendekkan kartu loket. Baris ditambah
-     * hanya selama panel tidak lebih dari 45% papan DAN kartu masih setinggi
-     * minimal 1/8 layar. Mendatar: kolom samping memanjang ke bawah sampai
-     * penuh; kartu tidak terpengaruh.
+     * Berapa baris nomor yang boleh tampil. Sepuluh baris selalu dijatah:
+     * bila tinggi layar tidak cukup, huruf dikecilkan (tidak lebih kecil
+     * dari NEXT_SP_MIN) sebelum barisnya dikurangi.
      */
     private int nextRowsAllowed(int wanted) {
-        int limit = Math.min(wanted, (int) Math.ceil(NEXT_MAX / (double) perRow()));
-        if (limit <= 1) return limit;
+        int limit = Math.min(wanted, NEXT_BARIS);
+        if (limit == 0) return 0;
         int board = body.getHeight() - body.getPaddingTop() - body.getPaddingBottom();
-        if (board <= 0) return 1;  // belum diukur; dihitung ulang pada polling berikutnya
+        if (board <= 0) return Math.min(limit, 1);  // belum diukur; dihitung ulang pada polling berikutnya
+        nextSp = NEXT_SP;
         int rowHeight = nextRowHeight();
-        if (!portrait) {
-            int fit = (board - fixedSideHeight()) / Math.max(1, rowHeight);
-            return Math.max(1, Math.min(limit, fit));
+        int dipakaiLoket = 0;
+        if (portrait) {
+            // Strip loket setinggi tetap; daftar menempati seluruh sisanya.
+            dipakaiLoket = Math.max(1, grid.getRowCount()) * dp(CARD_TEGAK_DP + 8) + dp(10);
         }
-        int cardRows = Math.max(1, grid.getRowCount());
-        int minCard = getResources().getDisplayMetrics().heightPixels / CARD_MIN_FRACTION;
-        int minGrid = cardRows * (minCard + dp(12));
-        int rows = limit;
-        while (rows > 1) {
-            int panel = fixedSideHeight() + rows * rowHeight + dp(10);
-            if (panel <= board * NEXT_SHARE_MAX && board - panel >= minGrid) break;
-            rows--;
+        int ruang = board - dipakaiLoket - fixedSideHeight();
+        if (ruang < NEXT_BARIS * rowHeight) {
+            nextSp = Math.max(NEXT_SP_MIN, NEXT_SP * ruang / (float) (NEXT_BARIS * rowHeight));
+            rowHeight = nextRowHeight();
         }
-        return rows;
+        int fit = ruang / Math.max(1, rowHeight);
+        return Math.max(1, Math.min(limit, fit));
     }
 
     private void applyNext(JSONObject state) {
@@ -769,13 +956,31 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         for (int i = 0; prioritasRows != null && i < prioritasRows.length(); i++) {
             prioritas.add(prioritasRows.optString(i));
         }
-        int available = next == null ? 0 : next.length();
+        int semua = next == null ? 0 : next.length();
+        int jumlahAkan = Math.min(AKAN_JUMLAH, semua);
+        for (int i = 0; i < AKAN_JUMLAH; i++) {
+            String nomor = i < jumlahAkan ? next.optString(i) : "";
+            NomorMenunggu pil = akanPil[i];
+            pil.setGayaAkan(!nomor.isEmpty(), prioritas.contains(nomor), i == 0);
+            String teks = nomor.isEmpty() ? "\u2013" : nomor;
+            if (!teks.contentEquals(pil.getText())) {
+                pil.setText(teks);
+                final float besar = i == 0 ? 30 : 26;
+                pil.post(() -> fitText(pil, besar, pil.getWidth() - dp(8), 0));
+            }
+        }
+        // Daftar bawah dimulai dari nomor ke-4; tiga teratas tidak diulang.
+        int available = Math.max(0, semua - jumlahAkan);
         int per = perRow();
         int wanted = (int) Math.ceil(available / (double) per);
         int rows = nextRowsAllowed(wanted);
-        int shown = Math.min(available, rows * per);
+        int perHalaman = Math.max(1, rows * per);
+        halamanTotal = Math.max(1, (int) Math.ceil(available / (double) perHalaman));
+        if (halaman >= halamanTotal) halaman = 0;
+        int awal = halaman * perHalaman;
+        int shown = Math.max(0, Math.min(available - awal, perHalaman));
 
-        if (rows != nextRowsShown) {
+        if (rows != nextRowsShown || nextSp != nextSpDibangun) {
             // Hanya saat jumlah BARIS berubah kartu ikut bergerak, dan geraknya halus.
             if (nextRowsShown >= 0) {
                 AutoTransition transition = new AutoTransition();
@@ -783,6 +988,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 TransitionManager.beginDelayedTransition(body, transition);
             }
             nextRowsShown = rows;
+            nextSpDibangun = nextSp;
             nextList.removeAllViews();
             for (int r = 0; r < rows; r++) {
                 LinearLayout row = new LinearLayout(this);
@@ -790,13 +996,14 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 for (int c = 0; c < per; c++) {
                     NomorMenunggu cell = new NomorMenunggu(this);
                     cell.setText("");
-                    cell.setTextSize(NEXT_SP);
-                    cell.setTextColor(Color.WHITE);
-                    // Medium, bukan tebal penuh: huruf tebal putih di atas latar
-                    // gelap terbaca timbul seperti ukiran.
+                    cell.setTextSize(nextSp);
+                    cell.setTextColor(INK);
+                    cell.setGravity(Gravity.CENTER);
                     cell.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-                    cell.setPadding(0, dp(5), dp(4), dp(5));
-                    row.addView(cell, new LinearLayout.LayoutParams(0, -2, 1));
+                    cell.setPadding(dp(4), dp(5), dp(4), dp(5));
+                    LinearLayout.LayoutParams pil = new LinearLayout.LayoutParams(0, -2, 1);
+                    pil.setMargins(dp(3), dp(2), dp(3), dp(2));
+                    row.addView(cell, pil);
                 }
                 nextList.addView(row);
             }
@@ -804,17 +1011,38 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         for (int i = 0; i < rows * per; i++) {
             LinearLayout row = (LinearLayout) nextList.getChildAt(i / per);
             NomorMenunggu cell = (NomorMenunggu) row.getChildAt(i % per);
-            String value = i < shown ? next.optString(i) : "";
-            cell.setPrioritas(prioritas.contains(value));
+            String value = i < shown ? next.optString(jumlahAkan + awal + i) : "";
+            cell.setGaya(!value.isEmpty(), prioritas.contains(value), false, false);
             if (!value.contentEquals(cell.getText())) {
                 cell.setText(value);
-                cell.post(() -> fitText(cell, NEXT_SP, cell.getWidth(), 0));
+                cell.post(() -> fitText(cell, nextSp, cell.getWidth(), 0));
             }
         }
-        int lainnya = state.optInt("total_waiting") - shown;
-        moreLabel.setText(lainnya > 0 ? "dan " + lainnya + " lainnya menunggu"
-                : shown == 0 ? "Tidak ada yang menunggu" : "");
+        if (halamanTotal > 1) {
+            StringBuilder titik = new StringBuilder();
+            for (int h = 0; h < halamanTotal && h < 10; h++) titik.append(h == halaman ? "\u25CF " : "\u25CB ");
+            moreLabel.setText(titik + " Halaman " + (halaman + 1) + " dari " + halamanTotal
+                    + " \u00B7 " + Math.max(0, state.optInt("total_waiting") - jumlahAkan) + " menunggu");
+        } else {
+            int lainnya = Math.max(0, state.optInt("total_waiting") - jumlahAkan) - shown;
+            moreLabel.setText(lainnya > 0 ? "dan " + lainnya + " lainnya menunggu"
+                    : semua == 0 ? "Tidak ada yang menunggu" : "");
+        }
     }
+
+    /** Ganti halaman nomor menunggu tiap HALAMAN_MS dengan transisi pudar. */
+    private final Runnable putarHalaman = new Runnable() {
+        @Override
+        public void run() {
+            handler.postDelayed(this, HALAMAN_MS);
+            if (lastState == null || halamanTotal <= 1 || nextList == null) return;
+            halaman = (halaman + 1) % halamanTotal;
+            nextList.animate().alpha(0f).setDuration(250).withEndAction(() -> {
+                if (lastState != null) applyNext(lastState);
+                nextList.animate().alpha(1f).setDuration(250).start();
+            }).start();
+        }
+    };
 
     // -----------------------------------------------------------------
 
@@ -861,7 +1089,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         @Override
         public void run() {
             SimpleDateFormat format = new SimpleDateFormat(
-                    "EEEE, d MMM yyyy · HH:mm:ss", new Locale("id", "ID"));
+                    "EEEE, d MMMM yyyy · HH:mm:ss", new Locale("id", "ID"));
             format.setTimeZone(TimeZone.getTimeZone(serverTimezone));
             String label = "Asia/Makassar".equals(serverTimezone) ? "WITA"
                     : "Asia/Jayapura".equals(serverTimezone) ? "WIT" : "WIB";
@@ -1038,6 +1266,21 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     // Suara
     // =================================================================
 
+    /** Kedip singkat kartu loket yang baru memanggil, supaya mata tertarik ke sana. */
+    private void kedipkan(View kartu) {
+        android.animation.ObjectAnimator kedip =
+                android.animation.ObjectAnimator.ofFloat(kartu, View.ALPHA, 1f, 0.35f);
+        kedip.setDuration(300);
+        kedip.setRepeatCount(5);
+        kedip.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        kedip.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator a) { kartu.setAlpha(1f); }
+            @Override public void onAnimationCancel(android.animation.Animator a) { kartu.setAlpha(1f); }
+        });
+        kartu.setAlpha(1f);
+        kedip.start();
+    }
+
     private void announce(JSONObject call) {
         if (call == null) return;
         String counter = call.optString("counter_name");
@@ -1048,9 +1291,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             number.setText(call.optString("queue_number"));
             number.setTextColor(INK);
             number.post(() -> fitNumber(number));
-            GradientDrawable bg = rounded(Color.WHITE, dp(16));
-            bg.setStroke(dp(6), ACCENT);
-            card.setBackground(bg);
+            card.setBackground(kartu(true));
+            kedipkan(card);
         }
         if (!soundEnabled) return;
         try {

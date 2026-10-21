@@ -65,7 +65,31 @@ kartu loket memendek:
 - kartu hanya bergerak saat jumlah **baris** berubah, dengan animasi halus,
   bukan setiap kali satu nomor bertambah;
 - `display.next_count` di server tetap berlaku sebagai jumlah minimal yang
-  dikirim; layar meminta sampai 12 (`?next=12`).
+  dikirim; layar meminta sampai 300 (`?next=300`); lebih dari satu halaman nomor bergantian tampil.
+
+## Tema Bening
+
+Nama tema tampilan layar antrian saat ini (disimpan 21 Oktober 2026). Latar
+putih, aksen teal, nuansa bersih dan resmi. Belum ada pilihan tema di
+pengaturan; layar hanya punya tema ini, dan tampilan gelap lama sudah tidak
+ada. Nilainya ada di konstanta warna `MainActivity.java` modul `layar`.
+
+- **Warna:** latar putih `#FFFFFF`; teal `#0F766E` (blok nama loket, nomor
+  pertama); tinta `#0F172A` (nomor, judul); teks sekunder `#334155` dan
+  `#64748B`; garis `#CBD5E1`; amber `#B45309` (banner, status DIPANGGIL,
+  prioritas); sorotan panggilan cyan `#0891B2`.
+- **Kartu loket (tegak):** strip 84 dp satu loket per baris. Kiri blok teal
+  berisi nama loket; tengah nomor besar dan nama layanan rata tengah; kanan
+  kolom status 112 dp berisi pil DILAYANI (putih, teks teal) atau DIPANGGIL
+  (amber, berdenyut pelan). Kartu yang baru memanggil berkedip sekitar
+  2 detik.
+- **Panel samping:** judul **AKAN DIPANGGIL** berisi 3 nomor teratas urutan
+  panggil (BERIKUTNYA teal penuh, KE-2 dan KE-3 teal muda; slot kosong
+  abu redup), garis pemisah, lalu **MENUNGGU** berisi nomor ke-4 dan seterusnya
+  sebagai pil abu muda 3 kolom, sampai 10 baris. Lebih dari satu halaman
+  bergantian tiap 8 detik dengan transisi pudar. Nomor prioritas berpil amber
+  dengan bintang.
+- **Teks:** tanggal memakai nama bulan lengkap ("Rabu, 21 Oktober 2026").
 
 ## Yang ditampilkan
 

@@ -620,14 +620,16 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         """
         Isi papan: nomor tiap loket, nomor berikutnya, dan yang menunggu.
 
-        `next` (paling banyak 12): layar meminta lebih banyak nomor
+        `next` (paling banyak 300): layar meminta lebih banyak nomor
         berikutnya supaya daftarnya dapat memanjang saat antrian ramai;
         `display.next_count` tetap menjadi jumlah paling sedikit.
         """
         jumlah = max(1, services.settings.get_int("display.next_count", 3))
         if next is not None:
-            jumlah = max(jumlah, min(int(next), 12))
-        state = services.queue.display_state(jumlah_berikutnya=jumlah)
+            jumlah = max(jumlah, min(int(next), 300))
+        state = services.queue.display_state(
+            jumlah_berikutnya=jumlah, jumlah_per_layanan=1
+        )
         apk = info_apk(folder_apk(base_dir()), "layar")
         paket = info_paket(folder_paket(base_dir()))
         return {
@@ -640,6 +642,10 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
                 q.queue_number for q in state.berikutnya if q.prioritas
             ],
             "total_waiting": state.total_menunggu,
+            # Prefiks nomor -> nama layanan, untuk judul kelompok di layar.
+            "service_labels": {
+                k.category_prefix: k.category_name for k in state.layanan
+            },
             "server_time_ms": int(time.time() * 1000),
             "timezone": TIMEZONE,
             "app_min_version_code": VERSI_MINIMAL_LAYAR,
