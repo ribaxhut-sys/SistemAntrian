@@ -69,9 +69,11 @@ class DialogCabutPrioritas(QDialog):
 
         # Tiket yang sudah dipegang pengunjung masih bertuliskan "Prioritas".
         self.kotak_cetak_ulang = QCheckBox(
-            "Cetak ulang tiket tanpa tanda prioritas"
+            "Cetak ulang tiket tanpa tanda prioritas di printer PC ini"
         )
-        self.kotak_cetak_ulang.setChecked(True)
+        # Bawaannya di anjungan; printer PC ini hanya bila nomornya tidak
+        # berasal dari anjungan.
+        self.kotak_cetak_ulang.setChecked(anjungan is None)
         susunan.addWidget(self.kotak_cetak_ulang)
 
         # Tiketnya keluar di anjungan tempat nomor diambil, bukan di printer
@@ -82,6 +84,7 @@ class DialogCabutPrioritas(QDialog):
             else "Cetak ulang di anjungan tiket"
         )
         self.kotak_cetak_anjungan.setEnabled(anjungan is not None)
+        self.kotak_cetak_anjungan.setChecked(anjungan is not None)
         if anjungan is None:
             self.kotak_cetak_anjungan.setToolTip(
                 "Nomor ini tidak berasal dari anjungan yang dapat dihubungi."
@@ -90,8 +93,9 @@ class DialogCabutPrioritas(QDialog):
         if anjungan is not None:
             susunan.addWidget(
                 keterangan(
-                    "Saran: bila kertas anjungan habis atau tabletnya mati, "
-                    "centang cetak di printer PC ini saja."
+                    "Tiket pengganti bertanda CETAK ULANG; nomornya tetap sama. "
+                    "Bila kertas anjungan habis atau tabletnya mati, centang "
+                    "cetak di printer PC ini saja."
                 )
             )
 

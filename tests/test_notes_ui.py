@@ -447,12 +447,15 @@ def test_kalimat_cepat_menyisipkan_ke_catatan(halaman_kerja, terbitkan):
 
     _panggil(halaman_kerja, terbitkan)
     panel = halaman_kerja.panel_pengaduan
-    assert len(panel._tombol_frasa) == len(FRASA_BAWAAN)
+    assert len(panel.daftar_frasa.item) == len(FRASA_BAWAAN)
 
-    panel._tombol_frasa[0].click()
+    panel.daftar_frasa.pilih(0)
     assert panel.isian_catatan.toPlainText() == FRASA_BAWAAN[0]
-    panel._tombol_frasa[1].click()
-    assert panel.isian_catatan.toPlainText() == f"{FRASA_BAWAAN[0]}\n{FRASA_BAWAAN[1]}"
+    panel.daftar_frasa.pilih(1)
+    # Dirangkai dengan koma; titik di ujung kalimat lama dibuang.
+    assert panel.isian_catatan.toPlainText() == (
+        f"{FRASA_BAWAAN[0].rstrip('.')}, {FRASA_BAWAAN[1]}"
+    )
 
     halaman_kerja.mulai_melayani()
     assert panel.tombol_selesai.isEnabled()  # kalimat cepat dihitung sebagai catatan
@@ -473,7 +476,7 @@ def test_kalimat_cepat_mengikuti_jenis_layanan(halaman_kerja, terbitkan, auth, a
     auth.pindah_loket(antrian_siap["loket"][0])
 
     _panggil(halaman_kerja, terbitkan)
-    teks = [btn.toolTip() for btn in halaman_kerja.panel_pengaduan._tombol_frasa]
+    teks = [b.kalimat for b in halaman_kerja.panel_pengaduan.daftar_frasa.item]
     assert teks == ["Berkas diterima.", "Berkas dikembalikan."]
 
 
@@ -814,57 +817,57 @@ def test_judul_pengaduan_bertanda_bila_ada_isian_belum_disimpan(
 # ---------------------------------------------------------------------
 
 
-def test_kalimat_cepat_yang_sudah_dipakai_dimatikan(halaman_kerja, terbitkan):
+def test_kalimat_cepat_yang_sudah_dipakai_ditandai_dan_tidak_bisa_diklik(
+    halaman_kerja, terbitkan
+):
     from app.services.note_service import FRASA_BAWAAN
 
     _panggil(halaman_kerja, terbitkan)
     panel = halaman_kerja.panel_pengaduan
-    pertama, kedua = panel._tombol_frasa[0], panel._tombol_frasa[1]
+    daftar = panel.daftar_frasa
+    pertama, kedua = daftar.item[0], daftar.item[1]
 
-    pertama.click()
-    assert not pertama.isEnabled() and pertama.terpakai
-    assert pertama.label.text().startswith("✓ ")
-    assert pertama.toolTip() == "Sudah ada di catatan"
-    assert kedua.isEnabled()
+    daftar.pilih(0)
+    assert pertama.terpakai and not kedua.terpakai
+    assert "✓ " in daftar.text()
+    assert 'href="0"' not in daftar.text() and 'href="1"' in daftar.text()
 
-    # Klik pada tombol mati tidak menambah apa pun.
-    pertama.click()
+    # Klik pada kalimat yang sudah dipakai tidak menambah apa pun.
+    daftar.pilih(0)
     assert panel.isian_catatan.toPlainText() == FRASA_BAWAAN[0]
 
-    # Dihapus dari catatan: tombolnya hidup lagi.
+    # Dihapus dari catatan: kalimatnya bisa diklik lagi.
     panel.isian_catatan.setPlainText("")
-    assert pertama.isEnabled() and not pertama.terpakai
-    assert pertama.label.text() == FRASA_BAWAAN[0]
+    assert not pertama.terpakai
+    assert 'href="0"' in daftar.text()
 
 
-def test_kalimat_cepat_panjang_tampil_utuh_membungkus(qtbot):
-    """
-    Tombol sendiri, bukan seluruh layar pelayanan: menampilkan ServicePage
-    di test menghentikan proses Qt tanpa pesan di mesin ini.
-    """
-    from PySide6.QtWidgets import QVBoxLayout, QWidget
+def test_kalimat_cepat_berkoma_tanpa_kotak_dan_tanpa_gulir(halaman_kerja, terbitkan):
+    from PySide6.QtWidgets import QPushButton, QScrollArea
 
-    from app.services.note_service import PANJANG_FRASA
-    from app.ui.tombol_frasa import TombolFrasa
+    from app.services.note_service import FRASA_BAWAAN
 
-    panjang = "Pelanggan menanyakan persyaratan pengajuan sambungan baru beserta biayanya"
-    assert len(panjang) <= PANJANG_FRASA
-    wadah = QWidget()
-    tata = QVBoxLayout(wadah)
-    tombol = TombolFrasa(panjang)
-    tata.addWidget(tombol)
-    qtbot.addWidget(wadah)
-    wadah.resize(260, 300)
-    wadah.show()
-    qtbot.wait(30)
+    _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    daftar = panel.daftar_frasa
 
-    assert tombol.label.text() == panjang  # tanpa elipsis
-    assert tombol.label.wordWrap()
-    butuh = tombol.label.heightForWidth(tombol.label.width())
-    assert tombol.label.height() >= butuh, "tinggi label kurang: teks terpotong"
-    assert tombol.height() >= butuh
-    # Sempit memang lebih tinggi daripada lebar: teks membungkus, bukan terpotong.
-    assert butuh > tombol.label.fontMetrics().height() * 1.5
+    assert daftar.isVisibleTo(panel)
+    assert daftar.wordWrap()
+    assert daftar.text().count(", ") == len(FRASA_BAWAAN) - 1
+    # Tidak ada tombol kalimat dan tidak ada area gulir: hanya satu label.
+    assert not daftar.findChildren(QPushButton)
+    assert not isinstance(daftar, QScrollArea)
+    assert not daftar.findChildren(QScrollArea)
+
+
+def test_kalimat_cepat_bawaan_muat_dalam_tiga_baris(halaman_kerja, terbitkan):
+    _panggil(halaman_kerja, terbitkan)
+    halaman_kerja.resize(1100, 760)
+    halaman_kerja.show()
+    daftar = halaman_kerja.panel_pengaduan.daftar_frasa
+
+    baris = daftar.heightForWidth(daftar.width()) / daftar.fontMetrics().lineSpacing()
+    assert baris <= 3.5
 
 
 def test_peringatan_catatan_sama_dengan_nomor_sebelumnya(
@@ -901,14 +904,14 @@ def test_peringatan_tidak_berlaku_untuk_kalimat_cepat(halaman_kerja, terbitkan):
     halaman_kerja.muat_ulang()
     halaman_kerja.panggil_berikutnya()
     halaman_kerja.mulai_melayani()
-    halaman_kerja.panel_pengaduan._tombol_frasa[0].click()
+    halaman_kerja.panel_pengaduan.daftar_frasa.pilih(0)
     halaman_kerja.selesaikan()
 
     halaman_kerja.panggil_berikutnya()
     panel = halaman_kerja.panel_pengaduan
-    panel._tombol_frasa[0].click()  # kalimat cepat yang sama untuk pelayanan yang sama
+    panel.daftar_frasa.pilih(0)  # kalimat cepat yang sama untuk pelayanan yang sama
 
-    assert panel.isian_catatan.toPlainText() == panel._tombol_frasa[0].kalimat
+    assert panel.isian_catatan.toPlainText() == panel.daftar_frasa.item[0].kalimat
     assert not panel.catatan_sama_dengan_sebelumnya
 
 
@@ -978,3 +981,19 @@ def test_layar_pelayanan_tampil_lalu_memanggil_nomor_tanpa_mematikan_proses(
         qtbot.wait(10)
 
     assert halaman_kerja.antrian is not None
+
+
+def test_kalimat_cepat_berturut_turut_tetap_ditandai_terpakai(halaman_kerja, terbitkan):
+    _panggil(halaman_kerja, terbitkan)
+    panel = halaman_kerja.panel_pengaduan
+    for urutan in range(3):
+        panel.daftar_frasa.pilih(urutan)
+
+    assert chr(10) not in panel.isian_catatan.toPlainText()
+    assert panel.isian_catatan.toPlainText().count(", ") == 2
+    item = panel.daftar_frasa.item
+    assert all(t.terpakai for t in item[:3])
+    assert not any(t.terpakai for t in item[3:])
+    # Rangkaian kalimat cepat murni tidak diperingatkan sebagai catatan yang sama.
+    assert panel._hanya_kalimat_cepat(panel.isian_catatan.toPlainText())
+    assert not panel._hanya_kalimat_cepat("Berkas belum lengkap, diminta kembali besok.")

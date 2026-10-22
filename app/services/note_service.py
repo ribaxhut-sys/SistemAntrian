@@ -379,8 +379,9 @@ class NoteService:
         """
         Kalimat cepat untuk catatan petugas pada satu jenis layanan.
 
-        Memakai daftar milik jenis layanan itu bila ada, dan daftar bawaan
-        bila belum diisi admin (atau jenis layanannya sudah tidak ada).
+        Memakai daftar milik jenis layanan itu bila ada; kalau tidak, daftar
+        bawaan yang diatur admin di Pengaturan; kalau itu juga kosong, daftar
+        bawaan aplikasi.
         """
         self.auth.require_permission(Permission.NOTE_WRITE)
         if category_id is not None:
@@ -389,7 +390,15 @@ class NoteService:
                 frasa = daftar_frasa(kategori.frasa_catatan) if kategori else []
             if frasa:
                 return frasa
-        return list(FRASA_BAWAAN)
+        from app.services.settings_service import SettingsService
+
+        try:
+            global_admin = daftar_frasa(
+                SettingsService(self.auth).get("catatan.frasa_bawaan", "")
+            )
+        except Exception:  # noqa: BLE001 - kalimat cepat hanya pelengkap
+            global_admin = []
+        return global_admin or list(FRASA_BAWAAN)
 
     def catatan_terakhir_saya(self, kecuali_queue_id: int | None = None) -> list[str]:
         """

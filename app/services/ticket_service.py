@@ -122,6 +122,9 @@ class TicketData:
     #: Turunkan isi tiket anjungan Android, dalam milimeter. Tablet mencetak
     #: tanpa driver, jadi tidak mendapat ruang kosong di kepala kertas.
     turun_anjungan_mm: int = 0
+    #: Jam tiket ini dicetak ULANG; None untuk cetakan pertama. `issued_at`
+    #: tetap jam terbit asli: nomornya sama, hanya kertasnya yang diulang.
+    cetak_ulang_pada: datetime | None = None
 
     @property
     def tanggal(self) -> str:
@@ -155,12 +158,24 @@ class TicketData:
         if self.counter_name:
             baris.append(self.counter_name)
         baris += ["", self.tanggal_jam]
-        sisa = self.baris_sisa_antrian()
+        sisa = self.baris_cetak_ulang() or self.baris_sisa_antrian()
         if sisa:
             baris += ["", sisa]
         if self.footer:
             baris += ["", self.footer]
         return baris
+
+    def baris_cetak_ulang(self) -> str:
+        """
+        Penanda tiket cetak ulang, atau kosong untuk cetakan pertama.
+
+        Menempati baris sisa antrian: sisa antrian pada tiket yang sudah
+        dipegang pengunjung tidak lagi berarti, sedangkan tinggi kertas
+        tetap 88 mm.
+        """
+        if self.cetak_ulang_pada is None:
+            return ""
+        return f"*** CETAK ULANG {self.cetak_ulang_pada:%H:%M} ***"
 
     def baris_sisa_antrian(self) -> str:
         """Baris sisa antrian tiket ini. Lihat `baris_sisa_antrian()`."""
@@ -833,7 +848,7 @@ def _tata_letak(
     satu(y, data.tanggal_jam, 10, False)
     y += JARAK_BLOK_BAWAH_MM
 
-    sisa = data.baris_sisa_antrian()
+    sisa = data.baris_cetak_ulang() or data.baris_sisa_antrian()
     if sisa:
         satu(y, sisa, 12, True)
     y += JARAK_BLOK_BAWAH_MM
@@ -862,8 +877,13 @@ class TicketService:
         # menghalangi tercetaknya nomor.
         self.queue = queue
 
-    def susun(self, antrian: QueueInfo) -> TicketData:
-        """Susun isi tiket dari sebuah antrian."""
+    def susun(self, antrian: QueueInfo, *, cetak_ulang: bool = False) -> TicketData:
+        """
+        Susun isi tiket dari sebuah antrian.
+
+        `cetak_ulang` menandai tiketnya sebagai cetakan ulang; nomor dan
+        jam terbitnya tetap yang asli.
+        """
         cabang = self.master.list_branches()
         nama_kantor = cabang[0].name if cabang else "Kantor Pelayanan"
         ringkasan = self._ringkasan(antrian)
@@ -882,6 +902,7 @@ class TicketService:
             sisa_antrian=ringkasan.sisa_antrian if ringkasan else None,
             geser_atas_mm=self.settings.get_int("ticket.geser_atas_mm", 0),
             turun_anjungan_mm=self.settings.get_int("ticket.turun_anjungan_mm", 4),
+            cetak_ulang_pada=clock.now() if cetak_ulang else None,
         )
 
     def _ringkasan(self, antrian: QueueInfo):
@@ -905,7 +926,7 @@ class TicketService:
             )
             return None
 
-    def cetak(self, antrian: QueueInfo) -> PrintResult:
+    def cetak(self, antrian: QueueInfo, *, cetak_ulang: bool = False) -> PrintResult:
         """
         Cetak tiket untuk sebuah antrian.
 
@@ -913,7 +934,7 @@ class TicketService:
         sebagai hasil, karena antriannya sendiri sudah sah dan tersimpan.
         """
         try:
-            data = self.susun(antrian)
+            data = self.susun(antrian, cetak_ulang=cetak_ulang)
         except Exception as exc:  # noqa: BLE001 - batas terluar pencetakan
             logger.exception("Gagal menyusun tiket %s", antrian.queue_number)
             return PrintResult(

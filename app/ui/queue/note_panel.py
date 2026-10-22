@@ -53,7 +53,7 @@ from app.services.note_service import (
 from app.services.queue_service import QueueInfo
 from app.ui.common import jalankan_aman
 from app.ui.queue.pelapor_form import PelaporForm
-from app.ui.tombol_frasa import TombolFrasa
+from app.ui.daftar_frasa import DaftarFrasa
 from app.ui.style import (
     BORDER,
     DANGER,
@@ -77,7 +77,7 @@ from app.ui.style import (
 #: lubang intip: yang sudah diketik menggulung ke atas dan tidak terbaca
 #: lagi saat hendak diperiksa ulang sebelum disimpan.
 TINGGI_DESKRIPSI = 130
-TINGGI_CATATAN = 90
+TINGGI_CATATAN = 72
 
 #: Penghitung huruf mulai memperingatkan pada porsi ini dari batasnya.
 #:
@@ -96,6 +96,11 @@ PESAN_CATATAN_SAMA = (
 )
 
 logger = get_logger("catatan.panel")
+
+
+def _tanpa_titik_akhir(teks: str) -> str:
+    """Kalimat tanpa titik penutupnya, supaya cocok di tengah rangkaian."""
+    return teks.rstrip(". ")
 
 
 class TombolSelesai(QPushButton):
@@ -222,21 +227,26 @@ class NotePanel(QWidget):
         return kartu
 
     def _bangun_bagian_catatan(self) -> QWidget:
-        kartu, badan = self._kartu("CATATAN PETUGAS")
+        # Tanpa kartu: bingkai dan bantalannya memakan tempat, dan catatan
+        # hanyalah isian lanjutan di bawah pengaduan.
+        kartu, badan = self._kartu("CATATAN PETUGAS", dengan_kartu=False)
 
         self.isian_catatan = QPlainTextEdit()
         self.isian_catatan.setPlaceholderText(
             "Misalnya: berkas belum lengkap, diminta kembali membawa fotokopi."
         )
-        self.isian_catatan.setMinimumHeight(TINGGI_CATATAN)
+        # Kotak catatan lega (empat baris) dan boleh tumbuh bila ada ruang;
+        # lebih tinggi dari ini membuat panel bergulir pada layar pendek.
+        self.isian_catatan.setMinimumHeight(
+            max(TINGGI_CATATAN, 4 * self.isian_catatan.fontMetrics().lineSpacing() + 16)
+        )
 
         # Kalimat cepat: satu klik menyisipkan kalimat ke catatan, dan
         # petugas tetap bisa menambah atau mengubahnya. Daftarnya milik
         # jenis layanan nomor yang dilayani (lihat `set_antrian`).
-        self.baris_frasa = QVBoxLayout()
-        self.baris_frasa.setSpacing(6)
-        badan.addLayout(self.baris_frasa)
-        self._tombol_frasa: list[TombolFrasa] = []
+        self.daftar_frasa = DaftarFrasa()
+        self.daftar_frasa.dipilih.connect(self.sisipkan_frasa)
+        badan.addWidget(self.daftar_frasa)
         #: Catatan petugas ini pada nomor lain hari ini (bahan peringatan).
         self._catatan_sebelumnya: list[str] = []
         self._frasa_bawaan_layar: list[str] = []
@@ -273,17 +283,27 @@ class NotePanel(QWidget):
         return kaki
 
     @staticmethod
-    def _kartu(judul_bagian: str) -> tuple[QFrame, QVBoxLayout]:
-        """Kartu berjudul; mengembalikan kartunya beserta susunan isinya."""
+    def _kartu(
+        judul_bagian: str, *, dengan_kartu: bool = True
+    ) -> tuple[QFrame, QVBoxLayout]:
+        """
+        Bagian berjudul; mengembalikan wadahnya beserta susunan isinya.
+
+        `dengan_kartu=False`: tanpa bingkai, latar, dan bantalan; hanya
+        judul kecil di atas isinya.
+        """
         kartu = QFrame()
         kartu.setObjectName("kartuBagian")
-        kartu.setStyleSheet(
-            f"QFrame#kartuBagian {{ background: {SURFACE};"
-            f" border: 1px solid {BORDER}; border-radius: {RADIUS}px; }}"
-        )
-
         susunan = QVBoxLayout(kartu)
-        susunan.setContentsMargins(16, 12, 16, 12)
+        if dengan_kartu:
+            kartu.setStyleSheet(
+                f"QFrame#kartuBagian {{ background: {SURFACE};"
+                f" border: 1px solid {BORDER}; border-radius: {RADIUS}px; }}"
+            )
+            susunan.setContentsMargins(16, 12, 16, 12)
+        else:
+            kartu.setStyleSheet("QFrame#kartuBagian { background: transparent; border: none; }")
+            susunan.setContentsMargins(2, 0, 2, 0)
         susunan.setSpacing(8)
 
         kepala = QHBoxLayout()
@@ -332,9 +352,18 @@ class NotePanel(QWidget):
         catatan = self.isian_catatan.toPlainText()
         if not catatan_sama_dengan(catatan, self._catatan_sebelumnya):
             return False
-        baris = {samakan_catatan(b) for b in catatan.splitlines() if b.strip()}
-        frasa = {samakan_catatan(f) for f in self._frasa_bawaan_layar}
-        return not (baris and baris <= frasa)
+        return not self._hanya_kalimat_cepat(catatan)
+
+    def _hanya_kalimat_cepat(self, catatan: str) -> bool:
+        """Benar bila isi catatan hanya rangkaian kalimat cepat (koma atau baris baru)."""
+        sisa = samakan_catatan(catatan)
+        ada = False
+        for frasa in sorted(self._frasa_bawaan_layar, key=len, reverse=True):
+            potongan = _tanpa_titik_akhir(samakan_catatan(frasa))
+            if potongan and potongan in sisa:
+                sisa = sisa.replace(potongan, "")
+                ada = True
+        return ada and not sisa.strip(" ,.;\n")
 
     @property
     def catatan_memadai(self) -> bool:
@@ -474,32 +503,27 @@ class NotePanel(QWidget):
     # =================================================================
 
     def _muat_frasa(self, category_id: int | None) -> None:
-        """Pasang tombol kalimat cepat milik jenis layanan nomor ini."""
-        for btn in self._tombol_frasa:
-            self.baris_frasa.removeWidget(btn)
-            btn.deleteLater()
-        self._tombol_frasa = []
+        """Pasang kalimat cepat milik jenis layanan nomor ini."""
         self._frasa_bawaan_layar = []
+        self.daftar_frasa.set_kalimat([])
         if category_id is None:
             return
         try:
             daftar = self.note.frasa_cepat(category_id)
-        except Exception:  # noqa: BLE001 - tombol cepat hanya pelengkap
+        except Exception:  # noqa: BLE001 - kalimat cepat hanya pelengkap
             logger.warning("Kalimat cepat gagal dibaca", exc_info=True)
             return
         self._frasa_bawaan_layar = list(daftar)
-        for kalimat in daftar:
-            btn = TombolFrasa(kalimat)
-            btn.clicked.connect(lambda _=False, k=kalimat: self.sisipkan_frasa(k))
-            self.baris_frasa.addWidget(btn)
-            self._tombol_frasa.append(btn)
+        self.daftar_frasa.set_kalimat(daftar)
         self._perbarui_frasa_terpakai()
 
     def _perbarui_frasa_terpakai(self) -> None:
-        """Matikan tombol yang kalimatnya sudah ada di catatan (diberi tanda ✓)."""
+        """Tandai ✓ kalimat yang sudah ada di catatan."""
         isi = samakan_catatan(self.isian_catatan.toPlainText())
-        for btn in self._tombol_frasa:
-            btn.tandai_terpakai(samakan_catatan(btn.kalimat) in isi)
+        for urutan, butir in enumerate(self.daftar_frasa.item):
+            self.daftar_frasa.tandai_terpakai(
+                urutan, _tanpa_titik_akhir(samakan_catatan(butir.kalimat)) in isi
+            )
 
     def _muat_catatan_sebelumnya(self, queue_id: int | None) -> None:
         self._catatan_sebelumnya = []
@@ -511,9 +535,19 @@ class NotePanel(QWidget):
             logger.warning("Catatan sebelumnya gagal dibaca", exc_info=True)
 
     def sisipkan_frasa(self, kalimat: str) -> None:
-        """Tambahkan kalimat ke catatan, pada baris baru bila sudah ada isinya."""
+        """
+        Tambahkan kalimat ke catatan, dirangkai dengan koma bila sudah ada isinya.
+
+        Koma, bukan baris baru, supaya beberapa kalimat cukup di kotak dua
+        baris. Titik di ujung catatan lama dibuang agar rangkaiannya
+        terbaca "A, B." dan bukan "A., B.".
+        """
         sekarang = self.isian_catatan.toPlainText().rstrip()
-        self.isian_catatan.setPlainText(f"{sekarang}\n{kalimat}" if sekarang else kalimat)
+        if sekarang:
+            sekarang = f"{sekarang.rstrip('.').rstrip()}, {kalimat}"
+        else:
+            sekarang = kalimat
+        self.isian_catatan.setPlainText(sekarang)
         kursor = self.isian_catatan.textCursor()
         kursor.movePosition(kursor.MoveOperation.End)
         self.isian_catatan.setTextCursor(kursor)

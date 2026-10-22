@@ -879,3 +879,61 @@ def test_tata_letak_anjungan_ikut_turun_seperti_raster():
     )["rows"]
 
     assert [b["y_mm"] - a["y_mm"] for a, b in zip(rata, turun)] == [3] * len(rata)
+
+
+# ---------------------------------------------------------------------
+# Penanda cetak ulang
+# ---------------------------------------------------------------------
+
+def _tiket_contoh(**ubah):
+    from datetime import datetime
+
+    from app.services.ticket_service import TicketData
+
+    dasar = dict(
+        queue_number="PB-004",
+        category_name="PBB",
+        office_name="Kantor Pelayanan",
+        issued_at=datetime(2026, 10, 22, 9, 15),
+        sisa_antrian=3,
+    )
+    return TicketData(**{**dasar, **ubah})
+
+
+def test_tiket_pertama_tanpa_penanda_cetak_ulang():
+    tiket = _tiket_contoh()
+    assert tiket.baris_cetak_ulang() == ""
+    assert "Sisa antrian: 3" in tiket.baris_teks()
+
+
+def test_tiket_cetak_ulang_bertanda_jam_dan_menggantikan_sisa_antrian():
+    from datetime import datetime
+
+    tiket = _tiket_contoh(cetak_ulang_pada=datetime(2026, 10, 22, 9, 42))
+    baris = tiket.baris_teks()
+
+    assert "*** CETAK ULANG 09:42 ***" in baris
+    assert not any(b.startswith("Sisa antrian") for b in baris)
+    # Nomor dan jam terbit tetap yang asli.
+    assert "PB-004" in baris
+    assert tiket.jam == "09:15"
+
+
+def test_tiket_cetak_ulang_tetap_muat_88_mm():
+    from dataclasses import replace
+    from datetime import datetime
+
+    from app.services.ticket_service import PdfTicketPrinter, _tata_letak
+
+    tiket = replace(
+        _tiket_contoh(),
+        header="BAPENDA DKI JAKARTA",
+        office_name="UNIT PELAYANAN PEMUNGUTAN PAJAK DAERAH",
+        counter_name="Loket 2",
+        footer=" ".join(["Terima kasih atas kesabaran Anda"] * 5),
+        cetak_ulang_pada=datetime(2026, 10, 22, 9, 42),
+    )
+    baris = _tata_letak(tiket, _pas_helvetica, ukuran_nomor=54)
+
+    assert "*** CETAK ULANG 09:42 ***" in [b.teks for b in baris]
+    assert PdfTicketPrinter.TINGGI_MM - baris[-1].y_mm >= 12

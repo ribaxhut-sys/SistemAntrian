@@ -93,6 +93,7 @@ BAWAAN: dict[str, str] = {
     "queue.registration_closed_date": "",
     "survey.enabled": "true",
     "privasi.retensi_pengaduan_bulan": "24",
+    "catatan.frasa_bawaan": "",
     "ticket.footer": "Silakan menunggu nomor Anda dipanggil.",
     "ticket.printer": "pdf",
     "ticket.geser_atas_mm": "0",
@@ -108,6 +109,8 @@ BOOLEAN = "boolean"
 PILIHAN = "pilihan"
 BERKAS = "berkas"
 DAFTAR_PUTAR = "daftar_putar"
+#: Teks beberapa baris (satu butir per baris).
+TEKS_BANYAK = "teks_banyak"
 
 
 @dataclass(frozen=True)
@@ -639,6 +642,16 @@ SKEMA: tuple[Pengaturan, ...] = (
         kelompok="Pengaduan",
     ),
     Pengaturan(
+        "catatan.frasa_bawaan",
+        "Kalimat cepat bawaan catatan petugas",
+        "Satu kalimat per baris (maksimal 8, masing-masing 80 karakter). "
+        "Dipakai jenis layanan yang kolom \"Kalimat Cepat Catatan\"-nya "
+        "dikosongkan. Kosongkan untuk memakai daftar bawaan aplikasi.",
+        TEKS_BANYAK,
+        boleh_kosong=True,
+        kelompok="Pengaduan",
+    ),
+    Pengaturan(
         "dashboard.refresh_seconds",
         "Jeda penyegaran ringkasan",
         "Semakin kecil semakin sering database dibaca.",
@@ -782,6 +795,14 @@ def _validasi(kunci: str, nilai: str) -> str:
 
     if butir.jenis == DAFTAR_PUTAR:
         return daftar_putar.baku(nilai)
+
+    if butir.jenis == TEKS_BANYAK:
+        if kunci == "catatan.frasa_bawaan":
+            from app.services.note_service import daftar_frasa, periksa_frasa
+
+            periksa_frasa(nilai)
+            return "\n".join(daftar_frasa(nilai))
+        return nilai
 
     if not nilai and not butir.boleh_kosong:
         raise ValidationError(f"{butir.label} tidak boleh dikosongkan.")

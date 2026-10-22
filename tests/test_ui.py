@@ -1829,11 +1829,13 @@ class _TiketPalsu:
 
     def __init__(self):
         self.dicetak = []
+        self.tanda_cetak_ulang = []
 
-    def cetak(self, antrian):
+    def cetak(self, antrian, *, cetak_ulang=False):
         from types import SimpleNamespace
 
         self.dicetak.append(antrian)
+        self.tanda_cetak_ulang.append(cetak_ulang)
         return SimpleNamespace(berhasil=True, pesan="")
 
 
@@ -1871,7 +1873,58 @@ def test_cetak_ulang_tiket_memakai_keadaan_terbaru_tanpa_prioritas(
 
     assert len(tiket.dicetak) == 1
     assert tiket.dicetak[0].prioritas is None
+    assert tiket.tanda_cetak_ulang == [True]
     assert halaman_layanan.label_cetak.text() == "Tiket tercetak."
+
+
+def test_cetak_ulang_nomor_anjungan_dikirim_ke_anjungan_bukan_printer_pc(
+    halaman_layanan, terbitkan, auth, monkeypatch
+):
+    terbitkan("A", 1)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    tiket = _TiketPalsu()
+    halaman_layanan.ticket = tiket
+    halaman_layanan.muat_ulang()
+    halaman_layanan.panggil_berikutnya()
+    permintaan = []
+    monkeypatch.setattr(
+        halaman_layanan.queue, "anjungan_penerbit", lambda _id: "Anjungan Lobi"
+    )
+    monkeypatch.setattr(
+        halaman_layanan.queue,
+        "minta_cetak_ulang_anjungan",
+        lambda id_: permintaan.append(id_) or "Anjungan Lobi",
+    )
+    monkeypatch.setattr(halaman_layanan, "_periksa_cetak_anjungan_nanti", lambda _id: None)
+
+    halaman_layanan.tombol_cetak_ulang.click()
+
+    assert permintaan == [halaman_layanan.antrian.id]
+    assert tiket.dicetak == []
+    assert "Anjungan Lobi" in halaman_layanan.label_cetak.text()
+    # Klik ganda dicegah sebentar.
+    assert not halaman_layanan.tombol_cetak_ulang.isEnabled()
+
+
+def test_cetak_di_loket_ini_mencetak_di_printer_pc_dengan_penanda(
+    halaman_layanan, terbitkan, auth, monkeypatch
+):
+    terbitkan("A", 1)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    tiket = _TiketPalsu()
+    halaman_layanan.ticket = tiket
+    halaman_layanan.muat_ulang()
+    halaman_layanan.panggil_berikutnya()
+    monkeypatch.setattr(
+        halaman_layanan.queue, "anjungan_penerbit", lambda _id: "Anjungan Lobi"
+    )
+
+    halaman_layanan._cetak_ulang_tiket(halaman_layanan.antrian, ke_loket=True)
+
+    assert len(tiket.dicetak) == 1
+    assert tiket.tanda_cetak_ulang == [True]
 
 
 def test_cabut_lewat_dialog_dengan_centang_mencetak_ulang_nomor_yang_dikembalikan(

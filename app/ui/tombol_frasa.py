@@ -48,7 +48,7 @@ class TombolFrasa(QPushButton):
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         tata = QHBoxLayout(self)
-        tata.setContentsMargins(10, 6, 10, 6)
+        tata.setContentsMargins(8, 4, 8, 4)
         tata.addWidget(self.label)
         self._gayai()
 

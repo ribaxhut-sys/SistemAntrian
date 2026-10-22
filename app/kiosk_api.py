@@ -1143,7 +1143,9 @@ def create_app(token: str, services: KioskServices | None = None) -> FastAPI:
         for perintah_id, queue_id in cetak_ulang_anjungan.ambil_untuk_perangkat(device_id):
             try:
                 info = services.queue.nomor_untuk_cetak_ulang(queue_id)
-                ticket = replace(services.ticket.susun(info), sisa_antrian=None)
+                ticket = replace(
+                    services.ticket.susun(info, cetak_ulang=True), sisa_antrian=None
+                )
                 raster = None
                 try:
                     raster = raster_tiket_anjungan(ticket)

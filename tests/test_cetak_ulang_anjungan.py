@@ -89,6 +89,8 @@ def test_cabut_lalu_cetak_ulang_sampai_ke_tablet_asal(skenario):
     # Tiket disusun dari keadaan sekarang: tanda prioritas sudah hilang.
     assert not any("Prioritas" in baris for baris in tugas[0]["ticket_lines"])
     assert tugas[0]["ticket_layout"] is not None
+    # Tiket pengganti bertanda cetak ulang; nomornya tetap yang asli.
+    assert any(b.startswith("*** CETAK ULANG ") for b in tugas[0]["ticket_lines"])
 
     # Sekali kirim: penyegaran berikutnya tidak mencetak dua kali.
     assert klien.get("/v1/kiosk/cetak-ulang", headers=kepala).json() == {"jobs": []}

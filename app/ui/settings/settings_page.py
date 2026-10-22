@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QListWidget,
     QListWidgetItem,
     QScrollArea,
@@ -54,6 +55,7 @@ from app.services.settings_service import (
     BERKAS,
     BOOLEAN,
     DAFTAR_PUTAR,
+    TEKS_BANYAK,
     PILIHAN,
     Pengaturan,
     SettingsService,
@@ -214,6 +216,20 @@ def teks_tempat(butir: daftar_putar.Butir) -> str:
     if butir.tampil == daftar_putar.TAMPIL_KEDUANYA:
         return ""
     return daftar_putar.LABEL_TAMPIL[butir.tampil]
+
+
+class _KotakBanyakBaris(QPlainTextEdit):
+    """Kotak teks beberapa baris dengan antarmuka yang sama seperti QLineEdit."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFixedHeight(110)
+
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def setText(self, nilai: str) -> None:  # noqa: N802 - menyamai QLineEdit
+        self.setPlainText(nilai)
 
 
 class _DaftarPutar(QWidget):
@@ -559,6 +575,9 @@ class _BarisPengaturan(QFrame):
 
         if self.butir.jenis == DAFTAR_PUTAR:
             return _DaftarPutar()
+
+        if self.butir.jenis == TEKS_BANYAK:
+            return _KotakBanyakBaris()
 
         return QLineEdit()
 

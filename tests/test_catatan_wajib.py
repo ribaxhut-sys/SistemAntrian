@@ -243,3 +243,41 @@ def test_catatan_terakhir_saya_hanya_milik_petugas_dan_hari_ini(
     # Terbaru lebih dulu; nomor yang sedang dikerjakan dikecualikan.
     assert catatan.catatan_terakhir_saya() == ["Catatan dua lengkap.", "Catatan satu lengkap."]
     assert catatan.catatan_terakhir_saya(kecuali_queue_id=nomor[1]) == ["Catatan satu lengkap."]
+
+
+def test_frasa_cepat_bawaan_dapat_diganti_admin(auth, antrian_siap, cro_queue):
+    from app.services.settings_service import SettingsService
+
+    kategori = antrian_siap["kategori"]["A"]
+
+    def baca() -> list[str]:
+        auth.logout()
+        auth.login("cro", TEST_PASSWORD)
+        hasil = NoteService(auth).frasa_cepat(kategori)
+        auth.logout()
+        auth.login("admin", TEST_PASSWORD)
+        return hasil
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    pengaturan = SettingsService(auth)
+    assert baca() == list(FRASA_BAWAAN)
+
+    pengaturan.set("catatan.frasa_bawaan", "Berkas lengkap.\n  Berkas   kurang.\nBerkas lengkap.")
+    assert baca() == ["Berkas lengkap.", "Berkas kurang."]
+
+    # Dikosongkan: kembali ke daftar bawaan aplikasi.
+    pengaturan.set("catatan.frasa_bawaan", "")
+    assert baca() == list(FRASA_BAWAAN)
+
+
+def test_frasa_bawaan_admin_ditolak_bila_terlalu_panjang_atau_banyak(auth):
+    from app.services.settings_service import SettingsService
+
+    auth.logout()
+    auth.login("admin", TEST_PASSWORD)
+    pengaturan = SettingsService(auth)
+    with pytest.raises(ValidationError):
+        pengaturan.set("catatan.frasa_bawaan", "x" * (PANJANG_FRASA + 1))
+    with pytest.raises(ValidationError):
+        pengaturan.set("catatan.frasa_bawaan", "\n".join(f"Kalimat {i}" for i in range(9)))
