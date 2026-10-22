@@ -99,7 +99,7 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity implements TextToSpeech.OnInitListener {
 
     /** Identitas tetap; tidak mengikuti judul dari server (app/core/identitas.py). */
-    private static final String NAMA_TAMPIL = "CRO";
+    private static final String NAMA_TAMPIL = "Bapenda DKI Jakarta";
 
     private static final String PREFS = "layar";
     private static final String TEMA = "tema";

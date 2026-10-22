@@ -53,14 +53,14 @@ UKURAN_HURUF_MIN = 7
 JARAK_BARIS_KANTOR_MM = 4.0
 
 #: Ukuran huruf nama kantor. Lebih kecil dari judul instansi supaya
-#: "CRO" tetap yang dibaca pertama.
+#: "BAPENDA DKI JAKARTA" tetap yang dibaca pertama.
 UKURAN_KANTOR = 10
 
 #: Garis dasar baris pertama tiket, diukur dari tepi atas kertas.
 #:
 #: Ini jarak ke garis dasar huruf, bukan ke puncaknya. Kapital 12 pt
 #: setinggi ±3 mm, jadi 3,5 mm adalah batas: puncak judul hampir di tepi
-#: halaman. Lebih rapat dari ini memotong "CRO…". Zona kosong di
+#: halaman. Lebih rapat dari ini memotong "BAPENDA…". Zona kosong di
 #: kertas IWare di atas itu tidak tercetak — jangan diisi geseran.
 ATAS_MM = 3.5
 

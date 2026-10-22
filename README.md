@@ -1060,7 +1060,7 @@ konfirmasi dulu.
 | Kunci | Bawaan | Kegunaan |
 |---|---|---|
 | `ticket.printer` | `pdf` | Cara mencetak tiket: `pdf`, `system`, `none` |
-| `ticket.header` | `CRO` | Judul di baris paling atas tiket; boleh dikosongkan |
+| `ticket.header` | `BAPENDA DKI JAKARTA` | Judul di baris paling atas tiket; boleh dikosongkan |
 | `ticket.footer` | — | Teks penutup pada tiket |
 | `display.title` | — | Judul pada layar antrian |
 | `display.next_count` | `3` | Jumlah nomor berikutnya yang ditampilkan |

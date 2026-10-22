@@ -14,8 +14,8 @@ KUNCI_DIKUNCI = ("ticket.header", "display.title", "kiosk.judul")
 
 
 def test_nama_tampil_memuat_produk_dan_instansi():
-    assert identitas.NAMA_TAMPIL == "Sistem Antrian CRO"
-    assert identitas.JUDUL_TIKET == "CRO"
+    assert identitas.NAMA_TAMPIL == "Sistem Antrian CRO - Bapenda DKI Jakarta"
+    assert identitas.JUDUL_TIKET == "BAPENDA DKI JAKARTA"
 
 
 def test_judul_identitas_tidak_ada_di_pengaturan_admin():
@@ -42,4 +42,4 @@ def test_android_memakai_nama_instansi_saja():
         "android-kiosk/app/src/main/AndroidManifest.xml",
         "android-kiosk/layar/src/main/AndroidManifest.xml",
     ):
-        assert "CRO" in (RAKIT / manifes).read_text(encoding="utf-8")
+        assert "Bapenda DKI Jakarta" in (RAKIT / manifes).read_text(encoding="utf-8")

@@ -35,7 +35,7 @@ def test_tiket_memuat_keterangan_yang_dibutuhkan(ticket_pdf, reg_queue, antrian_
     assert tiket.category_name == "Konsultasi"
     assert tiket.office_name == "Kantor Pelayanan"
     assert tiket.footer == "Silakan menunggu nomor Anda dipanggil."
-    assert tiket.header == "CRO"
+    assert tiket.header == "BAPENDA DKI JAKARTA"
     assert tiket.geser_atas_mm == 0
 
 
@@ -267,7 +267,7 @@ def test_sisa_antrian_muat_di_tinggi_struk_yang_tetap(
     # ulang yang loketnya sudah diketahui), dan catatan kaki dua baris.
     terpanjang = replace(
         tiket,
-        header="CRO",
+        header="BAPENDA DKI JAKARTA",
         office_name="UNIT PELAYANAN PEMUNGUTAN PAJAK DAERAH",
         counter_name="Loket 2",
         footer=" ".join(["Terima kasih atas kesabaran Anda"] * 5),
@@ -276,11 +276,11 @@ def test_sisa_antrian_muat_di_tinggi_struk_yang_tetap(
     tulisan = [b for b in baris if not b.garis]
 
     assert [b.teks for b in tulisan[:3]] == [
-        "CRO",
+        "BAPENDA DKI JAKARTA",
         "UNIT PELAYANAN PEMUNGUTAN",
         "PAJAK DAERAH",
     ]
-    assert baris[0].teks == "CRO"
+    assert baris[0].teks == "BAPENDA DKI JAKARTA"
     assert baris[1].garis
     assert baris[1].y_mm > baris[0].y_mm
     assert baris[1].y_mm < tulisan[1].y_mm
@@ -529,7 +529,7 @@ def test_ukuran_halaman_sama_dengan_tiket_pdf(qt_available, tmp_path):
 def test_geser_printer_tidak_memakan_judul():
     """
     Regresi: geseran −14 mm menaruh judul di zona umpan IWare yang tidak
-    tercetak, sehingga "CRO…" hilang dari kertas. Zona itu tidak boleh
+    tercetak, sehingga "BAPENDA…" hilang dari kertas. Zona itu tidak boleh
     diisi software.
     """
     from app.services.ticket_service import GESER_PRINTER_MM
@@ -711,11 +711,11 @@ def test_judul_tiket_di_baris_paling_atas():
         category_name="Konsultasi",
         office_name="Kantor Pelayanan",
         issued_at=datetime(2026, 9, 12, 9, 30),
-        header="CRO",
+        header="BAPENDA DKI JAKARTA",
     )
 
     assert tiket.baris_teks()[:4] == [
-        "CRO",
+        "BAPENDA DKI JAKARTA",
         "Kantor Pelayanan",
         "",
         "NOMOR ANTRIAN",
@@ -744,7 +744,7 @@ def _tiket_nama_panjang():
         queue_number="A-023",
         category_name="Pelayanan Pajak Kendaraan Bermotor",
         office_name="UNIT PELAYANAN PEMUNGUTAN PAJAK DAERAH",
-        header="CRO",
+        header="BAPENDA DKI JAKARTA",
         issued_at=datetime(2026, 9, 12, 9, 30),
         footer="Silakan menunggu nomor Anda dipanggil.",
         counter_name="Loket 2",
@@ -846,7 +846,7 @@ def test_tata_letak_anjungan_android_tidak_memotong_tiket_biasa():
         office_name="Kantor Pelayanan",
         issued_at=datetime(2026, 10, 12, 10, 0),
         footer="Silakan menunggu nomor Anda dipanggil.",
-        header="CRO",
+        header="BAPENDA DKI JAKARTA",
     )
     baris = {
         row["text"]: row["size"]
@@ -854,7 +854,7 @@ def test_tata_letak_anjungan_android_tidak_memotong_tiket_biasa():
         if not row["line"]
     }
 
-    assert baris["CRO"] == 12
+    assert baris["BAPENDA DKI JAKARTA"] == 12
     assert baris["Kantor Pelayanan"] == 10
     assert baris["C-002"] == 44
     assert baris["Silakan menunggu nomor Anda dipanggil."] == 9

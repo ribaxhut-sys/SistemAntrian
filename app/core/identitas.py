@@ -11,10 +11,10 @@ terpasang tidak putus. Yang tampil kepada orang memakai `NAMA_TAMPIL`.
 from __future__ import annotations
 
 PRODUK = "Sistem Antrian CRO"
-INSTANSI = "CRO"
+INSTANSI = "Bapenda DKI Jakarta"
 
 #: Judul jendela, layar masuk, dan kepala aplikasi.
-NAMA_TAMPIL = PRODUK
+NAMA_TAMPIL = f"{PRODUK} - {INSTANSI}"
 
 #: Baris paling atas tiket dan kop laporan.
 JUDUL_TIKET = INSTANSI.upper()

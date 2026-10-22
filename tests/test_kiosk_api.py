@@ -20,7 +20,7 @@ from app.services.ticket_service import TicketData
 VERSI_APK = {"X-App-Version-Code": str(VERSI_MINIMAL)}
 
 
-TOKEN = "croantrian"
+TOKEN = "bapendacro"
 
 
 class _Master:
@@ -296,7 +296,7 @@ def test_api_display_hanya_berisi_keperluan_ambil_nomor(tmp_path, monkeypatch):
     assert abs(isi.pop("server_time_ms") - time.time() * 1000) < 5000
     assert len(isi.pop("categories_version")) == 16
     assert isi == {
-        "title": "Sistem Antrian CRO",
+        "title": "Sistem Antrian CRO - Bapenda DKI Jakarta",
         "subtitle": "",
         "welcome_text": "Selamat datang",
         "welcome_kind": "teks",
@@ -371,14 +371,14 @@ def test_display_selalu_memakai_identitas_tetap():
     from app.kiosk_api import create_app
 
     services = _Services()
-    services.settings.judul = "  Selamat datang di CRO  "
+    services.settings.judul = "  Selamat datang di Bapenda  "
     services.settings.subjudul = " UPPRD Menteng · 08.00–15.00 "
     client = TestClient(create_app(TOKEN, services))
     isi = client.get(
         "/v1/kiosk/display", headers={"Authorization": f"Bearer {TOKEN}"}
     ).json()
 
-    assert isi["title"] == "Sistem Antrian CRO"
+    assert isi["title"] == "Sistem Antrian CRO - Bapenda DKI Jakarta"
     assert isi["subtitle"] == "UPPRD Menteng · 08.00–15.00"
 
 
@@ -572,7 +572,7 @@ def test_ticket_raster_matches_windows_geometry():
         category_name="Pajak Kendaraan",
         office_name="Kantor Pelayanan",
         issued_at=datetime(2026, 10, 6, 9, 0),
-        header="CRO",
+        header="BAPENDA DKI JAKARTA",
     )
     raster = raster_tiket_anjungan(data)
 
