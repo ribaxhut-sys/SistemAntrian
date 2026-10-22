@@ -29,7 +29,7 @@ from app.models import UserRole
 from app.services import daftar_putar
 from app.services.note_service import FRASA_MAKS, PANJANG_FRASA, daftar_frasa, periksa_frasa
 from app.ui.common import judul, keterangan, label_error, tombol
-from app.ui.tombol_frasa import TombolFrasa
+from app.ui.daftar_frasa import DaftarFrasa
 from app.ui.kiosk.sambutan import (
     FILTER_BERKAS_ANJUNGAN,
     folder_media_layanan,
@@ -378,15 +378,13 @@ class CategoryDialog(_DialogIsian):
         self.input_frasa.setMaximumHeight(110)
         self.form.addRow("Kalimat Cepat Catatan", self.input_frasa)
 
-        # Pratinjau: tombol persis seperti yang dilihat petugas, supaya
-        # admin tahu bila sebuah kalimat terlalu panjang sebelum menyimpan.
+        # Pratinjau: paragraf persis seperti yang dilihat petugas (kalimat
+        # dirangkai koma, tanpa kotak), supaya admin tahu bila daftarnya
+        # terlalu panjang untuk dua sampai tiga baris sebelum menyimpan.
         self.peringatan_frasa = keterangan("")
         self.form.addRow("", self.peringatan_frasa)
-        self.pratinjau_frasa = QWidget()
+        self.pratinjau_frasa = DaftarFrasa()
         self.pratinjau_frasa.setMaximumWidth(360)
-        self._tata_pratinjau = QVBoxLayout(self.pratinjau_frasa)
-        self._tata_pratinjau.setContentsMargins(0, 0, 0, 0)
-        self._tata_pratinjau.setSpacing(6)
         self.form.addRow("Pratinjau", self.pratinjau_frasa)
         self.input_frasa.textChanged.connect(self._perbarui_pratinjau_frasa)
         self._perbarui_pratinjau_frasa()
@@ -422,19 +420,25 @@ class CategoryDialog(_DialogIsian):
 
         (self.input_nama if ubah else self.input_kode).setFocus()
 
+    #: Daftar yang lebih tinggi dari ini tidak lagi "dua sampai tiga baris".
+    BARIS_FRASA_MAKS = 3
+
     def _perbarui_pratinjau_frasa(self) -> None:
-        while self._tata_pratinjau.count():
-            butir = self._tata_pratinjau.takeAt(0)
-            if butir.widget() is not None:
-                butir.widget().deleteLater()
         teks = self.input_frasa.toPlainText()
         daftar = daftar_frasa(teks)
-        for kalimat in daftar:
-            self._tata_pratinjau.addWidget(TombolFrasa(kalimat))
+        self.pratinjau_frasa.set_kalimat(daftar)
         try:
             periksa_frasa(teks)
         except ValidationError as exc:
             self.peringatan_frasa.setText(str(exc))
+            self.peringatan_frasa.setStyleSheet("color: #B45309; font-weight: 600;")
+            return
+        baris = self._baris_pratinjau()
+        if baris > self.BARIS_FRASA_MAKS:
+            self.peringatan_frasa.setText(
+                f"Daftar ini memakan sekitar {baris} baris di layar petugas. "
+                f"Persingkat supaya paling banyak {self.BARIS_FRASA_MAKS} baris."
+            )
             self.peringatan_frasa.setStyleSheet("color: #B45309; font-weight: 600;")
             return
         self.peringatan_frasa.setStyleSheet("")
@@ -442,6 +446,15 @@ class CategoryDialog(_DialogIsian):
             f"Maksimal {FRASA_MAKS} kalimat, masing-masing {PANJANG_FRASA} karakter. "
             "Kosongkan untuk memakai daftar bawaan."
         )
+
+    def _baris_pratinjau(self) -> int:
+        """Perkiraan banyaknya baris pratinjau pada lebarnya sekarang."""
+        daftar = self.pratinjau_frasa
+        if not daftar.item:
+            return 0
+        lebar = min(daftar.maximumWidth(), 360)
+        tinggi = daftar.heightForWidth(lebar)
+        return max(1, round(tinggi / max(1, daftar.fontMetrics().lineSpacing())))
 
     def _perbarui_contoh(self, teks: str) -> None:
         bersih = teks.strip().upper()

@@ -836,11 +836,26 @@ class QueueService:
                 row, repo.jumlah_pemanggilan(row.id), self.batas_panggilan()
             )
 
+    def _sesi_ringkasan_tiket(self):
+        """
+        Sesi yang berhak membaca ringkasan sebuah tiket.
+
+        Penerbit tiket (kios, pendaftaran) memakai TICKET_PRINT. Petugas
+        loket mencetak ULANG tiket nomor yang ia pegang dan tidak punya
+        TICKET_PRINT, tetapi berhak QUEUE_VIEW; tanpa jalur ini penolakannya
+        tercatat sebagai peringatan palsu di log dan tiketnya kehilangan
+        baris sisa antrian.
+        """
+        if self.auth.has_permission(Permission.TICKET_PRINT):
+            return self.auth.require_permission(Permission.TICKET_PRINT)
+        return self.auth.require_permission(Permission.QUEUE_VIEW)
+
     def ringkasan_tiket(self, antrian: QueueInfo) -> RingkasanTiket:
         """
         Keadaan antrian pada detik sebuah tiket dicetak.
 
-        Memakai hak TICKET_PRINT, bukan QUEUE_VIEW maupun DISPLAY_VIEW.
+        Memakai hak TICKET_PRINT (atau QUEUE_VIEW bagi petugas loket yang
+        mencetak ulang), bukan DISPLAY_VIEW.
         Tiket terbit dari dua tempat dengan kewenangan yang berbeda —
         anjungan kios (DISPLAY_VIEW, tanpa QUEUE_VIEW) dan meja pendaftaran
         (QUEUE_VIEW, tanpa DISPLAY_VIEW) — sehingga hak yang benar untuk
@@ -851,7 +866,7 @@ class QueueService:
         sehingga kios di ruang publik tetap tidak dapat membaca siapa saja
         yang sedang mengantre.
         """
-        sesi = self.auth.require_permission(Permission.TICKET_PRINT)
+        sesi = self._sesi_ringkasan_tiket()
 
         with session_scope() as session:
             repo = QueueRepository(session)

@@ -65,7 +65,9 @@ Android **2.5.6 (kode 60)**: pita di atas layar "Sedang mencetak ulang tiket (no
 paragraf berkoma (`app/ui/daftar_frasa.py`, dirangkai koma, titik akhir dibuang), kotak catatan 4 baris;
 daftar bawaan dapat diganti admin (pengaturan `catatan.frasa_bawaan`, jenis baru `TEKS_BANYAK`); panel
 survey DISEMBUNYIKAN sementara (`_baris_survey.setVisible(False)`, kode dipertahankan). Perkiraan tunggu
-dihapus dari tiket. Tes terarah 340 lulus (+423 pada rangkaian sebelumnya); suite penuh belum.
+dihapus dari tiket. `ringkasan_tiket` kini dapat dibaca petugas loket (QUEUE_VIEW) sehingga cetak ulang CRO
+tidak lagi mencatat peringatan TICKET_PRINT; pratinjau dialog admin memakai `DaftarFrasa` dan memperingatkan
+bila lebih dari 3 baris. **Suite penuh 22 Oktober: 2078 lulus, 8 dilewati, 0 gagal.**
 **Belum terbukti:** cetak ulang ke printer anjungan sungguhan (BlueStacks tanpa printer USB); banner
 belum dilihat di tablet. Server (proses lama sejak 13:09) dan aplikasi Windows harus dimulai ulang agar
 memuat kode baru. Anjungan BlueStacks sempat macet (tidak menghubungi server sama sekali, proses hidup

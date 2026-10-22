@@ -997,3 +997,34 @@ def test_kalimat_cepat_berturut_turut_tetap_ditandai_terpakai(halaman_kerja, ter
     # Rangkaian kalimat cepat murni tidak diperingatkan sebagai catatan yang sama.
     assert panel._hanya_kalimat_cepat(panel.isian_catatan.toPlainText())
     assert not panel._hanya_kalimat_cepat("Berkas belum lengkap, diminta kembali besok.")
+
+
+def test_pratinjau_dialog_admin_sama_dengan_tampilan_petugas(qtbot):
+    from PySide6.QtWidgets import QPushButton
+
+    from app.ui.daftar_frasa import DaftarFrasa
+    from app.ui.settings.dialogs import CategoryDialog
+
+    dialog = CategoryDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.input_frasa.setPlainText("Berkas lengkap.\nBerkas kurang.\nDiminta kembali besok.")
+
+    assert isinstance(dialog.pratinjau_frasa, DaftarFrasa)
+    assert not dialog.pratinjau_frasa.findChildren(QPushButton)
+    assert dialog.pratinjau_frasa.text().count(", ") == 2
+    assert "Persingkat" not in dialog.peringatan_frasa.text()
+
+
+def test_pratinjau_dialog_admin_memperingatkan_daftar_terlalu_panjang(qtbot):
+    from app.services.note_service import PANJANG_FRASA
+    from app.ui.settings.dialogs import CategoryDialog
+
+    dialog = CategoryDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+    panjang = ("Pelanggan menanyakan persyaratan pengajuan sambungan baru beserta "
+               "biayanya")[:PANJANG_FRASA]
+    dialog.input_frasa.setPlainText("\n".join(f"{i} {panjang}"[:PANJANG_FRASA] for i in range(8)))
+
+    assert "Persingkat" in dialog.peringatan_frasa.text()

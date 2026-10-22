@@ -937,3 +937,42 @@ def test_tiket_cetak_ulang_tetap_muat_88_mm():
 
     assert "*** CETAK ULANG 09:42 ***" in [b.teks for b in baris]
     assert PdfTicketPrinter.TINGGI_MM - baris[-1].y_mm >= 12
+
+
+def test_petugas_loket_membaca_ringkasan_tiket_tanpa_peringatan_akses(
+    auth, antrian_siap, terbitkan, caplog
+):
+    """CRO mencetak ulang di loket: tidak punya TICKET_PRINT, tetapi berhak QUEUE_VIEW."""
+    import logging
+
+    from app.services.queue_service import QueueService
+    from tests.conftest import TEST_PASSWORD
+
+    terbitkan("A", 3)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    layanan = QueueService(auth)
+    nomor = layanan.call_next(antrian_siap["loket"][0])
+
+    with caplog.at_level(logging.WARNING, logger="antrian.auth"):
+        ringkasan = layanan.ringkasan_tiket(nomor)
+
+    assert ringkasan.sisa_antrian == 0
+    assert not [r for r in caplog.records if "Akses ditolak" in r.getMessage()]
+
+
+def test_cetak_ulang_petugas_loket_memuat_ringkasan_tanpa_gagal(
+    auth, antrian_siap, terbitkan, ticket_pdf
+):
+    from app.services.queue_service import QueueService
+    from tests.conftest import TEST_PASSWORD
+
+    terbitkan("A", 2)
+    auth.logout()
+    auth.login("cro", TEST_PASSWORD)
+    nomor = QueueService(auth).call_next(antrian_siap["loket"][0])
+
+    tiket = ticket_pdf.susun(nomor, cetak_ulang=True)
+
+    assert tiket.sisa_antrian == 0
+    assert tiket.baris_cetak_ulang().startswith("*** CETAK ULANG")
