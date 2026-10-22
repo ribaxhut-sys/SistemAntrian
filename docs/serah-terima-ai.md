@@ -16,7 +16,7 @@ jebakan; bagian riwayat commit-nya sudah lama), [istilah.md](istilah.md),
 [layar-antrian.md](layar-antrian.md), [prioritas-antrian.md](prioritas-antrian.md),
 [keamanan-sesi.md](keamanan-sesi.md).
 
-Terakhir diperbarui: **22 Oktober 2026**, oleh Claude. Kata "Bapenda" dicabut dari seluruh berkas (judul, tiket, installer, tes) dan diganti "CRO"; cabang kerja kini `fitur/identitas-cro`. APK perlu dibangun ulang agar judul baru berlaku.
+Terakhir diperbarui: **22 Oktober 2026**, oleh Claude. Nama instansi lama diganti "CRO" di seluruh berkas (judul, tiket, installer, tes); cabang kerja kini `fitur/identitas-cro`. APK perlu dibangun ulang agar judul baru berlaku.
 
 **Audit produksi 21 Oktober 2026 (Codex):** keputusan **belum siap
 produksi**. `ruff check app tests alembic alat` bersih. Tes terarah yang
