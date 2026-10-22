@@ -202,3 +202,99 @@ def test_saran_bila_cetak_di_anjungan_gagal_atau_tidak_dijawab(skenario):
         json={"ok": True, "message": "Tiket tercetak."},
     )
     assert layanan.saran_cetak_ulang_anjungan(antrian.id) is None
+
+
+# ---------------------------------------------------------------------
+# Tujuan cetak ulang: penerbit bila aktif, kalau tidak anjungan aktif lain
+# ---------------------------------------------------------------------
+
+def _terlihat(device_id: str, menit_lalu: float) -> None:
+    from app.models import KioskDevice
+
+    with session_scope() as session:
+        session.execute(
+            sa.update(KioskDevice)
+            .where(KioskDevice.device_id == device_id)
+            .values(terakhir_terlihat=clock.now() - timedelta(minutes=menit_lalu))
+        )
+
+
+def _nomor_dari_windows(auth, antrian_siap):
+    auth.logout()
+    auth.login("registration", TEST_PASSWORD)
+    return QueueService(auth).create_queue(antrian_siap["kategori"]["A"])
+
+
+def test_nomor_dari_windows_dicetak_ulang_di_anjungan_aktif(
+    admin_auth, auth, antrian_siap
+):
+    klien = _klien()
+    _pasang(klien, admin_auth, DEVICE, "Anjungan Lobi")
+    _terlihat(DEVICE, 0)
+    nomor = _nomor_dari_windows(auth, antrian_siap)
+    layanan = _petugas(auth)
+
+    assert layanan.anjungan_penerbit(nomor.id) == "Anjungan Lobi"
+    assert layanan.minta_cetak_ulang_anjungan(nomor.id) == "Anjungan Lobi"
+
+
+def _id_nomor(nomor: str) -> int:
+    from app.models import Queue
+
+    with session_scope() as session:
+        return session.scalar(sa.select(Queue.id).where(Queue.queue_number == nomor))
+
+
+def test_penerbit_aktif_didahulukan_walau_anjungan_lain_lebih_baru(
+    admin_auth, auth, antrian_siap
+):
+    klien = _klien()
+    kepala = _pasang(klien, admin_auth, DEVICE, "Anjungan Lobi")
+    _pasang(klien, admin_auth, LAIN, "Anjungan Teras")
+    nomor = _ambil_nomor(klien, kepala, antrian_siap["kategori"]["A"], prioritas=False)
+    _terlihat(DEVICE, 2)
+    _terlihat(LAIN, 0)
+    layanan = _petugas(auth)
+
+    assert layanan.minta_cetak_ulang_anjungan(_id_nomor(nomor)) == "Anjungan Lobi"
+
+
+def test_penerbit_mati_dialihkan_ke_anjungan_lain_yang_aktif(
+    admin_auth, auth, antrian_siap
+):
+    klien = _klien()
+    kepala = _pasang(klien, admin_auth, DEVICE, "Anjungan Lobi")
+    _pasang(klien, admin_auth, LAIN, "Anjungan Teras")
+    nomor = _ambil_nomor(klien, kepala, antrian_siap["kategori"]["A"], prioritas=False)
+    _terlihat(DEVICE, cetak_ulang_anjungan.AKTIF_MENIT + 5)
+    _terlihat(LAIN, 0)
+    layanan = _petugas(auth)
+
+    assert layanan.minta_cetak_ulang_anjungan(_id_nomor(nomor)) == "Anjungan Teras"
+
+
+def test_tanpa_anjungan_aktif_penerbit_tetap_dipakai_agar_ada_saran(
+    admin_auth, auth, antrian_siap
+):
+    klien = _klien()
+    kepala = _pasang(klien, admin_auth, DEVICE, "Anjungan Lobi")
+    nomor = _ambil_nomor(klien, kepala, antrian_siap["kategori"]["A"], prioritas=False)
+    _terlihat(DEVICE, cetak_ulang_anjungan.AKTIF_MENIT + 5)
+    layanan = _petugas(auth)
+
+    assert layanan.minta_cetak_ulang_anjungan(_id_nomor(nomor)) == "Anjungan Lobi"
+
+
+def test_nomor_dari_windows_tanpa_anjungan_aktif_ditolak(
+    admin_auth, auth, antrian_siap
+):
+    klien = _klien()
+    _pasang(klien, admin_auth, DEVICE, "Anjungan Lobi")
+    _terlihat(DEVICE, cetak_ulang_anjungan.AKTIF_MENIT + 5)
+    nomor = _nomor_dari_windows(auth, antrian_siap)
+    layanan = _petugas(auth)
+
+    # Tidak ada penerbit dan satu-satunya anjungan mati: tidak ada tujuan.
+    assert layanan.anjungan_penerbit(nomor.id) is None
+    with pytest.raises(BusinessRuleError, match="anjungan"):
+        layanan.minta_cetak_ulang_anjungan(nomor.id)

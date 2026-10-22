@@ -634,7 +634,13 @@ public final class MainActivity extends Activity {
     /** Penanda panggilan terakhir tiap loket: nomor#jumlah panggilan; null = belum dimuat. */
     private Map<String, String> penandaPanggilanLoket;
     private android.widget.PopupWindow bannerPanggilan;
+    /** Pita di atas layar selama tiket dicetak ulang atas permintaan petugas. */
+    private android.widget.PopupWindow bannerCetakUlang;
+    private TextView teksBannerCetakUlang;
+    private android.widget.ProgressBar putarBannerCetakUlang;
     private static final long LAMA_BANNER_PANGGILAN_MS = 6_000L;
+    /** Hasil cetak ulang (berhasil atau gagal) tampil sebentar sebelum pita hilang. */
+    private static final long LAMA_BANNER_CETAK_ULANG_MS = 3_500L;
     private static final long DURASI_PANEL_PANGGILAN_MS = 900L;
     /** Nomor menunggu muncul berurutan, gaya acak (server: waiting_animation). */
     private boolean animasiNomorAktif = true;
@@ -4215,10 +4221,12 @@ public final class MainActivity extends Activity {
         if (teks != null) {
             for (int i = 0; i < teks.length(); i++) baris.add(teks.optString(i));
         }
+        tampilkanBannerCetakUlang(nomor);
         UsbEscPosPrinter.print(this, nomor, baris,
                 tugas.optJSONObject("ticket_layout"), tugas.optJSONObject("ticket_raster"),
                 message -> {
                     boolean tercetak = message.contains("tercetak");
+                    handler.post(() -> hasilBannerCetakUlang(nomor, tercetak));
                     try {
                         JSONObject hasil = new JSONObject()
                                 .put("ok", tercetak)
@@ -4230,6 +4238,77 @@ public final class MainActivity extends Activity {
                         // Laporan hasil hanya keterangan bagi petugas.
                     }
                 });
+    }
+
+    /**
+     * Pita "Sedang mencetak ulang tiket ..." di atas layar. Tidak menutup
+     * layanan di bawahnya dan tidak menangkap sentuhan, sehingga pengunjung
+     * lain tetap bisa memilih layanan sementara tiket dicetak ulang.
+     */
+    private void tampilkanBannerCetakUlang(String nomor) {
+        tutupBannerCetakUlang();
+        LinearLayout isi = new LinearLayout(this);
+        isi.setOrientation(LinearLayout.HORIZONTAL);
+        isi.setGravity(Gravity.CENTER_VERTICAL);
+        isi.setPadding(dp(20), dp(12), dp(20), dp(12));
+        isi.setBackground(rounded(Color.argb(240, 30, 41, 59), dp(18)));
+        android.widget.ProgressBar putar = new android.widget.ProgressBar(
+                this, null, android.R.attr.progressBarStyleSmall);
+        putar.setIndeterminate(true);
+        putarBannerCetakUlang = putar;
+        isi.addView(putar, new LinearLayout.LayoutParams(dp(24), dp(24)));
+        TextView teks = text(
+                nomor.isEmpty() ? "Sedang mencetak ulang tiket…"
+                        : "Sedang mencetak ulang tiket " + nomor + "…",
+                16, Color.WHITE, true);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.leftMargin = dp(12);
+        isi.addView(teks, lp);
+        teksBannerCetakUlang = teks;
+        int lebar = Math.min(getResources().getDisplayMetrics().widthPixels - dp(32), dp(520));
+        android.widget.PopupWindow jendela = new android.widget.PopupWindow(
+                isi, lebar, ViewGroup.LayoutParams.WRAP_CONTENT);
+        jendela.setTouchable(false);
+        jendela.setFocusable(false);
+        bannerCetakUlang = jendela;
+        View decor = getWindow().getDecorView();
+        decor.post(() -> {
+            if (bannerCetakUlang != jendela || isFinishing()) return;
+            try {
+                jendela.showAtLocation(decor, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, dp(24));
+            } catch (RuntimeException ignored) {
+                // Jendela belum siap; tiket tetap dicetak, hanya pitanya yang tidak tampil.
+            }
+        });
+    }
+
+    /** Ganti isi pita dengan hasil cetak, lalu tutup sesudah beberapa detik. */
+    private void hasilBannerCetakUlang(String nomor, boolean tercetak) {
+        android.widget.PopupWindow jendela = bannerCetakUlang;
+        if (jendela == null || teksBannerCetakUlang == null) return;
+        if (putarBannerCetakUlang != null) putarBannerCetakUlang.setVisibility(View.GONE);
+        teksBannerCetakUlang.setText(tercetak
+                ? "Tiket " + nomor + " sudah dicetak ulang"
+                : "Tiket " + nomor + " tidak dapat dicetak. Mohon hubungi petugas.");
+        View latar = (View) teksBannerCetakUlang.getParent();
+        latar.setBackground(rounded(tercetak
+                ? Color.argb(240, 4, 120, 87) : Color.argb(240, 180, 83, 9), dp(18)));
+        handler.postDelayed(() -> {
+            if (bannerCetakUlang == jendela) tutupBannerCetakUlang();
+        }, LAMA_BANNER_CETAK_ULANG_MS);
+    }
+
+    private void tutupBannerCetakUlang() {
+        android.widget.PopupWindow jendela = bannerCetakUlang;
+        bannerCetakUlang = null;
+        teksBannerCetakUlang = null;
+        putarBannerCetakUlang = null;
+        if (jendela == null) return;
+        try {
+            jendela.dismiss();
+        } catch (RuntimeException ignored) {
+            // Sudah tertutup.
+        }
     }
 
     // =================================================================
@@ -6581,6 +6660,7 @@ public final class MainActivity extends Activity {
             // Belum terdaftar.
         }
         handler.removeCallbacksAndMessages(null);
+        tutupBannerCetakUlang();
         hentikanKilauAjakan();
         hentikanDenyutAjakanIklan();
         antreanUcapan.clear();

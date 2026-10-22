@@ -55,6 +55,42 @@ def perangkat_penerbit(queue_id: int) -> tuple[str, str] | None:
         return (baris.device_id, baris.nama) if baris is not None else None
 
 
+#: Anjungan dianggap aktif bila terlihat (menghubungi server) dalam waktu ini.
+AKTIF_MENIT = 3
+
+
+def perangkat_tujuan(queue_id: int) -> tuple[str, str] | None:
+    """
+    (device_id, nama) anjungan tempat tiket cetak ulang nomor ini dikeluarkan.
+
+    Penerbit nomor didahulukan bila ia aktif. Nomor yang tidak berasal dari
+    anjungan (pendaftaran, atau perangkat yang sudah dicabut) maupun yang
+    penerbitnya sedang mati dialihkan ke anjungan lain yang aktif, paling
+    baru terlihat lebih dulu. Bila tidak ada anjungan aktif sama sekali,
+    penerbit (kalau ada) tetap dipakai supaya petugas menerima saran
+    "tablet tidak menjawab"; None bila tidak ada anjungan berpasangan.
+    """
+    batas = clock.now() - timedelta(minutes=AKTIF_MENIT)
+    penerbit = perangkat_penerbit(queue_id)
+    with session_scope() as session:
+        aktif = session.execute(
+            sa.select(KioskDevice.device_id, KioskDevice.nama, KioskDevice.terakhir_terlihat)
+            .where(
+                KioskDevice.jenis == "anjungan",
+                KioskDevice.dicabut_pada.is_(None),
+                KioskDevice.token_hash.is_not(None),
+                KioskDevice.terakhir_terlihat >= batas,
+            )
+            .order_by(KioskDevice.terakhir_terlihat.desc())
+        ).all()
+    ids = {baris.device_id: baris.nama for baris in aktif}
+    if penerbit is not None and penerbit[0] in ids:
+        return penerbit
+    if aktif:
+        return (aktif[0].device_id, aktif[0].nama)
+    return penerbit
+
+
 def antrikan(session, queue_id: int, device_id: str, user_id: int | None) -> KioskCetakUlang:
     """Buat perintah baru; permintaan kembar yang masih menunggu dipakai ulang."""
     ada = session.scalar(

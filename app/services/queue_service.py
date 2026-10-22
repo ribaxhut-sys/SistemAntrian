@@ -1488,10 +1488,15 @@ class QueueService:
             )
 
     def anjungan_penerbit(self, queue_id: int) -> str | None:
-        """Nama anjungan yang menerbitkan nomor ini, None bila tidak dapat ditunjuk."""
+        """
+        Nama anjungan tempat cetak ulang nomor ini dikeluarkan, None bila tidak ada.
+
+        Penerbit nomor bila ia aktif; kalau tidak (nomor dari pendaftaran atau
+        penerbitnya mati), anjungan lain yang aktif.
+        """
         self.auth.require_permission(Permission.QUEUE_VIEW)
-        penerbit = cetak_ulang_anjungan.perangkat_penerbit(queue_id)
-        return (penerbit[1] or "Anjungan") if penerbit else None
+        tujuan = cetak_ulang_anjungan.perangkat_tujuan(queue_id)
+        return (tujuan[1] or "Anjungan") if tujuan else None
 
     def saran_cetak_ulang_anjungan(self, queue_id: int) -> str | None:
         """
@@ -1531,13 +1536,13 @@ class QueueService:
         Mengembalikan nama anjungan tujuan.
         """
         sesi = self.auth.require_permission(Permission.QUEUE_CALL)
-        penerbit = cetak_ulang_anjungan.perangkat_penerbit(queue_id)
-        if penerbit is None:
+        tujuan = cetak_ulang_anjungan.perangkat_tujuan(queue_id)
+        if tujuan is None:
             raise BusinessRuleError(
-                "Nomor ini tidak berasal dari anjungan yang dapat dihubungi "
-                "(diterbitkan dari Windows, atau anjungannya sudah dicabut)."
+                "Tidak ada anjungan berpasangan yang dapat dihubungi untuk "
+                "mencetak ulang tiket ini."
             )
-        device_id, nama = penerbit
+        device_id, nama = tujuan
         with session_scope() as session:
             repo = QueueRepository(session)
             antrian = self._ambil(repo, queue_id)

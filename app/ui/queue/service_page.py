@@ -1801,7 +1801,7 @@ class ServicePage(QWidget):
         # Nomor yang masih menunggu: tiket lamanya yang bertuliskan "Prioritas"
         # diganti otomatis di anjungan penerbitnya (bila ada), dengan penanda
         # cetak ulang; nomornya sendiri tidak berubah.
-        anjungan = self._anjungan_penerbit(antrian_id)
+        anjungan = self._anjungan_penerbit(antrian_id, segarkan=True)
 
         def aksi_menunggu():
             hasil = self.queue.cabut_prioritas(antrian_id)
@@ -1857,20 +1857,28 @@ class ServicePage(QWidget):
             self.label_cetak.setText("Tiket tercetak di anjungan.")
             self.label_cetak.setVisible(True)
 
-    def _anjungan_penerbit(self, antrian_id: int) -> str | None:
+    def _anjungan_penerbit(self, antrian_id: int, *, segarkan: bool = False) -> str | None:
         """
-        Nama anjungan penerbit nomor ini, atau None. Dibaca sekali per nomor.
+        Nama anjungan tujuan cetak ulang nomor ini, atau None. Disimpan sebentar.
 
         Dipanggil tiap penyegaran kartu; tanpa simpanan ini setiap detik
-        akan menanyai database hanya untuk menentukan satu tombol.
+        akan menanyai database hanya untuk menentukan satu tombol. Simpanan
+        berlaku 30 detik karena anjungan yang aktif bisa berganti, dan
+        `segarkan=True` dipakai saat petugas benar-benar menekan tombol.
         """
+        import time
+
         simpanan = self.__dict__.setdefault("_simpanan_anjungan", {})
-        if antrian_id not in simpanan:
-            try:
-                simpanan[antrian_id] = self.queue.anjungan_penerbit(antrian_id)
-            except Exception:  # noqa: BLE001 - hanya menentukan tombol
-                return None
-        return simpanan[antrian_id]
+        sekarang = time.monotonic()
+        ada = simpanan.get(antrian_id)
+        if ada is not None and not segarkan and sekarang - ada[0] < 30:
+            return ada[1]
+        try:
+            nama = self.queue.anjungan_penerbit(antrian_id)
+        except Exception:  # noqa: BLE001 - hanya menentukan tombol
+            return None
+        simpanan[antrian_id] = (sekarang, nama)
+        return nama
 
     def _cetak_ulang_tiket(
         self, target: QueueInfo | None, *, ke_loket: bool = False
@@ -1893,7 +1901,7 @@ class ServicePage(QWidget):
             5000, lambda: self.tombol_cetak_ulang.setEnabled(True)
         )
 
-        if not ke_loket and self._anjungan_penerbit(antrian_id):
+        if not ke_loket and self._anjungan_penerbit(antrian_id, segarkan=True):
             berhasil, nama = jalankan_aman(
                 self,
                 lambda: self.queue.minta_cetak_ulang_anjungan(antrian_id),

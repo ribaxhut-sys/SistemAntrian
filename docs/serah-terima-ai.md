@@ -49,6 +49,29 @@ kini memuat fitur ini, tanpa kenaikan versi, tanpa cadangan APK sebelumnya); tab
 berkode 58 tidak memperbarui diri. API server harus dimulai ulang. Belum diuji di
 perangkat/BlueStacks.
 
+**Cetak ulang bertanda, catatan petugas ringkas, banner anjungan (22 Oktober 2026, Claude):**
+tiket cetak ulang memuat `*** CETAK ULANG jam ***` yang MENGGANTIKAN baris sisa antrian
+(`TicketData.cetak_ulang_pada`, `TicketService.susun/cetak(..., cetak_ulang=True)`); nomor, antrian,
+dan jam terbit tidak berubah. Tombol **Cetak ulang tiket** di layar petugas kini meminta cetak ke
+anjungan (`minta_cetak_ulang_anjungan`), jeda 5 dtk, cadangan **Cetak di loket ini** bila gagal.
+Tujuan (`cetak_ulang_anjungan.perangkat_tujuan`): penerbit nomor bila aktif (terlihat <= 3 menit);
+kalau tidak, anjungan berpasangan lain yang aktif; tanpa anjungan aktif penerbit tetap dipakai
+(supaya ada saran); tanpa anjungan berpasangan cetak di printer PC. Nomor tanpa penerbit (pendaftaran,
+dummy `dummy-N`) kini ikut ke anjungan aktif. Cabut prioritas pada nomor MENUNGGU otomatis meminta
+tiket pengganti ke anjungan; dialog nomor dipanggil: cetak di anjungan menyala bawaan. Anjungan
+Android **2.5.6 (kode 60)**: pita di atas layar "Sedang mencetak ulang tiket (nomor)", jadi hijau
+"sudah dicetak ulang" / jingga bila gagal, hilang 3,5 dtk (`tampilkanBannerCetakUlang`). Cadangan
+`apk\` sebelumnya: `backup\apk-sebelum-2.5.6`. Panel petugas: catatan tanpa kartu, kalimat cepat satu
+paragraf berkoma (`app/ui/daftar_frasa.py`, dirangkai koma, titik akhir dibuang), kotak catatan 4 baris;
+daftar bawaan dapat diganti admin (pengaturan `catatan.frasa_bawaan`, jenis baru `TEKS_BANYAK`); panel
+survey DISEMBUNYIKAN sementara (`_baris_survey.setVisible(False)`, kode dipertahankan). Perkiraan tunggu
+dihapus dari tiket. Tes terarah 340 lulus (+423 pada rangkaian sebelumnya); suite penuh belum.
+**Belum terbukti:** cetak ulang ke printer anjungan sungguhan (BlueStacks tanpa printer USB); banner
+belum dilihat di tablet. Server (proses lama sejak 13:09) dan aplikasi Windows harus dimulai ulang agar
+memuat kode baru. Anjungan BlueStacks sempat macet (tidak menghubungi server sama sekali, proses hidup
+tanpa CPU); pulih setelah BlueStacks di-restart, penyebab belum ditemukan (adb BlueStacks menolak perintah
+yang mengubah keadaan; logcat tak terambil).
+
 **Layar antrian tema Bening (21 Oktober 2026, Claude):** tampilan layar
 Android didesain ulang dan diberi nama **Bening** (lihat bagian "Tema Bening"
 di [layar-antrian.md](layar-antrian.md)): latar putih, strip loket tegak
@@ -796,6 +819,7 @@ menyeret APK ke jendela BlueStacks. Tangkapan layar:
 | 2026-10-20 | Codex | Audit ulang: lint bersih dan 117 tes terarah lulus; status tetap Siap staging/UAT, dengan build installer tanpa `-SkipTests` dan validasi perangkat/PC bersih sebagai sisa risiko. |
 | 2026-10-21 | Codex | Audit produksi: lint bersih; tes terarah 341 lulus, 3 dilewati, 1 gagal setup karena timeout PostgreSQL `antrian_uji`. Artefak EXE lebih baru daripada signature yang ada; status tetap belum siap produksi sampai signature diverifikasi ulang dan validasi perangkat/PC selesai. |
 | 2026-10-21 | Codex | Audit ulang: lint bersih dan 242 tes terarah lulus setelah database uji pulih; status tetap belum siap produksi karena signature/validasi perangkat dan PC bersih belum selesai. |
+| 2026-10-22 | Claude | Cetak ulang bertanda ke anjungan (tujuan aktif), banner anjungan 2.5.6, catatan petugas ringkas dan daftar bawaan admin, panel survey disembunyikan; rincian di bagian atas dokumen |
 
 Saat menutup sesi: perbarui bagian 3 (keadaan, commit, versi), 6 (belum
 selesai), dan tabel di atas.
