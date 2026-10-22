@@ -138,8 +138,8 @@ seluruh jenis layanan karena urutan pemanggilan memang lintas layanan.
 Angkanya foto sesaat, bukan janji. Bila gagal dibaca, tiket tetap tercetak
 tanpa baris itu.
 
-Di bawahnya tercetak **perkiraan waktu tunggu**, misalnya
-`Perkiraan tunggu: ±20–25 menit` (pengaturan `ticket.perkiraan_tunggu`):
+Perkiraan waktu tunggu **tidak dicetak** di tiket; hitungannya
+(`QueueService.perkiraan_tunggu`) tetap ada:
 
 ```
 perkiraan = jumlah lama layanan tipikal tiap orang di depan
@@ -1073,7 +1073,6 @@ konfirmasi dulu.
 | `backup.retention_days` | `30` | Lama backup disimpan sebelum dihapus |
 | `backup.pg_dump_path` | — | Folder perkakas PostgreSQL bila tidak ada di PATH |
 | `backup.salinan_folder` | — | Folder salinan kedua backup (disk lain/flashdisk) |
-| `ticket.perkiraan_tunggu` | `true` | Cetak perkiraan waktu tunggu di tiket |
 | `privasi.retensi_pengaduan_bulan` | `24` | Masa simpan identitas pelapor; `0` = selamanya |
 
 Jenis dan batas tiap pengaturan dijelaskan sekali saja pada `SKEMA` di

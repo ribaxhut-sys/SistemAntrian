@@ -15,7 +15,6 @@ dapat diuji tanpa printer fisik.
 
 from __future__ import annotations
 
-import math
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -100,29 +99,6 @@ def baris_sisa_antrian(sisa: int | None) -> str:
     return f"Sisa antrian: {sisa}"
 
 
-def baris_perkiraan_tunggu(detik: float | None) -> str:
-    """
-    Perkiraan waktu tunggu sebagai satu baris tiket, atau kosong.
-
-    Dibulatkan KE ATAS per 5 menit dan ditulis sebagai rentang: angka
-    menit yang tepat terbaca sebagai janji, padahal ini hanya perkiraan
-    dari median lama layanan (lihat `QueueService.perkiraan_tunggu`).
-    Pengunjung yang dipanggil lebih cepat dari perkiraan tidak kecewa;
-    yang menunggu lebih lama dari angka "pasti" merasa dibohongi.
-
-    Kosong bila tidak ada perkiraan, atau tidak ada orang di depan —
-    baris "Tidak ada sisa antrian" sudah mengatakannya.
-    """
-    if detik is None or detik <= 0:
-        return ""
-    menit = max(5, math.ceil(detik / 60 / 5) * 5)
-    if menit > 180:
-        return "Perkiraan tunggu: lebih dari 3 jam"
-    if menit == 5:
-        return "Perkiraan tunggu: ±5 menit"
-    return f"Perkiraan tunggu: ±{menit - 5}–{menit} menit"
-
-
 @dataclass(frozen=True)
 class TicketData:
     """Isi satu tiket antrian."""
@@ -140,9 +116,6 @@ class TicketData:
     #: seluruh jenis layanan. None berarti angkanya tidak berhasil dibaca —
     #: barisnya dihilangkan, bukan dicetak sebagai nol yang menyesatkan.
     sisa_antrian: int | None = None
-    #: Perkiraan lama menunggu, dalam detik. None: tidak ada perkiraan
-    #: yang jujur, barisnya dihilangkan.
-    perkiraan_tunggu_detik: float | None = None
     #: Geseran ke atas pada pencetak Windows asli, dalam milimeter.
     #: 0 berarti tidak digeser. PDF mengabaikannya.
     geser_atas_mm: int = 0
@@ -185,9 +158,6 @@ class TicketData:
         sisa = self.baris_sisa_antrian()
         if sisa:
             baris += ["", sisa]
-        perkiraan = self.baris_perkiraan_tunggu()
-        if perkiraan:
-            baris.append(perkiraan)
         if self.footer:
             baris += ["", self.footer]
         return baris
@@ -195,10 +165,6 @@ class TicketData:
     def baris_sisa_antrian(self) -> str:
         """Baris sisa antrian tiket ini. Lihat `baris_sisa_antrian()`."""
         return baris_sisa_antrian(self.sisa_antrian)
-
-    def baris_perkiraan_tunggu(self) -> str:
-        """Baris perkiraan tunggu tiket ini. Lihat `baris_perkiraan_tunggu()`."""
-        return baris_perkiraan_tunggu(self.perkiraan_tunggu_detik)
 
 
 @dataclass(frozen=True)
@@ -868,23 +834,9 @@ def _tata_letak(
     y += JARAK_BLOK_BAWAH_MM
 
     sisa = data.baris_sisa_antrian()
-    perkiraan = data.baris_perkiraan_tunggu()
     if sisa:
         satu(y, sisa, 12, True)
-        y += JARAK_BLOK_BAWAH_MM
-        if perkiraan:
-            # Tepat di bawah sisa antrian, lebih kecil: keduanya menjawab
-            # "berapa lama lagi", dan sisa antrian adalah angka pastinya.
-            satu(y - 0.5, perkiraan, 10, False)
-            y += JARAK_BLOK_BAWAH_MM - 0.5
-    elif perkiraan:
-        # Tiket anjungan Android sengaja tanpa sisa antrian (lihat
-        # kiosk_api), tetapi perkiraan tetap dicetak — justru di sanalah
-        # sebagian besar tiket terbit. Mengambil tempat baris sisa.
-        satu(y, perkiraan, 11, True)
-        y += JARAK_BLOK_BAWAH_MM
-    else:
-        y += JARAK_BLOK_BAWAH_MM
+    y += JARAK_BLOK_BAWAH_MM
 
     if data.footer:
         for potongan in _bungkus(data.footer, 38):
@@ -928,7 +880,6 @@ class TicketService:
             header=JUDUL_TIKET,
             counter_name=antrian.counter_name,
             sisa_antrian=ringkasan.sisa_antrian if ringkasan else None,
-            perkiraan_tunggu_detik=self._perkiraan(antrian),
             geser_atas_mm=self.settings.get_int("ticket.geser_atas_mm", 0),
             turun_anjungan_mm=self.settings.get_int("ticket.turun_anjungan_mm", 4),
         )
@@ -949,30 +900,6 @@ class TicketService:
         except Exception:  # noqa: BLE001 - ringkasan tidak boleh menahan tiket
             logger.warning(
                 "Sisa antrian untuk tiket %s tidak terbaca; tiket dicetak tanpa baris itu",
-                antrian.queue_number,
-                exc_info=True,
-            )
-            return None
-
-    def _perkiraan(self, antrian: QueueInfo) -> float | None:
-        """
-        Perkiraan waktu tunggu, atau None bila mati atau tidak terbaca.
-
-        Ditelan seperti `_ringkasan`, dan dibaca terpisah darinya: gagalnya
-        perkiraan tidak boleh ikut menghapus baris sisa antrian.
-        """
-        # Tiket contoh (Uji cetak di tablet) bukan antrian sungguhan.
-        if getattr(antrian, "id", None) is None:
-            return None
-        if self.queue is None or not self.settings.get_bool(
-            "ticket.perkiraan_tunggu", True
-        ):
-            return None
-        try:
-            return self.queue.perkiraan_tunggu(antrian)
-        except Exception:  # noqa: BLE001 - perkiraan tidak boleh menahan tiket
-            logger.warning(
-                "Perkiraan tunggu untuk tiket %s tidak terbaca; tiket dicetak tanpa baris itu",
                 antrian.queue_number,
                 exc_info=True,
             )

@@ -97,7 +97,6 @@ BAWAAN: dict[str, str] = {
     "ticket.printer": "pdf",
     "ticket.geser_atas_mm": "0",
     "ticket.turun_anjungan_mm": "4",
-    "ticket.perkiraan_tunggu": "true",
 }
 
 _BENAR = {"true", "1", "ya", "yes", "on"}
@@ -203,16 +202,6 @@ SKEMA: tuple[Pengaturan, ...] = (
         maksimum=15,
         satuan="mm",
         nilai_khusus="Tidak diturunkan",
-        kelompok="Tiket",
-    ),
-    Pengaturan(
-        "ticket.perkiraan_tunggu",
-        "Cetak perkiraan waktu tunggu",
-        "Baris \"Perkiraan tunggu: ±20–25 menit\" di bawah sisa antrian. "
-        "Dihitung dari median lama layanan per jenis layanan dan banyaknya "
-        "loket yang sedang berpetugas. Tidak dicetak bila belum ada cukup "
-        "riwayat pelayanan atau tidak ada loket yang melayani.",
-        BOOLEAN,
         kelompok="Tiket",
     ),
     Pengaturan(
