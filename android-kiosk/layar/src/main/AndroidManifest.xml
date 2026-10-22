@@ -12,7 +12,7 @@
         android:banner="@drawable/banner"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
-        android:label="Layar Antrian - Bapenda DKI Jakarta"
+        android:label="Layar Antrian - CRO"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
         android:usesCleartextTraffic="true">
         <activity

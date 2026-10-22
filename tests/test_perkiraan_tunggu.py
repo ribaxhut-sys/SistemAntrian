@@ -257,7 +257,7 @@ def test_tiket_terpanjang_dengan_perkiraan_tetap_muat_88_mm(
 
     tiket = replace(
         ticket_pdf.susun(reg_queue.create_queue(antrian_siap["kategori"]["A"])),
-        header="BAPENDA DKI JAKARTA",
+        header="CRO",
         office_name="UNIT PELAYANAN PEMUNGUTAN PAJAK DAERAH",
         counter_name="Loket 2",
         footer=" ".join(["Terima kasih atas kesabaran Anda"] * 5),

@@ -1,6 +1,6 @@
 #define MyAppName "Sistem Antrian CRO"
 #define MyAppVersion "1.3.1"
-#define MyAppPublisher "Bapenda DKI Jakarta"
+#define MyAppPublisher "CRO"
 #define MyAppExeName "AntrianCRO.exe"
 #define SourceDir GetEnv("ANTRIAN_SOURCE_DIR")
 #define OutputDir GetEnv("ANTRIAN_OUTPUT_DIR")

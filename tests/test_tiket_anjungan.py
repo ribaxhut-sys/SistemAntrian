@@ -21,7 +21,7 @@ from app.core.database import session_scope
 from app.models import KioskTicketRequest, Queue
 from app.services.apk_anjungan import VERSI_MINIMAL
 
-TOKEN = "bapendacro"
+TOKEN = "croantrian"
 
 
 def _klien() -> TestClient:

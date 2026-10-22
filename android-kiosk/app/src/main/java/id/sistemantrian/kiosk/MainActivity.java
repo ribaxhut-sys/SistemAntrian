@@ -216,7 +216,7 @@ public final class MainActivity extends Activity {
      * Identitas tetap aplikasi. Tidak dapat diubah dari server maupun dari
      * pengaturan tablet; ubah hanya di sini (dan di app/core/identitas.py).
      */
-    static final String NAMA_TAMPIL = "Bapenda DKI Jakarta";
+    static final String NAMA_TAMPIL = "CRO";
 
     private String judulBerlaku() {
         return NAMA_TAMPIL;
@@ -379,7 +379,7 @@ public final class MainActivity extends Activity {
     private static final int DISCOVERY_PORT = 8766;
     private static final String DISCOVERY_REQUEST = "SISTEMANTRIAN_KIOSK_DISCOVER_V1";
     private static final String DISCOVERY_RESPONSE = "SISTEMANTRIAN_KIOSK_SERVER_V1";
-    private static final String DEFAULT_TOKEN = "bapendacro";
+    private static final String DEFAULT_TOKEN = "croantrian";
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     /**
