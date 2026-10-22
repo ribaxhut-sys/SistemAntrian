@@ -158,6 +158,8 @@ _SETTINGS: list[tuple[str, str, str]] = [
      "Turunkan isi tiket anjungan Android, dalam milimeter"),
     ("privasi.retensi_pengaduan_bulan", "24",
      "Masa simpan identitas pelapor pengaduan, dalam bulan (0 = selamanya)"),
+    ("catatan.frasa_bawaan", "",
+     "Kalimat cepat bawaan catatan petugas, satu per baris (kosong = bawaan aplikasi)"),
 ]
 
 
